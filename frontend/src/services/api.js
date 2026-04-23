@@ -1,5 +1,5 @@
 // All fetch calls go through here. Throws on non-2xx.
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const { silent401 = false, headers: extraHeaders, body, ...restOptions } = options;
   const res = await fetch(path, {
     credentials: 'include',
@@ -18,6 +18,46 @@ async function request(path, options = {}) {
   }
 
   return res.json();
+}
+
+export async function requestStream(path, body, onChunk) {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('auth:unauthorized'));
+    throw Object.assign(new Error('Unauthorized'), { status: 401 });
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status });
+  }
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop(); // keep incomplete chunk
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          onChunk(data);
+        } catch {
+          // malformed chunk, skip
+        }
+      }
+    }
+  }
 }
 
 export const authApi = {
