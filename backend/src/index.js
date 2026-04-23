@@ -22,7 +22,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use(errorHandler);
 
-async function start() {
+function start() {
   initDb(config.dbPath);
   runMigrations();
   app.listen(config.port, () => {
