@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as authService from '../services/auth.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { config } from '../config.js';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.post('/setup', (req, res, next) => {
     const { username, password, displayName } = req.body;
     if (!username || !password || !displayName) return res.status(400).json({ error: 'Missing fields' });
     const { token, user } = authService.setup(username, password, displayName);
-    res.cookie('auth_token', token, COOKIE_OPTS(process.env.NODE_ENV === 'production'));
+    res.cookie('auth_token', token, COOKIE_OPTS(config.isProd));
     res.json({ user });
   } catch (err) { next(err); }
 });
@@ -31,7 +32,7 @@ router.post('/register', (req, res, next) => {
     const { username, password, displayName, inviteCode } = req.body;
     if (!username || !password || !displayName || !inviteCode) return res.status(400).json({ error: 'Missing fields' });
     const { token, user } = authService.register(username, password, displayName, inviteCode);
-    res.cookie('auth_token', token, COOKIE_OPTS(process.env.NODE_ENV === 'production'));
+    res.cookie('auth_token', token, COOKIE_OPTS(config.isProd));
     res.json({ user });
   } catch (err) { next(err); }
 });
@@ -41,7 +42,7 @@ router.post('/login', (req, res, next) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
     const { token, user } = authService.login(username, password);
-    res.cookie('auth_token', token, COOKIE_OPTS(process.env.NODE_ENV === 'production'));
+    res.cookie('auth_token', token, COOKIE_OPTS(config.isProd));
     res.json({ user });
   } catch (err) { next(err); }
 });

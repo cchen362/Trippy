@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { getDb } from '../db/database.js';
 
 const SALT_ROUNDS = 12;
@@ -27,7 +27,10 @@ export function setup(username, password, displayName) {
 export function register(username, password, displayName, inviteCode) {
   const db = getDb();
   const stored = db.prepare("SELECT value FROM settings WHERE key='invite_code'").get();
-  if (!stored || stored.value !== inviteCode) throw Object.assign(new Error('Invalid invite code'), { status: 403 });
+  const codeMatch = stored &&
+    stored.value.length === inviteCode.length &&
+    timingSafeEqual(Buffer.from(stored.value), Buffer.from(inviteCode));
+  if (!codeMatch) throw Object.assign(new Error('Invalid invite code'), { status: 403 });
 
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) throw Object.assign(new Error('Username already taken'), { status: 409 });
