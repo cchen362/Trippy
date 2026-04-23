@@ -1,0 +1,23 @@
+{
+  "name": "trippy-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
