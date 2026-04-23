@@ -23,11 +23,15 @@ export function runMigrations() {
     .filter(f => f.endsWith('.sql'))
     .sort();
 
+  const applyMigration = db.transaction((file, sql) => {
+    db.exec(sql);
+    db.prepare('INSERT INTO _migrations (filename) VALUES (?)').run(file);
+  });
+
   for (const file of files) {
     if (applied.has(file)) continue;
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    db.exec(sql);
-    db.prepare('INSERT INTO _migrations (filename) VALUES (?)').run(file);
+    applyMigration(file, sql);
     console.log(`Migration applied: ${file}`);
   }
 }

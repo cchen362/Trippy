@@ -8,6 +8,7 @@ router.get('/', (req, res) => {
     getDb().prepare('SELECT 1').get();
     res.json({ status: 'ok', db: 'connected' });
   } catch (err) {
+    console.error('[health] DB check failed:', err);
     res.status(503).json({ status: 'error', db: 'disconnected' });
   }
 });
