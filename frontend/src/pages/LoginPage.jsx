@@ -18,7 +18,7 @@ export default function LoginPage() {
   };
 
   const field = (name, label, type = 'text') => (
-    <div key={name}>
+    <div>
       <label className="font-mono text-xs tracking-widest uppercase block mb-1" style={{ color: 'var(--cream-mute)' }}>{label}</label>
       <input
         type={type}
@@ -43,7 +43,7 @@ export default function LoginPage() {
           {['login', 'register'].map(t => (
             <button
               key={t}
-              onClick={() => { setTab(t); clearError(); }}
+              onClick={() => { setTab(t); clearError(); setForm({ username: '', password: '', displayName: '', inviteCode: '' }); }}
               className="flex-1 py-2 font-mono text-xs tracking-widest uppercase"
               style={{
                 background: tab === t ? 'var(--gold-soft)' : 'transparent',
