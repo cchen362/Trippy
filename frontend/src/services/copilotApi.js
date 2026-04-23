@@ -7,6 +7,6 @@ export const copilotApi = {
   apply: (tripId, mutation) =>
     request(`/api/trips/${tripId}/copilot/apply`, {
       method: 'POST',
-      body: JSON.stringify(mutation),
+      body: mutation,
     }),
 };
