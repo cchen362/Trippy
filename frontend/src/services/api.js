@@ -1,13 +1,14 @@
 // All fetch calls go through here. Throws on non-2xx.
 async function request(path, options = {}) {
+  const { silent401 = false, headers: extraHeaders, body, ...restOptions } = options;
   const res = await fetch(path, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    ...restOptions,
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 && !silent401) {
     window.dispatchEvent(new Event('auth:unauthorized'));
   }
 
@@ -25,7 +26,7 @@ export const authApi = {
   login: (data) => request('/api/auth/login', { method: 'POST', body: data }),
   register: (data) => request('/api/auth/register', { method: 'POST', body: data }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
-  me: () => request('/api/auth/me'),
+  me: () => request('/api/auth/me', { silent401: true }),
 };
 
 export const adminApi = {

@@ -12,13 +12,16 @@ export function AuthProvider({ children }) {
   const clearError = useCallback(() => setError(null), []);
 
   useEffect(() => {
+    let cancelled = false;
     authApi.status()
       .then(({ needsSetup }) => {
-        if (needsSetup) { setNeedsSetup(true); setLoading(false); return; }
-        return authApi.me().then(({ user }) => setUser(user)).catch(() => {});
+        if (cancelled) return;
+        if (needsSetup) { setNeedsSetup(true); return; }
+        return authApi.me().then(({ user }) => { if (!cancelled) setUser(user); }).catch(() => {});
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
