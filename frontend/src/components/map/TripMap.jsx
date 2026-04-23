@@ -47,6 +47,14 @@ function MapBounds({ stops }) {
 export default function TripMap({ stops, mapConfig }) {
   const pinnedStops = stops.filter(s => s.lat && s.lng);
 
+  // Apply coordinate transform once — both MapBounds and markers use the same coords
+  const transformedStops = pinnedStops.map(stop => {
+    const coords = mapConfig.coordinateSystem === 'gcj02'
+      ? wgs84ToGcj02(stop.lat, stop.lng)
+      : { lat: stop.lat, lng: stop.lng };
+    return { ...stop, lat: coords.lat, lng: coords.lng };
+  });
+
   let tileUrl;
   let subdomains;
   let attribution;
@@ -69,19 +77,14 @@ export default function TripMap({ stops, mapConfig }) {
       zoomControl={true}
     >
       <TileLayer url={tileUrl} subdomains={subdomains} attribution={attribution} />
-      <MapBounds stops={pinnedStops} />
-      {pinnedStops.map(stop => {
-        const coords = mapConfig.coordinateSystem === 'gcj02'
-          ? wgs84ToGcj02(stop.lat, stop.lng)
-          : { lat: stop.lat, lng: stop.lng };
-        return (
-          <StopMarker
-            key={stop.id}
-            stop={{ ...stop, lat: coords.lat, lng: coords.lng }}
-            deepLinkProvider={mapConfig.deepLinkProvider}
-          />
-        );
-      })}
+      <MapBounds stops={transformedStops} />
+      {transformedStops.map(stop => (
+        <StopMarker
+          key={stop.id}
+          stop={stop}
+          deepLinkProvider={mapConfig.deepLinkProvider}
+        />
+      ))}
     </MapContainer>
   );
 }
