@@ -38,3 +38,6 @@ docker-compose.override.yml
 
 # Brainstorm session files (keep mockups, not server state)
 .superpowers/brainstorm/*/state/
+
+# Git worktrees
+.worktrees/
