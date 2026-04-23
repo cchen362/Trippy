@@ -7,16 +7,8 @@ const router = Router();
 
 router.get('/:tripId/map-config', requireAuth, requireTripAccess, (req, res, next) => {
   try {
-    // req.trip is the raw DB row; destination_countries is a JSON-encoded column
-    let destinationCountries = req.trip.destinationCountries;
-    if (!Array.isArray(destinationCountries)) {
-      try {
-        destinationCountries = JSON.parse(req.trip.destination_countries || '[]');
-      } catch {
-        destinationCountries = [];
-      }
-    }
-
+    // req.trip is the raw DB row from assertTripAccess; destination_countries is a JSON text column
+    const destinationCountries = JSON.parse(req.trip.destination_countries || '[]');
     const mapConfig = getMapConfig(destinationCountries);
     res.json({ mapConfig });
   } catch (error) {
