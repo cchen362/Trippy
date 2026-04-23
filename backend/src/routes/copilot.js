@@ -45,7 +45,15 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     return next(Object.assign(new Error('message is required'), { status: 400 }));
   }
 
-  // Save user message
+  // Load trip detail BEFORE saving user message — if this fails we can return a clean error
+  let tripDetail;
+  try {
+    tripDetail = getTripDetail(tripId, userId);
+  } catch (error) {
+    return next(error);
+  }
+
+  // Now save the user message (trip access confirmed above)
   db.prepare(`
     INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
     VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, datetime('now'))
@@ -66,24 +74,21 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     content: r.content,
   }));
 
-  // Load full trip detail for itinerary context
-  let tripDetail;
-  try {
-    tripDetail = getTripDetail(tripId, userId);
-  } catch (error) {
-    return next(error);
-  }
-
   // Stream response — SSE headers are set inside streamCopilotResponse
   // Errors during streaming are handled inside the service (writes error SSE event)
   const fullText = await streamCopilotResponse(conversationMessages, tripDetail, res);
 
   // Save assistant response after streaming completes
   if (fullText) {
-    db.prepare(`
-      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
-      VALUES (lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, datetime('now'))
-    `).run(tripId, fullText);
+    try {
+      db.prepare(`
+        INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
+        VALUES (lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, datetime('now'))
+      `).run(tripId, fullText);
+    } catch (err) {
+      // SSE headers already flushed — log and continue, cannot send HTTP error
+      console.error('[copilot] failed to save assistant message:', err);
+    }
   }
 });
 
@@ -109,6 +114,7 @@ router.post('/:tripId/copilot/apply', requireTripAccess, async (req, res, next) 
         assertStopAccess(userId, op.stopId);
       } else if (op.action === 'move_stop') {
         assertStopAccess(userId, op.stopId);
+        assertDayAccess(userId, op.toDayId);  // prevent moving stop into another user's trip
       } else if (op.action === 'update_stop') {
         assertStopAccess(userId, op.stopId);
       }
