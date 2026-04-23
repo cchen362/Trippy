@@ -23,18 +23,15 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-if (config.isProd) {
-  app.use(express.static(join(__dirname, '../../frontend/dist')));
-}
-
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 
 if (config.isProd) {
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(join(__dirname, '../../frontend/dist/index.html'));
-    }
+  const frontendDist = join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(join(frontendDist, 'index.html'));
   });
 }
 

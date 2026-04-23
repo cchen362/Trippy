@@ -10,7 +10,7 @@ export function seedIfEmpty(adminUserId) {
   const tripCount = db.prepare('SELECT COUNT(*) as c FROM trips').get();
   if (tripCount.c > 0) return; // already seeded
 
-  const raw = readFileSync(join(__dirname, '../../data/seed/chengdu-chongqing.json'), 'utf8');
+  const raw = readFileSync(join(__dirname, 'chengdu-chongqing.json'), 'utf8');
   const { trip, days } = JSON.parse(raw);
 
   const insertTrip = db.prepare(`

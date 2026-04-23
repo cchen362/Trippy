@@ -12,11 +12,8 @@ RUN cd frontend && npm ci
 COPY frontend/ ./frontend/
 RUN cd frontend && npm run build
 
-# Copy backend source
+# Copy backend source (includes seed JSON in src/db/)
 COPY backend/ ./backend/
-
-# Copy seed data
-COPY data/ ./data/
 
 ENV NODE_ENV=production
 ENV PORT=3001
