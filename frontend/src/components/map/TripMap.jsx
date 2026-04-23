@@ -55,20 +55,6 @@ export default function TripMap({ stops, mapConfig }) {
     return { ...stop, lat: coords.lat, lng: coords.lng };
   });
 
-  let tileUrl;
-  let subdomains;
-  let attribution;
-
-  if (mapConfig.tileProvider === 'amap') {
-    tileUrl = 'http://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7';
-    subdomains = ['1', '2', '3', '4'];
-    attribution = '&copy; AutoNavi';
-  } else {
-    tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-    subdomains = ['a', 'b', 'c'];
-    attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-  }
-
   return (
     <MapContainer
       center={[20, 100]}
@@ -76,7 +62,11 @@ export default function TripMap({ stops, mapConfig }) {
       style={{ width: '100%', height: '100%' }}
       zoomControl={true}
     >
-      <TileLayer url={tileUrl} subdomains={subdomains} attribution={attribution} />
+      <TileLayer
+        url={mapConfig.tileUrl}
+        subdomains={mapConfig.tileSubdomains}
+        attribution={mapConfig.tileAttribution}
+      />
       <MapBounds stops={transformedStops} />
       {transformedStops.map(stop => (
         <StopMarker

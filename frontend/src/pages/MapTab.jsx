@@ -3,33 +3,31 @@ import { useMapConfig } from '../hooks/useMapConfig.js';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import TripMap from '../components/map/TripMap.jsx';
 
+// TopBar ~56px + BottomNav ~64px + DayTabs ~52px + main vertical padding ~48px = ~220px
+const MAP_HEIGHT = 'calc(100vh - 220px)';
+
 export default function MapTab() {
   const { trip, days, activeDay, activeDayId, setActiveDayId } = useTripContext();
   const { mapConfig, loading: configLoading } = useMapConfig(trip?.id);
 
   const stops = activeDay?.stops ?? [];
-
-  if (configLoading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d0b09' }}>
-        <DayTabs days={days} activeDayId={activeDayId} onSelect={setActiveDayId} />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(240,234,216,0.6)', fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
-          Loading map…
-        </div>
-      </div>
-    );
-  }
-
   const pinnedStops = stops.filter(s => s.lat && s.lng);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0d0b09' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--ink-deep)' }}>
       <DayTabs days={days} activeDayId={activeDayId} onSelect={setActiveDayId} />
-      <div style={{ flex: 1, position: 'relative' }}>
-        {mapConfig ? (
-          <TripMap stops={stops} mapConfig={mapConfig} />
-        ) : null}
-        {!configLoading && pinnedStops.length === 0 && (
+      <div style={{ position: 'relative', height: MAP_HEIGHT, minHeight: 300 }}>
+        {configLoading && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', background: 'var(--ink-deep)',
+            color: 'rgba(240,234,216,0.6)', fontFamily: "'DM Mono', monospace", fontSize: 12, zIndex: 10
+          }}>
+            Loading map…
+          </div>
+        )}
+        {mapConfig && <TripMap stops={stops} mapConfig={mapConfig} />}
+        {!configLoading && mapConfig && pinnedStops.length === 0 && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
             justifyContent: 'center', pointerEvents: 'none', zIndex: 1000

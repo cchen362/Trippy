@@ -54,7 +54,7 @@ describe('buildDeepLink', () => {
 
   it('builds naver deep link correctly', () => {
     const url = buildDeepLink('naver', 37.5, 127.0, 'Seoul');
-    expect(url).toBe('https://map.naver.com/v5/search/Seoul?c=127,37.5,15,0,0,0,dh');
+    expect(url).toBe('https://map.naver.com/p/search/Seoul?c=127,37.5,15,0,0,0,dh');
   });
 
   it('builds google deep link correctly', () => {

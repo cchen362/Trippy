@@ -38,7 +38,7 @@ export function buildDeepLink(provider, lat, lng, label) {
     case 'amap':
       return `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(label)}`;
     case 'naver':
-      return `https://map.naver.com/v5/search/${encodeURIComponent(label)}?c=${lng},${lat},15,0,0,0,dh`;
+      return `https://map.naver.com/p/search/${encodeURIComponent(label)}?c=${lng},${lat},15,0,0,0,dh`;
     default:
       return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
   }

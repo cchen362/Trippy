@@ -7,7 +7,7 @@ export function useMapConfig(tripId) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId) { setLoading(false); return; }
     setLoading(true);
     mapApi.config(tripId)
       .then(data => { setMapConfig(data.mapConfig); setLoading(false); })

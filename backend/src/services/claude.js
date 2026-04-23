@@ -80,7 +80,11 @@ export async function streamCopilotResponse(conversationMessages, itineraryConte
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  const write = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const write = (data) => {
+    if (!res.destroyed && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
 
   const systemPrompt = `You are a travel co-pilot helping manage a trip itinerary.
 
@@ -122,14 +126,16 @@ Guidelines:
 
     await stream.finalMessage();
 
-    // Extract mutation JSON block if present
-    const mutationMatch = fullText.match(/```json\n([\s\S]*?)```/);
-    if (mutationMatch) {
+    // Extract mutation JSON block — take the LAST fenced JSON block in case Claude
+    // includes illustrative examples earlier in the response
+    const mutationMatches = [...fullText.matchAll(/```json\r?\n([\s\S]*?)\r?\n?```/g)];
+    const lastMatch = mutationMatches.at(-1);
+    if (lastMatch) {
       try {
-        const parsedMutation = JSON.parse(mutationMatch[1]);
+        const parsedMutation = JSON.parse(lastMatch[1]);
         write({ type: 'mutation', mutation: parsedMutation });
-      } catch {
-        // Malformed JSON block — skip mutation, still send done
+      } catch (e) {
+        console.error('[copilot] malformed mutation JSON block — skipping:', e.message);
       }
     }
 
