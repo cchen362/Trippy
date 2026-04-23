@@ -11,6 +11,7 @@ import { seedIfEmpty } from './db/seed.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import healthRoutes from './routes/health.js';
+import mapRoutes from './routes/map.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +26,7 @@ app.use(cookieParser());
 
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/trips', mapRoutes);
 
 if (config.isProd) {
   const frontendDist = join(__dirname, '../../frontend/dist');
