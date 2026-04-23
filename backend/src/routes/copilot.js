@@ -51,12 +51,14 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, datetime('now'))
   `).run(tripId, userId, req.body.message);
 
-  // Load conversation context (last 20 messages)
+  // Load the most recent 20 messages for conversation context, re-ordered chronologically
   const contextRows = db.prepare(`
-    SELECT role, content FROM copilot_messages
-    WHERE trip_id = ?
-    ORDER BY created_at ASC
-    LIMIT 20
+    SELECT role, content FROM (
+      SELECT role, content, created_at FROM copilot_messages
+      WHERE trip_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    ) ORDER BY created_at ASC
   `).all(tripId);
 
   const conversationMessages = contextRows.map((r) => ({
