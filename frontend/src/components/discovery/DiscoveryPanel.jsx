@@ -16,7 +16,7 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
   const defaultDestination = days[0]?.city || trip.destinations?.[0] || '';
   const [destination, setDestination] = useState(defaultDestination);
   const [activeCategory, setActiveCategory] = useState('culture');
-  const { results, loading, error, source, cached, discover } = useDiscovery(trip.id);
+  const { results, loading, error, source, cached, discover, refresh } = useDiscovery(trip.id);
 
   // Auto-discover when panel opens if we have a destination
   const discoveredRef = useRef(false);
@@ -101,8 +101,8 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
           DISCOVER
         </span>
 
-        {/* Source badge */}
-        <div style={{ minWidth: '80px', display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Source badge + Refresh */}
+        <div style={{ minWidth: '80px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
           {source && (
             <span
               style={{
@@ -119,6 +119,25 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
             >
               {source === 'web' ? 'WEB RESULTS' : 'AI SUGGESTED'}
             </span>
+          )}
+          {results && (
+            <button
+              onClick={() => refresh(destination.trim(), trip.interest_tags ?? [])}
+              disabled={loading}
+              aria-label="Refresh discovery results"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: loading ? 'default' : 'pointer',
+                color: loading ? 'rgba(240,234,216,0.28)' : 'rgba(240,234,216,0.60)',
+                fontFamily: "'DM Mono', monospace",
+                fontSize: '14px',
+                padding: '0',
+                lineHeight: '1',
+              }}
+            >
+              ↺
+            </button>
           )}
         </div>
       </div>
