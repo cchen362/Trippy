@@ -58,7 +58,6 @@ export default function PlanTab() {
           <DiscoveryPanel
             trip={trip}
             days={days}
-            stops={activeDay?.stops ?? []}
             onAddStop={createStop}
             onClose={() => setDiscoveryOpen(false)}
           />

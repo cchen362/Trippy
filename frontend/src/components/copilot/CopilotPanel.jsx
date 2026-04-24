@@ -19,8 +19,14 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
 
   const [inputText, setInputText] = useState('');
   const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Auto-focus input when panel opens
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   // Auto-scroll to bottom when messages or streaming text change
   useEffect(() => {
@@ -43,9 +49,12 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
 
   const handleApply = async () => {
     setApplying(true);
+    setApplyError(null);
     try {
       const result = await applyMutation();
       if (result) onMutationApplied(result);
+    } catch (err) {
+      setApplyError(err.message || 'Failed to apply changes. Please try again.');
     } finally {
       setApplying(false);
     }
@@ -161,7 +170,7 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
 
         {messages.map((msg, i) => (
           <CopilotMessage
-            key={i}
+            key={`${msg.role}-${msg.createdAt || i}`}
             role={msg.role}
             content={msg.content}
             isStreaming={false}
@@ -177,13 +186,28 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
         )}
 
         {pendingMutation && !streaming && (
-          <MutationPreview
-            mutation={pendingMutation}
-            days={days}
-            onApply={handleApply}
-            onReject={rejectMutation}
-            applying={applying}
-          />
+          <>
+            <MutationPreview
+              mutation={pendingMutation}
+              days={days}
+              onApply={handleApply}
+              onReject={rejectMutation}
+              applying={applying}
+            />
+            {applyError && (
+              <div
+                style={{
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 11,
+                  color: '#e05a5a',
+                  padding: '6px 0 0',
+                  textAlign: 'center',
+                }}
+              >
+                {applyError}
+              </div>
+            )}
+          </>
         )}
 
         {error && (
@@ -216,6 +240,7 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
         <input
           ref={inputRef}
           type="text"
+          className="copilot-input"
           value={inputText}
           onChange={e => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -231,7 +256,6 @@ export default function CopilotPanel({ tripId, days, onClose, onMutationApplied 
             padding: '4px 0',
             opacity: streaming ? 0.5 : 1,
           }}
-          // Inline placeholder color via CSS custom property not available; use a class or style tag workaround
         />
         <button
           onClick={handleSend}

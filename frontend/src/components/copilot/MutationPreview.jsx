@@ -8,8 +8,16 @@ function formatDayLabel(days, dayId) {
   return date.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' });
 }
 
+function resolveStopLabel(days, stopId) {
+  for (const day of (days || [])) {
+    const stop = day.stops?.find(s => s.id === stopId);
+    if (stop) return stop.title;
+  }
+  return stopId;
+}
+
 function OperationRow({ op, days }) {
-  if (op.type === 'add_stop') {
+  if (op.action === 'add_stop') {
     return (
       <div
         style={{
@@ -32,7 +40,7 @@ function OperationRow({ op, days }) {
     );
   }
 
-  if (op.type === 'remove_stop') {
+  if (op.action === 'remove_stop') {
     return (
       <div
         style={{
@@ -47,12 +55,12 @@ function OperationRow({ op, days }) {
         }}
       >
         <span style={{ color: 'rgba(200,80,80,0.9)' }}>×</span>{' '}
-        Remove: <strong>{op.stopId}</strong>
+        Remove: <strong>{resolveStopLabel(days, op.stopId)}</strong>
       </div>
     );
   }
 
-  if (op.type === 'move_stop') {
+  if (op.action === 'move_stop') {
     return (
       <div
         style={{
@@ -73,7 +81,7 @@ function OperationRow({ op, days }) {
     );
   }
 
-  if (op.type === 'update_stop') {
+  if (op.action === 'update_stop') {
     return (
       <div
         style={{
@@ -88,7 +96,7 @@ function OperationRow({ op, days }) {
         }}
       >
         <span style={{ color: '#c9a84c' }}>✎</span>{' '}
-        Update: <strong>{op.stopId}</strong>
+        Update: <strong>{resolveStopLabel(days, op.stopId)}</strong>
       </div>
     );
   }
@@ -126,7 +134,7 @@ export default function MutationPreview({ mutation, days, onApply, onReject, app
 
       <div style={{ marginBottom: 12 }}>
         {operations.map((op, i) => (
-          <OperationRow key={i} op={op} days={days} />
+          <OperationRow key={`${op.action}-${op.stopId || op.dayId || i}`} op={op} days={days} />
         ))}
         {operations.length === 0 && (
           <p

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useDiscovery } from '../../hooks/useDiscovery.js';
 import SuggestionCard from './SuggestionCard.jsx';
 
@@ -12,7 +12,7 @@ const CATEGORY_KEYS = {
   'Hidden Gems': 'hidden_gems',
 };
 
-export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }) {
+export default function DiscoveryPanel({ trip, days, onAddStop, onClose }) {
   const defaultDestination = days[0]?.city || trip.destinations?.[0] || '';
   const [destination, setDestination] = useState(defaultDestination);
   const [activeCategory, setActiveCategory] = useState('culture');
@@ -23,13 +23,13 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
   useEffect(() => {
     if (!discoveredRef.current && destination) {
       discoveredRef.current = true;
-      discover(destination, trip.interest_tags ?? []);
+      discover(destination, trip.interestTags ?? []);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // intentional mount-only effect — auto-discover once when panel opens
 
   const handleDiscover = () => {
     if (destination.trim()) {
-      discover(destination.trim(), trip.interest_tags ?? []);
+      discover(destination.trim(), trip.interestTags ?? []);
     }
   };
 
@@ -122,7 +122,7 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
           )}
           {results && (
             <button
-              onClick={() => refresh(destination.trim(), trip.interest_tags ?? [])}
+              onClick={() => refresh(destination.trim(), trip.interestTags ?? [])}
               disabled={loading}
               aria-label="Refresh discovery results"
               style={{
@@ -184,9 +184,9 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
         </div>
 
         {/* Interest tags */}
-        {trip.interest_tags && trip.interest_tags.length > 0 && (
+        {trip.interestTags && trip.interestTags.length > 0 && (
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-            {trip.interest_tags.map((tag) => (
+            {trip.interestTags.map((tag) => (
               <span
                 key={tag}
                 style={{
@@ -332,7 +332,12 @@ export default function DiscoveryPanel({ trip, days, stops, onAddStop, onClose }
         }}
       >
         <button
-          onClick={() => setActiveCategory('hidden_gems')}
+          onClick={() => {
+            setActiveCategory('hidden_gems');
+            if (!results && destination.trim()) {
+              discover(destination.trim(), trip.interestTags ?? []);
+            }
+          }}
           style={{
             width: '100%',
             fontFamily: "'DM Mono', monospace",
