@@ -6,7 +6,14 @@ export const bookingsApi = {
   update: (bookingId, data) => request(`/api/bookings/${bookingId}`, { method: 'PATCH', body: data }),
   remove: (bookingId) => request(`/api/bookings/${bookingId}`, { method: 'DELETE' }),
   lookupHotels: (query) => request(`/api/lookups/places/hotels?q=${encodeURIComponent(query)}`),
-  lookupFlight: ({ carrierCode, flightNumber, departureDate }) => request(
-    `/api/lookups/flights?carrierCode=${encodeURIComponent(carrierCode)}&flightNumber=${encodeURIComponent(flightNumber)}&departureDate=${encodeURIComponent(departureDate)}`
-  ),
+  lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
+    const params = new URLSearchParams({ departureDate });
+    if (flightQuery) {
+      params.set('flightQuery', flightQuery);
+    } else {
+      params.set('carrierCode', carrierCode);
+      params.set('flightNumber', flightNumber);
+    }
+    return request(`/api/lookups/flights?${params.toString()}`);
+  },
 };

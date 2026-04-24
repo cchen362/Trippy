@@ -27,5 +27,8 @@ export const config = {
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY,
   googlePlacesKey: process.env.GOOGLE_PLACES_API_KEY,
   maptilerKey: process.env.MAPTILER_API_KEY || '',
+  flightDataProvider: process.env.FLIGHT_DATA_PROVIDER || '',
+  aerodataboxApiKey: process.env.AERODATABOX_API_KEY || '',
+  aerodataboxApiHost: process.env.AERODATABOX_API_HOST || 'aerodatabox.p.rapidapi.com',
   isProd: process.env.NODE_ENV === 'production',
 };

@@ -28,6 +28,7 @@ router.get('/flights', async (req, res, next) => {
       flight: await lookupFlightDetails({
         carrierCode: req.query.carrierCode,
         flightNumber: req.query.flightNumber,
+        flightQuery: req.query.flightQuery,
         departureDate: req.query.departureDate,
       }),
     });

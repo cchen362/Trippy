@@ -10,6 +10,7 @@ const DEFAULT_FORM = {
   origin: '',
   destination: '',
   terminalOrStation: '',
+  flightQuery: '',
   carrierCode: '',
   flightNumber: '',
   departureDate: '',
@@ -29,6 +30,7 @@ function normalizeForm(form) {
     terminalOrStation: form.terminalOrStation || null,
     detailsJson: form.type === 'flight'
       ? {
+        ...form.detailsJson,
         carrierCode: form.carrierCode,
         flightNumber: form.flightNumber,
         departureDate: form.departureDate,
@@ -79,18 +81,26 @@ export default function AddBookingModal({
     setError(null);
     try {
       const response = await lookupFlight({
-        carrierCode: form.carrierCode,
-        flightNumber: form.flightNumber,
+        flightQuery: form.flightQuery,
         departureDate: form.departureDate,
       });
       setForm((current) => ({
         ...current,
         title: response.flight.title || current.title,
-        startDatetime: current.startDatetime || `${form.departureDate}T09:00:00`,
+        carrierCode: response.flight.carrierCode || current.carrierCode,
+        flightNumber: response.flight.flightNumber || current.flightNumber,
+        origin: response.flight.origin || current.origin,
+        destination: response.flight.destination || current.destination,
+        startDatetime: response.flight.startDatetime || current.startDatetime,
+        endDatetime: response.flight.endDatetime || current.endDatetime,
         detailsJson: {
           ...current.detailsJson,
+          ...response.flight.detailsJson,
           lookupStatus: response.flight.lookupStatus,
           note: response.flight.note,
+          provider: response.flight.provider,
+          airlineName: response.flight.airlineName,
+          aircraft: response.flight.aircraft,
         },
       }));
     } catch (err) {
@@ -199,13 +209,14 @@ export default function AddBookingModal({
 
             {form.type === 'flight' && (
               <>
-                <label className="block">
-                  <span className="modal-label">Carrier Code</span>
-                  <input value={form.carrierCode} onChange={(event) => setForm((current) => ({ ...current, carrierCode: event.target.value }))} className="modal-input" />
-                </label>
-                <label className="block">
+                <label className="block sm:col-span-2">
                   <span className="modal-label">Flight Number</span>
-                  <input value={form.flightNumber} onChange={(event) => setForm((current) => ({ ...current, flightNumber: event.target.value }))} className="modal-input" />
+                  <input
+                    value={form.flightQuery}
+                    onChange={(event) => setForm((current) => ({ ...current, flightQuery: event.target.value }))}
+                    placeholder="SQ317 or SQ 317"
+                    className="modal-input"
+                  />
                 </label>
                 <label className="block">
                   <span className="modal-label">Departure Date</span>
