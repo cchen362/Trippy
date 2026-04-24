@@ -1,11 +1,15 @@
 // Validates all required env vars at startup — fail fast, never silently
-const required = [
-  'SESSION_SECRET',
-  'DB_PATH',
-  'ANTHROPIC_API_KEY',
-  'UNSPLASH_ACCESS_KEY',
-  'GOOGLE_PLACES_API_KEY',
-];
+const required = [];
+
+if (process.env.NODE_ENV !== 'test') {
+  required.push(
+    'SESSION_SECRET',
+    'DB_PATH',
+    'ANTHROPIC_API_KEY',
+    'UNSPLASH_ACCESS_KEY',
+    'GOOGLE_PLACES_API_KEY',
+  );
+}
 
 for (const key of required) {
   if (!process.env[key]) {

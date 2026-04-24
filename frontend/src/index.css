@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;1,400;1,500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -15,18 +17,104 @@
   --cream-mute:  rgba(240,234,216,0.28);
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
 
 body {
-  background: var(--ink-deep);
+  background: radial-gradient(circle at top, rgba(201,168,76,0.08), transparent 30%), var(--ink-deep);
   color: var(--cream-dim);
   font-family: 'Cormorant Garamond', serif;
   margin: 0;
-  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbar — webkit */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.font-display { font-family: 'Playfair Display', serif; }
+.font-body { font-family: 'Cormorant Garamond', serif; }
+.font-mono { font-family: 'DM Mono', monospace; }
+
+.trip-card-overlay {
+  background: linear-gradient(100deg, rgba(13,11,9,0.92) 0%, rgba(13,11,9,0.36) 65%, rgba(13,11,9,0.08) 100%);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--ink-border);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  background: rgba(13,11,9,0.35);
+}
+
+.modal-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cream-mute);
+}
+
+.modal-input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--ink-border);
+  background: var(--ink-mid);
+  color: var(--cream);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.9rem;
+}
+
+.modal-action {
+  border-radius: 0.9rem;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-line);
+  color: var(--gold);
+  padding: 0.9rem 1rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+button,
+input,
+select {
+  outline: none;
+}
+
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+@keyframes copilot-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.copilot-input::placeholder {
+  color: var(--cream-mute);
+}
