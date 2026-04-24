@@ -72,7 +72,7 @@ Focus on: ${destination}. Traveller profile: ${travellers} people, pace: ${pace}
   }
 }
 
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res) {
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req) {
   const client = getClient();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -117,6 +117,11 @@ Guidelines:
       max_tokens: 4096,
       system: systemPrompt,
       messages: conversationMessages,
+    });
+
+    // Abort Anthropic stream when client disconnects to avoid wasted API cost
+    req?.on('close', () => {
+      if (!stream.ended) stream.abort();
     });
 
     stream.on('text', (text) => {

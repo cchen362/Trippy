@@ -17,11 +17,12 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       throw Object.assign(new Error('destination is required'), { status: 400 });
     }
 
+    const normalizedDestination = destination.trim().toLowerCase();
     const rawTags = interestTags ?? JSON.parse(req.trip.interest_tags || '[]');
     const tags = Array.isArray(rawTags) ? rawTags : [];
 
     const hash = createHash('sha256')
-      .update(JSON.stringify([destination.toLowerCase(), ...[...tags].sort()]))
+      .update(JSON.stringify([normalizedDestination, ...[...tags].sort()]))
       .digest('hex');
 
     const db = getDb();
@@ -29,7 +30,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const cached = db.prepare(`
       SELECT * FROM discovery_cache
       WHERE trip_id = ? AND destination = ? AND interest_hash = ?
-    `).get(req.params.tripId, destination, hash);
+    `).get(req.params.tripId, normalizedDestination, hash);
 
     if (cached) {
       const ageMs = Date.now() - new Date(cached.fetched_at).getTime();
@@ -39,7 +40,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     }
 
     const { results, source } = await discoverDestination(
-      destination,
+      normalizedDestination,
       tags,
       req.trip.pace,
       req.trip.travellers,
@@ -48,7 +49,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     db.prepare(`
       INSERT OR REPLACE INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
       VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-    `).run(req.params.tripId, destination, hash, JSON.stringify({ results, source }));
+    `).run(req.params.tripId, normalizedDestination, hash, JSON.stringify({ results, source }));
 
     res.json({ discovery: { results, source, cached: false } });
   } catch (err) {

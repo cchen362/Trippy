@@ -76,7 +76,7 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
 
   // Stream response — SSE headers are set inside streamCopilotResponse
   // Errors during streaming are handled inside the service (writes error SSE event)
-  const fullText = await streamCopilotResponse(conversationMessages, tripDetail, res);
+  const fullText = await streamCopilotResponse(conversationMessages, tripDetail, res, req);
 
   // Save assistant response after streaming completes
   if (fullText) {

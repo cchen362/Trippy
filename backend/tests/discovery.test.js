@@ -177,11 +177,11 @@ describe('POST /trips/:tripId/discover — cache hit', () => {
     const hash = computeHash(destination, tags);
     const fakeResults = { culture: [{ name: 'Temple' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
 
-    // Insert a fresh cache row
+    // Insert a fresh cache row — destination is stored normalized (lowercase)
     getDb().prepare(`
       INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
       VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-    `).run(tripId, destination, hash, JSON.stringify({ results: fakeResults, source: 'web' }));
+    `).run(tripId, destination.toLowerCase(), hash, JSON.stringify({ results: fakeResults, source: 'web' }));
 
     const { responseBody, error } = await callDiscover({ destination, interestTags: tags });
 
@@ -210,17 +210,18 @@ describe('POST /trips/:tripId/discover — cache miss', () => {
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
     const tripRow = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
-    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination, tags, 'relaxed', tripRow.travellers);
+    // Route normalizes destination to lowercase before calling discoverDestination
+    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination.toLowerCase(), tags, 'relaxed', tripRow.travellers);
 
     expect(responseBody.discovery.cached).toBe(false);
     expect(responseBody.discovery.results).toEqual(fakeResults);
     expect(responseBody.discovery.source).toBe('web');
 
-    // Verify stored in DB
+    // Verify stored in DB — destination stored normalized (lowercase)
     const hash = computeHash(destination, tags);
     const row = getDb().prepare(
       'SELECT * FROM discovery_cache WHERE trip_id = ? AND destination = ? AND interest_hash = ?'
-    ).get(tripId, destination, hash);
+    ).get(tripId, destination.toLowerCase(), hash);
     expect(row).toBeDefined();
     const stored = JSON.parse(row.result_json);
     expect(stored.results).toEqual(fakeResults);
@@ -235,8 +236,9 @@ describe('POST /trips/:tripId/discover — cache miss', () => {
 
     expect(error).toBeUndefined();
     // Should have used the trip's interest_tags: ['culture', 'food']
+    // Route normalizes destination to lowercase before calling discoverDestination
     const tripRow = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
-    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination, ['culture', 'food'], 'relaxed', tripRow.travellers);
+    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination.toLowerCase(), ['culture', 'food'], 'relaxed', tripRow.travellers);
     expect(responseBody.discovery.cached).toBe(false);
   });
 });
@@ -253,12 +255,12 @@ describe('POST /trips/:tripId/discover — expired cache', () => {
     const staleResults = { culture: [{ name: 'Old result' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
     const freshResults = { culture: [{ name: 'New result' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
 
-    // Insert expired cache row (51 hours ago)
+    // Insert expired cache row (51 hours ago) — stored with normalized lowercase destination
     const expiredTime = new Date(Date.now() - 51 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
     getDb().prepare(`
       INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
       VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-    `).run(tripId, destination, hash, JSON.stringify({ results: staleResults, source: 'web' }), expiredTime);
+    `).run(tripId, destination.toLowerCase(), hash, JSON.stringify({ results: staleResults, source: 'web' }), expiredTime);
 
     mockDiscoverDestination.mockResolvedValue({ results: freshResults, source: 'web' });
 
