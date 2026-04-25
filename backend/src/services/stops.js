@@ -114,10 +114,14 @@ export async function createStop(userId, dayId, input) {
 export async function updateStop(userId, stopId, input) {
   const db = getDb();
   const existing = assertStopAccess(userId, stopId);
-  const day = assertDayAccess(userId, existing.day_id);
+
+  const isMoving = input.dayId && input.dayId !== existing.day_id;
+  const targetDayId = isMoving ? input.dayId : existing.day_id;
+  const day = assertDayAccess(userId, targetDayId);
+
   const title = (input.title ?? existing.title)?.trim();
   const type = input.type ?? existing.type;
-  const shouldRefreshPhoto = input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
+  const shouldRefreshPhoto = isMoving || input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = shouldRefreshPhoto
     ? await resolvePhotoUrl({
@@ -129,9 +133,12 @@ export async function updateStop(userId, stopId, input) {
     })
     : existing.unsplash_photo_url;
 
+  const sortOrder = isMoving ? nextSortOrder(targetDayId) : (input.sortOrder ?? existing.sort_order);
+
   const row = db.prepare(`
     UPDATE stops
     SET
+      day_id = ?,
       time = ?,
       title = ?,
       type = ?,
@@ -148,6 +155,7 @@ export async function updateStop(userId, stopId, input) {
     WHERE id = ?
     RETURNING *
   `).get(
+    targetDayId,
     input.time ?? existing.time,
     title,
     type,
@@ -159,7 +167,7 @@ export async function updateStop(userId, stopId, input) {
     input.bookingRequired !== undefined ? (input.bookingRequired ? 1 : 0) : existing.booking_required,
     input.bestTime ?? existing.best_time,
     input.duration ?? existing.duration,
-    input.sortOrder ?? existing.sort_order,
+    sortOrder,
     input.isFeatured !== undefined ? (input.isFeatured ? 1 : 0) : existing.is_featured,
     stopId,
   );

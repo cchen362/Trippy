@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import StopCard from './StopCard.jsx';
 import TransitStop from './TransitStop.jsx';
 
-export default function Timeline({ day, onReorder, saving }) {
+export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, days, onMove }) {
   const [expandedId, setExpandedId] = useState(null);
   const [items, setItems] = useState(day?.stops || []);
 
@@ -36,12 +36,20 @@ export default function Timeline({ day, onReorder, saving }) {
                   index={index}
                   expanded={expandedId === stop.id}
                   onExpand={(id) => setExpandedId((current) => current === id ? null : id)}
+                  onDelete={onDelete}
+                  onUpdate={onUpdate}
+                  days={days}
+                  onMove={onMove}
                 />
               ) : (
                 <StopCard
                   stop={stop}
                   expanded={expandedId === stop.id}
                   onToggle={(id) => setExpandedId((current) => current === id ? null : id)}
+                  onDelete={onDelete}
+                  onUpdate={onUpdate}
+                  days={days}
+                  onMove={onMove}
                 />
               )}
             </motion.div>

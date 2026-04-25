@@ -16,6 +16,8 @@ export default function PlanTab() {
     reorderStops,
     createStop,
     saving,
+    deleteStop,
+    updateStop,
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
@@ -24,6 +26,8 @@ export default function PlanTab() {
     if (!activeDay || orderedStopIds.length === 0) return;
     await reorderStops(activeDay.id, orderedStopIds);
   };
+
+  const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId });
 
   return (
     <div className="space-y-6">
@@ -60,7 +64,7 @@ export default function PlanTab() {
           className="space-y-6"
         >
           <DayHeader day={activeDay} dayNumber={days.findIndex((day) => day.id === activeDayId) + 1} />
-          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} />
+          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={deleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
         </motion.div>
       </AnimatePresence>
 
