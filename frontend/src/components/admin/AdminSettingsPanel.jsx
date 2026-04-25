@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { RefreshCcw, Settings, Trash2, X } from 'lucide-react';
 import { adminApi } from '../../services/api.js';
@@ -76,7 +77,7 @@ export default function AdminSettingsPanel() {
         <Settings size={18} />
       </button>
 
-      {open && (
+      {open && createPortal(
         <motion.div
           className="fixed inset-0 z-[230] flex items-end sm:items-center justify-center px-0 sm:px-4"
           style={{ background: 'rgba(0,0,0,0.68)' }}
@@ -190,7 +191,8 @@ export default function AdminSettingsPanel() {
               </div>
             )}
           </motion.div>
-        </motion.div>
+        </motion.div>,
+        document.body,
       )}
     </>
   );
