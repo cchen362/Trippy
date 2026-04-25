@@ -39,5 +39,9 @@ docker-compose.override.yml
 # Brainstorm session files (keep mockups, not server state)
 .superpowers/brainstorm/*/state/
 
-# Git worktrees
+# Git worktrees (Claude Code creates these under .claude/worktrees/)
 .worktrees/
+.claude/worktrees/
+
+# Playwright MCP snapshots and screenshots
+.playwright-mcp/
