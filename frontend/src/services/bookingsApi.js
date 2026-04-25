@@ -6,6 +6,7 @@ export const bookingsApi = {
   update: (bookingId, data) => request(`/api/bookings/${bookingId}`, { method: 'PATCH', body: data }),
   remove: (bookingId) => request(`/api/bookings/${bookingId}`, { method: 'DELETE' }),
   lookupHotels: (query) => request(`/api/lookups/places/hotels?q=${encodeURIComponent(query)}`),
+  lookupHotelDetails: (placeId) => request(`/api/lookups/places/${encodeURIComponent(placeId)}`),
   lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
     const params = new URLSearchParams({ departureDate });
     if (flightQuery) {

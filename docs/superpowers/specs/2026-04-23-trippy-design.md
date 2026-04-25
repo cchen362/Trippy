@@ -163,6 +163,45 @@ copilot_messages    id, trip_id, user_id, role (user|assistant), content, create
   - **Trains:** manual entry (origin, destination, train number, time)
   - **All types:** confirmation ref field always present
 - Auto-insert into day timeline: when a booking is added, it's placed chronologically into the correct day by datetime. Ordering logic: sort by `start_datetime`, hotel check-in defaults to 15:00 if no time given.
+- **Edit booking:** tapping a card opens a detail sheet; an "Edit Booking" button opens the Add Booking modal pre-populated with the existing data. Type cannot be changed during edit.
+
+#### 7.4.1 Booking card anatomies
+
+These define the bespoke per-type card designs. Do **not** revert to a single generic card.
+
+**Flight card — ticket-stub metaphor**
+- Outer shape: `ticket-stub` CSS class for left/right semicircular notch cut-outs (CSS mask). No border — surface contrast against `--ink-deep` body provides the edge.
+- Eyebrow (gold, mono 11px): `{AIRLINE NAME} · {CARRIER}{NUMBER}` (e.g. `SINGAPORE AIRLINES · SQ848`). This is the **one gold element** on this card.
+- Dashed fold line below eyebrow (`ticket-fold` class, gold at 22% alpha).
+- Hero row: left IATA code / right IATA code in Playfair Display italic (`text-4xl sm:text-5xl lg:text-6xl`), center flight number in DM Mono. ◆ diamonds flanking the center glyph are hidden below `sm` breakpoint to fit 375px.
+- Time row: departure time left / arrival time right in DM Mono (`text-2xl sm:text-3xl`). Label below each time: `DEPART · {IATA}` / `ARRIVE · {IATA}` in DM Mono 11px cream-mute. Date below that in Cormorant Garamond italic small.
+- Footer (dashed fold line above): `BOOKING REF` label left (cream-mute) / confirmation ref right (cream). The confirmation ref is **cream, not gold** — the eyebrow airline line is already the gold usage.
+- IATA codes derived from: `detailsJson.providerPayload.departure.airport.iata` → fallback `iataFromOriginString(booking.origin)`.
+
+**Hotel / Accommodation card — concierge card metaphor**
+- Shape: standard `rounded-xl` with 1px `--ink-border` hairline. No notch mask.
+- Eyebrow (cream-mute, mono 11px): literal `ACCOMMODATION`.
+- Title: hotel name in Playfair Display italic (`text-2xl sm:text-3xl`), cream.
+- Labeled rows below title, each separated by `.hairline-row` (gold at 12% alpha):
+  - `CHECK-IN` / formatted date (e.g. `Wed 11 Jun`)
+  - `CHECK-OUT` / formatted date + computed nights (e.g. `Mon 16 Jun · 5 nights`)
+  - `BOOKED VIA` / booking source — row hidden if empty
+  - `CONFIRMATION` / confirmation ref in **gold** (the one gold element on this card) — row hidden if empty
+- Nights computed client-side from `startDatetime`/`endDatetime` via `computeNights()`.
+
+**Train card — ticket-stub metaphor (same primitive as flight)**
+- Uses `TicketStubCard` primitive. Eyebrow: `{ORIGIN CITY} → {DEST CITY} · {TRAIN NUMBER}`.
+- Left/right codes are abbreviated station names (`CHENGDU E.`) at `text-2xl sm:text-3xl lg:text-4xl` — station names are longer than IATA codes.
+- Center glyph: train number only (no ◆ diamonds, since station abbreviations already carry meaning).
+- Footer: seat class left (if present) / booking ref right in **gold** (the one gold element).
+
+**Other card — minimal concierge card**
+- Same shape as hotel. Eyebrow: `booking.type.toUpperCase()` (e.g. `FERRY`, `CAR RENTAL`).
+- Rows: `WHEN` (date range or start), `WHERE` (destination), `CONFIRMATION` (gold). All optional.
+
+**Implementation files:** `TicketStubCard.jsx` (primitive), `FlightBookingCard.jsx`, `TrainBookingCard.jsx`, `HotelBookingCard.jsx`, `OtherBookingCard.jsx`, `bookingCardUtils.js` (helpers: `formatShortDate`, `formatTime`, `computeNights`, `iataFromOriginString`).
+
+**🚩 NEXT-SESSION PRIORITY:** Times currently render in the viewer's local timezone. Correct fix requires storing `origin_tz` / `destination_tz` per booking (IANA zone), sourced from AeroDataBox payload for flights and Google Places for hotels. The `formatTime`/`formatShortDate` helpers already accept an optional `tz` param for this upgrade. See migration `007_booking_timezones.sql`.
 
 ### 7.5 Map View (Map tab)
 

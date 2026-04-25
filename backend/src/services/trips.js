@@ -1,4 +1,5 @@
 import { getDb } from '../db/database.js';
+import { cityFromIata, cityFromAirportString } from '../utils/airports.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -94,6 +95,73 @@ function normalizeArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (typeof value === 'string' && value.trim()) return [value.trim()];
   return [];
+}
+
+/**
+ * Extracts a clean city name from a booking's structured detailsJson.
+ * Returns null if no city can be determined — never guesses from station names.
+ */
+function extractCityFromBooking(booking) {
+  const d = booking.detailsJson || {};
+  // Explicit city fields written by the booking form (set in Fix 1a)
+  if (booking.type === 'hotel' || booking.type === 'other') {
+    return d.city || null;
+  }
+  if (booking.type === 'train' || booking.type === 'bus') {
+    return d.destinationCity || null;
+  }
+  if (booking.type === 'flight') {
+    // Prefer explicit city stored at booking time
+    if (d.destinationCity) return d.destinationCity;
+    // Fall back: IATA from provider payload (AeroDataBox stores arrival.airport.iata)
+    const iata = d.providerPayload?.arrival?.airport?.iata;
+    if (iata) return cityFromIata(iata);
+    // Last resort: formatted airport string like "CKG - Jiangbei International"
+    return cityFromAirportString(booking.destination);
+  }
+  return null;
+}
+
+/**
+ * Derives the city for a single day given the full bookings list.
+ *
+ * Priority:
+ * 1. Manual city_override on the day row
+ * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date)
+ * 3. Last same-day transit arrival (flight/train/bus departing that day)
+ * 4. Previous day's resolved city
+ * 5. Seeded day.city (trip default)
+ */
+function deriveDayCity(day, bookings, previousResolvedCity) {
+  if (day.cityOverride) return day.cityOverride;
+
+  // Hotel active tonight: check-in ≤ day.date < check-out
+  const activeHotel = bookings.find((b) => {
+    if (b.type !== 'hotel') return false;
+    const checkIn = b.startDatetime?.slice(0, 10);
+    const checkOut = b.endDatetime?.slice(0, 10);
+    return checkIn && checkOut && checkIn <= day.date && day.date < checkOut;
+  });
+  if (activeHotel) {
+    const city = extractCityFromBooking(activeHotel);
+    if (city) return city;
+  }
+
+  // Last same-day transit arrival
+  const sameDayTransit = bookings
+    .filter((b) => {
+      const type = b.type;
+      if (type !== 'flight' && type !== 'train' && type !== 'bus') return false;
+      return b.startDatetime?.slice(0, 10) === day.date;
+    })
+    .sort((a, b) => (a.startDatetime || '').localeCompare(b.startDatetime || ''));
+  for (let i = sameDayTransit.length - 1; i >= 0; i--) {
+    const city = extractCityFromBooking(sameDayTransit[i]);
+    if (city) return city;
+  }
+
+  if (previousResolvedCity) return previousResolvedCity;
+  return day.city;
 }
 
 export function assertTripAccess(userId, tripId) {
@@ -253,35 +321,54 @@ export function createTrip(userId, input) {
   return getTripDetail(tripId, userId);
 }
 
-export function listDaysForTrip(tripId, userId) {
+export function listDaysForTrip(tripId, userId, bookings = []) {
   assertTripAccess(userId, tripId);
   const db = getDb();
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT d.*, COUNT(s.id) AS stop_count
     FROM days d
     LEFT JOIN stops s ON s.day_id = d.id
     WHERE d.trip_id = ?
     GROUP BY d.id
     ORDER BY d.date ASC
-  `).all(tripId).map((row, index) => ({
-    id: row.id,
-    tripId: row.trip_id,
-    date: row.date,
-    city: row.city,
-    phase: row.phase,
-    hotel: row.hotel,
-    theme: row.theme,
-    colorCode: row.color_code,
-    stopCount: row.stop_count,
-    dayIndex: index,
-  }));
+  `).all(tripId);
+
+  let previousResolvedCity = null;
+  return rows.map((row, index) => {
+    const day = {
+      id: row.id,
+      tripId: row.trip_id,
+      date: row.date,
+      city: row.city,
+      cityOverride: row.city_override ?? null,
+      phase: row.phase,
+      hotel: row.hotel,
+      theme: row.theme,
+      colorCode: row.color_code,
+      stopCount: row.stop_count,
+      dayIndex: index,
+    };
+    const resolvedCity = deriveDayCity(day, bookings, previousResolvedCity);
+    previousResolvedCity = resolvedCity;
+    return { ...day, resolvedCity };
+  });
 }
 
 export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } = {}) {
   const tripRow = assertTripAccess(userId, tripId);
   const trip = mapTrip(tripRow, today);
-  const days = listDaysForTrip(tripId, userId);
   const db = getDb();
+
+  // Load bookings first so deriveDayCity can use them when building days
+  const bookings = db.prepare(`
+    SELECT *
+    FROM bookings
+    WHERE trip_id = ?
+    ORDER BY COALESCE(start_datetime, end_datetime, created_at) ASC, created_at ASC
+  `).all(tripId).map(mapBooking);
+
+  const days = listDaysForTrip(tripId, userId, bookings);
+
   const stops = db.prepare(`
     SELECT *
     FROM stops
@@ -294,13 +381,6 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
     if (!stopsByDay.has(stop.dayId)) stopsByDay.set(stop.dayId, []);
     stopsByDay.get(stop.dayId).push(stop);
   }
-
-  const bookings = db.prepare(`
-    SELECT *
-    FROM bookings
-    WHERE trip_id = ?
-    ORDER BY COALESCE(start_datetime, end_datetime, created_at) ASC, created_at ASC
-  `).all(tripId).map(mapBooking);
 
   return {
     trip,

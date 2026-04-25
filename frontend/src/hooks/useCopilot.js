@@ -74,8 +74,23 @@ export function useCopilot(tripId) {
     abortRef.current?.abort();
   }, []);
 
+  const clear = useCallback(async () => {
+    abortRef.current?.abort();
+    try {
+      await copilotApi.clear(tripId);
+    } catch (err) {
+      setError(err);
+      return;
+    }
+    setMessages([]);
+    setStreamingText('');
+    setPendingMutation(null);
+    setError(null);
+    setStreaming(false);
+  }, [tripId]);
+
   return {
     messages, streaming, streamingText, pendingMutation, error,
-    send, applyMutation, rejectMutation, cancel,
+    send, applyMutation, rejectMutation, cancel, clear,
   };
 }

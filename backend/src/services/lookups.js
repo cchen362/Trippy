@@ -48,6 +48,53 @@ export async function lookupHotelPredictions(input) {
     }));
 }
 
+export async function lookupHotelDetails(placeId) {
+  const normalizedPlaceId = placeId?.trim();
+  if (!normalizedPlaceId) {
+    throw Object.assign(new Error('placeId is required'), { status: 400 });
+  }
+
+  if (!config.googlePlacesKey) {
+    throw Object.assign(new Error('Google Places API key is not configured'), {
+      status: 503,
+    });
+  }
+
+  const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': config.googlePlacesKey,
+      'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents',
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(body || 'Google Places details lookup failed'), {
+      status: 502,
+    });
+  }
+
+  const place = await response.json();
+  return {
+    placeId: place.id || normalizedPlaceId,
+    name: place.displayName?.text || '',
+    address: place.formattedAddress || '',
+    city: extractCityFromAddressComponents(place.addressComponents),
+  };
+}
+
+/**
+ * Extracts a city name from a Google Places addressComponents array.
+ * Tries locality first (most cities globally), then administrative_area_level_2
+ * (used for prefecture-level cities in China like Chongqing, Chengdu).
+ */
+function extractCityFromAddressComponents(components) {
+  if (!Array.isArray(components)) return null;
+  const find = (type) => components.find((c) => c.types?.includes(type))?.longText ?? null;
+  return find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1') || null;
+}
+
 export async function lookupPhotos(query) {
   return searchPhotos(query);
 }

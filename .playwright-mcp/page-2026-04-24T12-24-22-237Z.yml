@@ -1,0 +1,15 @@
+- generic [ref=e9]:
+  - paragraph [ref=e11]: Trippy
+  - heading "Welcome back." [level=1] [ref=e12]
+  - generic [ref=e13]:
+    - button "Sign In" [ref=e14] [cursor=pointer]
+    - button "Register" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: Username
+      - textbox [ref=e19]: cchen
+    - generic [ref=e20]:
+      - generic [ref=e21]: Password
+      - textbox [ref=e22]: password
+    - paragraph [ref=e25]: Invalid credentials
+    - button "Sign In" [ref=e23] [cursor=pointer]

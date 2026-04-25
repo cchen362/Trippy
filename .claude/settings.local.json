@@ -1,7 +1,36 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(lsof -ti:3001)",
+      "Bash(xargs kill *)",
+      "Bash(lsof -ti:5173)",
+      "Bash(npm run *)",
+      "Bash(echo \"Backend PID: $!\")",
+      "Bash(echo \"Frontend PID: $!\")",
+      "Bash(git -C \"c:/Users/cchen362/OneDrive/Desktop/Trippy\" log --oneline -20)",
+      "Bash(git -C \"c:/Users/cchen362/OneDrive/Desktop/Trippy\" log --all --oneline -20)",
+      "Bash(git -C \"c:/Users/cchen362/OneDrive/Desktop/Trippy\" status)",
+      "Bash(git -C \"c:/Users/cchen362/OneDrive/Desktop/Trippy\" diff backend/src/config.js)",
+      "Bash(netstat -ano)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "Bash(taskkill /F /PID 3756)",
+      "Bash(taskkill /F /PID 42020)",
+      "PowerShell(Stop-Process -Id 3756 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 42020 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(netstat -ano)",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_fill_form",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "Bash(node -e ' *)",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_network_requests",
+      "mcp__plugin_playwright_playwright__browser_type",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3002,5173,5174 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep 1; Write-Host \"Killed\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3002 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep 2; Write-Host \"done\")",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(git add *)"
     ]
   }
 }

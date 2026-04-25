@@ -27,6 +27,7 @@ export function useBookings({ tripId, onChanged }) {
     updateBooking: (bookingId, data) => run(() => bookingsApi.update(bookingId, data)),
     deleteBooking: (bookingId) => run(() => bookingsApi.remove(bookingId)),
     lookupHotels: bookingsApi.lookupHotels,
+    lookupHotelDetails: bookingsApi.lookupHotelDetails,
     lookupFlight: bookingsApi.lookupFlight,
   };
 }

@@ -34,6 +34,17 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   }
 });
 
+// DELETE /trips/:tripId/copilot/history
+router.delete('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
+  try {
+    const db = getDb();
+    const info = db.prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(req.params.tripId);
+    res.json({ ok: true, deleted: info.changes });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /trips/:tripId/copilot — SSE streaming
 router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
   const { tripId } = req.params;

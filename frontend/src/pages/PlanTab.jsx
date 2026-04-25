@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import DayHeader from '../components/timeline/DayHeader.jsx';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import Timeline from '../components/timeline/Timeline.jsx';
@@ -50,14 +50,26 @@ export default function PlanTab() {
         </button>
       </div>
 
-      <DayHeader day={activeDay} dayNumber={days.findIndex((day) => day.id === activeDayId) + 1} />
-      <Timeline day={activeDay} onReorder={handleReorder} saving={saving} />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeDayId || 'no-day'}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="space-y-6"
+        >
+          <DayHeader day={activeDay} dayNumber={days.findIndex((day) => day.id === activeDayId) + 1} />
+          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} />
+        </motion.div>
+      </AnimatePresence>
 
       <AnimatePresence>
         {discoveryOpen && (
           <DiscoveryPanel
             trip={trip}
             days={days}
+            activeDay={activeDay}
             onAddStop={createStop}
             onClose={() => setDiscoveryOpen(false)}
           />

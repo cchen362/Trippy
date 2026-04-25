@@ -1,4 +1,13 @@
 // Validates all required env vars at startup — fail fast, never silently
+import { config as loadEnv } from 'dotenv';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+loadEnv();
+loadEnv({ path: join(__dirname, '../../.env'), override: false });
+
 const required = [];
 
 if (process.env.NODE_ENV !== 'test') {

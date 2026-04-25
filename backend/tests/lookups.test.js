@@ -4,19 +4,53 @@ const mockConfig = {
   flightDataProvider: '',
   aerodataboxApiKey: '',
   aerodataboxApiHost: 'aerodatabox.p.rapidapi.com',
+  googlePlacesKey: 'places-key',
 };
 
 vi.mock('../src/config.js', () => ({
   config: mockConfig,
 }));
 
-const { lookupFlightDetails, normalizeFlightQuery } = await import('../src/services/lookups.js');
+const { lookupFlightDetails, lookupHotelDetails, normalizeFlightQuery } = await import('../src/services/lookups.js');
 
 beforeEach(() => {
   mockConfig.flightDataProvider = '';
   mockConfig.aerodataboxApiKey = '';
   mockConfig.aerodataboxApiHost = 'aerodatabox.p.rapidapi.com';
+  mockConfig.googlePlacesKey = 'places-key';
   vi.restoreAllMocks();
+});
+
+describe('lookupHotelDetails', () => {
+  it('returns display name and formatted address for a selected place', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'place-123',
+        displayName: { text: 'Waldorf Astoria Chengdu' },
+        formattedAddress: '1199 Tianfu Avenue North, Chengdu, Sichuan, China',
+      }),
+    });
+
+    const place = await lookupHotelDetails('place-123');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://places.googleapis.com/v1/places/place-123',
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': 'places-key',
+          'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents',
+        },
+      },
+    );
+    expect(place).toEqual({
+      placeId: 'place-123',
+      name: 'Waldorf Astoria Chengdu',
+      address: '1199 Tianfu Avenue North, Chengdu, Sichuan, China',
+      city: null,
+    });
+  });
 });
 
 describe('normalizeFlightQuery', () => {

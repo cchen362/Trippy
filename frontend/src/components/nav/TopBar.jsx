@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-export default function TopBar({ title }) {
+export default function TopBar({ title, actions = null }) {
   return (
     <header
       className="sticky top-0 z-20 border-b backdrop-blur-md"
@@ -14,13 +14,16 @@ export default function TopBar({ title }) {
         >
           ← Trips
         </Link>
-        <div className="min-w-0 text-right">
-          <p className="font-mono text-[10px] tracking-[0.28em] uppercase" style={{ color: 'var(--cream-mute)' }}>
-            Current Trip
-          </p>
-          <h1 className="font-display italic text-2xl truncate" style={{ color: 'var(--cream)' }}>
-            {title}
-          </h1>
+        <div className="min-w-0 flex items-center justify-end gap-3">
+          <div className="min-w-0 text-right">
+            <p className="font-mono text-[10px] tracking-[0.28em] uppercase" style={{ color: 'var(--cream-mute)' }}>
+              Current Trip
+            </p>
+            <h1 className="font-display italic text-2xl truncate" style={{ color: 'var(--cream)' }}>
+              {title}
+            </h1>
+          </div>
+          {actions}
         </div>
       </div>
     </header>

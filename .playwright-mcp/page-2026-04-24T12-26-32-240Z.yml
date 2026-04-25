@@ -1,0 +1,176 @@
+- generic [ref=e70]:
+  - banner [ref=e71]:
+    - generic [ref=e72]:
+      - link "← Trips" [ref=e73] [cursor=pointer]:
+        - /url: /trips
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - paragraph [ref=e76]: Current Trip
+          - heading "Chengdu - Chongqing" [level=1] [ref=e77]
+        - generic [ref=e78]:
+          - button "Open people and share settings" [ref=e79] [cursor=pointer]:
+            - img [ref=e80]
+          - button "Open admin settings" [ref=e85] [cursor=pointer]:
+            - img [ref=e86]
+  - main [ref=e89]:
+    - generic [ref=e90]:
+      - generic [ref=e91]:
+        - button "8 Mon" [ref=e92] [cursor=pointer]
+        - button "9 Tue" [ref=e93] [cursor=pointer]
+        - button "10 Wed" [ref=e94] [cursor=pointer]
+        - button "11 Thu" [ref=e95] [cursor=pointer]
+        - button "12 Fri" [ref=e96] [cursor=pointer]
+        - button "13 Sat" [ref=e97] [cursor=pointer]
+        - button "14 Sun" [ref=e98] [cursor=pointer]
+        - button "15 Mon" [ref=e99] [cursor=pointer]
+        - button "16 Tue" [ref=e100] [cursor=pointer]
+        - button "17 Wed" [ref=e101] [cursor=pointer]
+      - button "DISCOVER" [active] [ref=e103] [cursor=pointer]
+      - generic [ref=e104]:
+        - generic [ref=e105]:
+          - paragraph [ref=e107]: Cheng Du · Day 1
+          - heading "Cheng Du" [level=2] [ref=e108]
+          - paragraph [ref=e109]: Monday, June 8 · 2 stops
+        - list [ref=e112]:
+          - button "12:25SQ 842" [ref=e118] [cursor=pointer]
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - button "hotel Waldorf Astoria Chengdu" [ref=e128] [cursor=pointer]:
+                - paragraph [ref=e129]: hotel
+                - heading "Waldorf Astoria Chengdu" [level=3] [ref=e130]
+              - generic [ref=e131]: Drag
+            - paragraph [ref=e134]: 15:00
+      - generic [ref=e153]:
+        - generic [ref=e154]:
+          - button "Close discovery panel" [ref=e155] [cursor=pointer]: ✕
+          - generic [ref=e156]: DISCOVER
+          - generic [ref=e174]:
+            - generic [ref=e175]: AI SUGGESTED
+            - button "Refresh discovery results" [ref=e176] [cursor=pointer]: ↺
+        - generic [ref=e158]:
+          - textbox "Enter destination..." [ref=e159]: Cheng Du
+          - button "DISCOVER" [ref=e160] [cursor=pointer]
+        - generic [ref=e161]:
+          - button "Culture" [ref=e162] [cursor=pointer]
+          - button "Food" [ref=e163] [cursor=pointer]
+          - button "Nature" [ref=e164] [cursor=pointer]
+          - button "Nightlife" [ref=e165] [cursor=pointer]
+          - button "Hidden Gems" [ref=e166] [cursor=pointer]
+        - generic [ref=e177]:
+          - generic [ref=e178]:
+            - paragraph [ref=e179]: Wuhou Shrine
+            - paragraph [ref=e180]: A memorial temple dedicated to Zhuge Liang and Liu Bei from the Three Kingdoms period, featuring beautiful gardens, ancient architecture, and rich historical artifacts.
+            - paragraph [ref=e181]: A must-visit cultural landmark for couples who enjoy history and serene garden walks together.
+            - generic [ref=e182]:
+              - generic [ref=e183]: 2-3 hours
+              - generic [ref=e184]: 08:00 - 18:00 daily
+            - generic [ref=e185]:
+              - paragraph [ref=e186]: ADD TO DAY
+              - generic [ref=e187]:
+                - button "8 Jun" [ref=e188] [cursor=pointer]
+                - button "9 Jun" [ref=e189] [cursor=pointer]
+                - button "10 Jun" [ref=e190] [cursor=pointer]
+                - button "11 Jun" [ref=e191] [cursor=pointer]
+                - button "12 Jun" [ref=e192] [cursor=pointer]
+                - button "13 Jun" [ref=e193] [cursor=pointer]
+                - button "14 Jun" [ref=e194] [cursor=pointer]
+                - button "15 Jun" [ref=e195] [cursor=pointer]
+                - button "16 Jun" [ref=e196] [cursor=pointer]
+                - button "17 Jun" [ref=e197] [cursor=pointer]
+          - generic [ref=e198]:
+            - paragraph [ref=e199]: Jinli Ancient Street
+            - paragraph [ref=e200]: A beautifully preserved ancient pedestrian street near Wuhou Shrine, lined with traditional Sichuan architecture, local crafts, street food stalls, and folk performances.
+            - paragraph [ref=e201]: Perfect for couples to stroll hand-in-hand, sample local snacks, and soak in the atmosphere of ancient Chengdu.
+            - generic [ref=e202]:
+              - generic [ref=e203]: 2-3 hours
+              - generic [ref=e204]: 09:00 - 22:00 daily
+            - generic [ref=e205]:
+              - paragraph [ref=e206]: ADD TO DAY
+              - generic [ref=e207]:
+                - button "8 Jun" [ref=e208] [cursor=pointer]
+                - button "9 Jun" [ref=e209] [cursor=pointer]
+                - button "10 Jun" [ref=e210] [cursor=pointer]
+                - button "11 Jun" [ref=e211] [cursor=pointer]
+                - button "12 Jun" [ref=e212] [cursor=pointer]
+                - button "13 Jun" [ref=e213] [cursor=pointer]
+                - button "14 Jun" [ref=e214] [cursor=pointer]
+                - button "15 Jun" [ref=e215] [cursor=pointer]
+                - button "16 Jun" [ref=e216] [cursor=pointer]
+                - button "17 Jun" [ref=e217] [cursor=pointer]
+          - generic [ref=e218]:
+            - paragraph [ref=e219]: Kuanzhai Alley (Wide and Narrow Alleys)
+            - paragraph [ref=e220]: A historic neighborhood complex of three parallel alleys — Kuan Alley, Zhai Alley, and Jing Alley — showcasing Qing Dynasty courtyard architecture blended with modern cafes and boutiques.
+            - paragraph [ref=e221]: A charming cultural corridor ideal for couples to explore at a comfortable moderate pace.
+            - generic [ref=e222]:
+              - generic [ref=e223]: 2-3 hours
+              - generic [ref=e224]: Open 24 hours (shops 09:00 - 22:00)
+            - generic [ref=e225]:
+              - paragraph [ref=e226]: ADD TO DAY
+              - generic [ref=e227]:
+                - button "8 Jun" [ref=e228] [cursor=pointer]
+                - button "9 Jun" [ref=e229] [cursor=pointer]
+                - button "10 Jun" [ref=e230] [cursor=pointer]
+                - button "11 Jun" [ref=e231] [cursor=pointer]
+                - button "12 Jun" [ref=e232] [cursor=pointer]
+                - button "13 Jun" [ref=e233] [cursor=pointer]
+                - button "14 Jun" [ref=e234] [cursor=pointer]
+                - button "15 Jun" [ref=e235] [cursor=pointer]
+                - button "16 Jun" [ref=e236] [cursor=pointer]
+                - button "17 Jun" [ref=e237] [cursor=pointer]
+          - generic [ref=e238]:
+            - paragraph [ref=e239]: Sichuan Opera Face-Changing Show
+            - paragraph [ref=e240]: An iconic traditional performance art featuring the dramatic and mysterious art of bian lian (face-changing), acrobatics, fire-breathing, and shadow puppetry unique to Sichuan culture.
+            - paragraph [ref=e241]: A memorable shared experience for couples looking to engage with authentic Sichuan performing arts.
+            - generic [ref=e242]:
+              - generic [ref=e243]: 1.5-2 hours
+              - generic [ref=e244]: Evening shows typically 20:00 - 21:30
+            - generic [ref=e245]:
+              - paragraph [ref=e246]: ADD TO DAY
+              - generic [ref=e247]:
+                - button "8 Jun" [ref=e248] [cursor=pointer]
+                - button "9 Jun" [ref=e249] [cursor=pointer]
+                - button "10 Jun" [ref=e250] [cursor=pointer]
+                - button "11 Jun" [ref=e251] [cursor=pointer]
+                - button "12 Jun" [ref=e252] [cursor=pointer]
+                - button "13 Jun" [ref=e253] [cursor=pointer]
+                - button "14 Jun" [ref=e254] [cursor=pointer]
+                - button "15 Jun" [ref=e255] [cursor=pointer]
+                - button "16 Jun" [ref=e256] [cursor=pointer]
+                - button "17 Jun" [ref=e257] [cursor=pointer]
+          - generic [ref=e258]:
+            - paragraph [ref=e259]: Du Fu Thatched Cottage
+            - paragraph [ref=e260]: A museum and park built on the former residence of the Tang Dynasty poet Du Fu, featuring classical Chinese garden architecture, poetry inscriptions, and lush greenery.
+            - paragraph [ref=e261]: A tranquil cultural escape for couples who appreciate poetry, history, and peaceful garden strolls.
+            - generic [ref=e262]:
+              - generic [ref=e263]: 2 hours
+              - generic [ref=e264]: 08:00 - 18:00 daily
+            - generic [ref=e265]:
+              - paragraph [ref=e266]: ADD TO DAY
+              - generic [ref=e267]:
+                - button "8 Jun" [ref=e268] [cursor=pointer]
+                - button "9 Jun" [ref=e269] [cursor=pointer]
+                - button "10 Jun" [ref=e270] [cursor=pointer]
+                - button "11 Jun" [ref=e271] [cursor=pointer]
+                - button "12 Jun" [ref=e272] [cursor=pointer]
+                - button "13 Jun" [ref=e273] [cursor=pointer]
+                - button "14 Jun" [ref=e274] [cursor=pointer]
+                - button "15 Jun" [ref=e275] [cursor=pointer]
+                - button "16 Jun" [ref=e276] [cursor=pointer]
+                - button "17 Jun" [ref=e277] [cursor=pointer]
+        - button "SURPRISE ME" [ref=e173] [cursor=pointer]
+  - button "Open co-pilot" [ref=e135] [cursor=pointer]:
+    - img [ref=e136]
+  - navigation [ref=e138]:
+    - generic [ref=e140]:
+      - link "Trips" [ref=e141] [cursor=pointer]:
+        - /url: /trips
+        - generic [ref=e142]: Trips
+      - link "Plan" [ref=e144] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/plan
+        - generic [ref=e145]: Plan
+      - link "Logistics" [ref=e147] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/logistics
+        - generic [ref=e148]: Logistics
+      - link "Map" [ref=e150] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/map
+        - generic [ref=e151]: Map

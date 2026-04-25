@@ -8,6 +8,8 @@ function getClient() {
   return _client;
 }
 
+const DISCOVERY_KEYS = ['culture', 'food', 'nature', 'nightlife', 'hidden_gems'];
+
 const DISCOVERY_SCHEMA = `{
   "culture": [...],
   "food": [...],
@@ -18,58 +20,63 @@ const DISCOVERY_SCHEMA = `{
 Each item: { "name": string, "description": string, "whyItMatches": string, "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }`;
 
 export async function discoverDestination(destination, interestTags, pace, travellers) {
+  console.log('[discover] destination=%s tags=%o', destination, interestTags);
+
   const client = getClient();
-  const systemPrompt = `You are a travel discovery assistant. Return ONLY valid JSON (no markdown, no explanation outside JSON) in this exact structure:
+  const systemPrompt = `You are a travel discovery assistant. Return ONLY a JSON object. No prose, no markdown fences, no commentary. The response must start with { and end with }.
+
+The JSON must have exactly this structure:
 ${DISCOVERY_SCHEMA}
+
 Focus on: ${destination}. Traveller profile: ${travellers} people, pace: ${pace}, interests: ${interestTags.join(', ')}.`;
 
-  const userMessage = `Discover top attractions and experiences in ${destination}.`;
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `Discover top attractions and experiences in ${destination}.` }],
+  });
 
-  // Attempt with web_search tool first
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: userMessage }],
-    });
-
-    const textBlock = response.content.find((b) => b.type === 'text');
-    const text = textBlock ? textBlock.text : '';
-
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw Object.assign(new Error('Discovery response was not valid JSON'), { status: 502 });
-    }
-
-    return { results: parsed, source: 'web' };
-  } catch (err) {
-    // If the error is our own 502, propagate it — don't retry
-    if (err.status === 502) throw err;
-
-    // Tool not available or not enabled — retry without tools
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    });
-
-    const textBlock = response.content.find((b) => b.type === 'text');
-    const text = textBlock ? textBlock.text : '';
-
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw Object.assign(new Error('Discovery response was not valid JSON'), { status: 502 });
-    }
-
-    return { results: parsed, source: 'ai' };
+  const textBlock = response.content.find((b) => b.type === 'text');
+  if (!textBlock) {
+    throw Object.assign(new Error('Discovery returned no text block'), { status: 502 });
   }
+
+  console.log('[discover] raw response (first 500 chars):', textBlock.text.slice(0, 500));
+
+  // Extract JSON: prefer a fenced ```json block, fall back to first { ... } span
+  let raw = textBlock.text.trim();
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    raw = fenceMatch[1].trim();
+  } else {
+    const braceStart = raw.indexOf('{');
+    const braceEnd = raw.lastIndexOf('}');
+    if (braceStart !== -1 && braceEnd > braceStart) {
+      raw = raw.slice(braceStart, braceEnd + 1);
+    }
+  }
+
+  console.log('[discover] extracted JSON (first 200 chars):', raw.slice(0, 200));
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw Object.assign(new Error('Discovery response was not valid JSON'), { status: 502 });
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw Object.assign(new Error('Discovery response shape invalid'), { status: 502 });
+  }
+  for (const key of DISCOVERY_KEYS) {
+    if (!Array.isArray(parsed[key])) {
+      throw Object.assign(new Error(`Discovery response missing required key: ${key}`), { status: 502 });
+    }
+  }
+
+  console.log('[discover] ok keys=%o', Object.keys(parsed));
+  return { results: parsed, source: 'ai' };
 }
 
 export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req) {
@@ -110,8 +117,11 @@ Guidelines:
 - If not proposing changes, do NOT include the JSON block`;
 
   let fullText = '';
+  let streamDone = false;
 
   try {
+    console.log('[copilot] stream opened messages=%d', conversationMessages.length);
+
     const stream = client.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
@@ -119,12 +129,22 @@ Guidelines:
       messages: conversationMessages,
     });
 
-    // Abort Anthropic stream when client disconnects to avoid wasted API cost
-    req?.on('close', () => {
-      if (!stream.ended) stream.abort();
+    // Abort Anthropic stream when the client drops the SSE connection.
+    // Must listen on res, not req — req.close fires when the request body is consumed
+    // (immediately after flushHeaders), whereas res.close fires when the response socket closes.
+    res.on('close', () => {
+      if (!streamDone) {
+        console.log('[copilot] client dropped SSE connection — aborting stream');
+        stream.abort();
+      }
     });
 
+    let sawFirstDelta = false;
     stream.on('text', (text) => {
+      if (!sawFirstDelta) {
+        sawFirstDelta = true;
+        console.log('[copilot] first text delta len=%d', text.length);
+      }
       fullText += text;
       write({ type: 'text', content: text });
     });
@@ -144,9 +164,13 @@ Guidelines:
       }
     }
 
+    streamDone = true;
+    console.log('[copilot] stream done fullText.length=%d', fullText.length);
     write({ type: 'done' });
     res.end();
   } catch (err) {
+    streamDone = true;
+    console.error('[copilot] stream error:', err);
     write({ type: 'error', message: err.message });
     res.end();
   }

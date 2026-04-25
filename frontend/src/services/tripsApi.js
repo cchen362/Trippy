@@ -5,4 +5,14 @@ export const tripsApi = {
   create: (data) => request('/api/trips', { method: 'POST', body: data }),
   detail: (tripId) => request(`/api/trips/${tripId}/detail`),
   days: (tripId) => request(`/api/trips/${tripId}/days`),
+  collaborators: (tripId) => request(`/api/trips/${tripId}/collaborators`),
+  inviteCollaborator: (tripId, username) => request(`/api/trips/${tripId}/collaborators`, {
+    method: 'POST',
+    body: { username },
+  }),
+  removeCollaborator: (tripId, userId) => request(`/api/trips/${tripId}/collaborators/${userId}`, {
+    method: 'DELETE',
+  }),
+  createShareLink: (tripId) => request(`/api/trips/${tripId}/share`, { method: 'POST' }),
+  sharedDetail: (token) => request(`/api/share/${token}`, { silent401: true }),
 };

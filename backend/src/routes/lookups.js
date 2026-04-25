@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { lookupFlightDetails, lookupHotelPredictions, lookupPhotos } from '../services/lookups.js';
+import {
+  lookupFlightDetails,
+  lookupHotelDetails,
+  lookupHotelPredictions,
+  lookupPhotos,
+} from '../services/lookups.js';
 
 const router = Router();
 
@@ -17,6 +22,14 @@ router.get('/photos', async (req, res, next) => {
 router.get('/places/hotels', async (req, res, next) => {
   try {
     res.json({ suggestions: await lookupHotelPredictions(req.query.q) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/places/:placeId', async (req, res, next) => {
+  try {
+    res.json({ place: await lookupHotelDetails(req.params.placeId) });
   } catch (error) {
     next(error);
   }

@@ -1,14 +1,23 @@
 import { useMemo, useState } from 'react';
 import AddBookingModal from '../components/logistics/AddBookingModal.jsx';
-import BookingCard from '../components/logistics/BookingCard.jsx';
+import FlightBookingCard from '../components/logistics/FlightBookingCard.jsx';
+import TrainBookingCard from '../components/logistics/TrainBookingCard.jsx';
+import HotelBookingCard from '../components/logistics/HotelBookingCard.jsx';
+import OtherBookingCard from '../components/logistics/OtherBookingCard.jsx';
 import { useTripContext } from './TripPage.jsx';
+
+const CARD_BY_TYPE = {
+  flight: FlightBookingCard,
+  train: TrainBookingCard,
+  hotel: HotelBookingCard,
+};
 
 function groupBookings(bookings) {
   return {
-    flight: bookings.filter((booking) => booking.type === 'flight'),
-    train: bookings.filter((booking) => booking.type === 'train'),
-    hotel: bookings.filter((booking) => booking.type === 'hotel'),
-    other: bookings.filter((booking) => !['flight', 'train', 'hotel'].includes(booking.type)),
+    flight: bookings.filter((b) => b.type === 'flight'),
+    train: bookings.filter((b) => b.type === 'train'),
+    hotel: bookings.filter((b) => b.type === 'hotel'),
+    other: bookings.filter((b) => !['flight', 'train', 'hotel'].includes(b.type)),
   };
 }
 
@@ -16,17 +25,23 @@ export default function LogisticsTab() {
   const {
     bookings,
     createBooking,
+    updateBooking,
     deleteBooking,
     saving,
     lookupHotels,
+    lookupHotelDetails,
     lookupFlight,
   } = useTripContext();
-  const [open, setOpen] = useState(false);
+
+  const [addOpen, setAddOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [editing, setEditing] = useState(null);
+
   const grouped = useMemo(() => groupBookings(bookings), [bookings]);
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <section className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <p className="font-mono text-[11px] tracking-[0.3em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
@@ -36,13 +51,13 @@ export default function LogisticsTab() {
             Your bookings
           </h2>
           <p className="font-body text-xl" style={{ color: 'var(--cream-dim)' }}>
-            {bookings.length} bookings across {new Set(bookings.map((booking) => booking.bookingSource).filter(Boolean)).size || 1} sources.
+            {bookings.length} bookings across {new Set(bookings.map((b) => b.bookingSource).filter(Boolean)).size || 1} sources.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => setAddOpen(true)}
           className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase"
           style={{ background: 'var(--gold)', color: 'var(--ink-deep)' }}
         >
@@ -50,6 +65,7 @@ export default function LogisticsTab() {
         </button>
       </section>
 
+      {/* Per-type sections */}
       {['flight', 'train', 'hotel', 'other'].map((section) => (
         grouped[section].length > 0 && (
           <section key={section}>
@@ -61,15 +77,18 @@ export default function LogisticsTab() {
                 {grouped[section].length}
               </span>
             </div>
-            <div className="grid lg:grid-cols-2 gap-4">
-              {grouped[section].map((booking) => (
-                <BookingCard key={booking.id} booking={booking} onOpen={setSelectedBooking} />
-              ))}
+            {/* Ticket cards (flight/train) span full width; hotel pairs 2-up on lg+ */}
+            <div className={section === 'hotel' ? 'grid lg:grid-cols-2 gap-4' : 'grid grid-cols-1 gap-4'}>
+              {grouped[section].map((booking) => {
+                const Card = CARD_BY_TYPE[booking.type] || OtherBookingCard;
+                return <Card key={booking.id} booking={booking} onOpen={setSelectedBooking} />;
+              })}
             </div>
           </section>
         )
       ))}
 
+      {/* Detail sheet */}
       {selectedBooking && (
         <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
           <div className="w-full max-w-xl rounded-[22px] border p-6" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
@@ -95,7 +114,17 @@ export default function LogisticsTab() {
               {selectedBooking.confirmationRef && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Reference</span><br />{selectedBooking.confirmationRef}</p>}
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(selectedBooking);
+                  setSelectedBooking(null);
+                }}
+                className="modal-action"
+              >
+                Edit Booking
+              </button>
               <button
                 type="button"
                 onClick={async () => {
@@ -112,14 +141,31 @@ export default function LogisticsTab() {
         </div>
       )}
 
+      {/* Create modal */}
       <AddBookingModal
-        open={open}
-        onClose={() => setOpen(false)}
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
         onSubmit={createBooking}
         saving={saving}
         lookupHotels={lookupHotels}
+        lookupHotelDetails={lookupHotelDetails}
         lookupFlight={lookupFlight}
       />
+
+      {/* Edit modal — keyed on booking.id so React remounts (and resets form) when target changes */}
+      {editing && (
+        <AddBookingModal
+          key={editing.id}
+          open
+          onClose={() => setEditing(null)}
+          onSubmit={(data) => updateBooking(editing.id, data)}
+          saving={saving}
+          lookupHotels={lookupHotels}
+          lookupHotelDetails={lookupHotelDetails}
+          lookupFlight={lookupFlight}
+          booking={editing}
+        />
+      )}
     </div>
   );
 }

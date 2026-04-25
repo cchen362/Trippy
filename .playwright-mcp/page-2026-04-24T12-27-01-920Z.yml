@@ -1,0 +1,58 @@
+- generic [ref=e70]:
+  - banner [ref=e71]:
+    - generic [ref=e72]:
+      - link "← Trips" [ref=e73] [cursor=pointer]:
+        - /url: /trips
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - paragraph [ref=e76]: Current Trip
+          - heading "Chengdu - Chongqing" [level=1] [ref=e77]
+        - generic [ref=e78]:
+          - button "Open people and share settings" [ref=e79] [cursor=pointer]:
+            - img [ref=e80]
+          - button "Open admin settings" [ref=e85] [cursor=pointer]:
+            - img [ref=e86]
+  - main [ref=e89]:
+    - generic [ref=e90]:
+      - generic [ref=e91]:
+        - button "8 Mon" [ref=e92] [cursor=pointer]
+        - button "9 Tue" [ref=e93] [cursor=pointer]
+        - button "10 Wed" [ref=e94] [cursor=pointer]
+        - button "11 Thu" [ref=e95] [cursor=pointer]
+        - button "12 Fri" [ref=e96] [cursor=pointer]
+        - button "13 Sat" [ref=e97] [cursor=pointer]
+        - button "14 Sun" [ref=e98] [cursor=pointer]
+        - button "15 Mon" [ref=e99] [cursor=pointer]
+        - button "16 Tue" [ref=e100] [cursor=pointer]
+        - button "17 Wed" [ref=e101] [cursor=pointer]
+      - button "DISCOVER" [ref=e103] [cursor=pointer]
+      - generic [ref=e104]:
+        - generic [ref=e105]:
+          - paragraph [ref=e107]: Cheng Du · Day 1
+          - heading "Cheng Du" [level=2] [ref=e108]
+          - paragraph [ref=e109]: Monday, June 8 · 2 stops
+        - list [ref=e112]:
+          - button "12:25SQ 842" [ref=e118] [cursor=pointer]
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - button "hotel Waldorf Astoria Chengdu" [ref=e128] [cursor=pointer]:
+                - paragraph [ref=e129]: hotel
+                - heading "Waldorf Astoria Chengdu" [level=3] [ref=e130]
+              - generic [ref=e131]: Drag
+            - paragraph [ref=e134]: 15:00
+  - button "Open co-pilot" [ref=e135] [cursor=pointer]:
+    - img [ref=e136]
+  - navigation [ref=e138]:
+    - generic [ref=e140]:
+      - link "Trips" [ref=e141] [cursor=pointer]:
+        - /url: /trips
+        - generic [ref=e142]: Trips
+      - link "Plan" [ref=e144] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/plan
+        - generic [ref=e145]: Plan
+      - link "Logistics" [ref=e147] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/logistics
+        - generic [ref=e148]: Logistics
+      - link "Map" [ref=e150] [cursor=pointer]:
+        - /url: /trips/f8fd07f218c8325b69cb8c117a8ec728/map
+        - generic [ref=e151]: Map

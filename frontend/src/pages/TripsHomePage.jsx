@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
 import NewTripModal from '../components/trips/NewTripModal.jsx';
@@ -13,6 +14,10 @@ function groupTrips(trips) {
     upcoming: trips.filter((trip) => trip.status === 'upcoming'),
     past: trips.filter((trip) => trip.status === 'past'),
   };
+}
+
+function isStandalonePwa() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
 }
 
 export default function TripsHomePage() {
@@ -39,6 +44,14 @@ export default function TripsHomePage() {
     loadTrips();
   }, []);
 
+  useEffect(() => {
+    if (loading || !isStandalonePwa()) return;
+    const lastTripId = window.localStorage.getItem('trippy:lastTripId');
+    if (lastTripId && trips.some((trip) => trip.id === lastTripId)) {
+      navigate(`/trips/${lastTripId}/plan`, { replace: true });
+    }
+  }, [loading, navigate, trips]);
+
   const grouped = useMemo(() => groupTrips(trips), [trips]);
 
   const handleCreateTrip = async (payload) => {
@@ -61,15 +74,20 @@ export default function TripsHomePage() {
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--ink-deep)' }}>
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 pb-10">
         <section className="pt-8 sm:pt-12 pb-8">
-          <p className="font-mono text-[11px] tracking-[0.32em] uppercase mb-3" style={{ color: 'var(--gold)' }}>
-            Trips
-          </p>
-          <h1 className="font-display italic text-5xl sm:text-6xl mb-3" style={{ color: 'var(--cream)' }}>
-            Where next?
-          </h1>
-          <p className="font-body text-xl max-w-2xl" style={{ color: 'var(--cream-dim)' }}>
-            Your journeys, bookings, and day plans stay in one quietly dramatic place.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-mono text-[11px] tracking-[0.32em] uppercase mb-3" style={{ color: 'var(--gold)' }}>
+                Trips
+              </p>
+              <h1 className="font-display italic text-5xl sm:text-6xl mb-3" style={{ color: 'var(--cream)' }}>
+                Where next?
+              </h1>
+              <p className="font-body text-xl max-w-2xl" style={{ color: 'var(--cream-dim)' }}>
+                Your journeys, bookings, and day plans stay in one quietly dramatic place.
+              </p>
+            </div>
+            <AdminSettingsPanel />
+          </div>
         </section>
 
         {error && <p className="font-mono text-xs mb-6" style={{ color: '#e05a5a' }}>{error}</p>}

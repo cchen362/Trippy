@@ -1,23 +1,43 @@
 // All fetch calls go through here. Throws on non-2xx.
 export async function request(path, options = {}) {
-  const { silent401 = false, headers: extraHeaders, body, ...restOptions } = options;
-  const res = await fetch(path, {
-    credentials: 'include',
-    ...restOptions,
-    headers: { 'Content-Type': 'application/json', ...extraHeaders },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const { silent401 = false, headers: extraHeaders, body, timeoutMs, ...restOptions } = options;
 
-  if (res.status === 401 && !silent401) {
-    window.dispatchEvent(new Event('auth:unauthorized'));
+  let signal = restOptions.signal;
+  let timer;
+  let controller;
+  if (timeoutMs) {
+    controller = new AbortController();
+    signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), timeoutMs);
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status });
-  }
+  try {
+    const res = await fetch(path, {
+      credentials: 'include',
+      ...restOptions,
+      signal,
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
+      body: body ? JSON.stringify(body) : undefined,
+    });
 
-  return res.json();
+    if (res.status === 401 && !silent401) {
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status });
+    }
+
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw Object.assign(new Error('Request timed out'), { status: 408, timeout: true });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function requestStream(path, body, onChunk, signal) {

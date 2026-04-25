@@ -12,8 +12,8 @@ const CATEGORY_KEYS = {
   'Hidden Gems': 'hidden_gems',
 };
 
-export default function DiscoveryPanel({ trip, days, onAddStop, onClose }) {
-  const defaultDestination = days[0]?.city || trip.destinations?.[0] || '';
+export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose }) {
+  const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const [destination, setDestination] = useState(defaultDestination);
   const [activeCategory, setActiveCategory] = useState('culture');
   const { results, loading, error, source, cached, discover, refresh } = useDiscovery(trip.id);

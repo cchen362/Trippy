@@ -9,4 +9,6 @@ export const copilotApi = {
       method: 'POST',
       body: { mutation },
     }),
+  clear: (tripId) =>
+    request(`/api/trips/${tripId}/copilot/history`, { method: 'DELETE' }),
 };
