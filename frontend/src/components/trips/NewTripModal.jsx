@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import InterestTagPicker from './InterestTagPicker';
 
 const EMPTY_FORM = {
   title: '',
@@ -7,7 +8,7 @@ const EMPTY_FORM = {
   startDate: '',
   endDate: '',
   travellers: 'couple',
-  interestTags: '',
+  interestTags: [],
   pace: 'moderate',
 };
 
@@ -33,7 +34,6 @@ export default function NewTripModal({ open, onClose, onSubmit, saving }) {
         ...form,
         destinations: parseList(form.destinations),
         destinationCountries: parseList(form.destinationCountries),
-        interestTags: parseList(form.interestTags),
       });
       setForm(EMPTY_FORM);
     } catch (err) {
@@ -66,7 +66,6 @@ export default function NewTripModal({ open, onClose, onSubmit, saving }) {
               ['destinationCountries', 'Country Codes (comma separated)'],
               ['startDate', 'Start Date', 'date'],
               ['endDate', 'End Date', 'date'],
-              ['interestTags', 'Interest Tags (comma separated)'],
             ].map(([name, label, type = 'text']) => (
               <label key={name} className="block">
                 <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
@@ -81,6 +80,11 @@ export default function NewTripModal({ open, onClose, onSubmit, saving }) {
                 />
               </label>
             ))}
+
+            <InterestTagPicker
+              selected={form.interestTags}
+              onChange={(tags) => setForm((current) => ({ ...current, interestTags: tags }))}
+            />
 
             <label className="block">
               <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
