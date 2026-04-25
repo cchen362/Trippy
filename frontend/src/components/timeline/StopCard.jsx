@@ -53,6 +53,17 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
             <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, #3d3021, #101010)' }} />
           )}
           <div className="absolute inset-0 trip-card-overlay" />
+          {expanded && (
+            <div
+              className="absolute inset-x-0 bottom-0"
+              style={{
+                top: '35%',
+                background: 'linear-gradient(to bottom, transparent 0%, rgba(13,11,9,0.82) 30%, rgba(13,11,9,0.88) 100%)',
+                borderRadius: '0 0 16px 16px',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           <div className="relative z-10 p-4 sm:p-5 h-full flex flex-col justify-between gap-3">
             <div className="flex items-start justify-between gap-3">
               <button type="button" onClick={() => onToggle(stop.id)} className="text-left">
