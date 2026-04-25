@@ -28,8 +28,42 @@ function isPhotoEligible(type) {
   return type !== 'transit';
 }
 
-function titleForPhoto(title, city) {
-  return city ? `${title} ${city}` : title;
+function cleanTitle(title) {
+  return title
+    .replace(/\([^)]*\)/g, '')   // strip (parentheticals)
+    .replace(/\s+at\s+.*/i, '')  // strip "at Venue Name"
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function cityInTitle(title, city) {
+  return Boolean(city && title.toLowerCase().includes(city.toLowerCase()));
+}
+
+function buildPhotoQuery(title, type, city) {
+  const clean = cleanTitle(title);
+  const hasCity = cityInTitle(title, city);
+
+  if (type === 'hotel') {
+    return hasCity ? `${clean} hotel` : `${clean} ${city} hotel`.trim();
+  }
+  if (type === 'food') {
+    // Avoid city name — city-specific fallback images are often off-topic (e.g. panda for Chengdu)
+    return `${clean} food`;
+  }
+  return hasCity ? clean : `${clean} ${city || ''}`.trim();
+}
+
+function buildFallbackQuery(type, city, title) {
+  if (type === 'hotel') return city ? `${city} hotel interior` : 'hotel lobby';
+  if (type === 'food') return city ? `${city} food restaurant` : 'restaurant food';
+  return city || title;
+}
+
+function titleHash(title) {
+  let h = 5381;
+  for (const ch of title) h = ((h << 5) + h + ch.charCodeAt(0)) | 0;
+  return Math.abs(h);
 }
 
 function getDayIndex(tripId, dayDate) {
@@ -48,9 +82,10 @@ async function resolvePhotoUrl({ title, type, city, dayIndex, existingUrl }) {
 
   try {
     const photo = await pickPhoto({
-      query: titleForPhoto(title, city),
-      fallbackQuery: city || title,
+      query: buildPhotoQuery(title, type, city),
+      fallbackQuery: buildFallbackQuery(type, city, title),
       dayIndex,
+      stopSeed: titleHash(title),
     });
     return photo?.url || null;
   } catch {
@@ -237,6 +272,30 @@ function inferBookingStop(booking) {
     isFeatured: booking.type === 'flight',
     cityHint: booking.destination || booking.origin || '',
   };
+}
+
+export async function backfillTripPhotos(userId, tripId) {
+  const db = getDb();
+  const trip = db.prepare('SELECT id FROM trips WHERE id = ? AND owner_id = ?').get(tripId, userId);
+  if (!trip) throw Object.assign(new Error('Not found'), { status: 404 });
+
+  const nullStops = db.prepare(`
+    SELECT s.id, s.title, s.type, d.city, d.trip_id, d.date
+    FROM stops s
+    JOIN days d ON s.day_id = d.id
+    WHERE d.trip_id = ? AND s.unsplash_photo_url IS NULL AND s.type != 'transit'
+  `).all(tripId);
+
+  const updated = [];
+  for (const s of nullStops) {
+    const dayIndex = getDayIndex(s.trip_id, s.date);
+    const url = await resolvePhotoUrl({ title: s.title, type: s.type, city: s.city, dayIndex });
+    if (url) {
+      db.prepare('UPDATE stops SET unsplash_photo_url = ? WHERE id = ?').run(url, s.id);
+      updated.push(s.id);
+    }
+  }
+  return updated;
 }
 
 export async function syncStopWithBooking(booking) {

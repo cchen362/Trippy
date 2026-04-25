@@ -61,7 +61,7 @@ export async function searchPhotos(query) {
   return search(query.trim());
 }
 
-export async function pickPhoto({ query, fallbackQuery, dayIndex = 0 }) {
+export async function pickPhoto({ query, fallbackQuery, dayIndex = 0, stopSeed = 0 }) {
   const primaryResults = await searchPhotos(query);
   const fallbackResults = primaryResults.length > 0 || !fallbackQuery
     ? []
@@ -72,5 +72,8 @@ export async function pickPhoto({ query, fallbackQuery, dayIndex = 0 }) {
     return null;
   }
 
-  return results[Math.abs(dayIndex) % results.length];
+  // Combine dayIndex and a per-stop seed so stops on the same day get different photos.
+  // Multiplying dayIndex by a prime (7) prevents periodicity across sort positions.
+  const index = Math.abs(dayIndex * 7 + stopSeed) % results.length;
+  return results[index];
 }

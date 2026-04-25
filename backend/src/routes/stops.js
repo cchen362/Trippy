@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDayAccess } from '../middleware/tripAccess.js';
-import { createStop, deleteStop, reorderStops, updateStop } from '../services/stops.js';
+import { backfillTripPhotos, createStop, deleteStop, reorderStops, updateStop } from '../services/stops.js';
 
 const router = Router();
 
@@ -35,6 +35,12 @@ router.delete('/stops/:stopId', (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/trips/:tripId/refresh-photos', (req, res, next) => {
+  backfillTripPhotos(req.user.id, req.params.tripId)
+    .then((ids) => res.json({ updated: ids.length }))
+    .catch(next);
 });
 
 export default router;
