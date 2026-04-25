@@ -1,25 +1,42 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { discoveryApi } from '../services/discoveryApi.js';
 
 export function useDiscovery(tripId) {
-  const [results, setResults] = useState(null); // { culture, food, nature, nightlife, hidden_gems }
+  const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [source, setSource] = useState(null); // 'web' | 'ai'
+  const [source, setSource] = useState(null);
   const [cached, setCached] = useState(false);
+  const abortRef = useRef(null);
 
   const discover = useCallback(async (destination, interestTags) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setError(null);
+
     try {
-      const data = await discoveryApi.discover(tripId, destination, interestTags);
-      setResults(data.discovery.results);
-      setSource(data.discovery.source);
-      setCached(data.discovery.cached);
-    } catch (err) {
-      setError(err);
-    } finally {
+      await discoveryApi.discover(tripId, destination, interestTags, (chunk) => {
+        if (chunk.type === 'results') {
+          setResults(chunk.results);
+          setSource(chunk.source);
+          setCached(chunk.cached);
+        } else if (chunk.type === 'error') {
+          setError(new Error(chunk.message || 'Discovery failed'));
+        }
+        // 'thinking' chunks: no-op — loading state is already showing
+        // 'done' chunk: handled by the post-await setLoading(false) below
+      }, controller.signal);
+      // Stream closed — set loading false whether we got a clean 'done' event or not.
+      // Handles server restarts and abrupt disconnects without permanently stuck loading state.
       setLoading(false);
+    } catch (err) {
+      if (err.name !== 'AbortError') setError(err);
+      setLoading(false);
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }, [tripId]);
 

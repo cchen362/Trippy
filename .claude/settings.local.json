@@ -30,7 +30,31 @@
       "PowerShell(Get-NetTCPConnection -LocalPort 3002,5173,5174 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep 1; Write-Host \"Killed\")",
       "PowerShell(Get-NetTCPConnection -LocalPort 3002 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep 2; Write-Host \"done\")",
       "mcp__plugin_playwright_playwright__browser_take_screenshot",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(sqlite3 data/trippy.db \"SELECT id, title FROM trips LIMIT 5;\")",
+      "Bash(sqlite3 data/trippy.db \"SELECT COUNT\\(*\\) FROM stops WHERE unsplash_photo_url IS NULL AND type != 'transit';\")",
+      "Bash(sqlite3 backend/data/trippy.db \"SELECT COUNT\\(*\\) FROM stops WHERE unsplash_photo_url IS NULL AND type != 'transit';\")",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq '' } | Select-Object Id, CPU, StartTime, CommandLine)",
+      "PowerShell(Stop-Process -Id 12980 -Force)",
+      "Bash(node backfill-photos.mjs)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(curl -s http://localhost:3002/api/health)",
+      "Bash(git -C \"C:/Users/cchen362/OneDrive/Desktop/Trippy\" diff --stat)",
+      "Bash(git -C \"C:/Users/cchen362/OneDrive/Desktop/Trippy\" status)",
+      "Bash(git -C \"C:/Users/cchen362/OneDrive/Desktop/Trippy\" add backend/src/routes/stops.js backend/src/services/stops.js backend/src/services/unsplash.js)",
+      "Bash(git -C C:/Users/cchen362/OneDrive/Desktop/Trippy commit -m ' *)",
+      "Bash(git -C \"C:/Users/cchen362/OneDrive/Desktop/Trippy\" add frontend/src/components/admin/AdminSettingsPanel.jsx)",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "Bash(node -e \"require\\('fs'\\).utimesSync\\('backend/src/routes/discovery.js', new Date\\(\\), new Date\\(\\)\\)\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3002 -State Listen | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Get-Process -Id $_ | Select-Object Id, ProcessName, CommandLine })",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3002 -ErrorAction SilentlyContinue)",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 3002 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Get-Process -Id $conn.OwningProcess | Select-Object Id, ProcessName } else { Write-Output \"Nothing on 3002\" })",
+      "Bash(node src/index.js)",
+      "Bash(findstr \":3002\")",
+      "Bash(node backend/src/index.js)",
+      "Bash(node --env-file=.env backend/src/index.js)",
+      "Bash(node -e \"const d = require\\('C:/Users/cchen362/OneDrive/Desktop/Trippy/backend/node_modules/dotenv'\\); d.config\\(\\); console.log\\('ANTHROPIC set from cwd .env:', !!process.env.ANTHROPIC_API_KEY\\)\")"
     ]
   }
 }

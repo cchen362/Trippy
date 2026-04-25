@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useDiscovery } from '../../hooks/useDiscovery.js';
 import SuggestionCard from './SuggestionCard.jsx';
 
@@ -11,12 +11,35 @@ const CATEGORY_KEYS = {
   Nightlife: 'nightlife',
   'Hidden Gems': 'hidden_gems',
 };
+const ALL_KEYS = ['culture', 'food', 'nature', 'nightlife', 'hidden_gems'];
+
+function normalizeName(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function pickSurprise(results, days) {
+  if (!results) return null;
+  const addedNames = new Set(
+    (days ?? []).flatMap((d) => (d.stops ?? []).map((s) => normalizeName(s.title ?? ''))),
+  );
+  const pool = ALL_KEYS.flatMap((k) =>
+    (results[k] ?? []).filter((s) => !addedNames.has(normalizeName(s?.name ?? ''))),
+  );
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const [destination, setDestination] = useState(defaultDestination);
   const [activeCategory, setActiveCategory] = useState('culture');
-  const { results, loading, error, source, cached, discover, refresh } = useDiscovery(trip.id);
+  const [surprisePick, setSurprisePick] = useState(null);
+  const { results, loading, error, source, discover, refresh } = useDiscovery(trip.id);
 
   // Auto-discover when panel opens if we have a destination
   const discoveredRef = useRef(false);
@@ -26,6 +49,16 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       discover(destination, trip.interestTags ?? []);
     }
   }, []); // intentional mount-only effect — auto-discover once when panel opens
+
+  // When results arrive after a Surprise Me tap that triggered discovery, surface the pick.
+  // Can't read updated results state inside the async callback due to stale closure — use a ref.
+  const surprisePendingRef = useRef(false);
+  useEffect(() => {
+    if (surprisePendingRef.current && results && !loading) {
+      surprisePendingRef.current = false;
+      setSurprisePick(pickSurprise(results, days));
+    }
+  }, [results, loading]);
 
   const handleDiscover = () => {
     if (destination.trim()) {
@@ -42,6 +75,15 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       lng: suggestion.lng,
       duration: suggestion.estimatedDuration,
     });
+  };
+
+  const handleSurpriseMe = () => {
+    if (!results && destination.trim()) {
+      surprisePendingRef.current = true;
+      discover(destination.trim(), trip.interestTags ?? []);
+      return;
+    }
+    setSurprisePick(pickSurprise(results, days));
   };
 
   const activeSuggestions = results?.[activeCategory] ?? [];
@@ -246,7 +288,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       </div>
 
       {/* Content area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', position: 'relative' }}>
         {loading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {[0, 1, 2].map((i) => (
@@ -321,6 +363,99 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             Enter a destination and tap Discover to find things to do.
           </p>
         )}
+
+        {/* Surprise Me spotlight overlay */}
+        <AnimatePresence>
+          {surprisePick && (
+            <motion.div
+              key="surprise-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setSurprisePick(null)}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(13,11,9,0.88)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '24px 20px',
+                zIndex: 10,
+              }}
+            >
+              {/* Card wrapper — stop click propagation so tapping the card doesn't dismiss */}
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: '100%', maxWidth: '420px' }}
+              >
+                {/* Header */}
+                <p
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: '10px',
+                    letterSpacing: '0.22em',
+                    color: 'var(--gold)',
+                    textAlign: 'center',
+                    marginBottom: '14px',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  ✦ Your Surprise
+                </p>
+
+                <SuggestionCard
+                  suggestion={surprisePick}
+                  days={days}
+                  onAddToDay={async (dayId, suggestion) => {
+                    await handleAddToDay(dayId, suggestion);
+                    setSurprisePick(null);
+                  }}
+                />
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                  <button
+                    onClick={() => setSurprisePick(pickSurprise(results, days))}
+                    style={{
+                      flex: 1,
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: '11px',
+                      letterSpacing: '0.14em',
+                      color: 'rgba(240,234,216,0.60)',
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      borderRadius: '8px',
+                      padding: '10px',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ANOTHER
+                  </button>
+                  <button
+                    onClick={() => setSurprisePick(null)}
+                    style={{
+                      flex: 1,
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: '11px',
+                      letterSpacing: '0.14em',
+                      color: 'rgba(240,234,216,0.60)',
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      borderRadius: '8px',
+                      padding: '10px',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    DISMISS
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Surprise Me button */}
@@ -332,24 +467,20 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         }}
       >
         <button
-          onClick={() => {
-            setActiveCategory('hidden_gems');
-            if (!results && destination.trim()) {
-              discover(destination.trim(), trip.interestTags ?? []);
-            }
-          }}
+          onClick={handleSurpriseMe}
+          disabled={loading}
           style={{
             width: '100%',
             fontFamily: "'DM Mono', monospace",
             fontSize: '12px',
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
-            color: 'var(--gold)',
+            color: loading ? 'rgba(201,168,76,0.40)' : 'var(--gold)',
             background: 'rgba(201,168,76,0.08)',
             border: '1px solid rgba(201,168,76,0.35)',
             borderRadius: '10px',
             padding: '12px',
-            cursor: 'pointer',
+            cursor: loading ? 'default' : 'pointer',
           }}
         >
           SURPRISE ME

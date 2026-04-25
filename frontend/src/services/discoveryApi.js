@@ -1,12 +1,13 @@
-import { request } from './api.js';
+import { request, requestStream } from './api.js';
 
 export const discoveryApi = {
-  discover: (tripId, destination, interestTags) =>
-    request(`/api/trips/${tripId}/discover`, {
-      method: 'POST',
-      body: { destination, interestTags },
-      timeoutMs: 60000,
-    }),
+  discover: (tripId, destination, interestTags, onChunk, signal) =>
+    requestStream(
+      `/api/trips/${tripId}/discover`,
+      { destination, interestTags },
+      onChunk,
+      signal,
+    ),
   clearCache: (tripId) =>
     request(`/api/trips/${tripId}/discover/cache`, { method: 'DELETE' }),
 };

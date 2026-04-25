@@ -19,22 +19,69 @@ const DISCOVERY_SCHEMA = `{
 }
 Each item: { "name": string, "description": string, "whyItMatches": string, "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }`;
 
-export async function discoverDestination(destination, interestTags, pace, travellers) {
-  console.log('[discover] destination=%s tags=%o', destination, interestTags);
+// Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
+// and "Dujiangyan Scenic Area" collapse to the same canonical key.
+function normalizeName(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export async function discoverDestination(destination, interestTags, pace, travellers, existingStopTitles = [], startDate = null, endDate = null) {
+  console.log('[discover] destination=%s tags=%o existingStops=%d', destination, interestTags, existingStopTitles.length);
 
   const client = getClient();
-  const systemPrompt = `You are a travel discovery assistant. Return ONLY a JSON object. No prose, no markdown fences, no commentary. The response must start with { and end with }.
+
+  const travellersLine = travellers === 'couple'
+    ? 'A couple — prioritise intimate settings, romantic or atmospheric venues, and experiences that work well for two'
+    : `${travellers} travellers`;
+
+  const paceLine = pace === 'slow'
+    ? 'Slow — fewer, deeper experiences over packed schedules'
+    : pace === 'fast'
+      ? 'Fast — efficient variety, maximise what can be seen'
+      : 'Moderate — balanced mix of depth and variety';
+
+  const datesLine = startDate && endDate
+    ? `Trip dates: ${startDate} to ${endDate} — factor in season, local events, crowd levels, and the best time of day to visit each place`
+    : '';
+
+  const existingLine = existingStopTitles.length > 0
+    ? `\nAlready in itinerary — do not suggest these or close variants:\n${existingStopTitles.map((t) => `- ${t}`).join('\n')}`
+    : '';
+
+  const systemPrompt = `You are a discerning travel curator, not a tourist guide aggregator. Return ONLY a JSON object. No prose, no markdown fences, no commentary. The response must start with { and end with }.
 
 The JSON must have exactly this structure:
 ${DISCOVERY_SCHEMA}
 
-Focus on: ${destination}. Traveller profile: ${travellers} people, pace: ${pace}, interests: ${interestTags.join(', ')}.`;
+Curation rules:
+- Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
+- Prioritise places with authentic local character: neighbourhood favourites, spots that reward some insider knowledge, experiences with real depth.
+- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItMatches", do not include it.
+- "whyItMatches": one sentence, concrete — name the atmosphere, crowd level, or what makes it suit THIS traveller specifically. Never "great for couples" or "popular with tourists".
+- "description": one to two sentences maximum. Factual and specific.
+- Return exactly 3 items per category. Three sharp picks beats five mediocre ones.
+- Use the most specific, locally-used name for each place. Do not append "& Scenic Area", "& Park", or other generic suffixes unless they are part of the official name.
+- Do not repeat the same place across categories.${existingLine}
+
+Traveller profile:
+- Group: ${travellersLine}
+- Pace: ${paceLine}
+- Interests: ${interestTags.length > 0 ? interestTags.join(', ') : 'general travel'}
+${datesLine}`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 4096,
     system: systemPrompt,
-    messages: [{ role: 'user', content: `Discover top attractions and experiences in ${destination}.` }],
+    messages: [{
+      role: 'user',
+      content: `Curate the best of ${destination} for this traveller. Include neighbourhood gems alongside the genuinely unmissable. Be specific, be honest about crowds and tourist traps, and explain what makes each place worth the time.`,
+    }],
   });
 
   const textBlock = response.content.find((b) => b.type === 'text');
@@ -73,6 +120,18 @@ Focus on: ${destination}. Traveller profile: ${travellers} people, pace: ${pace}
     if (!Array.isArray(parsed[key])) {
       throw Object.assign(new Error(`Discovery response missing required key: ${key}`), { status: 502 });
     }
+  }
+
+  // Deduplicate across all categories by normalized name — first occurrence wins.
+  const seen = new Set();
+  for (const key of DISCOVERY_KEYS) {
+    parsed[key] = parsed[key].filter((item) => {
+      if (!item?.name) return false;
+      const n = normalizeName(item.name);
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    });
   }
 
   console.log('[discover] ok keys=%o', Object.keys(parsed));

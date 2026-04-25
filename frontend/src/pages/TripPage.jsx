@@ -13,6 +13,7 @@ import { useBookings } from '../hooks/useBookings.js';
 import { useCopilot } from '../hooks/useCopilot.js';
 import { useStops } from '../hooks/useStops.js';
 import { useTrip } from '../hooks/useTrip.js';
+import { discoveryApi } from '../services/discoveryApi.js';
 
 export function useTripContext() {
   return useOutletContext();
@@ -30,6 +31,18 @@ export default function TripPage() {
   useEffect(() => {
     if (tripId) window.localStorage.setItem('trippy:lastTripId', tripId);
   }, [tripId]);
+
+  // Pre-warm the discovery cache as soon as the trip loads so the panel opens instantly.
+  // Fire-and-forget — if the cache is already fresh the server returns immediately at no cost.
+  useEffect(() => {
+    if (!tripState.trip || tripState.loading) return;
+    const destination =
+      tripState.days[0]?.resolvedCity ??
+      tripState.days[0]?.city ??
+      tripState.trip.destinations?.[0];
+    if (!destination) return;
+    discoveryApi.discover(tripState.trip.id, destination, tripState.trip.interestTags ?? [], () => {}).catch(() => {});
+  }, [tripState.trip?.id]);
 
   if (tripState.loading) {
     return <LoadingScreen label="Loading itinerary..." />;
