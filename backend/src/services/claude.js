@@ -8,16 +8,7 @@ function getClient() {
   return _client;
 }
 
-const DISCOVERY_KEYS = ['culture', 'food', 'nature', 'nightlife', 'hidden_gems'];
-
-const DISCOVERY_SCHEMA = `{
-  "culture": [...],
-  "food": [...],
-  "nature": [...],
-  "nightlife": [...],
-  "hidden_gems": [...]
-}
-Each item: { "name": string, "description": string, "whyItMatches": string, "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }`;
+export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
 
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
 // and "Dujiangyan Scenic Area" collapse to the same canonical key.
@@ -30,112 +21,89 @@ function normalizeName(str) {
     .trim();
 }
 
-export async function discoverDestination(destination, interestTags, pace, travellers, existingStopTitles = [], startDate = null, endDate = null) {
-  console.log('[discover] destination=%s tags=%o existingStops=%d', destination, interestTags, existingStopTitles.length);
+const DISCOVER_SYSTEM = `You are a discerning travel curator. Return ONLY newline-delimited JSON — one object per line, one line per category, nothing else. No prose, no markdown fences, no wrapper object.
+
+Each line must match exactly:
+{"category":"<name>","items":[...]}
+
+Output all 8 categories in this order:
+essentials, culture, food, nature, nightlife, hidden_gems, architecture, wellness
+
+Each item: { "name": string, "description": string (1-2 sentences, specific and factual), "whyItFits": string (one concrete sentence — name atmosphere, crowd level, or specific draw; never generic phrases like "great for couples" or "popular with tourists"), "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }
+
+Curation rules:
+- Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
+- Prioritise places with authentic local character: neighbourhood favourites, spots that reward insider knowledge, experiences with real depth.
+- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItFits", do not include it.
+- Aim for 30 items per category. Fewer sharp picks beats padding with mediocre ones — do not force 30 if the city cannot support it.
+- Use the most specific, locally-used name for each place. Do not append generic suffixes unless part of the official name.
+- Do not repeat the same place across categories.`;
+
+// Streams discovery results as NDJSON. Calls onCategory({ category, items }) for each
+// completed line as Claude generates it. Returns the full accumulated results array for caching.
+export async function discoverDestination(destination, existingStopTitles = [], onCategory) {
+  console.log('[discover] destination=%s existingStops=%d', destination, existingStopTitles.length);
 
   const client = getClient();
-
-  const travellersLine = travellers === 'couple'
-    ? 'A couple — prioritise intimate settings, romantic or atmospheric venues, and experiences that work well for two'
-    : `${travellers} travellers`;
-
-  const paceLine = pace === 'slow'
-    ? 'Slow — fewer, deeper experiences over packed schedules'
-    : pace === 'fast'
-      ? 'Fast — efficient variety, maximise what can be seen'
-      : 'Moderate — balanced mix of depth and variety';
-
-  const datesLine = startDate && endDate
-    ? `Trip dates: ${startDate} to ${endDate} — factor in season, local events, crowd levels, and the best time of day to visit each place`
-    : '';
 
   const existingLine = existingStopTitles.length > 0
     ? `\nAlready in itinerary — do not suggest these or close variants:\n${existingStopTitles.map((t) => `- ${t}`).join('\n')}`
     : '';
 
-  const systemPrompt = `You are a discerning travel curator, not a tourist guide aggregator. Return ONLY a JSON object. No prose, no markdown fences, no commentary. The response must start with { and end with }.
+  const systemPrompt = existingLine ? `${DISCOVER_SYSTEM}${existingLine}` : DISCOVER_SYSTEM;
 
-The JSON must have exactly this structure:
-${DISCOVERY_SCHEMA}
-
-Curation rules:
-- Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
-- Prioritise places with authentic local character: neighbourhood favourites, spots that reward some insider knowledge, experiences with real depth.
-- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItMatches", do not include it.
-- "whyItMatches": one sentence, concrete — name the atmosphere, crowd level, or what makes it suit THIS traveller specifically. Never "great for couples" or "popular with tourists".
-- "description": one to two sentences maximum. Factual and specific.
-- Return exactly 3 items per category. Three sharp picks beats five mediocre ones.
-- Use the most specific, locally-used name for each place. Do not append "& Scenic Area", "& Park", or other generic suffixes unless they are part of the official name.
-- Do not repeat the same place across categories.${existingLine}
-
-Traveller profile:
-- Group: ${travellersLine}
-- Pace: ${paceLine}
-- Interests: ${interestTags.length > 0 ? interestTags.join(', ') : 'general travel'}
-${datesLine}`;
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+  const stream = client.messages.stream({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 16000,
     system: systemPrompt,
     messages: [{
       role: 'user',
-      content: `Curate the best of ${destination} for this traveller. Include neighbourhood gems alongside the genuinely unmissable. Be specific, be honest about crowds and tourist traps, and explain what makes each place worth the time.`,
+      content: `Curate the best of ${destination}. Include neighbourhood gems alongside the genuinely unmissable. Be specific, be honest about crowds and tourist traps.`,
     }],
   });
 
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock) {
-    throw Object.assign(new Error('Discovery returned no text block'), { status: 502 });
-  }
-
-  console.log('[discover] raw response (first 500 chars):', textBlock.text.slice(0, 500));
-
-  // Extract JSON: prefer a fenced ```json block, fall back to first { ... } span
-  let raw = textBlock.text.trim();
-  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) {
-    raw = fenceMatch[1].trim();
-  } else {
-    const braceStart = raw.indexOf('{');
-    const braceEnd = raw.lastIndexOf('}');
-    if (braceStart !== -1 && braceEnd > braceStart) {
-      raw = raw.slice(braceStart, braceEnd + 1);
-    }
-  }
-
-  console.log('[discover] extracted JSON (first 200 chars):', raw.slice(0, 200));
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw Object.assign(new Error('Discovery response was not valid JSON'), { status: 502 });
-  }
-
-  if (!parsed || typeof parsed !== 'object') {
-    throw Object.assign(new Error('Discovery response shape invalid'), { status: 502 });
-  }
-  for (const key of DISCOVERY_KEYS) {
-    if (!Array.isArray(parsed[key])) {
-      throw Object.assign(new Error(`Discovery response missing required key: ${key}`), { status: 502 });
-    }
-  }
-
-  // Deduplicate across all categories by normalized name — first occurrence wins.
+  const accumulated = [];
   const seen = new Set();
-  for (const key of DISCOVERY_KEYS) {
-    parsed[key] = parsed[key].filter((item) => {
+  let buffer = '';
+
+  const processLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let obj;
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    if (!obj.category || !Array.isArray(obj.items)) return;
+
+    // Deduplicate items by normalized name across all categories
+    const deduped = obj.items.filter((item) => {
       if (!item?.name) return false;
       const n = normalizeName(item.name);
       if (seen.has(n)) return false;
       seen.add(n);
       return true;
     });
-  }
 
-  console.log('[discover] ok keys=%o', Object.keys(parsed));
-  return { results: parsed, source: 'ai' };
+    const categoryObj = { category: obj.category, items: deduped };
+    accumulated.push(categoryObj);
+    if (onCategory) onCategory(categoryObj);
+  };
+
+  stream.on('text', (text) => {
+    buffer += text;
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // last element may be incomplete
+    for (const line of lines) processLine(line);
+  });
+
+  await stream.finalMessage();
+  // Flush any remaining content in buffer
+  if (buffer.trim()) processLine(buffer);
+
+  console.log('[discover] ok categories=%o', accumulated.map((c) => c.category));
+  return accumulated;
 }
 
 export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req) {

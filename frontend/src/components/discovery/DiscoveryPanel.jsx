@@ -1,17 +1,35 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useDiscovery } from '../../hooks/useDiscovery.js';
 import SuggestionCard from './SuggestionCard.jsx';
 
-const CATEGORY_TABS = ['Culture', 'Food', 'Nature', 'Nightlife', 'Hidden Gems'];
-const CATEGORY_KEYS = {
-  Culture: 'culture',
-  Food: 'food',
-  Nature: 'nature',
-  Nightlife: 'nightlife',
-  'Hidden Gems': 'hidden_gems',
+// Maps user interest tags → discovery category keys
+const TAG_TO_CATEGORY = {
+  'food & drink': 'food',
+  'nature': 'nature',
+  'culture': 'culture',
+  'nightlife': 'nightlife',
+  'architecture': 'architecture',
+  'wellness': 'wellness',
+  'history': 'culture',
+  'art': 'culture',
+  'markets': 'hidden_gems',
+  'shopping': 'hidden_gems',
+  'adventure': 'nature',
+  'off the beaten path': 'hidden_gems',
 };
-const ALL_KEYS = ['culture', 'food', 'nature', 'nightlife', 'hidden_gems'];
+
+const CATEGORY_LABELS = {
+  essentials: 'Essentials',
+  culture: 'Culture',
+  food: 'Food',
+  nature: 'Nature',
+  nightlife: 'Nightlife',
+  hidden_gems: 'Hidden Gems',
+  architecture: 'Architecture',
+  wellness: 'Wellness',
+};
+
+const PAGE_SIZE = 5;
 
 function normalizeName(str) {
   return str
@@ -22,47 +40,96 @@ function normalizeName(str) {
     .trim();
 }
 
-function pickSurprise(results, days) {
-  if (!results) return null;
+// Derives which category tabs to show based on user interest tags.
+// Always includes 'essentials'. Deduplicates mapped categories.
+function buildTabs(interestTags) {
+  const categories = ['essentials'];
+  const seen = new Set(['essentials']);
+  for (const tag of (interestTags ?? [])) {
+    const cat = TAG_TO_CATEGORY[tag.toLowerCase()];
+    if (cat && !seen.has(cat)) {
+      categories.push(cat);
+      seen.add(cat);
+    }
+  }
+  // If no tags, show all 8 categories so the panel is still useful
+  if (categories.length === 1) {
+    for (const cat of Object.keys(CATEGORY_LABELS)) {
+      if (!seen.has(cat)) {
+        categories.push(cat);
+        seen.add(cat);
+      }
+    }
+  }
+  return categories;
+}
+
+function pickSurprise(partialResults, days) {
   const addedNames = new Set(
     (days ?? []).flatMap((d) => (d.stops ?? []).map((s) => normalizeName(s.title ?? ''))),
   );
-  const pool = ALL_KEYS.flatMap((k) =>
-    (results[k] ?? []).filter((s) => !addedNames.has(normalizeName(s?.name ?? ''))),
+  const pool = Object.values(partialResults).flat().filter(
+    (s) => s?.name && !addedNames.has(normalizeName(s.name)),
   );
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose }) {
+function TabSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          style={{
+            background: '#1c1a17',
+            borderRadius: '12px',
+            height: '100px',
+            border: '1px solid rgba(255,255,255,0.07)',
+            animation: 'pulse 1.6s ease-in-out infinite',
+            opacity: 1 - i * 0.2,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const [destination, setDestination] = useState(defaultDestination);
-  const [activeCategory, setActiveCategory] = useState('culture');
+  const tabs = buildTabs(trip.interestTags);
+  const [activeCategory, setActiveCategory] = useState(tabs[0]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [surprisePick, setSurprisePick] = useState(null);
-  const { results, loading, error, source, discover, refresh } = useDiscovery(trip.id);
 
-  // Auto-discover when panel opens if we have a destination
-  const discoveredRef = useRef(false);
+  const { discover, refresh, getDestination } = discovery;
+  // Per-destination state — updates independently from other cities in the cache
+  const { partialResults, completedCategories, loading, error } = getDestination(destination);
+
+  // Reset visible count when switching tabs
+  useEffect(() => setVisibleCount(PAGE_SIZE), [activeCategory]);
+
+  // On mount: trigger discovery for this destination if not already fetched/loading.
+  // discover() internally guards against duplicate calls.
   useEffect(() => {
-    if (!discoveredRef.current && destination) {
-      discoveredRef.current = true;
-      discover(destination, trip.interestTags ?? []);
-    }
-  }, []); // intentional mount-only effect — auto-discover once when panel opens
+    if (destination) discover(destination);
+  }, []); // intentional mount-only
 
-  // When results arrive after a Surprise Me tap that triggered discovery, surface the pick.
-  // Can't read updated results state inside the async callback due to stale closure — use a ref.
+  // When results arrive after a pending Surprise Me, surface the pick
   const surprisePendingRef = useRef(false);
   useEffect(() => {
-    if (surprisePendingRef.current && results && !loading) {
+    if (surprisePendingRef.current && Object.keys(partialResults).length > 0 && !loading) {
       surprisePendingRef.current = false;
-      setSurprisePick(pickSurprise(results, days));
+      setSurprisePick(pickSurprise(partialResults, days));
     }
-  }, [results, loading]);
+  }, [partialResults, loading]);
 
   const handleDiscover = () => {
     if (destination.trim()) {
-      discover(destination.trim(), trip.interestTags ?? []);
+      discover(destination.trim());
+      setActiveCategory(tabs[0]);
+      setVisibleCount(PAGE_SIZE);
     }
   };
 
@@ -78,15 +145,20 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   };
 
   const handleSurpriseMe = () => {
-    if (!results && destination.trim()) {
+    const hasResults = Object.keys(partialResults).length > 0;
+    if (!hasResults && destination.trim()) {
       surprisePendingRef.current = true;
-      discover(destination.trim(), trip.interestTags ?? []);
+      discover(destination.trim());
       return;
     }
-    setSurprisePick(pickSurprise(results, days));
+    setSurprisePick(pickSurprise(partialResults, days));
   };
 
-  const activeSuggestions = results?.[activeCategory] ?? [];
+  const activeItems = partialResults[activeCategory] ?? [];
+  const visibleItems = activeItems.slice(0, visibleCount);
+  const hasMore = activeItems.length > visibleCount;
+  const categoryLoaded = completedCategories.has(activeCategory);
+  const anyResults = Object.keys(partialResults).length > 0;
 
   return (
     <motion.div
@@ -143,28 +215,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           DISCOVER
         </span>
 
-        {/* Source badge + Refresh */}
         <div style={{ minWidth: '80px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-          {source && (
-            <span
-              style={{
-                fontFamily: "'DM Mono', monospace",
-                fontSize: '10px',
-                letterSpacing: '0.08em',
-                padding: '2px 8px',
-                borderRadius: '999px',
-                border: source === 'web'
-                  ? '1px solid var(--gold)'
-                  : '1px solid rgba(240,234,216,0.28)',
-                color: source === 'web' ? 'var(--gold)' : 'rgba(240,234,216,0.50)',
-              }}
-            >
-              {source === 'web' ? 'WEB RESULTS' : 'AI SUGGESTED'}
-            </span>
-          )}
-          {results && (
+          {anyResults && (
             <button
-              onClick={() => refresh(destination.trim(), trip.interestTags ?? [])}
+              onClick={() => refresh(destination.trim())}
               disabled={loading}
               aria-label="Refresh discovery results"
               style={{
@@ -184,9 +238,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </div>
       </div>
 
-      {/* Destination input + tags */}
+      {/* Destination input */}
       <div style={{ padding: '14px 20px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
           <input
             type="text"
             value={destination}
@@ -221,31 +275,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               whiteSpace: 'nowrap',
             }}
           >
-            DISCOVER
+            GO
           </button>
         </div>
-
-        {/* Interest tags */}
-        {trip.interestTags && trip.interestTags.length > 0 && (
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-            {trip.interestTags.map((tag) => (
-              <span
-                key={tag}
-                style={{
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: '10px',
-                  letterSpacing: '0.08em',
-                  color: 'rgba(240,234,216,0.50)',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                  borderRadius: '999px',
-                  padding: '2px 8px',
-                }}
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Category tabs */}
@@ -259,9 +291,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           flexShrink: 0,
         }}
       >
-        {CATEGORY_TABS.map((tab) => {
-          const key = CATEGORY_KEYS[tab];
+        {tabs.map((key) => {
           const isActive = activeCategory === key;
+          const isLoaded = completedCategories.has(key);
+          const isLoading = loading && !isLoaded;
           return (
             <button
               key={key}
@@ -279,9 +312,24 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 transition: 'color 0.15s, border-color 0.15s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
               }}
             >
-              {tab}
+              {CATEGORY_LABELS[key] ?? key}
+              {isLoading && (
+                <span
+                  style={{
+                    width: '5px',
+                    height: '5px',
+                    borderRadius: '50%',
+                    background: 'rgba(201,168,76,0.5)',
+                    display: 'inline-block',
+                    animation: 'trippyPulse 1.4s ease-in-out infinite',
+                  }}
+                />
+              )}
             </button>
           );
         })}
@@ -289,25 +337,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
 
       {/* Content area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', position: 'relative' }}>
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                style={{
-                  background: '#1c1a17',
-                  borderRadius: '12px',
-                  height: '100px',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                  animation: 'pulse 1.6s ease-in-out infinite',
-                  opacity: 1 - i * 0.15,
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {!loading && error && (
+        {error && (
           <p
             style={{
               fontFamily: "'DM Mono', monospace",
@@ -322,7 +352,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!loading && !error && results && activeSuggestions.length === 0 && (
+        {!error && !categoryLoaded && loading && <TabSkeleton />}
+
+        {!error && categoryLoaded && activeItems.length === 0 && (
           <p
             style={{
               fontFamily: "'Cormorant Garamond', serif",
@@ -336,9 +368,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!loading && !error && activeSuggestions.length > 0 && (
+        {!error && visibleItems.length > 0 && (
           <div>
-            {activeSuggestions.map((suggestion, idx) => (
+            {visibleItems.map((suggestion, idx) => (
               <SuggestionCard
                 key={suggestion.name ?? idx}
                 suggestion={suggestion}
@@ -346,10 +378,33 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 onAddToDay={handleAddToDay}
               />
             ))}
+
+            {hasMore && (
+              <button
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginTop: '12px',
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: '11px',
+                  letterSpacing: '0.18em',
+                  textTransform: 'uppercase',
+                  color: 'rgba(240,234,216,0.50)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                }}
+              >
+                Show more ({activeItems.length - visibleCount} remaining)
+              </button>
+            )}
           </div>
         )}
 
-        {!loading && !error && !results && (
+        {!error && !loading && !anyResults && (
           <p
             style={{
               fontFamily: "'Cormorant Garamond', serif",
@@ -360,7 +415,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               lineHeight: '1.6',
             }}
           >
-            Enter a destination and tap Discover to find things to do.
+            Enter a destination and tap GO to find things to do.
           </p>
         )}
 
@@ -386,12 +441,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 zIndex: 10,
               }}
             >
-              {/* Card wrapper — stop click propagation so tapping the card doesn't dismiss */}
               <div
                 onClick={(e) => e.stopPropagation()}
                 style={{ width: '100%', maxWidth: '420px' }}
               >
-                {/* Header */}
                 <p
                   style={{
                     fontFamily: "'DM Mono', monospace",
@@ -415,10 +468,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                   }}
                 />
 
-                {/* Actions */}
                 <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
                   <button
-                    onClick={() => setSurprisePick(pickSurprise(results, days))}
+                    onClick={() => setSurprisePick(pickSurprise(partialResults, days))}
                     style={{
                       flex: 1,
                       fontFamily: "'DM Mono', monospace",
@@ -468,19 +520,19 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       >
         <button
           onClick={handleSurpriseMe}
-          disabled={loading}
+          disabled={loading && !anyResults}
           style={{
             width: '100%',
             fontFamily: "'DM Mono', monospace",
             fontSize: '12px',
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
-            color: loading ? 'rgba(201,168,76,0.40)' : 'var(--gold)',
+            color: (loading && !anyResults) ? 'rgba(201,168,76,0.40)' : 'var(--gold)',
             background: 'rgba(201,168,76,0.08)',
             border: '1px solid rgba(201,168,76,0.35)',
             borderRadius: '10px',
             padding: '12px',
-            cursor: loading ? 'default' : 'pointer',
+            cursor: (loading && !anyResults) ? 'default' : 'pointer',
           }}
         >
           SURPRISE ME

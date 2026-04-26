@@ -18,6 +18,7 @@ export default function PlanTab() {
     saving,
     deleteStop,
     updateStop,
+    discovery,
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
@@ -33,7 +34,7 @@ export default function PlanTab() {
     <div className="space-y-6">
       <DayTabs days={days} activeDayId={activeDayId} onSelect={setActiveDayId} />
 
-      {/* Discover button */}
+      {/* Discover button with pulsing dot when loading in background */}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           onClick={() => setDiscoveryOpen(true)}
@@ -48,9 +49,24 @@ export default function PlanTab() {
             padding: '5px 14px',
             background: 'transparent',
             cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
           }}
         >
           DISCOVER
+          {discovery?.isAnyLoading && (
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: 'var(--gold)',
+                display: 'inline-block',
+                animation: 'trippyPulse 1.4s ease-in-out infinite',
+              }}
+            />
+          )}
         </button>
       </div>
 
@@ -76,6 +92,7 @@ export default function PlanTab() {
             activeDay={activeDay}
             onAddStop={createStop}
             onClose={() => setDiscoveryOpen(false)}
+            discovery={discovery}
           />
         )}
       </AnimatePresence>

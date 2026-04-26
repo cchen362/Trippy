@@ -8,6 +8,6 @@ export const discoveryApi = {
       onChunk,
       signal,
     ),
-  clearCache: (tripId) =>
-    request(`/api/trips/${tripId}/discover/cache`, { method: 'DELETE' }),
+  clearCache: (tripId, destination) =>
+    request(`/api/trips/${tripId}/discover/cache`, { method: 'DELETE', body: destination ? { destination } : undefined }),
 };

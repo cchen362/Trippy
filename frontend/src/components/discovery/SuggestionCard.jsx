@@ -10,7 +10,8 @@ function normalizeName(str) {
 }
 
 export default function SuggestionCard({ suggestion, days, onAddToDay }) {
-  const { name, description, whyItMatches, estimatedDuration, openingHours } = suggestion;
+  const { name, description, whyItFits, whyItMatches, estimatedDuration, openingHours } = suggestion;
+  const whyText = whyItFits ?? whyItMatches;
 
   const normalizedName = normalizeName(name ?? '');
   const addedToDayIds = new Set(
@@ -80,8 +81,8 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
         </p>
       )}
 
-      {/* Why it matches */}
-      {whyItMatches && (
+      {/* Why it fits */}
+      {whyText && (
         <p
           style={{
             fontFamily: "'Cormorant Garamond', serif",
@@ -92,7 +93,7 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
             lineHeight: '1.4',
           }}
         >
-          {whyItMatches}
+          {whyText}
         </p>
       )}
 

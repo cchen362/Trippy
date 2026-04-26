@@ -14,5 +14,6 @@ export const tripsApi = {
     method: 'DELETE',
   }),
   createShareLink: (tripId) => request(`/api/trips/${tripId}/share`, { method: 'POST' }),
+  update: (tripId, data) => request(`/api/trips/${tripId}`, { method: 'PATCH', body: data }),
   sharedDetail: (token) => request(`/api/share/${token}`, { silent401: true }),
 };

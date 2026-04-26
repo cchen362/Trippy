@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
-import { Users } from 'lucide-react';
+import { Edit2, Users } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
@@ -9,11 +9,13 @@ import TopBar from '../components/nav/TopBar.jsx';
 import CopilotFab from '../components/copilot/CopilotFab.jsx';
 import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
 import TripShareModal from '../components/collaboration/TripShareModal.jsx';
+import EditTripModal from '../components/trips/EditTripModal.jsx';
 import { useBookings } from '../hooks/useBookings.js';
 import { useCopilot } from '../hooks/useCopilot.js';
+import { useDiscovery } from '../hooks/useDiscovery.js';
 import { useStops } from '../hooks/useStops.js';
 import { useTrip } from '../hooks/useTrip.js';
-import { discoveryApi } from '../services/discoveryApi.js';
+import { tripsApi } from '../services/tripsApi.js';
 
 export function useTripContext() {
   return useOutletContext();
@@ -27,13 +29,15 @@ export default function TripPage() {
   const copilotState = useCopilot(tripId);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const discovery = useDiscovery(tripId);
 
   useEffect(() => {
     if (tripId) window.localStorage.setItem('trippy:lastTripId', tripId);
   }, [tripId]);
 
-  // Pre-warm the discovery cache as soon as the trip loads so the panel opens instantly.
-  // Fire-and-forget — if the cache is already fresh the server returns immediately at no cost.
+  // Pre-warm discovery as soon as trip loads — state lives here so it survives tab navigation.
   useEffect(() => {
     if (!tripState.trip || tripState.loading) return;
     const destination =
@@ -41,8 +45,20 @@ export default function TripPage() {
       tripState.days[0]?.city ??
       tripState.trip.destinations?.[0];
     if (!destination) return;
-    discoveryApi.discover(tripState.trip.id, destination, tripState.trip.interestTags ?? [], () => {}).catch(() => {});
-  }, [tripState.trip?.id]);
+    discovery.discover(destination);
+  }, [tripState.trip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleEditSave = async (updates) => {
+    setEditSaving(true);
+    try {
+      await tripsApi.update(tripId, updates);
+      await tripState.refresh();
+      // If interest tags changed, clear discovery so tabs update on next open
+      discovery.reset();
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   if (tripState.loading) {
     return <LoadingScreen label="Loading itinerary..." />;
@@ -77,12 +93,22 @@ export default function TripPage() {
             >
               <Users size={18} />
             </button>
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              className="w-10 h-10 inline-flex items-center justify-center rounded-full border"
+              style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)', background: 'rgba(255,255,255,0.02)' }}
+              aria-label="Edit trip settings"
+              title="Edit trip"
+            >
+              <Edit2 size={16} />
+            </button>
             <AdminSettingsPanel />
           </div>
         )}
       />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
-        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions }} />
+        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery }} />
       </main>
       {!copilotOpen && <CopilotFab onClick={() => setCopilotOpen(true)} />}
       <AnimatePresence>
@@ -98,6 +124,15 @@ export default function TripPage() {
             days={tripState.days}
             onClose={() => setCopilotOpen(false)}
             onMutationApplied={() => tripState.refresh()}
+          />
+        )}
+        {editOpen && (
+          <EditTripModal
+            trip={tripState.trip}
+            open={editOpen}
+            onClose={() => setEditOpen(false)}
+            onSubmit={handleEditSave}
+            saving={editSaving}
           />
         )}
       </AnimatePresence>

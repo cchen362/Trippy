@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { createHash } from 'crypto';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
@@ -7,33 +6,28 @@ import { discoverDestination } from '../services/claude.js';
 
 const router = Router();
 
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 router.use(requireAuth);
 
 router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
   try {
-    const { destination, interestTags } = req.body;
+    const { destination } = req.body;
 
     if (!destination || typeof destination !== 'string' || !destination.trim()) {
       throw Object.assign(new Error('destination is required'), { status: 400 });
     }
 
-    const normalizedDestination = destination.trim().toLowerCase();
-    const rawTags = interestTags ?? JSON.parse(req.trip.interest_tags || '[]');
-    // Normalize tags to lowercase for consistent cache keys across capitalisation variants
-    const tags = (Array.isArray(rawTags) ? rawTags : []).map((t) => t.toLowerCase().trim());
-
-    const hash = createHash('sha256')
-      .update(JSON.stringify([normalizedDestination, ...[...tags].sort()]))
-      .digest('hex');
+    // claudeDestination: human-readable, sent to Claude ("cheng du", "xi'an")
+    // cacheKey: maximally normalized for DB matching ("chengdu", "xian")
+    const claudeDestination = destination.trim().toLowerCase();
+    const cacheKey = claudeDestination
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[\s'''\-\.]/g, '');
 
     const db = getDb();
 
-    const cached = db.prepare(`
-      SELECT * FROM discovery_cache
-      WHERE trip_id = ? AND destination = ? AND interest_hash = ?
-    `).get(req.params.tripId, normalizedDestination, hash);
-
-    // SSE headers — used for both cache hits (instant) and cache misses (streamed)
+    // SSE headers — set before any potential cache hit or miss
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -45,11 +39,19 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       }
     };
 
+    // Check global destination cache (shared across all trips and users)
+    const cached = db.prepare(
+      'SELECT * FROM global_discovery_cache WHERE destination = ?',
+    ).get(cacheKey);
+
     if (cached) {
       const ageMs = Date.now() - new Date(cached.fetched_at).getTime();
-      if (ageMs < 48 * 60 * 60 * 1000) {
-        write({ type: 'results', ...JSON.parse(cached.result_json), cached: true });
-        write({ type: 'done' });
+      if (ageMs < CACHE_TTL_MS) {
+        const categories = JSON.parse(cached.result_json);
+        for (const cat of categories) {
+          write({ type: 'category', category: cat.category, items: cat.items });
+        }
+        write({ type: 'done', cached: true });
         return res.end();
       }
     }
@@ -58,32 +60,28 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const ping = setInterval(() => write({ type: 'thinking' }), 8000);
 
     try {
-      // Pass existing stop titles so Claude avoids re-suggesting them
       const existingStopTitles = db.prepare(`
         SELECT s.title FROM stops s
         JOIN days d ON s.day_id = d.id
         WHERE d.trip_id = ?
       `).all(req.params.tripId).map((r) => r.title);
 
-      const { results, source } = await discoverDestination(
-        normalizedDestination,
-        tags,
-        req.trip.pace,
-        req.trip.travellers,
+      const accumulated = await discoverDestination(
+        claudeDestination,
         existingStopTitles,
-        req.trip.start_date ?? null,
-        req.trip.end_date ?? null,
+        (categoryObj) => write({ type: 'category', ...categoryObj }),
       );
 
       clearInterval(ping);
 
-      db.prepare(`
-        INSERT OR REPLACE INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
-        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-      `).run(req.params.tripId, normalizedDestination, hash, JSON.stringify({ results, source }));
+      if (accumulated.length > 0) {
+        db.prepare(`
+          INSERT OR REPLACE INTO global_discovery_cache (destination, result_json, fetched_at)
+          VALUES (?, ?, datetime('now'))
+        `).run(cacheKey, JSON.stringify(accumulated));
+      }
 
-      write({ type: 'results', results, source, cached: false });
-      write({ type: 'done' });
+      write({ type: 'done', cached: false });
     } catch (err) {
       clearInterval(ping);
       write({ type: 'error', message: err.message || 'Discovery failed' });
@@ -91,7 +89,6 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
 
     res.end();
   } catch (err) {
-    // If SSE headers already sent we can't use next(err) — write the error and close
     if (res.headersSent) {
       res.write(`data: ${JSON.stringify({ type: 'error', message: err.message || 'Discovery failed' })}\n\n`);
       return res.end();
@@ -100,10 +97,17 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
   }
 });
 
+// Clears the global destination cache for a specific destination (used by refresh button)
 router.delete('/:tripId/discover/cache', requireTripAccess, (req, res, next) => {
   try {
+    const { destination } = req.body;
     const db = getDb();
-    db.prepare('DELETE FROM discovery_cache WHERE trip_id = ?').run(req.params.tripId);
+    if (destination) {
+      const key = destination.trim().toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[\s'''\-\.]/g, '');
+      db.prepare('DELETE FROM global_discovery_cache WHERE destination = ?').run(key);
+    }
     res.json({ ok: true });
   } catch (err) {
     next(err);

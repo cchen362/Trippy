@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
-import { createTrip, getTripDetail, listTripsForUser } from '../services/trips.js';
+import { createTrip, getTripDetail, listTripsForUser, updateTrip } from '../services/trips.js';
 
 const router = Router();
 
@@ -26,6 +26,14 @@ router.post('/', (req, res, next) => {
 router.get('/:tripId/detail', requireTripAccess, (req, res, next) => {
   try {
     res.json(getTripDetail(req.params.tripId, req.user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:tripId', requireTripAccess, (req, res, next) => {
+  try {
+    res.json(updateTrip(req.user.id, req.params.tripId, req.body));
   } catch (error) {
     next(error);
   }

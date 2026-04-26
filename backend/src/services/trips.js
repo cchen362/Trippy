@@ -321,6 +321,59 @@ export function createTrip(userId, input) {
   return getTripDetail(tripId, userId);
 }
 
+export function updateTrip(userId, tripId, input) {
+  const db = getDb();
+  const existingRow = assertTripAccess(userId, tripId);
+
+  const title = input.title?.trim() || existingRow.title;
+  const travellers = input.travellers || existingRow.travellers;
+  const pace = input.pace || existingRow.pace;
+  const interestTags = input.interestTags !== undefined
+    ? normalizeArray(input.interestTags)
+    : parseJson(existingRow.interest_tags, []);
+
+  let newEndDate = existingRow.end_date;
+
+  if (input.endDate && input.endDate !== existingRow.end_date) {
+    if (input.endDate < existingRow.end_date) {
+      // Block shortening if any removed day has stops
+      const blockedDay = db.prepare(`
+        SELECT d.date FROM days d
+        JOIN stops s ON s.day_id = d.id
+        WHERE d.trip_id = ? AND d.date > ?
+        ORDER BY d.date DESC LIMIT 1
+      `).get(tripId, input.endDate);
+
+      if (blockedDay) {
+        throw Object.assign(
+          new Error(`Cannot shorten trip — ${blockedDay.date} has stops. Remove them first.`),
+          { status: 400 },
+        );
+      }
+      db.prepare('DELETE FROM days WHERE trip_id = ? AND date > ?').run(tripId, input.endDate);
+      newEndDate = input.endDate;
+    } else {
+      // Extension — auto-generate new days
+      const defaultCity = parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const afterCurrent = new Date(`${existingRow.end_date}T00:00:00Z`);
+      afterCurrent.setUTCDate(afterCurrent.getUTCDate() + 1);
+      const newDates = eachDate(afterCurrent.toISOString().slice(0, 10), input.endDate);
+      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city) VALUES (?, ?, ?)');
+      for (const date of newDates) {
+        insertDay.run(tripId, date, defaultCity);
+      }
+      newEndDate = input.endDate;
+    }
+  }
+
+  db.prepare(`
+    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, end_date = ?
+    WHERE id = ?
+  `).run(title, travellers, JSON.stringify(interestTags), pace, newEndDate, tripId);
+
+  return getTripDetail(tripId, userId);
+}
+
 export function listDaysForTrip(tripId, userId, bookings = []) {
   assertTripAccess(userId, tripId);
   const db = getDb();
