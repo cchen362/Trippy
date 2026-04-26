@@ -4,6 +4,7 @@ import {
   lookupFlightDetails,
   lookupHotelDetails,
   lookupHotelPredictions,
+  lookupCityPredictions,
   lookupPhotos,
 } from '../services/lookups.js';
 
@@ -21,7 +22,7 @@ router.get('/photos', async (req, res, next) => {
 
 router.get('/places/hotels', async (req, res, next) => {
   try {
-    res.json({ suggestions: await lookupHotelPredictions(req.query.q) });
+    res.json({ suggestions: await lookupHotelPredictions(req.query.q, req.query.sessionToken) });
   } catch (error) {
     next(error);
   }
@@ -29,7 +30,15 @@ router.get('/places/hotels', async (req, res, next) => {
 
 router.get('/places/:placeId', async (req, res, next) => {
   try {
-    res.json({ place: await lookupHotelDetails(req.params.placeId) });
+    res.json({ place: await lookupHotelDetails(req.params.placeId, req.query.sessionToken) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/cities', async (req, res, next) => {
+  try {
+    res.json({ suggestions: await lookupCityPredictions(req.query.q) });
   } catch (error) {
     next(error);
   }

@@ -4,6 +4,7 @@ import DayHeader from '../components/timeline/DayHeader.jsx';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import Timeline from '../components/timeline/Timeline.jsx';
 import DiscoveryPanel from '../components/discovery/DiscoveryPanel.jsx';
+import { tripsApi } from '../services/tripsApi.js';
 import { useTripContext } from './TripPage.jsx';
 
 export default function PlanTab() {
@@ -19,6 +20,7 @@ export default function PlanTab() {
     deleteStop,
     updateStop,
     discovery,
+    refresh,
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
@@ -29,6 +31,11 @@ export default function PlanTab() {
   };
 
   const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId });
+
+  const handleCityOverride = async (date, cityOverride) => {
+    await tripsApi.patchDayCityOverride(trip.id, date, cityOverride);
+    await refresh();
+  };
 
   return (
     <div className="space-y-6">
@@ -79,7 +86,11 @@ export default function PlanTab() {
           transition={{ duration: 0.18 }}
           className="space-y-6"
         >
-          <DayHeader day={activeDay} dayNumber={days.findIndex((day) => day.id === activeDayId) + 1} />
+          <DayHeader
+            day={activeDay}
+            dayNumber={days.findIndex((day) => day.id === activeDayId) + 1}
+            onCityOverride={handleCityOverride}
+          />
           <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={deleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
         </motion.div>
       </AnimatePresence>

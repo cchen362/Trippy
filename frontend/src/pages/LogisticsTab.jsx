@@ -31,6 +31,7 @@ export default function LogisticsTab() {
     lookupHotels,
     lookupHotelDetails,
     lookupFlight,
+    lookupCities,
   } = useTripContext();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -150,6 +151,7 @@ export default function LogisticsTab() {
         lookupHotels={lookupHotels}
         lookupHotelDetails={lookupHotelDetails}
         lookupFlight={lookupFlight}
+        lookupCities={lookupCities}
       />
 
       {/* Edit modal — keyed on booking.id so React remounts (and resets form) when target changes */}
@@ -163,6 +165,7 @@ export default function LogisticsTab() {
           lookupHotels={lookupHotels}
           lookupHotelDetails={lookupHotelDetails}
           lookupFlight={lookupFlight}
+          lookupCities={lookupCities}
           booking={editing}
         />
       )}

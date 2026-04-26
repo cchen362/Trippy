@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { cityFromAirportString, cityFromIata } from '../../utils/airports.js';
+import { cityFromAirportString, cityFromIata, canonicalCity } from '../../utils/airports.js';
+import CityInput from './CityInput.jsx';
 
 const DEFAULT_FORM = {
   type: 'hotel',
@@ -108,12 +109,12 @@ function normalizeForm(form) {
       ? `${form.carrierCode ? form.carrierCode + ' ' : ''}${form.flightNumber}`.trim()
       : form.flightQuery.trim();
     // Extract destination city: prefer explicit city stored at lookup time, else parse from airport string
-    const destinationCity = form.detailsJson?.destinationCity
-      || cityFromAirportString(form.destination)
-      || null;
-    const originCity = form.detailsJson?.originCity
-      || cityFromAirportString(form.origin)
-      || null;
+    const destinationCity = canonicalCity(
+      form.detailsJson?.destinationCity || cityFromAirportString(form.destination),
+    ) || null;
+    const originCity = canonicalCity(
+      form.detailsJson?.originCity || cityFromAirportString(form.origin),
+    ) || null;
     return {
       type: 'flight',
       title: title || form.flightQuery.trim(),
@@ -154,8 +155,8 @@ function normalizeForm(form) {
         trainNumber: form.trainNumber || null,
         originStation: form.originStation || null,
         destinationStation: form.destinationStation || null,
-        originCity: form.fromCity || null,
-        destinationCity: form.toCity || null,
+        originCity: canonicalCity(form.fromCity) || null,
+        destinationCity: canonicalCity(form.toCity) || null,
         seatClass: form.seatClass || null,
       },
     };
@@ -252,6 +253,7 @@ export default function AddBookingModal({
   lookupHotels,
   lookupHotelDetails,
   lookupFlight,
+  lookupCities,
   booking,        // when provided, opens in edit mode
 }) {
   const isEditing = Boolean(booking);
@@ -261,6 +263,9 @@ export default function AddBookingModal({
   const [searchingHotels, setSearchingHotels] = useState(false);
   const [searchingFlight, setSearchingFlight] = useState(false);
   const [selectedHotelText, setSelectedHotelText] = useState('');
+  // Session token for Google Places Autocomplete — generated on first hotel keystroke,
+  // carried through to the Place Details call, then discarded. One UUID per search session.
+  const [hotelSessionToken, setHotelSessionToken] = useState(null);
 
   // Sync form state when the booking prop changes (switching between edit targets
   // or transitioning from create to edit mode).
@@ -270,6 +275,7 @@ export default function AddBookingModal({
       setError(null);
       setSuggestions([]);
       setSelectedHotelText('');
+      setHotelSessionToken(null);
     }
   }, [open, booking]);
 
@@ -285,7 +291,7 @@ export default function AddBookingModal({
     const timer = setTimeout(async () => {
       setSearchingHotels(true);
       try {
-        const response = await lookupHotels(form.hotelName);
+        const response = await lookupHotels(form.hotelName, hotelSessionToken);
         setSuggestions(response.suggestions || []);
       } catch {
         setSuggestions([]);
@@ -294,7 +300,7 @@ export default function AddBookingModal({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [form.hotelName, form.type, lookupHotels, open, selectedHotelText]);
+  }, [form.hotelName, form.type, hotelSessionToken, lookupHotels, open, selectedHotelText]);
 
   if (!open) return null;
 
@@ -309,12 +315,12 @@ export default function AddBookingModal({
       const f = response.flight;
       const arrivalIata = f.detailsJson?.providerPayload?.arrival?.airport?.iata;
       const departureIata = f.detailsJson?.providerPayload?.departure?.airport?.iata;
-      const destinationCity = (arrivalIata && cityFromIata(arrivalIata))
-        || cityFromAirportString(f.destination)
-        || null;
-      const originCity = (departureIata && cityFromIata(departureIata))
-        || cityFromAirportString(f.origin)
-        || null;
+      const destinationCity = canonicalCity(
+        (arrivalIata && cityFromIata(arrivalIata)) || cityFromAirportString(f.destination),
+      ) || null;
+      const originCity = canonicalCity(
+        (departureIata && cityFromIata(departureIata)) || cityFromAirportString(f.origin),
+      ) || null;
       setForm((current) => ({
         ...current,
         carrierCode: f.carrierCode || current.carrierCode,
@@ -360,6 +366,7 @@ export default function AddBookingModal({
   const handleTypeChange = (type) => {
     setSelectedHotelText('');
     setSuggestions([]);
+    setHotelSessionToken(null);
     // Reset all fields; preserve only the shared booking fields
     setForm({
       ...DEFAULT_FORM,
@@ -372,6 +379,8 @@ export default function AddBookingModal({
   const handleHotelNameChange = (value) => {
     setSelectedHotelText('');
     setForm((current) => ({ ...current, hotelName: value }));
+    // Start a new Places session on first keystroke after a reset
+    if (!hotelSessionToken) setHotelSessionToken(crypto.randomUUID());
   };
 
   const handleHotelSuggestionSelect = async (suggestion) => {
@@ -386,8 +395,10 @@ export default function AddBookingModal({
     }));
     try {
       const response = suggestion.placeId && lookupHotelDetails
-        ? await lookupHotelDetails(suggestion.placeId)
+        ? await lookupHotelDetails(suggestion.placeId, hotelSessionToken)
         : null;
+      // Session complete — details call closed it. Next search needs a fresh token.
+      setHotelSessionToken(null);
       const place = response?.place;
       const cleanTitle = place?.name && !isGenericHotelName(place.name, fallbackTitle)
         ? place.name
@@ -634,20 +645,28 @@ export default function AddBookingModal({
                 <input {...field('trainNumber')} placeholder="e.g. G8694 or D3212" />
               </label>
 
-              <label className="block">
-                <span className="modal-label">From — City</span>
-                <input {...field('fromCity')} placeholder="e.g. Chengdu" />
-              </label>
+              <CityInput
+                value={form.fromCity}
+                onChange={(v) => setForm((c) => ({ ...c, fromCity: v }))}
+                onCitySelect={(city) => setForm((c) => ({ ...c, fromCity: city }))}
+                lookupCities={lookupCities}
+                placeholder="e.g. Chengdu"
+                label="From — City"
+              />
 
               <label className="block">
                 <span className="modal-label">From — Station</span>
                 <input {...field('originStation')} placeholder="e.g. Chengdu East" />
               </label>
 
-              <label className="block">
-                <span className="modal-label">To — City</span>
-                <input {...field('toCity')} placeholder="e.g. Chongqing" />
-              </label>
+              <CityInput
+                value={form.toCity}
+                onChange={(v) => setForm((c) => ({ ...c, toCity: v }))}
+                onCitySelect={(city) => setForm((c) => ({ ...c, toCity: city }))}
+                lookupCities={lookupCities}
+                placeholder="e.g. Chongqing"
+                label="To — City"
+              />
 
               <label className="block">
                 <span className="modal-label">To — Station</span>

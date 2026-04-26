@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { searchPhotos } from './unsplash.js';
 
-export async function lookupHotelPredictions(input) {
+export async function lookupHotelPredictions(input, sessionToken) {
   const query = input?.trim();
   if (!query || query.length < 2) {
     throw Object.assign(new Error('Hotel query must be at least 2 characters'), {
@@ -25,6 +25,7 @@ export async function lookupHotelPredictions(input) {
       input: query,
       includedPrimaryTypes: ['lodging'],
       languageCode: 'en',
+      ...(sessionToken ? { sessionToken } : {}),
     }),
   });
 
@@ -48,7 +49,7 @@ export async function lookupHotelPredictions(input) {
     }));
 }
 
-export async function lookupHotelDetails(placeId) {
+export async function lookupHotelDetails(placeId, sessionToken) {
   const normalizedPlaceId = placeId?.trim();
   if (!normalizedPlaceId) {
     throw Object.assign(new Error('placeId is required'), { status: 400 });
@@ -60,7 +61,11 @@ export async function lookupHotelDetails(placeId) {
     });
   }
 
-  const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`, {
+  // sessionToken on the details call signals Google this completes the session — billing discount applied.
+  const detailsUrl = sessionToken
+    ? `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}?sessionToken=${encodeURIComponent(sessionToken)}`
+    : `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`;
+  const response = await fetch(detailsUrl, {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': config.googlePlacesKey,
@@ -93,6 +98,44 @@ function extractCityFromAddressComponents(components) {
   if (!Array.isArray(components)) return null;
   const find = (type) => components.find((c) => c.types?.includes(type))?.longText ?? null;
   return find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1') || null;
+}
+
+export async function lookupCityPredictions(input) {
+  const query = input?.trim();
+  if (!query || query.length < 2) {
+    throw Object.assign(new Error('City query must be at least 2 characters'), { status: 400 });
+  }
+
+  if (!config.googlePlacesKey) {
+    throw Object.assign(new Error('Google Places API key is not configured'), { status: 503 });
+  }
+
+  const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': config.googlePlacesKey,
+    },
+    body: JSON.stringify({
+      input: query,
+      includedPrimaryTypes: ['locality', 'administrative_area_level_2'],
+      languageCode: 'en',
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(body || 'Google Places city lookup failed'), { status: 502 });
+  }
+
+  const payload = await response.json();
+  return (payload.suggestions || [])
+    .map((s) => s.placePrediction)
+    .filter(Boolean)
+    .map((p) => ({
+      city: p.structuredFormat?.mainText?.text || p.text?.text || '',
+      country: p.structuredFormat?.secondaryText?.text || '',
+    }));
 }
 
 export async function lookupPhotos(query) {

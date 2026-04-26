@@ -29,5 +29,6 @@ export function useBookings({ tripId, onChanged }) {
     lookupHotels: bookingsApi.lookupHotels,
     lookupHotelDetails: bookingsApi.lookupHotelDetails,
     lookupFlight: bookingsApi.lookupFlight,
+    lookupCities: bookingsApi.lookupCities,
   };
 }

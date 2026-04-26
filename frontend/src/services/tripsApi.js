@@ -16,4 +16,8 @@ export const tripsApi = {
   createShareLink: (tripId) => request(`/api/trips/${tripId}/share`, { method: 'POST' }),
   update: (tripId, data) => request(`/api/trips/${tripId}`, { method: 'PATCH', body: data }),
   sharedDetail: (token) => request(`/api/share/${token}`, { silent401: true }),
+  patchDayCityOverride: (tripId, date, cityOverride) => request(`/api/trips/${tripId}/days/${date}`, {
+    method: 'PATCH',
+    body: { cityOverride: cityOverride ?? null },
+  }),
 };

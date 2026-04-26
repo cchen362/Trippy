@@ -1,5 +1,5 @@
 import { getDb } from '../db/database.js';
-import { cityFromIata, cityFromAirportString } from '../utils/airports.js';
+import { cityFromIata, cityFromAirportString, canonicalCity } from '../utils/airports.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -103,21 +103,18 @@ function normalizeArray(value) {
  */
 function extractCityFromBooking(booking) {
   const d = booking.detailsJson || {};
-  // Explicit city fields written by the booking form (set in Fix 1a)
   if (booking.type === 'hotel' || booking.type === 'other') {
-    return d.city || null;
+    return canonicalCity(d.city) || null;
   }
   if (booking.type === 'train' || booking.type === 'bus') {
-    return d.destinationCity || null;
+    return canonicalCity(d.destinationCity) || null;
   }
   if (booking.type === 'flight') {
-    // Prefer explicit city stored at booking time
-    if (d.destinationCity) return d.destinationCity;
+    if (d.destinationCity) return canonicalCity(d.destinationCity);
     // Fall back: IATA from provider payload (AeroDataBox stores arrival.airport.iata)
     const iata = d.providerPayload?.arrival?.airport?.iata;
-    if (iata) return cityFromIata(iata);
-    // Last resort: formatted airport string like "CKG - Jiangbei International"
-    return cityFromAirportString(booking.destination);
+    if (iata) return cityFromIata(iata); // already canonical from IATA_CITY
+    return canonicalCity(cityFromAirportString(booking.destination));
   }
   return null;
 }
@@ -443,4 +440,15 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
     })),
     bookings,
   };
+}
+
+export function updateDayCityOverride(userId, tripId, date, cityOverride) {
+  assertTripAccess(userId, tripId);
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?
+    RETURNING id, date, city_override
+  `).get(cityOverride ?? null, tripId, date);
+  if (!result) throw Object.assign(new Error('Day not found'), { status: 404 });
+  return { date: result.date, cityOverride: result.city_override };
 }
