@@ -4,10 +4,10 @@ export default function TicketStubCard({
   cardClassName = '',
   eyebrow,
   leftCode,
-  leftCodeSize = '',
+  leftCodeClassName = '',
   centerGlyph,
   rightCode,
-  rightCodeSize = '',
+  rightCodeClassName = '',
   leftTime,
   rightTime,
   leftLabel,
@@ -29,7 +29,7 @@ export default function TicketStubCard({
         <p className="logistics-eyebrow">{eyebrow}</p>
 
         <div className="logistics-route-grid">
-          <span className={`logistics-route-code ${leftCodeSize}`}>
+          <span className={`logistics-route-code ${leftCodeClassName}`}>
             {leftCode}
           </span>
           {centerGlyph && (
@@ -37,7 +37,7 @@ export default function TicketStubCard({
               {centerGlyph}
             </span>
           )}
-          <span className={`logistics-route-code logistics-route-code-right ${rightCodeSize}`}>
+          <span className={`logistics-route-code logistics-route-code-right ${rightCodeClassName}`}>
             {rightCode}
           </span>
         </div>

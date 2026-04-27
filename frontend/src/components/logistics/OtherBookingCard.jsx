@@ -3,7 +3,7 @@ import { formatShortDate } from './bookingCardUtils.js';
 function Row({ label, value, valueStyle, last }) {
   if (!value) return null;
   return (
-    <div className={`logistics-data-row ${last ? '' : 'hairline-row'}`}>
+    <div className={`logistics-data-row ${last ? '' : 'logistics-data-row-divided'}`}>
       <span className="logistics-row-label">
         {label}
       </span>

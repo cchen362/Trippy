@@ -25,10 +25,10 @@ export default function TrainBookingCard({ booking, onOpen }) {
       cardClassName="logistics-transit-card-wide"
       eyebrow={eyebrow}
       leftCode={formatStationName(originStation)}
-      leftCodeSize="logistics-route-code-station"
+      leftCodeClassName="logistics-route-code-station"
       centerGlyph={trainNumber}
       rightCode={formatStationName(destStation)}
-      rightCodeSize="logistics-route-code-station"
+      rightCodeClassName="logistics-route-code-station"
       leftTime={formatTime(booking.startDatetime)}
       rightTime={formatTime(booking.endDatetime)}
       leftLabel="DEPART"

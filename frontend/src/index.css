@@ -181,7 +181,7 @@ select {
   gap: 12px;
 }
 
-.logistics-data-row.hairline-row {
+.logistics-data-row-divided {
   border-bottom: 1px solid rgba(201,168,76,0.13);
 }
 
