@@ -21,6 +21,12 @@ function groupBookings(bookings) {
   };
 }
 
+function sectionGridClass(section) {
+  if (section === 'hotel') return 'logistics-card-grid logistics-card-grid-hotels';
+  if (section === 'other') return 'logistics-card-grid logistics-card-grid-compact';
+  return 'logistics-card-grid logistics-card-grid-transit';
+}
+
 export default function LogisticsTab() {
   const {
     bookings,
@@ -78,8 +84,7 @@ export default function LogisticsTab() {
                 {grouped[section].length}
               </span>
             </div>
-            {/* Ticket cards (flight/train) span full width; hotel pairs 2-up on lg+ */}
-            <div className={section === 'hotel' ? 'grid lg:grid-cols-2 gap-4' : 'grid grid-cols-1 gap-4'}>
+            <div className={sectionGridClass(section)}>
               {grouped[section].map((booking) => {
                 const Card = CARD_BY_TYPE[booking.type] || OtherBookingCard;
                 return <Card key={booking.id} booking={booking} onOpen={setSelectedBooking} />;

@@ -125,54 +125,289 @@ select {
 }
 
 
-/* Dashed fold line — between eyebrow and hero content on ticket cards. */
-.ticket-fold {
-  border-top: 1px dashed rgba(201, 168, 76, 0.22);
+/* Refined logistics card system. */
+.logistics-card {
+  overflow: hidden;
+  max-width: 382px;
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(36,31,20,0.98), rgba(15,13,10,0.99) 44%, rgba(9,8,6,0.99));
+  box-shadow: 0 22px 50px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
-/* Hairline gold divider — between rows on accommodation / other cards. */
-.hairline-row {
-  border-bottom: 1px solid rgba(201, 168, 76, 0.12);
+.logistics-card-top {
+  min-height: 88px;
+  padding: 28px 18px 16px;
+  background: radial-gradient(circle at 18% 0%, rgba(201,168,76,0.12), transparent 48%), rgba(31,28,20,0.82);
 }
 
-/* Transit boarding-pass connector: dotted gold line with circle endpoints. */
-.flight-line {
+.logistics-transit-top {
+  min-height: auto;
+  background: radial-gradient(circle at 95% 0%, rgba(201,168,76,0.11), transparent 46%), rgba(16,14,11,0.94);
+}
+
+.logistics-eyebrow {
+  margin: 0 0 8px;
+  color: var(--gold);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.logistics-card-title {
+  margin: 0;
+  color: var(--cream);
+  font-family: 'Playfair Display', serif;
+  font-size: 25px;
+  font-style: italic;
+  font-weight: 500;
+  line-height: 1.08;
+  text-shadow: 1px 1px 0 rgba(201,168,76,0.45);
+}
+
+.logistics-card-rows {
+  padding: 16px 18px 15px;
+  background: rgba(24,22,18,0.92);
+}
+
+.logistics-data-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  gap: 12px;
+}
+
+.logistics-data-row.hairline-row {
+  border-bottom: 1px solid rgba(201,168,76,0.13);
+}
+
+.logistics-row-label {
+  flex-shrink: 0;
+  color: var(--cream-mute);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.logistics-row-value {
+  min-width: 0;
+  color: var(--cream);
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.logistics-route-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(84px, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.logistics-route-code {
+  min-width: 0;
+  color: var(--cream);
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(28px, 7.8vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 2px 1px 0 rgba(201,168,76,0.42);
+  overflow-wrap: anywhere;
+}
+
+.logistics-route-code-station {
+  font-size: clamp(17px, 4.4vw, 22px);
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logistics-route-code-right {
+  text-align: right;
+}
+
+.logistics-route-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cream-mute);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.logistics-route-center::before,
+.logistics-route-center::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  min-width: 18px;
+  background: rgba(201,168,76,0.2);
+}
+
+.logistics-transit-body {
+  padding: 20px 18px 15px;
+  border-top: 1px solid rgba(255,255,255,0.035);
+  background: rgba(24,22,18,0.95);
+}
+
+.logistics-time-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 26px;
+}
+
+.logistics-time {
+  margin: 0;
+  color: var(--cream);
+  font-family: 'DM Mono', monospace;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 1px 1px 0 rgba(201,168,76,0.28);
+}
+
+.logistics-time-label {
+  margin: 5px 0 0;
+  color: var(--cream-mute);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.logistics-date {
+  margin: 2px 0 0;
+  color: var(--cream-dim);
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.1;
+}
+
+.logistics-transit-footer {
+  margin-top: 14px;
+}
+
+.logistics-footer-line {
   position: relative;
   height: 1px;
-  background: repeating-linear-gradient(
-    to right,
-    rgba(201, 168, 76, 0.38) 0px,
-    rgba(201, 168, 76, 0.38) 2px,
-    transparent 2px,
-    transparent 7px
-  );
+  margin-bottom: 12px;
+  background: rgba(201,168,76,0.13);
 }
-.flight-line::before,
-.flight-line::after {
+
+.logistics-footer-line::before,
+.logistics-footer-line::after {
   content: '';
   position: absolute;
-  top: -3px;
-  width: 7px;
-  height: 7px;
+  top: -2px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: rgba(201, 168, 76, 0.75);
+  background: var(--gold);
 }
-.flight-line::before { left: 0; }
-.flight-line::after { right: 0; }
 
-/* Hotel card top-right radial glow. */
-.hotel-glow {
-  position: absolute;
-  top: -30%;
-  right: -15%;
-  width: 240px;
-  height: 240px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(201, 168, 76, 0.20) 0%,
-    rgba(201, 168, 76, 0.06) 45%,
-    transparent 70%
-  );
-  pointer-events: none;
+.logistics-footer-line::before { left: 0; }
+.logistics-footer-line::after { right: 0; }
+
+.logistics-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.logistics-footer-label,
+.logistics-footer-value {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.logistics-footer-label {
+  color: var(--cream-mute);
+}
+
+.logistics-footer-value {
+  color: var(--gold);
+  letter-spacing: 0.12em;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.logistics-card-grid {
+  display: grid;
+  gap: 16px;
+  justify-content: start;
+}
+
+.logistics-card-grid-transit,
+.logistics-card-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 382px), 382px));
+}
+
+.logistics-card-grid-hotels {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 382px), 382px));
+}
+
+@media (min-width: 640px) {
+  .logistics-card-top,
+  .logistics-card-rows,
+  .logistics-transit-body {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .logistics-route-code {
+    font-size: 34px;
+  }
+
+  .logistics-route-code-station {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 420px) {
+  .logistics-route-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(56px, 0.7fr) minmax(0, 1.15fr);
+    gap: 8px;
+  }
+
+  .logistics-route-center {
+    gap: 6px;
+    letter-spacing: 0.08em;
+  }
+
+  .logistics-route-center::before,
+  .logistics-route-center::after {
+    min-width: 10px;
+  }
+
+  .logistics-data-row {
+    gap: 8px;
+  }
 }
