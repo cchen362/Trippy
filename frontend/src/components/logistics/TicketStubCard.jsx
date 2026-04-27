@@ -1,6 +1,7 @@
 // Shared transit-card primitive used by FlightBookingCard and TrainBookingCard.
 // Accepts display-ready values only; no booking data access here.
 export default function TicketStubCard({
+  cardClassName = '',
   eyebrow,
   leftCode,
   leftCodeSize = '',
@@ -22,7 +23,7 @@ export default function TicketStubCard({
     <button
       type="button"
       onClick={onClick}
-      className="logistics-card logistics-transit-card w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]"
+      className={`logistics-card logistics-transit-card ${cardClassName} w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]`}
     >
       <div className="logistics-card-top logistics-transit-top">
         <p className="logistics-eyebrow">{eyebrow}</p>

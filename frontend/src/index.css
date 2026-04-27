@@ -128,7 +128,6 @@ select {
 /* Refined logistics card system. */
 .logistics-card {
   overflow: hidden;
-  max-width: 382px;
   width: 100%;
   border: 1px solid rgba(255,255,255,0.11);
   border-radius: 16px;
@@ -211,7 +210,7 @@ select {
 
 .logistics-route-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(84px, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(84px, 0.75fr) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -229,11 +228,10 @@ select {
 }
 
 .logistics-route-code-station {
-  font-size: clamp(17px, 4.4vw, 22px);
-  line-height: 1.05;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: clamp(18px, 3vw, 26px);
+  line-height: 1.02;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .logistics-route-code-right {
@@ -365,13 +363,21 @@ select {
   justify-content: start;
 }
 
-.logistics-card-grid-transit,
-.logistics-card-grid-compact {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 382px), 382px));
+.logistics-card-grid-standard,
+.logistics-card-grid-wide {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.logistics-card-grid-hotels {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 382px), 382px));
+.logistics-card-grid-wide {
+  max-width: 860px;
+}
+
+.logistics-transit-card-wide .logistics-route-grid {
+  grid-template-columns: minmax(0, 1.25fr) minmax(92px, 0.45fr) minmax(0, 1.25fr);
+}
+
+.logistics-transit-card-wide .logistics-route-center {
+  letter-spacing: 0.08em;
 }
 
 @media (min-width: 640px) {
@@ -387,7 +393,13 @@ select {
   }
 
   .logistics-route-code-station {
-    font-size: 22px;
+    font-size: 26px;
+  }
+}
+
+@media (min-width: 760px) {
+  .logistics-card-grid-standard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

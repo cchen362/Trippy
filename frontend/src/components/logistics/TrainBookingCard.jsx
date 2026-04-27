@@ -1,13 +1,9 @@
 import { formatTime, formatShortDate } from './bookingCardUtils.js';
 import TicketStubCard from './TicketStubCard.jsx';
 
-function abbreviateStation(name) {
+function formatStationName(name) {
   if (!name) return '\u2014';
-  const words = name.trim().split(/\s+/);
-  if (words.length === 1) return words[0].toUpperCase();
-  const first = words[0];
-  const rest = words.slice(1).map((w) => w[0]).join('');
-  return `${first.toUpperCase()} ${rest}.`;
+  return name.trim().toUpperCase();
 }
 
 export default function TrainBookingCard({ booking, onOpen }) {
@@ -26,11 +22,12 @@ export default function TrainBookingCard({ booking, onOpen }) {
 
   return (
     <TicketStubCard
+      cardClassName="logistics-transit-card-wide"
       eyebrow={eyebrow}
-      leftCode={abbreviateStation(originStation)}
+      leftCode={formatStationName(originStation)}
       leftCodeSize="logistics-route-code-station"
       centerGlyph={trainNumber}
-      rightCode={abbreviateStation(destStation)}
+      rightCode={formatStationName(destStation)}
       rightCodeSize="logistics-route-code-station"
       leftTime={formatTime(booking.startDatetime)}
       rightTime={formatTime(booking.endDatetime)}

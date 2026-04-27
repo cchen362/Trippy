@@ -22,9 +22,8 @@ function groupBookings(bookings) {
 }
 
 function sectionGridClass(section) {
-  if (section === 'hotel') return 'logistics-card-grid logistics-card-grid-hotels';
-  if (section === 'other') return 'logistics-card-grid logistics-card-grid-compact';
-  return 'logistics-card-grid logistics-card-grid-transit';
+  if (section === 'train') return 'logistics-card-grid logistics-card-grid-wide';
+  return 'logistics-card-grid logistics-card-grid-standard';
 }
 
 export default function LogisticsTab() {
@@ -73,7 +72,7 @@ export default function LogisticsTab() {
       </section>
 
       {/* Per-type sections */}
-      {['flight', 'train', 'hotel', 'other'].map((section) => (
+      {['flight', 'hotel', 'other', 'train'].map((section) => (
         grouped[section].length > 0 && (
           <section key={section}>
             <div className="flex items-center justify-between mb-4">
