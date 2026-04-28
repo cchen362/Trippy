@@ -3,6 +3,8 @@ import { getMapConfig } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
 import { assertTripAccess } from './trips.js';
 
+const TRANSIT_TYPES = new Set(['flight', 'train', 'bus', 'ferry']);
+
 function parseJson(value, fallback) {
   if (!value) return fallback;
   try {
@@ -10,6 +12,81 @@ function parseJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function normalizeCity(value) {
+  return String(value || '').trim();
+}
+
+function periodForTime(time) {
+  if (!time) return '';
+  const hour = Number(String(time).slice(0, 2));
+  if (!Number.isFinite(hour)) return '';
+  return hour < 12 ? 'AM' : 'PM';
+}
+
+function localSegmentLabel(city, stops) {
+  const period = periodForTime(stops.find((stop) => stop.time)?.time);
+  const fallback = period === 'PM' ? 'Afternoon' : 'Morning';
+  return [normalizeCity(city) || fallback, period].filter(Boolean).join(' ');
+}
+
+function transitDestinationCity(stop, booking) {
+  const details = parseJson(booking?.details_json, {});
+  return normalizeCity(details.destinationCity)
+    || normalizeCity(booking?.destination)
+    || normalizeCity(stop.resolved_name)
+    || normalizeCity(stop.title);
+}
+
+function isTransitStop(stop, booking) {
+  return stop.type === 'transit' || TRANSIT_TYPES.has(booking?.type);
+}
+
+function buildSegmentsForDay(day, dayStops, bookingById) {
+  const segments = [];
+  let localStops = [];
+  let currentCity = normalizeCity(day.city_override) || normalizeCity(day.city);
+  let segmentIndex = 1;
+
+  const flushLocal = () => {
+    if (localStops.length === 0) return;
+    const id = `day:${day.id}:segment:${segmentIndex}`;
+    segments.push({
+      id,
+      dayId: day.id,
+      label: localSegmentLabel(currentCity, localStops),
+      type: 'local',
+      city: currentCity || null,
+      stopIds: localStops.map((stop) => stop.id),
+    });
+    segmentIndex += 1;
+    localStops = [];
+  };
+
+  for (const stop of dayStops) {
+    const booking = bookingById.get(stop.booking_id);
+    if (!isTransitStop(stop, booking)) {
+      localStops.push(stop);
+      continue;
+    }
+
+    flushLocal();
+    const id = `day:${day.id}:segment:${segmentIndex}`;
+    segments.push({
+      id,
+      dayId: day.id,
+      label: 'Transit',
+      type: 'transit',
+      city: null,
+      stopIds: [stop.id],
+    });
+    segmentIndex += 1;
+    currentCity = transitDestinationCity(stop, booking) || currentCity;
+  }
+
+  flushLocal();
+  return segments;
 }
 
 function formatMapStop(row, mapConfig, routeNumber, routeSegmentId) {
@@ -50,6 +127,13 @@ export function getTripMapData(userId, tripId) {
     ORDER BY date ASC
   `).all(tripId);
 
+  const bookings = db.prepare(`
+    SELECT *
+    FROM bookings
+    WHERE trip_id = ?
+  `).all(tripId);
+  const bookingById = new Map(bookings.map((booking) => [booking.id, booking]));
+
   const stops = db.prepare(`
     SELECT s.*
     FROM stops s
@@ -58,29 +142,34 @@ export function getTripMapData(userId, tripId) {
     ORDER BY d.date ASC, COALESCE(s.time, '99:99') ASC, s.sort_order ASC, s.created_at ASC
   `).all(tripId);
 
-  const segmentByDay = new Map(days.map((day) => [
-    day.id,
-    {
-      id: `day:${day.id}`,
-      dayId: day.id,
-      label: day.city_override || day.city,
-      type: 'local',
-      stopIds: [],
-    },
-  ]));
+  const stopsByDay = new Map(days.map((day) => [day.id, []]));
+  for (const stop of stops) {
+    if (!stopsByDay.has(stop.day_id)) stopsByDay.set(stop.day_id, []);
+    stopsByDay.get(stop.day_id).push(stop);
+  }
+
+  const segments = [];
+  const segmentByStopId = new Map();
+  for (const day of days) {
+    const daySegments = buildSegmentsForDay(day, stopsByDay.get(day.id) || [], bookingById);
+    for (const segment of daySegments) {
+      segments.push(segment);
+      for (const stopId of segment.stopIds) {
+        segmentByStopId.set(stopId, segment.id);
+      }
+    }
+  }
 
   const routeCountByDay = new Map();
   const mapStops = stops.map((stop) => {
     const routeNumber = (routeCountByDay.get(stop.day_id) || 0) + 1;
     routeCountByDay.set(stop.day_id, routeNumber);
-    const segment = segmentByDay.get(stop.day_id);
-    if (segment) segment.stopIds.push(stop.id);
-    return formatMapStop(stop, mapConfig, routeNumber, segment?.id || null);
+    return formatMapStop(stop, mapConfig, routeNumber, segmentByStopId.get(stop.id) || null);
   });
 
   return {
     mapConfig,
-    segments: Array.from(segmentByDay.values()).filter((segment) => segment.stopIds.length > 0),
+    segments,
     stops: mapStops,
   };
 }
