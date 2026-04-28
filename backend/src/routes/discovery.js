@@ -10,6 +10,21 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 router.use(requireAuth);
 
+function sanitizeDiscoveryCategory(categoryObj) {
+  return {
+    ...categoryObj,
+    items: (categoryObj.items || []).map((item) => ({
+      ...item,
+      lat: null,
+      lng: null,
+    })),
+  };
+}
+
+function sanitizeDiscoveryCategories(categories) {
+  return (categories || []).map(sanitizeDiscoveryCategory);
+}
+
 router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
   try {
     const { destination } = req.body;
@@ -47,7 +62,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     if (cached) {
       const ageMs = Date.now() - new Date(cached.fetched_at).getTime();
       if (ageMs < CACHE_TTL_MS) {
-        const categories = JSON.parse(cached.result_json);
+        const categories = sanitizeDiscoveryCategories(JSON.parse(cached.result_json));
         for (const cat of categories) {
           write({ type: 'category', category: cat.category, items: cat.items });
         }
@@ -69,16 +84,17 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       const accumulated = await discoverDestination(
         claudeDestination,
         existingStopTitles,
-        (categoryObj) => write({ type: 'category', ...categoryObj }),
+        (categoryObj) => write({ type: 'category', ...sanitizeDiscoveryCategory(categoryObj) }),
       );
+      const sanitized = sanitizeDiscoveryCategories(accumulated);
 
       clearInterval(ping);
 
-      if (accumulated.length > 0) {
+      if (sanitized.length > 0) {
         db.prepare(`
           INSERT OR REPLACE INTO global_discovery_cache (destination, result_json, fetched_at)
           VALUES (?, ?, datetime('now'))
-        `).run(cacheKey, JSON.stringify(accumulated));
+        `).run(cacheKey, JSON.stringify(sanitized));
       }
 
       write({ type: 'done', cached: false });

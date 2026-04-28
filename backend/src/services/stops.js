@@ -117,6 +117,15 @@ function isSimilarPlace(query, resolvedName) {
     || normalizedResolved.includes(normalizedQuery);
 }
 
+function locationAliasesForInput(input) {
+  return [
+    input.localName,
+    input.locationLocalName,
+    ...(Array.isArray(input.aliases) ? input.aliases : []),
+    ...(Array.isArray(input.locationAliases) ? input.locationAliases : []),
+  ].map((alias) => String(alias || '').trim()).filter(Boolean);
+}
+
 function applyResolutionFields(base, resolution, locationQuery) {
   return {
     ...base,
@@ -126,7 +135,7 @@ function applyResolutionFields(base, resolution, locationQuery) {
     resolvedName: resolution.resolvedName ?? null,
     resolvedAddress: resolution.resolvedAddress ?? null,
     coordinateSystem: resolution.coordinateSystem || 'unknown',
-    coordinateSource: resolution.coordinateSource ?? null,
+    coordinateSource: resolution.lat !== null && resolution.lng !== null ? (resolution.coordinateSource ?? null) : null,
     locationStatus: resolution.locationStatus || 'unresolved',
     locationConfidence: resolution.confidence ?? null,
     providerId: resolution.providerId ?? null,
@@ -151,6 +160,9 @@ function preserveLocationFields(input) {
 async function resolveLocationForStop({ day, title, input, existing = null }) {
   const explicitLocationQuery = input.locationQuery ?? input.location ?? null;
   const locationQuery = (explicitLocationQuery || input.resolvedName || title || '').trim();
+  const resolutionCity = input.locationCity ?? input.city ?? day.resolvedCity ?? day.city;
+  const resolutionCountry = input.locationCountry ?? input.country ?? countryForDay(day);
+  const locationAliases = locationAliasesForInput(input);
   const inputHasCoordinates = hasCoordinates(input);
   const trustedCoordinates = inputHasCoordinates && hasTrustedCoordinateMetadata(input);
   const generatedCoordinates = inputHasCoordinates && isGeneratedCoordinateSource(input.coordinateSource);
@@ -184,12 +196,36 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
     && (!existing || input.reResolveLocation || queryChanged || generatedCoordinates || (!inputHasCoordinates && input.locationQuery !== undefined));
 
   if (shouldResolve) {
-    const resolution = await resolvePlace({
+    let resolution = await resolvePlace({
       queryText: locationQuery,
-      city: day.resolvedCity || day.city,
-      country: countryForDay(day),
-      allowNetwork: Boolean(explicitLocationQuery || input.reResolveLocation || input.coordinateSource === 'booking'),
+      city: resolutionCity,
+      country: resolutionCountry,
+      aliases: locationAliases,
+      allowNetwork: Boolean(explicitLocationQuery || input.reResolveLocation || input.coordinateSource === 'booking' || generatedCoordinates),
+      preferNominatim: generatedCoordinates,
     });
+
+    if (generatedCoordinates && resolution.locationStatus === 'unresolved') {
+      resolution = await resolvePlace({
+        queryText: locationQuery,
+        city: resolutionCity,
+        country: resolutionCountry,
+        aliases: locationAliases,
+        allowNetwork: false,
+        preferNominatim: false,
+      });
+    }
+
+    if (generatedCoordinates && resolution.locationStatus === 'unresolved' && resolutionCity) {
+      resolution = await resolvePlace({
+        queryText: locationQuery,
+        city: null,
+        country: resolutionCountry,
+        aliases: locationAliases,
+        allowNetwork: false,
+        preferNominatim: false,
+      });
+    }
 
     if (resolution.lat !== null && resolution.lng !== null && (!inputHasCoordinates || isSimilarPlace(locationQuery, resolution.resolvedName))) {
       const confirmedResolution = generatedCoordinates && resolution.coordinateSystem === 'unknown'
@@ -198,14 +234,14 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
       return applyResolutionFields({}, confirmedResolution, locationQuery);
     }
 
-    if (inputHasCoordinates) {
+    if (inputHasCoordinates && !generatedCoordinates) {
       return {
         lat: input.lat,
         lng: input.lng,
         locationQuery,
         resolvedName: resolution.resolvedName ?? null,
         resolvedAddress: resolution.resolvedAddress ?? null,
-        coordinateSystem: input.coordinateSystem || 'unknown',
+        coordinateSystem: input.coordinateSystem || (input.coordinateSource === 'discovery' ? 'wgs84' : 'unknown'),
         coordinateSource: input.coordinateSource || 'discovery',
         locationStatus: 'estimated',
         locationConfidence: Math.min(resolution.confidence ?? 0.5, 0.68),
@@ -217,6 +253,21 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
   }
 
   if (inputHasCoordinates) {
+    if (generatedCoordinates) {
+      return {
+        lat: null,
+        lng: null,
+        locationQuery,
+        resolvedName: input.resolvedName ?? existing?.resolved_name ?? null,
+        resolvedAddress: input.resolvedAddress ?? existing?.resolved_address ?? null,
+        coordinateSystem: 'unknown',
+        coordinateSource: input.coordinateSource ?? existing?.coordinate_source ?? null,
+        locationStatus: existing?.location_status ?? 'unresolved',
+        locationConfidence: input.locationConfidence ?? existing?.location_confidence ?? null,
+        providerId: input.providerId ?? existing?.provider_id ?? null,
+      };
+    }
+
     return {
       lat: input.lat,
       lng: input.lng,
@@ -507,7 +558,7 @@ function findMatchingStopForBooking(dayId, booking, location) {
     FROM stops
     WHERE day_id = ?
       AND (booking_id IS NULL OR booking_id = ?)
-    ORDER BY COALESCE(time, '99:99') ASC, sort_order ASC, created_at ASC
+    ORDER BY sort_order ASC, created_at ASC
   `).all(dayId, booking.id);
 
   return rows.find((stop) => {
@@ -549,14 +600,16 @@ export async function repairTripStopLocations(userId, tripId) {
   const trip = db.prepare('SELECT id FROM trips WHERE id = ? AND owner_id = ?').get(tripId, userId);
   if (!trip) throw Object.assign(new Error('Not found'), { status: 404 });
 
+  // Include curated-source stops: they were previously set from AI-estimated curated data
+  // and need to be re-resolved with accurate Nominatim data.
   const stopsToRepair = db.prepare(`
     SELECT s.*, d.city, d.city_override, t.destination_countries
     FROM stops s
     JOIN days d ON d.id = s.day_id
     JOIN trips t ON t.id = d.trip_id
     WHERE d.trip_id = ?
-      AND s.coordinate_system = 'unknown'
       AND s.location_status != 'user_confirmed'
+      AND (s.coordinate_system = 'unknown' OR s.coordinate_source = 'curated')
       AND (s.location_query IS NOT NULL OR s.title IS NOT NULL)
   `).all(tripId);
 
@@ -572,11 +625,18 @@ export async function repairTripStopLocations(userId, tripId) {
       country = null;
     }
 
-    let resolution = await resolvePlace({ queryText, city, country, allowNetwork: false });
-    if (resolution.coordinateSystem === 'unknown' && city) {
-      resolution = await resolvePlace({ queryText, city: null, country, allowNetwork: false });
+    // Use Nominatim for accurate OSM WGS-84 data; fall back to city=null if city-specific fails
+    let resolution = await resolvePlace({ queryText, city, country, allowNetwork: true, preferNominatim: true });
+    if (resolution.locationStatus === 'unresolved' && city) {
+      resolution = await resolvePlace({ queryText, city: null, country, allowNetwork: true, preferNominatim: true });
     }
-    if (resolution.coordinateSystem !== 'unknown' && resolution.lat !== null) {
+    if (resolution.locationStatus === 'unresolved') {
+      resolution = await resolvePlace({ queryText, city, country, allowNetwork: false, preferNominatim: false });
+    }
+    if (resolution.locationStatus === 'unresolved' && city) {
+      resolution = await resolvePlace({ queryText, city: null, country, allowNetwork: false, preferNominatim: false });
+    }
+    if (resolution.locationStatus !== 'unresolved' && resolution.lat !== null) {
       db.prepare(`
         UPDATE stops
         SET lat = ?, lng = ?, coordinate_system = ?, coordinate_source = ?,

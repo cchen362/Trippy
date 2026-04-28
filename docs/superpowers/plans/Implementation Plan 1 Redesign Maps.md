@@ -14,6 +14,32 @@ Reference for no-key lookup limits: [OSMF Nominatim Usage Policy](https://operat
 
 ---
 
+## Current Status Update: Map Accuracy, Discover, and MapTiler
+
+Additional fixes completed after the original redesign plan:
+
+- Nominatim repair now uses a persisted valid local `NOMINATIM_USER_AGENT` and no longer appends country codes into the free-text `q`.
+- Nominatim requests now pass ISO-2 country constraints with `countrycodes`, retry failed cached Nominatim rows under `preferNominatim`, and cache both successful and failed attempts.
+- `preferNominatim` repair is used for existing unknown/curated stops, while vetted curated aliases remain a fallback when Nominatim cannot resolve a known place.
+- Curated Chongqing entries were reclassified from trusted GCJ-02/user-confirmed data to WGS-84/estimated data so they can be overwritten by better Nominatim results.
+- Added additional vetted Chongqing aliases/places for English-name misses, including People's Liberation Monument/Jiefangbei, Three Gorges Museum, and Wulong Karst Landscape.
+- Discover-generated coordinates are no longer trusted directly. Discovery cache lat/lng values are sanitized to `null`, and adding from Discover requires resolver verification or a vetted fallback before a marker is rendered.
+- Discover suggestions now request and carry `localName` and `aliases`; the UI displays `English/Common Name (Local Name)` only when useful, and the resolver tries local names/aliases invisibly.
+- This multilingual resolver path is language-agnostic, not China-only. It helps any destination where the indexed/common local name differs from the traveler-facing English name.
+- China trips continue to use AutoNavi/GCJ-02 display behavior; non-China trips use MapTiler raster tiles when `MAPTILER_API_KEY` exists and fall back to OpenStreetMap when absent.
+- Plan, Map, and Share stop ordering now use `sort_order` as the canonical itinerary order so drag reorder controls marker numbers and route direction instead of snapping back to time-first order.
+- Existing local Discover caches for `chengdu` and `chongqing` were cleared so they regenerate with multilingual fields. Malaysia caches were left intact because Ipoh/Kuala Lumpur Discover placement verified well.
+- Existing local stop repair was run after the fixes. The remaining unresolved China rows are transit/train rows without point locations, not Discover landmarks.
+
+Verification:
+
+- `cmd /c npm test -- placeResolver.test.js locationIntegration.test.js map.test.js` passed with 55 tests.
+- `node repair-locations.mjs` repaired the outstanding Wulong Karst stop after country-scoped curated fallback was added.
+- Backend restarted on `http://localhost:3002`.
+- Frontend restarted on `http://localhost:5174/`.
+
+---
+
 ## Product Decisions
 
 - Maps is a visual itinerary, not a navigation app.
@@ -155,7 +181,9 @@ Nominatim requirements:
 - Cache all successful and failed lookups.
 - Rate limit to max 1 request/second across the app.
 - Include attribution where map/place data is shown if OSM/Nominatim result is used.
-- Use city context in query: `"{place}, {resolvedCity}, {country}"`.
+- Use city context in query: `"{place}, {resolvedCity}"`.
+- Pass country as `countrycodes=<iso2>` instead of appending the country code to `q`.
+- Try bracketed names, stripped names, local names, and aliases before returning unresolved.
 
 Resolver output:
 - `lat`
@@ -169,7 +197,7 @@ Resolver output:
 - `providerId`
 
 Confidence rules:
-- curated exact match: `user_confirmed` or `resolved`, high confidence
+- curated exact match: `estimated`, moderate confidence, because Nominatim repair may still improve it
 - cache exact match: `resolved`
 - Nominatim strong name/city match: `resolved`
 - Nominatim weaker match: `estimated`
@@ -184,9 +212,10 @@ Progress:
 - Added `NOMINATIM_USER_AGENT` config with a local development fallback.
 - Added backend-only Nominatim lookup with city/country query context, one-request-per-second process throttle, and caching for both successful and failed lookups.
 - Added resolver tests for curated priority, cache hits avoiding network, Discovery cache reuse, failed lookup caching, and rate limiting.
+- Follow-up: curated entries now use WGS-84/estimated metadata, Nominatim uses `countrycodes`, failed Nominatim rows are retried under `preferNominatim`, and multilingual aliases/local names are tried before unresolved fallback.
 
 Notes for later tasks:
-- Task 2 created the resolver service but did not wire it into stop create/update, Discovery, Copilot, or bookings yet. That integration remains Task 3 and Task 6 scope.
+- Task 2 is now wired through stop create/update, Discovery, Copilot-generated coordinates, booking-linked stops, and repair flows.
 - OSM/Nominatim attribution still needs to be surfaced wherever Nominatim-backed map/place data is displayed in later frontend/map-data tasks.
 
 ### Task 3: Stop Create/Update Integration — DONE
@@ -239,7 +268,6 @@ Return:
   - `time`
 
 Sort exactly like Plan timeline:
-- `COALESCE(time, '99:99') ASC`
 - `sort_order ASC`
 - `created_at ASC`
 
@@ -255,6 +283,7 @@ Verification:
 - `cmd /c npm test -- map.test.js migrations.test.js placeResolver.test.js locationIntegration.test.js` passed.
 - `cmd /c npm run build` in `frontend` passed.
 - Covered map display coordinate output, route numbering, timeline sort order, and non-renderable unknown coordinates.
+- Follow-up: Plan/Map/Share now use `sort_order` as canonical itinerary order so manual drag reorder controls route numbers and connector direction.
 
 ### Task 5: Mixed-City Day Segments
 
@@ -273,6 +302,11 @@ Segment behavior:
   - `Chengdu PM`
 
 Do not require a day to have only one city.
+
+Progress:
+- Implemented mixed-city segment splitting in map data for local/transit/post-transit day sections.
+- Segment chips are rendered in the Map UI for focusable day segments.
+- Covered by location integration tests for Chongqing -> Chengdu mixed-day route segmentation.
 
 ### Task 6: Booking Integration — DONE
 
@@ -397,6 +431,11 @@ Purpose:
 - help users spot detours, backtracking, and bad ordering;
 - not provide navigation.
 
+Progress:
+- Implemented numbered markers, ordered straight-line connectors, dashed transit connectors where endpoints exist, and unresolved-stop route breaks in the Map sequence panel.
+- Route order now follows Plan drag order via `sort_order`.
+- Covered by map/location integration tests for route numbering after reorder and moving stops between days.
+
 ### Task 10: Location Correction UI
 
 For any marker:
@@ -423,6 +462,12 @@ For unresolved stop:
 - Existing ambiguous Discovery cache coordinates should not become trusted markers.
 - Clear or reclassify stale Discovery cache entries for Chongqing if they caused current bad markers.
 - Add curated overrides for known problematic/high-value Chongqing POIs before manual QA.
+
+Progress:
+- Added `backend/repair-locations.mjs` for local repair runs.
+- Cleared failed Nominatim rows and stale Discover cache rows during debugging/repair.
+- Cleared `chengdu` and `chongqing` global Discover caches after adding multilingual suggestion fields so the next Discover load regenerates clean data.
+- Repaired known Malaysia and China landmark misses; remaining unresolved China rows are transit/train rows without point locations.
 
 ---
 

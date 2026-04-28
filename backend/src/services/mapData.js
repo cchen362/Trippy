@@ -139,7 +139,7 @@ export function getTripMapData(userId, tripId) {
     FROM stops s
     JOIN days d ON d.id = s.day_id
     WHERE d.trip_id = ?
-    ORDER BY d.date ASC, COALESCE(s.time, '99:99') ASC, s.sort_order ASC, s.created_at ASC
+    ORDER BY d.date ASC, s.sort_order ASC, s.created_at ASC
   `).all(tripId);
 
   const stopsByDay = new Map(days.map((day) => [day.id, []]));

@@ -4,7 +4,7 @@ import { gcj02ToWgs84, toDisplayCoordinates, wgs84ToGcj02 } from '../src/service
 
 describe('getMapConfig', () => {
   it('returns amap config for CN', () => {
-    const config = getMapConfig(['CN']);
+    const config = getMapConfig(['CN'], { maptilerKey: 'test-key' });
     expect(config.tileProvider).toBe('amap');
     expect(config.coordinateSystem).toBe('gcj02');
     expect(config.deepLinkProvider).toBe('amap');
@@ -12,36 +12,39 @@ describe('getMapConfig', () => {
     expect(config.tileAttribution).toBe('© AutoNavi');
   });
 
-  it('returns osm + naver for KR', () => {
-    const config = getMapConfig(['KR']);
-    expect(config.tileProvider).toBe('osm');
+  it('returns maptiler + naver for KR when MapTiler is configured', () => {
+    const config = getMapConfig(['KR'], { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('maptiler');
     expect(config.coordinateSystem).toBe('wgs84');
     expect(config.deepLinkProvider).toBe('naver');
-    expect(config.tileSubdomains).toEqual(['a', 'b', 'c']);
-    expect(config.tileAttribution).toBe('© OpenStreetMap contributors');
+    expect(config.tileUrl).toBe('https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=test-key');
+    expect(config.tileAttribution).toContain('MapTiler');
   });
 
-  it('returns osm + google for JP', () => {
-    const config = getMapConfig(['JP']);
-    expect(config.tileProvider).toBe('osm');
+  it('returns maptiler + google for non-China maps when MapTiler is configured', () => {
+    const config = getMapConfig(['JP'], { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('maptiler');
     expect(config.coordinateSystem).toBe('wgs84');
     expect(config.deepLinkProvider).toBe('google');
+    expect(config.tileUrl).toContain('api.maptiler.com');
+    expect(config.tileUrl).toContain('key=test-key');
   });
 
-  it('returns osm + google for empty array', () => {
-    const config = getMapConfig([]);
+  it('returns osm + google when MapTiler is not configured', () => {
+    const config = getMapConfig([], { maptilerKey: '' });
     expect(config.tileProvider).toBe('osm');
+    expect(config.tileSubdomains).toEqual(['a', 'b', 'c']);
     expect(config.deepLinkProvider).toBe('google');
   });
 
   it('is case-insensitive for CN (lowercase cn)', () => {
-    const config = getMapConfig(['cn']);
+    const config = getMapConfig(['cn'], { maptilerKey: 'test-key' });
     expect(config.tileProvider).toBe('amap');
     expect(config.deepLinkProvider).toBe('amap');
   });
 
   it('CN takes precedence over KR when both present', () => {
-    const config = getMapConfig(['KR', 'CN']);
+    const config = getMapConfig(['KR', 'CN'], { maptilerKey: 'test-key' });
     expect(config.tileProvider).toBe('amap');
     expect(config.deepLinkProvider).toBe('amap');
   });
@@ -77,10 +80,8 @@ describe('buildDeepLink', () => {
 describe('wgs84ToGcj02', () => {
   it('transforms coordinates within China (Beijing)', () => {
     const result = wgs84ToGcj02(39.9, 116.4);
-    // Result should differ from input — GCJ-02 offset in Beijing is ~200-500m
     expect(result.lat).not.toBe(39.9);
     expect(result.lng).not.toBe(116.4);
-    // But should stay in roughly the same area
     expect(result.lat).toBeGreaterThan(39.8);
     expect(result.lat).toBeLessThan(40.0);
     expect(result.lng).toBeGreaterThan(116.3);
@@ -94,7 +95,6 @@ describe('wgs84ToGcj02', () => {
   });
 
   it('returns unchanged for edge case outside China bounds', () => {
-    // Tokyo is outside China's approximate bounds
     const result = wgs84ToGcj02(35.68, 139.69);
     expect(result.lat).toBe(35.68);
     expect(result.lng).toBe(139.69);

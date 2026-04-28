@@ -6,6 +6,8 @@ const NOMINATIM_INTERVAL_MS = 1000;
 
 let nextNominatimRequestAt = 0;
 
+// Curated place coordinates are OSM/WGS-84 reference values used as starting points only.
+// They are labeled 'estimated' so repair runs can overwrite them with accurate Nominatim data.
 const CURATED_PLACES = [
   {
     aliases: ['hongya cave', 'hongyadong', 'hongya cave chongqing', 'hongyadong chongqing'],
@@ -15,10 +17,10 @@ const CURATED_PLACES = [
     address: 'Hongyadong, Yuzhong District, Chongqing, China',
     lat: 29.5605,
     lng: 106.5655,
-    coordinateSystem: 'gcj02',
+    coordinateSystem: 'wgs84',
     providerId: 'curated:hongya-cave-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.99,
+    locationStatus: 'estimated',
+    confidence: 0.72,
   },
   {
     aliases: ['luohan temple', 'arhat temple', 'luohan temple chongqing'],
@@ -28,23 +30,57 @@ const CURATED_PLACES = [
     address: 'Luohan Temple, Yuzhong District, Chongqing, China',
     lat: 29.5557,
     lng: 106.5744,
-    coordinateSystem: 'gcj02',
+    coordinateSystem: 'wgs84',
     providerId: 'curated:luohan-temple-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.98,
+    locationStatus: 'estimated',
+    confidence: 0.72,
   },
   {
-    aliases: ['jiefangbei', 'jiefangbei pedestrian street', 'jiefangbei chongqing'],
+    aliases: [
+      'jiefangbei',
+      'jiefangbei pedestrian street',
+      'jiefangbei chongqing',
+      'people s liberation monument',
+      "people's liberation monument",
+      'liberation monument',
+      'jiefangbei monument',
+    ],
     city: 'chongqing',
     country: 'cn',
     name: 'Jiefangbei',
     address: 'Jiefangbei, Yuzhong District, Chongqing, China',
-    lat: 29.5580,
-    lng: 106.5772,
-    coordinateSystem: 'gcj02',
+    lat: 29.5601096,
+    lng: 106.5733569,
+    coordinateSystem: 'wgs84',
     providerId: 'curated:jiefangbei-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.98,
+    locationStatus: 'estimated',
+    confidence: 0.72,
+  },
+  {
+    aliases: ['three gorges museum', 'chongqing three gorges museum', 'china three gorges museum'],
+    city: 'chongqing',
+    country: 'cn',
+    name: 'Three Gorges Museum',
+    address: 'Three Gorges Museum, 236 Renmin Road, Yuzhong District, Chongqing, China',
+    lat: 29.5648943,
+    lng: 106.5465582,
+    coordinateSystem: 'wgs84',
+    providerId: 'curated:three-gorges-museum-chongqing',
+    locationStatus: 'estimated',
+    confidence: 0.72,
+  },
+  {
+    aliases: ['wulong karst landscape', 'wulong karst landscape day trip', 'wulong karst', 'wulong karst national geology park', 'three natural bridges'],
+    city: 'chongqing',
+    country: 'cn',
+    name: 'Wulong Karst Landscape',
+    address: 'Wulong Karst National Geology Park, Wulong District, Chongqing, China',
+    lat: 29.4338639,
+    lng: 107.8012806,
+    coordinateSystem: 'wgs84',
+    providerId: 'curated:wulong-karst-chongqing',
+    locationStatus: 'estimated',
+    confidence: 0.68,
   },
   {
     aliases: ['regent chongqing', 'regent hotel chongqing'],
@@ -54,10 +90,10 @@ const CURATED_PLACES = [
     address: 'Regent Chongqing, Jiangbei District, Chongqing, China',
     lat: 29.5578,
     lng: 106.5697,
-    coordinateSystem: 'gcj02',
+    coordinateSystem: 'wgs84',
     providerId: 'curated:regent-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.99,
+    locationStatus: 'estimated',
+    confidence: 0.72,
   },
   {
     aliases: ['raffles city chongqing', 'raffles city', 'chaotianmen raffles city'],
@@ -67,10 +103,10 @@ const CURATED_PLACES = [
     address: 'Raffles City Chongqing, Chaotianmen, Yuzhong District, Chongqing, China',
     lat: 29.5682,
     lng: 106.5876,
-    coordinateSystem: 'gcj02',
+    coordinateSystem: 'wgs84',
     providerId: 'curated:raffles-city-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.99,
+    locationStatus: 'estimated',
+    confidence: 0.72,
   },
   {
     aliases: ['chaotianmen dock', 'chaotianmen wharf', 'chaotianmen pier', 'chaotianmen dock chongqing'],
@@ -80,10 +116,10 @@ const CURATED_PLACES = [
     address: 'Chaotianmen Dock, Yuzhong District, Chongqing, China',
     lat: 29.5676,
     lng: 106.5870,
-    coordinateSystem: 'gcj02',
+    coordinateSystem: 'wgs84',
     providerId: 'curated:chaotianmen-dock-chongqing',
-    locationStatus: 'user_confirmed',
-    confidence: 0.98,
+    locationStatus: 'estimated',
+    confidence: 0.72,
   },
 ];
 
@@ -93,7 +129,7 @@ function normalizeText(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -108,6 +144,13 @@ function countryMatches(expected, actual) {
   const normActual = normalizeText(actual);
   if (normExpected === normActual) return true;
   return (normExpected === 'cn' && normActual === 'china') || (normExpected === 'china' && normActual === 'cn');
+}
+
+function placeNameMatches(expected, actual) {
+  if (!expected || !actual) return true;
+  const normExpected = normalizeText(expected);
+  const normActual = normalizeText(actual);
+  return normExpected === normActual || normExpected.replace(/\s+/g, '') === normActual.replace(/\s+/g, '');
 }
 
 function formatResolution({
@@ -141,10 +184,31 @@ function findCuratedPlace({ queryText, city, country }) {
   const normalizedCity = normalizeText(city);
 
   return CURATED_PLACES.find((place) => (
-    (!normalizedCity || normalizeText(place.city) === normalizedCity)
+    (!normalizedCity || placeNameMatches(place.city, city))
     && countryMatches(place.country, country)
     && place.aliases.some((alias) => normalizeText(alias) === query)
   ));
+}
+
+function uniqueValues(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = String(value || '').trim();
+    const key = normalizeText(text);
+    if (!text || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
+}
+
+function normalizeAliasList(aliases = []) {
+  if (!Array.isArray(aliases)) return [];
+  return aliases
+    .flatMap((alias) => Array.isArray(alias) ? alias : [alias])
+    .map((alias) => String(alias || '').trim())
+    .filter(Boolean);
 }
 
 function fromCurated(place) {
@@ -253,14 +317,13 @@ function findDiscoveryCacheMatch({ queryText, city }) {
 }
 
 function fromDiscovery(match) {
-  const isExact = match.score >= 1;
   return formatResolution({
     lat: match.item.lat,
     lng: match.item.lng,
-    coordinateSystem: 'unknown',
+    coordinateSystem: 'wgs84',
     coordinateSource: 'discovery',
-    locationStatus: isExact ? 'resolved' : 'estimated',
-    confidence: isExact ? 0.82 : 0.68,
+    locationStatus: 'estimated',
+    confidence: Math.min(match.score, 0.68),
     resolvedName: match.item.name,
     resolvedAddress: null,
     providerId: `discovery:${normalizeText(match.item.name).replace(/\s+/g, '-')}`,
@@ -296,15 +359,56 @@ function classifyNominatimResult(place, { queryText, city }) {
   };
 }
 
-async function searchNominatim({ queryText, city, country }) {
+function nominatimQueryTexts(queryText) {
+  const original = String(queryText || '').trim();
+  const variants = [original];
+  const bracketPatterns = [
+    /\(([^)]+)\)/g,
+    /（([^）]+)）/g,
+    /\[([^\]]+)\]/g,
+    /【([^】]+)】/g,
+  ];
+
+  for (const pattern of bracketPatterns) {
+    for (const match of original.matchAll(pattern)) {
+      if (match[1]?.trim()) variants.push(match[1].trim());
+    }
+  }
+
+  const stripped = original
+    .replace(/\([^)]*\)/g, '')
+    .replace(/（[^）]*）/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/【[^】]*】/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (stripped) variants.push(stripped);
+
+  return [...new Set(variants.filter(Boolean))];
+}
+
+function resolverQueryTexts(queryText, aliases = []) {
+  return uniqueValues([
+    ...nominatimQueryTexts(queryText),
+    ...normalizeAliasList(aliases).flatMap(nominatimQueryTexts),
+  ]);
+}
+
+async function fetchNominatimPayload({ queryText, city, country }) {
   await waitForNominatimSlot();
-  const q = [queryText, city, country].filter(Boolean).join(', ');
+  const canonicalCity = canonicalizeCity(city);
+  const q = [queryText, canonicalCity].filter(Boolean).join(', ');
   const params = new URLSearchParams({
     q,
     format: 'jsonv2',
     limit: '1',
     addressdetails: '1',
   });
+  const countryCode = String(country || '').trim().toLowerCase();
+  if (/^[a-z]{2}$/.test(countryCode)) {
+    params.set('countrycodes', countryCode);
+  }
 
   const response = await fetch(`${NOMINATIM_URL}?${params.toString()}`, {
     headers: {
@@ -317,30 +421,50 @@ async function searchNominatim({ queryText, city, country }) {
     throw Object.assign(new Error('Nominatim lookup failed'), { status: 502 });
   }
 
-  const payload = await response.json();
-  const place = Array.isArray(payload) ? payload[0] : null;
-  if (!place) return { result: null, rawJson: payload };
+  return response.json();
+}
 
-  const lat = Number.parseFloat(place.lat);
-  const lng = Number.parseFloat(place.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { result: null, rawJson: payload };
+function canonicalizeCity(city) {
+  const normalized = normalizeText(city);
+  const noSpace = normalized.replace(/\s+/g, '');
+  if (noSpace === 'chongqing') return 'Chongqing';
+  if (noSpace === 'chengdu') return 'Chengdu';
+  return city;
+}
 
-  const classification = classifyNominatimResult(place, { queryText, city });
-  return {
-    result: formatResolution({
-      lat,
-      lng,
-      coordinateSystem: 'wgs84',
-      coordinateSource: 'manual_lookup',
-      locationStatus: classification.locationStatus,
-      confidence: classification.confidence,
-      resolvedName: classification.name,
-      resolvedAddress: place.display_name || null,
-      providerId: place.osm_type && place.osm_id ? `${place.osm_type}:${place.osm_id}` : null,
-      provider: 'nominatim',
-    }),
-    rawJson: payload,
-  };
+async function searchNominatim({ queryText, city, country, aliases = [] }) {
+  const attempts = [];
+
+  for (const candidate of resolverQueryTexts(queryText, aliases)) {
+    const payload = await fetchNominatimPayload({ queryText: candidate, city, country });
+    attempts.push({ queryText: candidate, payload });
+
+    const place = Array.isArray(payload) ? payload[0] : null;
+    if (!place) continue;
+
+    const lat = Number.parseFloat(place.lat);
+    const lng = Number.parseFloat(place.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+    const classification = classifyNominatimResult(place, { queryText: candidate, city });
+    return {
+      result: formatResolution({
+        lat,
+        lng,
+        coordinateSystem: 'wgs84',
+        coordinateSource: 'manual_lookup',
+        locationStatus: classification.locationStatus,
+        confidence: classification.confidence,
+        resolvedName: classification.name,
+        resolvedAddress: place.display_name || null,
+        providerId: place.osm_type && place.osm_id ? `${place.osm_type}:${place.osm_id}` : null,
+        provider: 'nominatim',
+      }),
+      rawJson: attempts,
+    };
+  }
+
+  return { result: null, rawJson: attempts };
 }
 
 function unresolved() {
@@ -353,24 +477,42 @@ function unresolved() {
   });
 }
 
-export async function resolvePlace({ queryText, city, country, allowNetwork = true } = {}) {
+export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
   }
 
   const queryKey = buildPlaceQueryKey({ queryText: query, city, country });
-  const curated = findCuratedPlace({ queryText: query, city, country });
-  if (curated) return fromCurated(curated);
+  const lookupQueries = resolverQueryTexts(query, aliases);
+
+  // Skip curated and discovery when preferNominatim is active and network is available —
+  // these sources are AI-estimated and unreliable for accurate map placement.
+  const useFallbackChain = !preferNominatim || !allowNetwork;
+
+  if (useFallbackChain) {
+    const curated = lookupQueries
+      .map((candidate) => findCuratedPlace({ queryText: candidate, city, country }))
+      .find(Boolean);
+    if (curated) return fromCurated(curated);
+  }
 
   const cached = readCache(queryKey);
-  if (cached) return cached;
+  if (cached) {
+    if (!preferNominatim) return cached;
+    // With preferNominatim, only short-circuit on a previous successful Nominatim result
+    if (cached.provider === 'nominatim' && cached.locationStatus !== 'unresolved') return cached;
+  }
 
-  const discoveryMatch = findDiscoveryCacheMatch({ queryText: query, city });
-  if (discoveryMatch) {
-    const result = fromDiscovery(discoveryMatch);
-    writeCache({ queryKey, queryText: query, city, country, provider: 'discovery_cache', result });
-    return result;
+  if (useFallbackChain) {
+    const discoveryMatch = lookupQueries
+      .map((candidate) => findDiscoveryCacheMatch({ queryText: candidate, city }))
+      .find(Boolean);
+    if (discoveryMatch) {
+      const result = fromDiscovery(discoveryMatch);
+      writeCache({ queryKey, queryText: query, city, country, provider: 'discovery_cache', result });
+      return result;
+    }
   }
 
   if (!allowNetwork) {
@@ -378,7 +520,7 @@ export async function resolvePlace({ queryText, city, country, allowNetwork = tr
   }
 
   try {
-    const { result, rawJson } = await searchNominatim({ queryText: query, city, country });
+    const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases });
     if (result) {
       writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result, rawJson });
       return result;

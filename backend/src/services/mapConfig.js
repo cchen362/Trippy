@@ -1,3 +1,5 @@
+import { config } from '../config.js';
+
 const OSM_CONFIG = {
   tileProvider: 'osm',
   tileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -6,8 +8,19 @@ const OSM_CONFIG = {
   coordinateSystem: 'wgs84',
 };
 
-export function getMapConfig(destinationCountries) {
+function mapTilerConfig(maptilerKey) {
+  return {
+    tileProvider: 'maptiler',
+    tileUrl: `https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=${encodeURIComponent(maptilerKey)}`,
+    tileSubdomains: [],
+    tileAttribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+    coordinateSystem: 'wgs84',
+  };
+}
+
+export function getMapConfig(destinationCountries, options = {}) {
   const upper = (destinationCountries || []).map((c) => c.toUpperCase());
+  const maptilerKey = options.maptilerKey ?? config.maptilerKey;
 
   if (upper.includes('CN')) {
     return {
@@ -21,9 +34,23 @@ export function getMapConfig(destinationCountries) {
   }
 
   if (upper.includes('KR')) {
+    if (maptilerKey) {
+      return {
+        ...mapTilerConfig(maptilerKey),
+        deepLinkProvider: 'naver',
+      };
+    }
+
     return {
       ...OSM_CONFIG,
       deepLinkProvider: 'naver',
+    };
+  }
+
+  if (maptilerKey) {
+    return {
+      ...mapTilerConfig(maptilerKey),
+      deepLinkProvider: 'google',
     };
   }
 

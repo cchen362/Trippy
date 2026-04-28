@@ -31,6 +31,10 @@ essentials, culture, food, nature, nightlife, hidden_gems, architecture, wellnes
 
 Each item: { "name": string, "description": string (1-2 sentences, specific and factual), "whyItFits": string (one concrete sentence — name atmosphere, crowd level, or specific draw; never generic phrases like "great for couples" or "popular with tourists"), "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }
 
+Additional item fields:
+- Include "localName": string|null and "aliases": string[] on every item.
+- For places whose common indexed/local name is not English, put the traveler-friendly English or romanized name in "name", the local-script/common local name in "localName", and useful alternate spellings/official names in "aliases". Use null/[] when no meaningful local variant exists.
+
 Curation rules:
 - Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
 - Prioritise places with authentic local character: neighbourhood favourites, spots that reward insider knowledge, experiences with real depth.

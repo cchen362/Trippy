@@ -54,7 +54,21 @@
       "Bash(findstr \":3002\")",
       "Bash(node backend/src/index.js)",
       "Bash(node --env-file=.env backend/src/index.js)",
-      "Bash(node -e \"const d = require\\('C:/Users/cchen362/OneDrive/Desktop/Trippy/backend/node_modules/dotenv'\\); d.config\\(\\); console.log\\('ANTHROPIC set from cwd .env:', !!process.env.ANTHROPIC_API_KEY\\)\")"
+      "Bash(node -e \"const d = require\\('C:/Users/cchen362/OneDrive/Desktop/Trippy/backend/node_modules/dotenv'\\); d.config\\(\\); console.log\\('ANTHROPIC set from cwd .env:', !!process.env.ANTHROPIC_API_KEY\\)\")",
+      "Bash(npx kill-port *)",
+      "Read(//tmp/**)",
+      "Bash(node --env-file=.env -e ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(tasklist /FI \"PID eq 12396\")",
+      "Bash(wmic process *)",
+      "Bash(taskkill /PID 41672 /F)",
+      "PowerShell($pid3002 = \\(Get-NetTCPConnection -LocalPort 3002 -State Listen -ErrorAction SilentlyContinue\\).OwningProcess; if \\($pid3002\\) { Stop-Process -Id $pid3002 -Force; Write-Output \"Killed PID $pid3002\" } else { Write-Output \"Nothing on 3002\" })",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(node repair-locations.mjs)",
+      "Bash(node --env-file=../.env repair-locations.mjs)",
+      "Bash(dotenv -e ../.env -- node repair-locations.mjs)",
+      "Bash(node -e \"require\\('dotenv'\\).config\\({path:'../.env'}\\)\")",
+      "Bash(npx dotenv-cli *)"
     ]
   }
 }

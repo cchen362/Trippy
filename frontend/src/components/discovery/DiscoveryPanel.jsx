@@ -140,6 +140,14 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       note: suggestion.description,
       lat: suggestion.lat,
       lng: suggestion.lng,
+      locationQuery: suggestion.name,
+      locationCity: destination.trim(),
+      localName: suggestion.localName,
+      locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
+      coordinateSystem: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 'wgs84' : undefined,
+      coordinateSource: 'discovery',
+      locationStatus: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 'estimated' : undefined,
+      locationConfidence: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 0.68 : undefined,
       duration: suggestion.estimatedDuration,
     });
   };

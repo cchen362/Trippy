@@ -432,7 +432,7 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
     SELECT *
     FROM stops
     WHERE day_id IN (SELECT id FROM days WHERE trip_id = ?)
-    ORDER BY COALESCE(time, '99:99') ASC, sort_order ASC, created_at ASC
+    ORDER BY sort_order ASC, created_at ASC
   `).all(tripId).map(mapStop);
   const stopsByDay = new Map(days.map((day) => [day.id, []]));
 

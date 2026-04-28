@@ -81,7 +81,7 @@ function buildPublicTripDetail(tripId) {
     SELECT *
     FROM stops
     WHERE day_id IN (SELECT id FROM days WHERE trip_id = ?)
-    ORDER BY COALESCE(time, '99:99') ASC, sort_order ASC, created_at ASC
+    ORDER BY sort_order ASC, created_at ASC
   `).all(tripId).map(mapStop);
 
   for (const stop of stops) {

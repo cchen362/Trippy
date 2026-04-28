@@ -3,15 +3,17 @@
 function normalizeName(str) {
   return str
     .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 export default function SuggestionCard({ suggestion, days, onAddToDay }) {
-  const { name, description, whyItFits, whyItMatches, estimatedDuration, openingHours } = suggestion;
+  const { name, localName, description, whyItFits, whyItMatches, estimatedDuration, openingHours } = suggestion;
   const whyText = whyItFits ?? whyItMatches;
+  const showLocalName = localName && normalizeName(localName) !== normalizeName(name);
+  const displayName = showLocalName ? `${name} (${localName})` : name;
 
   const normalizedName = normalizeName(name ?? '');
   const addedToDayIds = new Set(
@@ -45,7 +47,7 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
             flex: 1,
           }}
         >
-          {name}
+          {displayName}
         </p>
         {isInTrip && (
           <span

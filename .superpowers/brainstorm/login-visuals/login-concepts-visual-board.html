@@ -1,0 +1,77 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trippy Login Concepts</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=DM+Mono:wght@400&family=Playfair+Display:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink-deep:#0d0b09; --ink-mid:#1c1a17; --ink-surface:#232018; --ink-border:rgba(255,255,255,.07); --gold:#c9a84c; --gold-soft:rgba(201,168,76,.12); --gold-line:rgba(201,168,76,.28); --cream:#f0ead8; --cream-dim:rgba(240,234,216,.60); --cream-mute:rgba(240,234,216,.28); }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at 82% 8%,rgba(201,168,76,.14),transparent 28rem),radial-gradient(circle at 10% 90%,rgba(240,234,216,.045),transparent 24rem),var(--ink-deep); color:var(--cream); font-family:'Cormorant Garamond',serif; padding:34px 28px 42px; }
+    .intro { max-width:1180px; margin:0 auto 26px; display:flex; justify-content:space-between; gap:24px; align-items:end; }
+    .kicker,.label { font-family:'DM Mono',monospace; text-transform:uppercase; letter-spacing:.24em; font-size:10px; color:var(--gold); }
+    h1 { font-family:'Playfair Display',serif; font-style:italic; font-weight:400; font-size:clamp(34px,5vw,64px); line-height:.96; margin:8px 0 0; }
+    .intro p { max-width:420px; color:var(--cream-dim); font-size:18px; line-height:1.35; margin:0; }
+    .grid { max-width:1180px; margin:0 auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; align-items:stretch; }
+    .concept { border:1px solid var(--ink-border); border-radius:12px; background:rgba(28,26,23,.62); padding:14px; cursor:pointer; transition:transform .22s ease,border-color .22s ease,background .22s ease; }
+    .concept:hover { transform:translateY(-3px); border-color:var(--gold-line); background:rgba(35,32,24,.86); }
+    .concept.selected { border-color:var(--gold); box-shadow:0 0 0 1px rgba(201,168,76,.22),0 20px 60px rgba(0,0,0,.28); }
+    .phone { min-height:640px; border-radius:16px; border:1px solid rgba(255,255,255,.1); overflow:hidden; position:relative; background:var(--ink-deep); box-shadow:inset 0 0 0 1px rgba(0,0,0,.5); }
+    .screen { position:absolute; inset:0; padding:28px 22px; display:flex; flex-direction:column; }
+    .gold-mark { width:22px; height:1px; background:var(--gold); margin-bottom:14px; }
+    .micro-dot { width:3px; height:3px; border-radius:50%; background:var(--gold); display:inline-block; margin:0 7px 2px; }
+    .title { font-family:'Playfair Display',serif; font-style:italic; font-weight:400; font-size:38px; line-height:.98; color:var(--cream); margin:8px 0 10px; }
+    .copy { color:var(--cream-dim); font-size:17px; line-height:1.28; margin:0; }
+    .card { border:1px solid var(--ink-border); border-radius:11px; background:linear-gradient(180deg,rgba(35,32,24,.96),rgba(28,26,23,.96)); }
+    .field { margin-top:14px; }
+    .field span { display:block; font-family:'DM Mono',monospace; text-transform:uppercase; letter-spacing:.22em; font-size:10px; color:var(--cream-mute); margin-bottom:7px; }
+    .input { height:45px; border:1px solid var(--ink-border); border-radius:8px; background:rgba(13,11,9,.55); }
+    .button { height:48px; display:grid; place-items:center; margin-top:18px; border-radius:7px; background:var(--gold); color:var(--ink-deep); font-family:'DM Mono',monospace; text-transform:uppercase; letter-spacing:.22em; font-size:10px; }
+    .tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:18px 0; }
+    .tab { border:1px solid var(--ink-border); border-radius:7px; height:40px; display:grid; place-items:center; font-family:'DM Mono',monospace; text-transform:uppercase; letter-spacing:.18em; font-size:9px; color:var(--cream-mute); }
+    .tab.active { color:var(--gold); background:var(--gold-soft); border-color:var(--gold-line); }
+    .notes { padding:14px 2px 0; }
+    .notes h2 { font-family:'Playfair Display',serif; font-style:italic; font-weight:400; font-size:24px; margin:0 0 6px; }
+    .notes p { color:var(--cream-dim); font-size:16px; line-height:1.28; margin:0 0 10px; }
+    .risk { font-family:'DM Mono',monospace; font-size:10px; line-height:1.45; color:var(--cream-mute); letter-spacing:.06em; text-transform:uppercase; }
+    .dossier .screen { justify-content:center; background:radial-gradient(circle at 86% 14%,rgba(201,168,76,.14),transparent 15rem),var(--ink-deep); }
+    .dossier .ticket { margin-top:24px; overflow:hidden; }
+    .dossier .ticket-head { padding:18px 18px 14px; border-bottom:1px solid var(--ink-border); }
+    .dossier .route { display:flex; align-items:center; gap:10px; margin-top:18px; }
+    .dossier .city { font-family:'Playfair Display',serif; font-style:italic; font-size:32px; line-height:1; }
+    .dossier .journey { flex:1; height:1px; background:repeating-linear-gradient(90deg,rgba(201,168,76,.42) 0 2px,transparent 2px 7px); position:relative; }
+    .dossier .journey:before,.dossier .journey:after { content:''; position:absolute; top:-3px; width:7px; height:7px; border-radius:50%; background:rgba(201,168,76,.75); }
+    .dossier .journey:before { left:0; } .dossier .journey:after { right:0; }
+    .dossier .ticket-body { padding:18px; }
+    .dossier .stamp { margin-top:auto; border-top:1px solid var(--ink-border); padding-top:15px; font-family:'DM Mono',monospace; letter-spacing:.16em; color:var(--cream-mute); font-size:10px; text-transform:uppercase; }
+    .hero .screen { justify-content:space-between; background:radial-gradient(circle at 78% 22%,rgba(201,168,76,.2),transparent 17rem),radial-gradient(circle at 15% 72%,rgba(240,234,216,.06),transparent 15rem),var(--ink-deep); }
+    .hero .title { font-size:51px; max-width:260px; }
+    .hero .form-shell { padding:18px; background:rgba(28,26,23,.62); border-top:1px solid var(--ink-border); border-radius:11px; backdrop-filter:blur(2px); }
+    .hero .wash-line { height:170px; border-left:1px solid var(--gold-line); margin:18px 0 0 5px; opacity:.72; }
+    .hotel .screen { justify-content:center; background:radial-gradient(circle at 74% 12%,rgba(201,168,76,.12),transparent 15rem),var(--ink-deep); }
+    .hotel .packet { margin-top:22px; padding:14px; background:rgba(35,32,24,.92); border-radius:12px; border:1px solid var(--ink-border); box-shadow:14px 14px 0 rgba(201,168,76,.05); }
+    .hotel .inner-note { padding:18px; border:1px solid var(--ink-border); border-radius:9px; background:rgba(13,11,9,.32); }
+    .hotel .room-row { display:grid; grid-template-columns:1fr auto; gap:12px; border-top:1px solid var(--ink-border); border-bottom:1px solid var(--ink-border); padding:13px 0; margin:16px 0; }
+    .hotel .room-no { font-family:'Playfair Display',serif; font-style:italic; font-size:44px; color:var(--gold); line-height:1; }
+    .mobile-tag { display:inline-flex; border:1px solid var(--gold-line); color:var(--gold); border-radius:999px; padding:5px 8px; font-family:'DM Mono',monospace; text-transform:uppercase; letter-spacing:.16em; font-size:9px; margin-top:8px; }
+    @media (max-width:980px) { .grid { grid-template-columns:1fr; } .intro { display:block; } .intro p { margin-top:14px; } .phone { min-height:560px; } }
+  </style>
+</head>
+<body>
+  <section class="intro"><div><div class="kicker">Trippy login page concepts</div><h1>Dark Ink Wash x Luxury</h1></div><p>Three mobile-first directions for a bespoke travel planning login. Click a card if one feels closest.</p></section>
+  <main class="grid">
+    <article class="concept dossier" data-choice="boarding-pass-dossier" onclick="toggleSelect(this)"><div class="phone"><div class="screen"><div><div class="gold-mark"></div><div class="label">Private itinerary</div><div class="title">Your next route, quietly held.</div><p class="copy">A login card treated like a premium travel dossier.</p></div><div class="card ticket"><div class="ticket-head"><div class="label">TRIPPY <span class="micro-dot"></span> ACCESS</div><div class="route"><div class="city">Home</div><div class="journey"></div><div class="city">Away</div></div></div><div class="ticket-body"><div class="tabs"><div class="tab active">Sign in</div><div class="tab">Register</div></div><div class="field"><span>Username</span><div class="input"></div></div><div class="field"><span>Password</span><div class="input"></div></div><div class="button">Open dossier</div></div></div><div class="stamp">REF 04.26 / CONFIDENTIAL JOURNEY NOTES</div></div></div><div class="notes"><h2>1. Boarding Pass / Travel Dossier</h2><p>Most travel-native: thin rules, ticket hierarchy, mono refs, dotted route detail.</p><div class="risk">Risk: keep it premium, not novelty airline. Mobile PWA: strongest.</div><span class="mobile-tag">Recommended</span></div></article>
+    <article class="concept hero" data-choice="ink-wash-hero" onclick="toggleSelect(this)"><div class="phone"><div class="screen"><div><div class="gold-mark"></div><div class="label">After dark planning</div><div class="title">Arrive before the itinerary begins.</div><p class="copy">The form sits inside a cinematic ink composition.</p><div class="wash-line"></div></div><div class="form-shell"><div class="tabs"><div class="tab active">Sign in</div><div class="tab">Register</div></div><div class="field"><span>Username</span><div class="input"></div></div><div class="field"><span>Password</span><div class="input"></div></div><div class="button">Continue</div></div></div></div><div class="notes"><h2>2. Ink Wash Hero</h2><p>Most emotional and cinematic, with a big italic headline and embedded form.</p><div class="risk">Risk: hero can overpower form on 360px. Mobile PWA: good, less practical.</div></div></article>
+    <article class="concept hotel" data-choice="hotel-key-concierge" onclick="toggleSelect(this)"><div class="phone"><div class="screen"><div><div class="gold-mark"></div><div class="label">Concierge desk</div><div class="title">Your key is waiting.</div><p class="copy">A restrained hotel packet with a formal note inside.</p></div><div class="packet"><div class="inner-note"><div class="label">Guest access</div><div class="room-row"><div><p class="copy">Suite</p><div class="label">Itinerary wing</div></div><div class="room-no">07</div></div><div class="tabs"><div class="tab active">Sign in</div><div class="tab">Register</div></div><div class="field"><span>Username</span><div class="input"></div></div><div class="field"><span>Password</span><div class="input"></div></div><div class="button">Receive key</div></div></div></div></div><div class="notes"><h2>3. Hotel Key / Concierge Card</h2><p>Hospitality-led and elegant, with a packet-and-note hierarchy.</p><div class="risk">Risk: reads more hotel than travel planner. Mobile PWA: very good.</div></div></article>
+  </main>
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll('.concept').forEach(function(card) { card.classList.remove('selected'); });
+    el.classList.add('selected');
+  }
+</script></body>
+</html>
+

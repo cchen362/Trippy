@@ -52,8 +52,8 @@ describe('resolver-aware stops', () => {
 
     expect(stop).toMatchObject({
       title: 'Raffles City Chongqing',
-      locationStatus: 'user_confirmed',
-      coordinateSystem: 'gcj02',
+      locationStatus: 'estimated',
+      coordinateSystem: 'wgs84',
       coordinateSource: 'curated',
       providerId: 'curated:raffles-city-chongqing',
     });
@@ -82,7 +82,7 @@ describe('resolver-aware stops', () => {
     });
   });
 
-  it('marks untrusted supplied coordinates as estimated, not resolved', async () => {
+  it('does not save unverified generated coordinates', async () => {
     const stop = await createStop(user.id, dayId, {
       title: 'AI Guess Place',
       lat: 29.5,
@@ -92,15 +92,202 @@ describe('resolver-aware stops', () => {
     });
 
     expect(stop).toMatchObject({
-      lat: 29.5,
-      lng: 106.5,
+      lat: null,
+      lng: null,
       coordinateSystem: 'unknown',
-      coordinateSource: 'copilot',
-      locationStatus: 'estimated',
+      coordinateSource: null,
+      locationStatus: 'unresolved',
     });
   });
 
-  it('does not re-resolve unrelated updates and preserves user-confirmed coordinates', async () => {
+  it('verifies discovery coordinates with Nominatim before saving them', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '29.557402',
+        lon: '106.574814',
+        display_name: 'Discovery Test Place, Chongqing, China',
+        name: 'Discovery Test Place',
+        osm_type: 'way',
+        osm_id: '987654',
+      }],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Discovery Test Place',
+      type: 'experience',
+      lat: 29.5389,
+      lng: 106.5806,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'discovery',
+      locationStatus: 'estimated',
+      locationQuery: 'Discovery Test Place',
+      unsplashPhotoUrl: null,
+    });
+
+    expect(stop).toMatchObject({
+      title: 'Discovery Test Place',
+      lat: 29.557402,
+      lng: 106.574814,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'manual_lookup',
+      locationStatus: 'resolved',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not save unverified discovery coordinates when Nominatim misses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Tiny Hidden Cave',
+      type: 'experience',
+      lat: 4.5,
+      lng: 101.1,
+      coordinateSource: 'discovery',
+      locationQuery: 'Tiny Hidden Cave',
+      unsplashPhotoUrl: null,
+    });
+
+    expect(stop).toMatchObject({
+      lat: null,
+      lng: null,
+      coordinateSystem: 'unknown',
+      coordinateSource: null,
+      locationStatus: 'unresolved',
+    });
+  });
+
+  it('falls back to vetted China aliases when Discover coordinates cannot be verified by Nominatim', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: "People's Liberation Monument",
+      type: 'experience',
+      lat: 29.555,
+      lng: 106.57,
+      coordinateSource: 'discovery',
+      locationCity: 'Chong Qing',
+      locationCountry: 'CN',
+      locationQuery: "People's Liberation Monument",
+      unsplashPhotoUrl: null,
+    });
+
+    expect(stop).toMatchObject({
+      lat: 29.5601096,
+      lng: 106.5733569,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'curated',
+      locationStatus: 'estimated',
+      providerId: 'curated:jiefangbei-chongqing',
+    });
+  });
+
+  it('falls back to country-scoped vetted aliases when the Discover city hint is wrong', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Wulong Karst Landscape (Day Trip)',
+      type: 'experience',
+      lat: 29.4,
+      lng: 107.8,
+      coordinateSource: 'discovery',
+      locationCity: 'Chengdu',
+      locationCountry: 'CN',
+      locationQuery: 'Wulong Karst Landscape (Day Trip)',
+      unsplashPhotoUrl: null,
+    });
+
+    expect(stop).toMatchObject({
+      lat: 29.4338639,
+      lng: 107.8012806,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'curated',
+      locationStatus: 'estimated',
+      providerId: 'curated:wulong-karst-chongqing',
+    });
+  });
+
+  it('repairs unresolved China Discover stops from vetted aliases after Nominatim misses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Three Gorges Museum',
+      type: 'experience',
+      unsplashPhotoUrl: null,
+    });
+    getDb().prepare(`
+      UPDATE stops
+      SET lat = NULL, lng = NULL, coordinate_system = 'unknown', coordinate_source = NULL,
+          location_status = 'unresolved', location_query = 'Three Gorges Museum'
+      WHERE id = ?
+    `).run(stop.id);
+
+    const result = await repairTripStopLocations(user.id, trip.trip.id);
+    const repaired = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+
+    expect(result.repaired).toBe(1);
+    expect(repaired).toMatchObject({
+      lat: 29.5648943,
+      lng: 106.5465582,
+      coordinate_system: 'wgs84',
+      coordinate_source: 'curated',
+      location_status: 'estimated',
+      provider_id: 'curated:three-gorges-museum-chongqing',
+    });
+  });
+
+  it('uses discovery-provided city instead of the active day city for generated coordinates', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '3.1219635',
+        lon: '101.6875793',
+        display_name: 'Thean Hou Temple, Kuala Lumpur, Malaysia',
+        name: 'Thean Hou Temple',
+        osm_type: 'way',
+        osm_id: '234567',
+      }],
+    });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Thean Hou Temple',
+      type: 'experience',
+      lat: 3.1489,
+      lng: 101.605,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'discovery',
+      locationStatus: 'estimated',
+      locationQuery: 'Thean Hou Temple',
+      locationCity: 'Kuala Lumpur',
+      locationCountry: 'MY',
+      unsplashPhotoUrl: null,
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.searchParams.get('q')).toBe('Thean Hou Temple, Kuala Lumpur');
+    expect(url.searchParams.get('countrycodes')).toBe('my');
+    expect(stop).toMatchObject({
+      lat: 3.1219635,
+      lng: 101.6875793,
+      coordinateSource: 'manual_lookup',
+      coordinateSystem: 'wgs84',
+    });
+  });
+
+  it('does not re-resolve unrelated updates and preserves curated coordinates', async () => {
     const stop = await createStop(user.id, dayId, {
       title: 'Raffles City Chongqing',
       type: 'experience',
@@ -113,7 +300,7 @@ describe('resolver-aware stops', () => {
       note: 'Keep the river view.',
       lat: stop.lat,
       lng: stop.lng,
-      locationStatus: 'user_confirmed',
+      locationStatus: 'estimated',
       providerId: 'curated:raffles-city-chongqing',
     });
   });
@@ -133,7 +320,7 @@ describe('resolver-aware stops', () => {
     expect(updated).toMatchObject({
       resolvedName: 'Hongya Cave',
       providerId: 'curated:hongya-cave-chongqing',
-      locationStatus: 'user_confirmed',
+      locationStatus: 'estimated',
     });
   });
 });
@@ -147,7 +334,7 @@ describe('map data endpoint service', () => {
 
     expect(mapData.mapConfig.coordinateSystem).toBe('gcj02');
     expect(mapData.segments).toHaveLength(1);
-    expect(mapData.stops.map((stop) => stop.title)).toEqual(['Raffles City Chongqing', 'Jiefangbei']);
+    expect(mapData.stops.map((stop) => stop.title)).toEqual(['Jiefangbei', 'Raffles City Chongqing']);
     expect(mapData.stops.map((stop) => stop.routeNumber)).toEqual([1, 2]);
     expect(mapData.stops[0]).toMatchObject({
       canRenderMarker: true,
@@ -230,15 +417,15 @@ describe('map data endpoint service', () => {
     let mapData = getTripMapData(user.id, multiDayTrip.trip.id);
     expect(mapData.stops.filter((stop) => stop.dayId === firstDay).map((stop) => [stop.title, stop.routeNumber])).toEqual([
       ['Morning Stop', 1],
-      ['Late Stop', 2],
-      ['Flexible Stop', 3],
+      ['Flexible Stop', 2],
+      ['Late Stop', 3],
     ]);
 
     reorderStops(user.id, firstDay, [late.id, morning.id, flexible.id]);
     mapData = getTripMapData(user.id, multiDayTrip.trip.id);
     expect(mapData.stops.filter((stop) => stop.dayId === firstDay).map((stop) => [stop.title, stop.routeNumber])).toEqual([
-      ['Morning Stop', 1],
-      ['Late Stop', 2],
+      ['Late Stop', 1],
+      ['Morning Stop', 2],
       ['Flexible Stop', 3],
     ]);
 
@@ -317,7 +504,14 @@ describe('map data endpoint service', () => {
 });
 
 describe('repair-stop-locations', () => {
-  it('upgrades unknown-coordinate stops matching curated overrides to gcj02', async () => {
+  function mockNominatimResponse(results) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => results,
+    });
+  }
+
+  it('upgrades unknown-coordinate stops using accurate Nominatim WGS-84 data', async () => {
     const db = getDb();
     const stop = await createStop(user.id, dayId, {
       title: 'Luohan Temple Chongqing',
@@ -328,15 +522,52 @@ describe('repair-stop-locations', () => {
     db.prepare('UPDATE stops SET coordinate_system = ?, location_status = ?, coordinate_source = ? WHERE id = ?')
       .run('unknown', 'estimated', null, stop.id);
 
+    mockNominatimResponse([{
+      lat: '29.5573',
+      lon: '106.5741',
+      display_name: 'Luohan Temple, Yuzhong District, Chongqing, China',
+      name: 'Luohan Temple',
+      osm_type: 'way',
+      osm_id: '123456',
+    }]);
+
     const result = await repairTripStopLocations(user.id, trip.trip.id);
 
     expect(result.repaired).toBe(1);
     expect(result.total).toBe(1);
     const repaired = db.prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
-    expect(repaired.coordinate_system).toBe('gcj02');
-    expect(repaired.location_status).toBe('user_confirmed');
-    expect(repaired.lat).toBeCloseTo(29.5597, 3);
-    expect(repaired.lng).toBeCloseTo(106.574, 2);
+    expect(repaired.coordinate_system).toBe('wgs84');
+    expect(repaired.coordinate_source).toBe('manual_lookup');
+    expect(['resolved', 'estimated']).toContain(repaired.location_status);
+    expect(repaired.lat).toBeCloseTo(29.5573, 3);
+    expect(repaired.lng).toBeCloseTo(106.5741, 3);
+  });
+
+  it('also re-repairs previously curated stops that are not user_confirmed', async () => {
+    const db = getDb();
+    const stop = await createStop(user.id, dayId, {
+      title: 'Luohan Temple Chongqing',
+      unsplashPhotoUrl: null,
+    });
+    // Simulate a stop that was previously resolved via curated but is not user-pinned
+    db.prepare('UPDATE stops SET coordinate_system = ?, location_status = ?, coordinate_source = ? WHERE id = ?')
+      .run('wgs84', 'estimated', 'curated', stop.id);
+
+    mockNominatimResponse([{
+      lat: '29.5573',
+      lon: '106.5741',
+      display_name: 'Luohan Temple, Chongqing, China',
+      name: 'Luohan Temple',
+      osm_type: 'way',
+      osm_id: '123456',
+    }]);
+
+    const result = await repairTripStopLocations(user.id, trip.trip.id);
+
+    expect(result.repaired).toBe(1);
+    const repaired = db.prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(repaired.coordinate_source).toBe('manual_lookup');
+    expect(repaired.coordinate_system).toBe('wgs84');
   });
 
   it('skips user_confirmed stops', async () => {
@@ -361,7 +592,7 @@ describe('repair-stop-locations', () => {
     expect(unchanged.coordinate_system).toBe('gcj02');
   });
 
-  it('leaves stops with no curated match unchanged', async () => {
+  it('leaves stops unchanged when Nominatim returns no result', async () => {
     const db = getDb();
     const stop = await createStop(user.id, dayId, {
       title: 'Some Obscure Local Restaurant',
@@ -371,6 +602,8 @@ describe('repair-stop-locations', () => {
     });
     db.prepare('UPDATE stops SET coordinate_system = ?, location_status = ? WHERE id = ?')
       .run('unknown', 'estimated', stop.id);
+
+    mockNominatimResponse([]);
 
     const result = await repairTripStopLocations(user.id, trip.trip.id);
 

@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trippy Logistics Card Mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;1,400;1,500&family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,700;1,400;1,500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050503;
+      --ink: #15130f;
+      --row: #1a1814;
+      --line: rgba(216, 177, 71, 0.2);
+      --gold: #d8b147;
+      --cream: #f7efd7;
+      --muted: rgba(247, 239, 215, 0.38);
+      --dim: rgba(247, 239, 215, 0.62);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 34px 24px 60px;
+      background: radial-gradient(circle at 48% 4%, rgba(216, 177, 71, 0.08), transparent 24%), var(--bg);
+      color: var(--cream);
+      font-family: "Cormorant Garamond", serif;
+    }
+
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .bar span,
+    .caption,
+    .badge {
+      font-family: "DM Mono", monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    .bar span {
+      color: var(--gold);
+    }
+
+    .bar::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: linear-gradient(90deg, var(--line), transparent);
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      margin-bottom: 28px;
+    }
+
+    .note {
+      margin: 0;
+      color: var(--dim);
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(280px, 382px) minmax(280px, 382px);
+      gap: 26px;
+      align-items: start;
+      justify-content: center;
+    }
+
+    .stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .caption {
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+
+    .card {
+      position: relative;
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      text-align: left;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(36, 31, 20, 0.98), rgba(15, 13, 10, 0.99) 44%, rgba(9, 8, 6, 0.99));
+      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .top {
+      position: relative;
+      min-height: 88px;
+      padding: 28px 18px 16px;
+      background: radial-gradient(circle at 18% 0%, rgba(216, 177, 71, 0.12), transparent 48%), rgba(31, 28, 20, 0.82);
+    }
+
+    .top.compact {
+      min-height: auto;
+      padding: 28px 18px 16px;
+      background: radial-gradient(circle at 95% 0%, rgba(216, 177, 71, 0.11), transparent 46%), rgba(16, 14, 11, 0.94);
+    }
+
+    .eyebrow {
+      position: relative;
+      z-index: 2;
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-family: "DM Mono", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.32em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .title {
+      position: relative;
+      z-index: 2;
+      margin: 0;
+      color: var(--cream);
+      font-family: "Playfair Display", serif;
+      font-size: 25px;
+      font-style: italic;
+      font-weight: 500;
+      line-height: 1.05;
+      text-shadow: 1px 1px 0 rgba(216, 177, 71, 0.45);
+    }
+
+    .rows {
+      padding: 16px 18px 15px;
+      background: rgba(24, 22, 18, 0.92);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 36px;
+      gap: 12px;
+      border-bottom: 1px solid rgba(216, 177, 71, 0.13);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .row b {
+      color: var(--muted);
+      font-family: "DM Mono", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.24em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .row span {
+      color: var(--cream);
+      font-family: "DM Mono", monospace;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      text-align: right;
+    }
+
+    .row span.gold {
+      color: var(--gold);
+    }
+
+    .codes {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr 1fr;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .code {
+      color: var(--cream);
+      font-family: "Playfair Display", serif;
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+      text-shadow: 2px 1px 0 rgba(216, 177, 71, 0.42);
+    }
+
+    .right {
+      text-align: right;
+    }
+
+    .route {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-family: "DM Mono", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .route::before,
+    .route::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--line);
+    }
+
+    .times {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 26px;
+      padding: 20px 18px 13px;
+      border-top: 1px solid rgba(255, 255, 255, 0.035);
+      background: rgba(24, 22, 18, 0.95);
+    }
+
+    .time {
+      color: var(--cream);
+      font-family: "DM Mono", monospace;
+      font-size: 21px;
+      font-weight: 700;
+      line-height: 1;
+      text-shadow: 1px 1px 0 rgba(216, 177, 71, 0.28);
+    }
+
+    .meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-family: "DM Mono", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .date {
+      margin-top: 2px;
+      color: var(--dim);
+      font-size: 14px;
+      font-style: italic;
+      line-height: 1.1;
+    }
+
+    .footer {
+      padding: 0 18px 15px;
+      background: rgba(24, 22, 18, 0.95);
+    }
+
+    .footer-line {
+      position: relative;
+      height: 1px;
+      margin-bottom: 12px;
+      background: rgba(216, 177, 71, 0.13);
+    }
+
+    .footer-line::before,
+    .footer-line::after {
+      content: "";
+      position: absolute;
+      top: -2px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--gold);
+    }
+
+    .footer-line::before { left: 0; }
+    .footer-line::after { right: 0; }
+
+    .ref {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .ref b,
+    .ref span {
+      font-family: "DM Mono", monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.24em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .ref b {
+      color: var(--muted);
+    }
+
+    .ref span {
+      color: var(--gold);
+      letter-spacing: 0.12em;
+    }
+
+    .current {
+      opacity: 0.78;
+      filter: saturate(0.82);
+    }
+
+    .current .card {
+      border-radius: 12px;
+      box-shadow: none;
+    }
+
+    .current .top {
+      padding-top: 28px;
+    }
+
+    .current .title {
+      font-size: 27px;
+      text-shadow: none;
+    }
+
+    .current .code {
+      font-family: "DM Mono", monospace;
+      font-size: 33px;
+    }
+
+    .current .route {
+      justify-content: center;
+    }
+
+    .current .route::before,
+    .current .route::after {
+      display: none;
+    }
+
+    .badge {
+      display: inline-block;
+      width: fit-content;
+      margin-top: 2px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--gold);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+    }
+
+    @media (max-width: 860px) {
+      body {
+        padding: 24px 16px 44px;
+      }
+
+      .intro,
+      .stage {
+        grid-template-columns: 1fr;
+      }
+
+      .stage {
+        max-width: 382px;
+        margin: 0 auto;
+      }
+
+      .note {
+        font-size: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="bar"><span>Logistics Cards</span></div>
+    <section class="intro">
+      <p class="note">Left is the current direction abstracted from screenshot 1. Right is a tighter proposed system based on the reference: narrower bespoke cards, stronger framing, refined row rhythm, top-right flourish, and shared transit language for flights and trains.</p>
+      <p class="note">This is visual-only intent. The production pass would preserve existing booking fields and click behavior while changing only component markup/classes and card CSS.</p>
+    </section>
+    <section class="stage">
+      <div class="stack current">
+        <p class="caption">Current feel</p>
+        <article class="card">
+          <div class="top">
+            <p class="eyebrow">Accommodation</p>
+            <h2 class="title">Regent Chongqing</h2>
+          </div>
+          <div class="rows">
+            <div class="row"><b>Check-in</b><span>Wed 11 Jun</span></div>
+            <div class="row"><b>Check-out</b><span>Mon 16 Jun · 5 nights</span></div>
+            <div class="row"><b>Booked via</b><span>IHG.com</span></div>
+            <div class="row"><b>Confirmation</b><span class="gold">IHG-7842991</span></div>
+          </div>
+        </article>
+        <article class="card transit">
+          <div class="top compact">
+            <p class="eyebrow">Singapore Airlines · SQ848</p>
+            <div class="codes">
+              <div class="code">KUL</div>
+              <div class="route">SQ 848</div>
+              <div class="code right">CTU</div>
+            </div>
+          </div>
+          <div class="times">
+            <div>
+              <div class="time">08:45</div>
+              <div class="meta">Depart · KUL</div>
+              <div class="date">Sun, 8 Jun</div>
+            </div>
+            <div class="right">
+              <div class="time">14:20</div>
+              <div class="meta">Arrive · CTU</div>
+              <div class="date">Sun, 8 Jun</div>
+            </div>
+          </div>
+          <div class="footer"><div class="footer-line"></div><div class="ref"><b>Booking ref</b><span>SQKL8X4</span></div></div>
+        </article>
+      </div>
+      <div class="stack">
+        <p class="caption">Proposed refined match</p>
+        <article class="card">
+          <div class="top">
+            <p class="eyebrow">Accommodation</p>
+            <h2 class="title">Regent Chongqing</h2>
+          </div>
+          <div class="rows">
+            <div class="row"><b>Check-in</b><span>Wed 11 Jun</span></div>
+            <div class="row"><b>Check-out</b><span>Mon 16 Jun · 5 nights</span></div>
+            <div class="row"><b>Booked via</b><span>IHG.com</span></div>
+            <div class="row"><b>Confirmation</b><span class="gold">IHG-7842991</span></div>
+          </div>
+        </article>
+        <article class="card transit">
+          <div class="top compact">
+            <p class="eyebrow">Singapore Airlines · SQ848</p>
+            <div class="codes">
+              <div class="code">KUL</div>
+              <div class="route">SQ 848</div>
+              <div class="code right">CTU</div>
+            </div>
+          </div>
+          <div class="times">
+            <div>
+              <div class="time">08:45</div>
+              <div class="meta">Depart · KUL</div>
+              <div class="date">Sun, 8 Jun</div>
+            </div>
+            <div class="right">
+              <div class="time">14:20</div>
+              <div class="meta">Arrive · CTU</div>
+              <div class="date">Sun, 8 Jun</div>
+            </div>
+          </div>
+          <div class="footer"><div class="footer-line"></div><div class="ref"><b>Booking ref</b><span>SQKL8X4</span></div></div>
+        </article>
+        <article class="card">
+          <div class="top">
+            <p class="eyebrow">Activity</p>
+            <h2 class="title">Dujiangyan Panda Valley</h2>
+          </div>
+          <div class="rows">
+            <div class="row"><b>When</b><span>Fri 13 Jun</span></div>
+            <div class="row"><b>Where</b><span>Chengdu</span></div>
+            <div class="row"><b>Confirmation</b><span class="gold">PD-1184</span></div>
+          </div>
+        </article>
+        <span class="badge">Flights and trains share this transit card</span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
