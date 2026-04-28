@@ -44,5 +44,6 @@ export const config = {
   flightDataProvider: process.env.FLIGHT_DATA_PROVIDER || '',
   aerodataboxApiKey: process.env.AERODATABOX_API_KEY || '',
   aerodataboxApiHost: process.env.AERODATABOX_API_HOST || 'aerodatabox.p.rapidapi.com',
+  nominatimUserAgent: process.env.NOMINATIM_USER_AGENT || 'Trippy travel planner local development (contact: local@example.invalid)',
   isProd: process.env.NODE_ENV === 'production',
 };
