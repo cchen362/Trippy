@@ -1,6 +1,7 @@
 import { useTripContext } from './TripPage.jsx';
 import { useMapData } from '../hooks/useMapData.js';
 import DayTabs from '../components/timeline/DayTabs.jsx';
+import MapSequencePanel from '../components/map/MapSequencePanel.jsx';
 import TripMap from '../components/map/TripMap.jsx';
 
 // TopBar ~56px + BottomNav ~64px + DayTabs ~52px + main vertical padding ~48px = ~220px
@@ -39,6 +40,7 @@ export default function MapTab() {
           </div>
         )}
         {mapConfig && <TripMap stops={stops} mapConfig={mapConfig} />}
+        {!configLoading && mapConfig && <MapSequencePanel stops={stops} />}
         {!configLoading && mapConfig && pinnedStops.length === 0 && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',

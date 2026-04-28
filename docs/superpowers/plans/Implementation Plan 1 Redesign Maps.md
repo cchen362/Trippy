@@ -315,7 +315,7 @@ Verification:
 
 ## Frontend Implementation
 
-### Task 7: Manual Add Place In Plan
+### Task 7: Manual Add Place In Plan — DONE
 
 Add an “Add place” action for active day.
 
@@ -338,7 +338,19 @@ Optional correction UX:
 - “Move pin”
 - “Search again”
 
-### Task 8: Map Rendering
+Progress:
+- Implemented on branch `redesign-maps`.
+- Added active-day `Add place` action in Plan.
+- Added a focused manual place form with place/name, optional time, type, note, and duration.
+- Manual place creation sends `location_query` through existing stop create flow so backend resolution works by place name.
+- Primary flow does not ask for coordinates.
+- Correction actions remain intentionally deferred to Task 10.
+
+Verification:
+- `cmd /c npm run build` in `frontend` passed.
+- `cmd /c npm test -- map.test.js migrations.test.js placeResolver.test.js locationIntegration.test.js` passed.
+
+### Task 8: Map Rendering — DONE
 
 Update `MapTab` and `TripMap`.
 
@@ -354,6 +366,20 @@ Do not:
 - call routing APIs
 - imply travel time
 - mutate stop coordinates in frontend
+
+Progress:
+- Implemented on branch `redesign-maps`.
+- Added day sequence panel in Map so all active-day stops remain visible, including unresolved stops.
+- Added numbered markers based on backend `routeNumber`.
+- Added subtle estimated marker styling while still allowing estimated stops to participate in route lines.
+- Added straight-line connector arrows between adjacent coordinate-bearing stops in itinerary order.
+- Added conservative dashed transit connectors using existing `type === 'transit'` stops when renderable endpoints exist.
+- Map rendering continues to use backend `displayLat/displayLng`; frontend does not mutate or convert coordinates.
+- Mixed-city segment chips, full route polish, and correction UI remain deferred to Tasks 5, 9, and 10.
+
+Verification:
+- `cmd /c npm run build` in `frontend` passed.
+- `cmd /c npm test -- map.test.js migrations.test.js placeResolver.test.js locationIntegration.test.js` passed.
 
 ### Task 9: Route Visualization
 

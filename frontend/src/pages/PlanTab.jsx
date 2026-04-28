@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Plus } from 'lucide-react';
+import AddPlaceModal from '../components/timeline/AddPlaceModal.jsx';
 import DayHeader from '../components/timeline/DayHeader.jsx';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import Timeline from '../components/timeline/Timeline.jsx';
@@ -24,6 +26,7 @@ export default function PlanTab() {
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  const [addPlaceOpen, setAddPlaceOpen] = useState(false);
 
   const handleReorder = async (orderedStopIds) => {
     if (!activeDay || orderedStopIds.length === 0) return;
@@ -31,6 +34,8 @@ export default function PlanTab() {
   };
 
   const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId });
+
+  const handleAddPlace = (data) => createStop(activeDay.id, data);
 
   const handleCityOverride = async (date, cityOverride) => {
     await tripsApi.patchDayCityOverride(trip.id, date, cityOverride);
@@ -42,8 +47,33 @@ export default function PlanTab() {
       <DayTabs days={days} activeDayId={activeDayId} onSelect={setActiveDayId} />
 
       {/* Discover button with pulsing dot when loading in background */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
         <button
+          type="button"
+          onClick={() => setAddPlaceOpen(true)}
+          disabled={!activeDay}
+          style={{
+            fontFamily: "'DM Mono', monospace",
+            fontSize: '11px',
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: 'var(--ink-deep)',
+            border: '1px solid rgba(201,168,76,0.55)',
+            borderRadius: '999px',
+            padding: '5px 14px',
+            background: 'var(--gold)',
+            cursor: activeDay ? 'pointer' : 'not-allowed',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+            opacity: activeDay ? 1 : 0.55,
+          }}
+        >
+          <Plus size={13} />
+          ADD PLACE
+        </button>
+        <button
+          type="button"
           onClick={() => setDiscoveryOpen(true)}
           style={{
             fontFamily: "'DM Mono', monospace",
@@ -104,6 +134,18 @@ export default function PlanTab() {
             onAddStop={createStop}
             onClose={() => setDiscoveryOpen(false)}
             discovery={discovery}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {addPlaceOpen && (
+          <AddPlaceModal
+            open={addPlaceOpen}
+            day={activeDay}
+            saving={saving}
+            onClose={() => setAddPlaceOpen(false)}
+            onSubmit={handleAddPlace}
           />
         )}
       </AnimatePresence>
