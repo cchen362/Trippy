@@ -353,7 +353,7 @@ function unresolved() {
   });
 }
 
-export async function resolvePlace({ queryText, city, country } = {}) {
+export async function resolvePlace({ queryText, city, country, allowNetwork = true } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
@@ -371,6 +371,10 @@ export async function resolvePlace({ queryText, city, country } = {}) {
     const result = fromDiscovery(discoveryMatch);
     writeCache({ queryKey, queryText: query, city, country, provider: 'discovery_cache', result });
     return result;
+  }
+
+  if (!allowNetwork) {
+    return unresolved();
   }
 
   try {

@@ -6,14 +6,14 @@ function MapBounds({ stops }) {
   const map = useMap();
   useEffect(() => {
     if (stops.length === 0) return;
-    const bounds = stops.map(s => [s.lat, s.lng]);
+    const bounds = stops.map(s => [s.displayLat, s.displayLng]);
     map.fitBounds(bounds, { padding: [40, 40] });
   }, [stops, map]);
   return null;
 }
 
 export default function TripMap({ stops, mapConfig }) {
-  const pinnedStops = stops.filter(s => s.lat && s.lng);
+  const pinnedStops = stops.filter(s => s.canRenderMarker);
 
   return (
     <MapContainer

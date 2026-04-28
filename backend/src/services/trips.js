@@ -81,6 +81,7 @@ function mapBooking(row) {
     origin: row.origin,
     destination: row.destination,
     terminalOrStation: row.terminal_or_station,
+    showInItinerary: Boolean(row.show_in_itinerary),
     detailsJson: parseJson(row.details_json, {}),
     createdAt: row.created_at,
   };
@@ -190,7 +191,7 @@ export function assertTripAccess(userId, tripId) {
 export function assertDayAccess(userId, dayId) {
   const db = getDb();
   const row = db.prepare(`
-    SELECT d.*, t.owner_id
+    SELECT d.*, t.owner_id, t.destination_countries
     FROM days d
     JOIN trips t ON t.id = d.trip_id
     LEFT JOIN trip_collaborators tc ON tc.trip_id = t.id

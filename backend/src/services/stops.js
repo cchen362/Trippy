@@ -1,6 +1,7 @@
 import { getDb } from '../db/database.js';
 import { pickPhoto } from './unsplash.js';
 import { assertDayAccess, assertStopAccess } from './trips.js';
+import { resolvePlace } from './placeResolver.js';
 
 function formatStop(row) {
   return {
@@ -74,6 +75,176 @@ function titleHash(title) {
   return Math.abs(h);
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countryForDay(day) {
+  try {
+    const countries = JSON.parse(day.destination_countries || '[]');
+    return Array.isArray(countries) ? countries[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasCoordinates(input) {
+  return Number.isFinite(Number(input?.lat)) && Number.isFinite(Number(input?.lng));
+}
+
+function hasTrustedCoordinateMetadata(input) {
+  return ['wgs84', 'gcj02'].includes(input?.coordinateSystem)
+    && ['resolved', 'estimated', 'user_confirmed'].includes(input?.locationStatus || 'resolved');
+}
+
+function isGeneratedCoordinateSource(source) {
+  return source === 'discovery' || source === 'copilot';
+}
+
+function isSimilarPlace(query, resolvedName) {
+  const normalizedQuery = normalizeText(query);
+  const normalizedResolved = normalizeText(resolvedName);
+  if (!normalizedQuery || !normalizedResolved) return false;
+  return normalizedQuery === normalizedResolved
+    || normalizedQuery.includes(normalizedResolved)
+    || normalizedResolved.includes(normalizedQuery);
+}
+
+function applyResolutionFields(base, resolution, locationQuery) {
+  return {
+    ...base,
+    lat: resolution.lat ?? null,
+    lng: resolution.lng ?? null,
+    locationQuery,
+    resolvedName: resolution.resolvedName ?? null,
+    resolvedAddress: resolution.resolvedAddress ?? null,
+    coordinateSystem: resolution.coordinateSystem || 'unknown',
+    coordinateSource: resolution.coordinateSource ?? null,
+    locationStatus: resolution.locationStatus || 'unresolved',
+    locationConfidence: resolution.confidence ?? null,
+    providerId: resolution.providerId ?? null,
+  };
+}
+
+function preserveLocationFields(input) {
+  return {
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
+    locationQuery: input.locationQuery ?? input.title ?? null,
+    resolvedName: input.resolvedName ?? null,
+    resolvedAddress: input.resolvedAddress ?? null,
+    coordinateSystem: input.coordinateSystem || 'unknown',
+    coordinateSource: input.coordinateSource ?? null,
+    locationStatus: input.locationStatus || 'resolved',
+    locationConfidence: input.locationConfidence ?? null,
+    providerId: input.providerId ?? null,
+  };
+}
+
+async function resolveLocationForStop({ day, title, input, existing = null }) {
+  const explicitLocationQuery = input.locationQuery ?? input.location ?? null;
+  const locationQuery = (explicitLocationQuery || input.resolvedName || title || '').trim();
+  const inputHasCoordinates = hasCoordinates(input);
+  const trustedCoordinates = inputHasCoordinates && hasTrustedCoordinateMetadata(input);
+  const generatedCoordinates = inputHasCoordinates && isGeneratedCoordinateSource(input.coordinateSource);
+
+  if (trustedCoordinates && !generatedCoordinates) {
+    return preserveLocationFields({ ...input, locationQuery });
+  }
+
+  const existingQuery = existing?.location_query || existing?.title || '';
+  const queryChanged = Boolean(existing) && normalizeText(locationQuery) !== normalizeText(existingQuery);
+  const protectedUserPin = existing?.location_status === 'user_confirmed'
+    && !input.reResolveLocation
+    && !trustedCoordinates;
+
+  if (protectedUserPin) {
+    return {
+      lat: existing.lat,
+      lng: existing.lng,
+      locationQuery: existing.location_query,
+      resolvedName: existing.resolved_name,
+      resolvedAddress: existing.resolved_address,
+      coordinateSystem: existing.coordinate_system,
+      coordinateSource: existing.coordinate_source,
+      locationStatus: existing.location_status,
+      locationConfidence: existing.location_confidence,
+      providerId: existing.provider_id,
+    };
+  }
+
+  const shouldResolve = Boolean(locationQuery)
+    && (!existing || input.reResolveLocation || queryChanged || generatedCoordinates || (!inputHasCoordinates && input.locationQuery !== undefined));
+
+  if (shouldResolve) {
+    const resolution = await resolvePlace({
+      queryText: locationQuery,
+      city: day.resolvedCity || day.city,
+      country: countryForDay(day),
+      allowNetwork: Boolean(explicitLocationQuery || input.reResolveLocation || input.coordinateSource === 'booking'),
+    });
+
+    if (resolution.lat !== null && resolution.lng !== null && (!inputHasCoordinates || isSimilarPlace(locationQuery, resolution.resolvedName))) {
+      const confirmedResolution = generatedCoordinates && resolution.coordinateSystem === 'unknown'
+        ? { ...resolution, locationStatus: 'estimated', confidence: Math.min(resolution.confidence ?? 0.68, 0.68) }
+        : resolution;
+      return applyResolutionFields({}, confirmedResolution, locationQuery);
+    }
+
+    if (inputHasCoordinates) {
+      return {
+        lat: input.lat,
+        lng: input.lng,
+        locationQuery,
+        resolvedName: resolution.resolvedName ?? null,
+        resolvedAddress: resolution.resolvedAddress ?? null,
+        coordinateSystem: input.coordinateSystem || 'unknown',
+        coordinateSource: input.coordinateSource || 'discovery',
+        locationStatus: 'estimated',
+        locationConfidence: Math.min(resolution.confidence ?? 0.5, 0.68),
+        providerId: resolution.providerId ?? null,
+      };
+    }
+
+    return applyResolutionFields({}, resolution, locationQuery);
+  }
+
+  if (inputHasCoordinates) {
+    return {
+      lat: input.lat,
+      lng: input.lng,
+      locationQuery,
+      resolvedName: input.resolvedName ?? existing?.resolved_name ?? null,
+      resolvedAddress: input.resolvedAddress ?? existing?.resolved_address ?? null,
+      coordinateSystem: input.coordinateSystem || existing?.coordinate_system || 'unknown',
+      coordinateSource: input.coordinateSource ?? existing?.coordinate_source ?? null,
+      locationStatus: input.locationStatus || existing?.location_status || 'estimated',
+      locationConfidence: input.locationConfidence ?? existing?.location_confidence ?? null,
+      providerId: input.providerId ?? existing?.provider_id ?? null,
+    };
+  }
+
+  return {
+    lat: existing?.lat ?? null,
+    lng: existing?.lng ?? null,
+    locationQuery: existing?.location_query ?? locationQuery ?? null,
+    resolvedName: existing?.resolved_name ?? null,
+    resolvedAddress: existing?.resolved_address ?? null,
+    coordinateSystem: existing?.coordinate_system ?? 'unknown',
+    coordinateSource: existing?.coordinate_source ?? null,
+    locationStatus: existing?.location_status ?? 'unresolved',
+    locationConfidence: existing?.location_confidence ?? null,
+    providerId: existing?.provider_id ?? null,
+  };
+}
+
 function getDayIndex(tripId, dayDate) {
   const db = getDb();
   const row = db.prepare(`
@@ -117,6 +288,7 @@ export async function createStop(userId, dayId, input) {
   }
 
   const type = input.type || 'explore';
+  const location = await resolveLocationForStop({ day, title, input });
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = await resolvePhotoUrl({
     title,
@@ -129,9 +301,11 @@ export async function createStop(userId, dayId, input) {
   const row = db.prepare(`
     INSERT INTO stops (
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
-      estimated_cost, booking_required, best_time, duration, sort_order, is_featured
+      estimated_cost, booking_required, best_time, duration, sort_order, is_featured,
+      location_query, resolved_name, resolved_address, coordinate_system, coordinate_source,
+      location_status, location_confidence, provider_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     dayId,
@@ -140,8 +314,8 @@ export async function createStop(userId, dayId, input) {
     title,
     type,
     input.note || null,
-    input.lat ?? null,
-    input.lng ?? null,
+    location.lat,
+    location.lng,
     unsplashPhotoUrl,
     input.estimatedCost || null,
     input.bookingRequired ? 1 : 0,
@@ -149,6 +323,14 @@ export async function createStop(userId, dayId, input) {
     input.duration || null,
     input.sortOrder ?? nextSortOrder(dayId),
     input.isFeatured ? 1 : 0,
+    location.locationQuery,
+    location.resolvedName,
+    location.resolvedAddress,
+    location.coordinateSystem,
+    location.coordinateSource,
+    location.locationStatus,
+    location.locationConfidence,
+    location.providerId,
   );
 
   return formatStop(row);
@@ -164,6 +346,7 @@ export async function updateStop(userId, stopId, input) {
 
   const title = (input.title ?? existing.title)?.trim();
   const type = input.type ?? existing.type;
+  const location = await resolveLocationForStop({ day, title, input, existing });
   const shouldRefreshPhoto = isMoving || input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = shouldRefreshPhoto
@@ -194,7 +377,15 @@ export async function updateStop(userId, stopId, input) {
       best_time = ?,
       duration = ?,
       sort_order = ?,
-      is_featured = ?
+      is_featured = ?,
+      location_query = ?,
+      resolved_name = ?,
+      resolved_address = ?,
+      coordinate_system = ?,
+      coordinate_source = ?,
+      location_status = ?,
+      location_confidence = ?,
+      provider_id = ?
     WHERE id = ?
     RETURNING *
   `).get(
@@ -203,8 +394,8 @@ export async function updateStop(userId, stopId, input) {
     title,
     type,
     input.note ?? existing.note,
-    input.lat ?? existing.lat,
-    input.lng ?? existing.lng,
+    location.lat,
+    location.lng,
     unsplashPhotoUrl,
     input.estimatedCost ?? existing.estimated_cost,
     input.bookingRequired !== undefined ? (input.bookingRequired ? 1 : 0) : existing.booking_required,
@@ -212,6 +403,14 @@ export async function updateStop(userId, stopId, input) {
     input.duration ?? existing.duration,
     sortOrder,
     input.isFeatured !== undefined ? (input.isFeatured ? 1 : 0) : existing.is_featured,
+    location.locationQuery,
+    location.resolvedName,
+    location.resolvedAddress,
+    location.coordinateSystem,
+    location.coordinateSource,
+    location.locationStatus,
+    location.locationConfidence,
+    location.providerId,
     stopId,
   );
 
@@ -249,6 +448,8 @@ export function reorderStops(userId, dayId, orderedStopIds) {
 }
 
 function inferBookingStop(booking) {
+  if (!booking.show_in_itinerary) return null;
+
   if (booking.type === 'hotel') {
     const [datePart, timePart] = String(booking.start_datetime || '').split('T');
     const date = datePart || null;
@@ -261,6 +462,7 @@ function inferBookingStop(booking) {
       note: [booking.booking_source, booking.confirmation_ref].filter(Boolean).join(' • ') || null,
       bookingRequired: true,
       isFeatured: true,
+      locationQuery: booking.destination || booking.title,
       cityHint: booking.destination || booking.origin || '',
     };
   }
@@ -278,8 +480,44 @@ function inferBookingStop(booking) {
     note: [booking.origin, booking.destination, booking.confirmation_ref].filter(Boolean).join(' • ') || null,
     bookingRequired: true,
     isFeatured: booking.type === 'flight',
+    locationQuery: booking.type === 'other' ? (booking.destination || booking.title) : (booking.destination || booking.origin || booking.title),
     cityHint: booking.destination || booking.origin || '',
   };
+}
+
+function cleanupLinkedStop(stop) {
+  if (!stop) return;
+  const db = getDb();
+  if (stop.booking_required) {
+    db.prepare('DELETE FROM stops WHERE id = ?').run(stop.id);
+  } else {
+    db.prepare('UPDATE stops SET booking_id = NULL WHERE id = ?').run(stop.id);
+  }
+}
+
+function findMatchingStopForBooking(dayId, booking, location) {
+  if (booking.type !== 'other') return null;
+  const db = getDb();
+  const title = normalizeText(booking.title);
+  const destination = normalizeText(booking.destination);
+  const providerId = location?.providerId;
+
+  const rows = db.prepare(`
+    SELECT *
+    FROM stops
+    WHERE day_id = ?
+      AND (booking_id IS NULL OR booking_id = ?)
+    ORDER BY COALESCE(time, '99:99') ASC, sort_order ASC, created_at ASC
+  `).all(dayId, booking.id);
+
+  return rows.find((stop) => {
+    const stopTitle = normalizeText(stop.title);
+    const stopQuery = normalizeText(stop.location_query);
+    const textMatch = (title && (stopTitle === title || stopQuery === title))
+      || (destination && (stopTitle === destination || stopQuery === destination));
+    const providerMatch = providerId && stop.provider_id && providerId === stop.provider_id;
+    return textMatch || providerMatch;
+  }) || null;
 }
 
 export async function backfillTripPhotos(userId, tripId) {
@@ -312,19 +550,32 @@ export async function syncStopWithBooking(booking) {
   const inferred = inferBookingStop(booking);
 
   if (!inferred) {
-    if (existingStop) {
-      db.prepare('DELETE FROM stops WHERE id = ?').run(existingStop.id);
-    }
+    cleanupLinkedStop(existingStop);
     return null;
   }
 
-  const day = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(booking.trip_id, inferred.date);
+  const day = db.prepare(`
+    SELECT d.*, t.destination_countries
+    FROM days d
+    JOIN trips t ON t.id = d.trip_id
+    WHERE d.trip_id = ? AND d.date = ?
+    LIMIT 1
+  `).get(booking.trip_id, inferred.date);
   if (!day) {
-    if (existingStop) {
-      db.prepare('DELETE FROM stops WHERE id = ?').run(existingStop.id);
-    }
+    cleanupLinkedStop(existingStop);
     return null;
   }
+
+  const location = await resolveLocationForStop({
+    day,
+    title: inferred.title,
+    input: {
+      title: inferred.title,
+      locationQuery: inferred.locationQuery,
+      coordinateSource: 'booking',
+    },
+    existing: existingStop,
+  });
 
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = await resolvePhotoUrl({
@@ -340,34 +591,93 @@ export async function syncStopWithBooking(booking) {
       UPDATE stops
       SET
         day_id = ?,
+        booking_id = ?,
         time = ?,
         title = ?,
         type = ?,
         note = ?,
+        lat = ?,
+        lng = ?,
         unsplash_photo_url = ?,
         booking_required = 1,
-        is_featured = ?
+        is_featured = ?,
+        location_query = ?,
+        resolved_name = ?,
+        resolved_address = ?,
+        coordinate_system = ?,
+        coordinate_source = ?,
+        location_status = ?,
+        location_confidence = ?,
+        provider_id = ?
       WHERE id = ?
       RETURNING *
     `).get(
       day.id,
+      booking.id,
       inferred.time,
       inferred.title,
       inferred.type,
       inferred.note,
+      location.lat,
+      location.lng,
       unsplashPhotoUrl,
       inferred.isFeatured ? 1 : 0,
+      location.locationQuery,
+      location.resolvedName,
+      location.resolvedAddress,
+      location.coordinateSystem,
+      location.coordinateSource,
+      location.locationStatus,
+      location.locationConfidence,
+      location.providerId,
       existingStop.id,
+    );
+    return formatStop(row);
+  }
+
+  const matchingStop = findMatchingStopForBooking(day.id, booking, location);
+  if (matchingStop) {
+    const row = db.prepare(`
+      UPDATE stops
+      SET
+        booking_id = ?,
+        lat = COALESCE(lat, ?),
+        lng = COALESCE(lng, ?),
+        location_query = COALESCE(location_query, ?),
+        resolved_name = COALESCE(resolved_name, ?),
+        resolved_address = COALESCE(resolved_address, ?),
+        coordinate_system = CASE WHEN coordinate_system = 'unknown' THEN ? ELSE coordinate_system END,
+        coordinate_source = COALESCE(coordinate_source, ?),
+        location_status = CASE WHEN location_status = 'unresolved' THEN ? ELSE location_status END,
+        location_confidence = COALESCE(location_confidence, ?),
+        provider_id = COALESCE(provider_id, ?)
+      WHERE id = ?
+      RETURNING *
+    `).get(
+      booking.id,
+      location.lat,
+      location.lng,
+      location.locationQuery,
+      location.resolvedName,
+      location.resolvedAddress,
+      location.coordinateSystem,
+      location.coordinateSource,
+      location.locationStatus,
+      location.locationConfidence,
+      location.providerId,
+      matchingStop.id,
     );
     return formatStop(row);
   }
 
   const row = db.prepare(`
     INSERT INTO stops (
-      day_id, booking_id, time, title, type, note, unsplash_photo_url,
-      booking_required, sort_order, is_featured
+      day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
+      booking_required, sort_order, is_featured, location_query, resolved_name,
+      resolved_address, coordinate_system, coordinate_source, location_status,
+      location_confidence, provider_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     day.id,
@@ -376,9 +686,19 @@ export async function syncStopWithBooking(booking) {
     inferred.title,
     inferred.type,
     inferred.note,
+    location.lat,
+    location.lng,
     unsplashPhotoUrl,
     nextSortOrder(day.id),
     inferred.isFeatured ? 1 : 0,
+    location.locationQuery,
+    location.resolvedName,
+    location.resolvedAddress,
+    location.coordinateSystem,
+    location.coordinateSource,
+    location.locationStatus,
+    location.locationConfidence,
+    location.providerId,
   );
 
   return formatStop(row);

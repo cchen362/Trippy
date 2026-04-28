@@ -1,0 +1,1 @@
+ALTER TABLE bookings ADD COLUMN show_in_itinerary INTEGER NOT NULL DEFAULT 1;

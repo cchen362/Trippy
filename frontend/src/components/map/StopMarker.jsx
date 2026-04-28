@@ -13,8 +13,11 @@ const goldIcon = L.divIcon({
 });
 
 export default function StopMarker({ stop, deepLinkProvider }) {
+  const lat = stop.displayLat ?? stop.lat;
+  const lng = stop.displayLng ?? stop.lng;
+
   return (
-    <Marker position={[stop.lat, stop.lng]} icon={goldIcon}>
+    <Marker position={[lat, lng]} icon={goldIcon}>
       <Popup>
         <div style={{ background: '#1c1a17', color: '#f0ead8', minWidth: 160, padding: '8px 0' }}>
           <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: 'italic', fontSize: 14, marginBottom: 4 }}>
@@ -25,8 +28,8 @@ export default function StopMarker({ stop, deepLinkProvider }) {
               {stop.time}
             </div>
           )}
-          {stop.lat && stop.lng && (
-            <OpenInMapsButton lat={stop.lat} lng={stop.lng} label={stop.title} deepLinkProvider={deepLinkProvider} />
+          {lat && lng && (
+            <OpenInMapsButton lat={lat} lng={lng} label={stop.title} deepLinkProvider={deepLinkProvider} />
           )}
         </div>
       </Popup>

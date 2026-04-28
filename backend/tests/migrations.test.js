@@ -54,11 +54,18 @@ describe('migrations', () => {
     expect(columns).toContain('provider_id');
   });
 
+  it('adds booking itinerary visibility column', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(bookings)').all().map((r) => r.name);
+
+    expect(columns).toContain('show_in_itinerary');
+  });
+
   it('tracks migration versions to avoid re-running', () => {
     const db = getDb();
     // Running again should not throw
     expect(() => runMigrations()).not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(8);
+    expect(count.c).toBe(9);
   });
 });

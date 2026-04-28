@@ -1,5 +1,5 @@
 import { useTripContext } from './TripPage.jsx';
-import { useMapConfig } from '../hooks/useMapConfig.js';
+import { useMapData } from '../hooks/useMapData.js';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import TripMap from '../components/map/TripMap.jsx';
 
@@ -7,11 +7,23 @@ import TripMap from '../components/map/TripMap.jsx';
 const MAP_HEIGHT = 'calc(100vh - 220px)';
 
 export default function MapTab() {
-  const { trip, days, activeDay, activeDayId, setActiveDayId } = useTripContext();
-  const { mapConfig, loading: configLoading } = useMapConfig(trip?.id);
+  const { trip, days, activeDayId, setActiveDayId } = useTripContext();
+  const mapRefreshKey = JSON.stringify(days.map((day) => ({
+    id: day.id,
+    stops: (day.stops || []).map((stop) => [
+      stop.id,
+      stop.time,
+      stop.sortOrder,
+      stop.lat,
+      stop.lng,
+      stop.locationStatus,
+      stop.coordinateSystem,
+    ]),
+  })));
+  const { mapConfig, stops: mapStops, loading: configLoading } = useMapData(trip?.id, mapRefreshKey);
 
-  const stops = activeDay?.stops ?? [];
-  const pinnedStops = stops.filter(s => s.lat && s.lng);
+  const stops = mapStops.filter((stop) => stop.dayId === activeDayId);
+  const pinnedStops = stops.filter((stop) => stop.canRenderMarker);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--ink-deep)' }}>
