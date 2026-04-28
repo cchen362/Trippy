@@ -15,9 +15,10 @@ function Row({ label, value, valueStyle, last }) {
 }
 
 export default function HotelBookingCard({ booking, onOpen }) {
+  const hotelTz = booking.originTz || null;
   const nights = computeNights(booking.startDatetime, booking.endDatetime);
-  const checkInStr = formatShortDate(booking.startDatetime);
-  const checkOutStr = formatShortDate(booking.endDatetime);
+  const checkInStr = formatShortDate(booking.startDatetime, hotelTz);
+  const checkOutStr = formatShortDate(booking.endDatetime, hotelTz);
   const checkOutDisplay = checkOutStr
     ? `${checkOutStr}${nights > 0 ? ` \u00b7 ${nights} ${nights === 1 ? 'night' : 'nights'}` : ''}`
     : null;

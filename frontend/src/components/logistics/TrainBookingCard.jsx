@@ -1,4 +1,4 @@
-import { formatTime, formatShortDate } from './bookingCardUtils.js';
+import { formatTime, formatShortDate, tzAbbr } from './bookingCardUtils.js';
 import TicketStubCard from './TicketStubCard.jsx';
 
 function formatStationName(name) {
@@ -20,6 +20,9 @@ export default function TrainBookingCard({ booking, onOpen }) {
     ? `${originCity.toUpperCase()} \u2192 ${destCity.toUpperCase()}${trainNumber ? ` \u00b7 ${trainNumber}` : ''}`
     : booking.title;
 
+  const originTz = booking.originTz || null;
+  const destTz   = booking.destinationTz || null;
+
   return (
     <TicketStubCard
       cardClassName="logistics-transit-card-wide"
@@ -29,12 +32,14 @@ export default function TrainBookingCard({ booking, onOpen }) {
       centerGlyph={trainNumber}
       rightCode={formatStationName(destStation)}
       rightCodeClassName="logistics-route-code-station"
-      leftTime={formatTime(booking.startDatetime)}
-      rightTime={formatTime(booking.endDatetime)}
+      leftTime={formatTime(booking.startDatetime, originTz)}
+      rightTime={formatTime(booking.endDatetime, destTz)}
       leftLabel="DEPART"
       rightLabel="ARRIVE"
-      leftDate={formatShortDate(booking.startDatetime)}
-      rightDate={formatShortDate(booking.endDatetime)}
+      leftDate={formatShortDate(booking.startDatetime, originTz)}
+      rightDate={formatShortDate(booking.endDatetime, destTz)}
+      leftTzBadge={tzAbbr(originTz, booking.startDatetime)}
+      rightTzBadge={tzAbbr(destTz, booking.endDatetime)}
       footerLeft={seatClass ? seatClass.toUpperCase() : (booking.confirmationRef ? 'BOOKING REF' : undefined)}
       footerRight={booking.confirmationRef || undefined}
       connector

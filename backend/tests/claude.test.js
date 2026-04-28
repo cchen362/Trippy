@@ -23,142 +23,114 @@ vi.mock('../src/config.js', () => ({
 // Import after mocks are in place
 const { discoverDestination, streamCopilotResponse } = await import('../src/services/claude.js');
 
-// Helper: build a minimal valid discovery response payload
-function makeDiscoveryResponse(jsonText) {
-  return {
-    content: [{ type: 'text', text: jsonText }],
-  };
-}
-
-const VALID_DISCOVERY_JSON = JSON.stringify({
-  culture: [],
-  food: [],
-  nature: [],
-  nightlife: [],
-  hidden_gems: [],
-});
-
 // ---------------------------------------------------------------------------
 // discoverDestination
 // ---------------------------------------------------------------------------
 
-describe('discoverDestination — system prompt structure', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockCreate.mockResolvedValue(makeDiscoveryResponse(VALID_DISCOVERY_JSON));
-  });
-
-  it('calls messages.create with correct model and includes destination in system prompt', async () => {
-    await discoverDestination('Kyoto', ['culture', 'food'], 'relaxed', 2);
-
-    expect(mockCreate).toHaveBeenCalledOnce();
-    const call = mockCreate.mock.calls[0][0];
-
-    expect(call.model).toBe('claude-sonnet-4-6');
-    expect(call.system).toContain('Kyoto');
-    expect(call.system).toContain('2 people');
-    expect(call.system).toContain('relaxed');
-    expect(call.system).toContain('culture, food');
-  });
-
-  it('includes web_search tool on first attempt', async () => {
-    await discoverDestination('Paris', ['nightlife'], 'fast', 1);
-
-    const call = mockCreate.mock.calls[0][0];
-    expect(call.tools).toBeDefined();
-    expect(call.tools[0].name).toBe('web_search');
-    expect(call.tools[0].type).toBe('web_search_20250305');
-  });
-
-  it('returns parsed results and source="web" on success', async () => {
-    const result = await discoverDestination('Tokyo', ['food'], 'moderate', 3);
-
-    expect(result.source).toBe('web');
-    expect(result.results).toEqual({
-      culture: [],
-      food: [],
-      nature: [],
-      nightlife: [],
-      hidden_gems: [],
-    });
-  });
-});
-
-describe('discoverDestination — fallback when web_search tool throws', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('retries without tools and returns source="ai"', async () => {
-    // First call (with tools) throws a "tool not available" error
-    mockCreate
-      .mockRejectedValueOnce(new Error('tool_use not supported'))
-      .mockResolvedValueOnce(makeDiscoveryResponse(VALID_DISCOVERY_JSON));
-
-    const result = await discoverDestination('Rome', ['history'], 'relaxed', 2);
-
-    expect(mockCreate).toHaveBeenCalledTimes(2);
-    // Second call must not include tools
-    const secondCall = mockCreate.mock.calls[1][0];
-    expect(secondCall.tools).toBeUndefined();
-
-    expect(result.source).toBe('ai');
-    expect(result.results).toBeDefined();
-  });
-});
-
-describe('discoverDestination — invalid JSON response throws 502', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('throws 502 when web response is not valid JSON', async () => {
-    mockCreate.mockResolvedValue(makeDiscoveryResponse('This is not JSON at all'));
-
-    await expect(discoverDestination('Berlin', [], 'moderate', 1)).rejects.toMatchObject({
-      message: 'Discovery response was not valid JSON',
-      status: 502,
-    });
-  });
-
-  it('throws 502 when fallback (ai) response is not valid JSON', async () => {
-    mockCreate
-      .mockRejectedValueOnce(new Error('tool not enabled'))
-      .mockResolvedValueOnce(makeDiscoveryResponse('still not json'));
-
-    await expect(discoverDestination('Berlin', [], 'moderate', 1)).rejects.toMatchObject({
-      message: 'Discovery response was not valid JSON',
-      status: 502,
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// streamCopilotResponse
-// ---------------------------------------------------------------------------
-
-// Build a mock stream that emits text events synchronously then resolves
+// Build a mock stream that emits NDJSON text lines then resolves.
+// Re-used by streamCopilotResponse tests too.
 function makeMockStream(chunks, finalText) {
   const listeners = {};
-
   const stream = {
     on(event, cb) {
       listeners[event] = cb;
       return stream;
     },
     async finalMessage() {
-      // Fire text events synchronously before resolving
       for (const chunk of chunks) {
         if (listeners['text']) listeners['text'](chunk);
       }
-      return {
-        content: [{ type: 'text', text: finalText }],
-      };
+      return { content: [{ type: 'text', text: finalText ?? chunks.join('') }] };
     },
   };
-
   return stream;
 }
+
+function ndjsonChunks(categories) {
+  return categories.map((cat) => JSON.stringify(cat) + '\n');
+}
+
+describe('discoverDestination — NDJSON streaming', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls messages.stream with haiku model and destination in user message', async () => {
+    const chunks = ndjsonChunks([{ category: 'culture', items: [] }]);
+    mockStream.mockReturnValue(makeMockStream(chunks));
+
+    await discoverDestination('kyoto', []);
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    const call = mockStream.mock.calls[0][0];
+    expect(call.model).toBe('claude-haiku-4-5-20251001');
+    expect(call.messages[0].content).toContain('kyoto');
+  });
+
+  it('returns accumulated categories parsed from NDJSON text events', async () => {
+    const cats = [
+      { category: 'culture', items: [{ name: 'Kinkakuji', lat: 35.0, lng: 135.7 }] },
+      { category: 'food', items: [] },
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const result = await discoverDestination('kyoto', []);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].category).toBe('culture');
+    expect(result[1].category).toBe('food');
+  });
+
+  it('calls onCategory callback for each parsed category', async () => {
+    const cats = [
+      { category: 'nature', items: [{ name: 'Arashiyama', lat: 35.0, lng: 135.6 }] },
+      { category: 'nightlife', items: [] },
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const received = [];
+    await discoverDestination('kyoto', [], (cat) => received.push(cat));
+
+    expect(received).toHaveLength(2);
+    expect(received[0].category).toBe('nature');
+    expect(received[1].category).toBe('nightlife');
+  });
+
+  it('deduplicates items with the same normalized name across categories', async () => {
+    const cats = [
+      { category: 'culture', items: [{ name: 'Dujiangyan Scenic Area' }, { name: 'Fushimi Inari' }] },
+      // 'Dujiangyan & Scenic Area' normalizes to the same key — should be dropped
+      { category: 'hidden_gems', items: [{ name: 'Dujiangyan & Scenic Area' }, { name: 'Nijo Castle' }] },
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const result = await discoverDestination('kyoto', []);
+
+    const allItems = result.flatMap((c) => c.items);
+    const names = allItems.map((i) => i.name);
+    expect(names.filter((n) => n.toLowerCase().includes('dujiangyan')).length).toBe(1);
+    expect(names).toContain('Fushimi Inari');
+    expect(names).toContain('Nijo Castle');
+  });
+
+  it('silently skips invalid NDJSON lines', async () => {
+    const chunks = [
+      'not valid json\n',
+      JSON.stringify({ category: 'food', items: [{ name: 'Ramen shop' }] }) + '\n',
+      '{"missing_items_key": true}\n',
+    ];
+    mockStream.mockReturnValue(makeMockStream(chunks));
+
+    const result = await discoverDestination('tokyo', []);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].category).toBe('food');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streamCopilotResponse
+// ---------------------------------------------------------------------------
 
 // Minimal mock for Express res
 function makeMockRes() {
@@ -173,6 +145,7 @@ function makeMockRes() {
     flushHeaders() { this.flushed = true; },
     write(chunk) { written.push(chunk); },
     end() { this.ended = true; },
+    on() { return this; },
   };
 }
 

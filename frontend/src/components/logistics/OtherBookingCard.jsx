@@ -15,8 +15,9 @@ function Row({ label, value, valueStyle, last }) {
 }
 
 export default function OtherBookingCard({ booking, onOpen }) {
-  const startStr = formatShortDate(booking.startDatetime);
-  const endStr = formatShortDate(booking.endDatetime);
+  const tz = booking.originTz || null;
+  const startStr = formatShortDate(booking.startDatetime, tz);
+  const endStr = formatShortDate(booking.endDatetime, tz);
   const whenStr = startStr && endStr && startStr !== endStr
     ? `${startStr} \u2192 ${endStr}`
     : (startStr || endStr || null);

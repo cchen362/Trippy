@@ -1,5 +1,39 @@
 import { useEffect, useState } from 'react';
 import { cityFromAirportString, cityFromIata, canonicalCity } from '../../utils/airports.js';
+
+const COMMON_TZ_OPTIONS = [
+  { value: '',                         label: 'Device timezone (default)' },
+  { value: 'UTC',                      label: 'UTC' },
+  { value: 'Europe/London',            label: 'London (GMT/BST)' },
+  { value: 'Europe/Paris',             label: 'Paris (CET/CEST)' },
+  { value: 'Europe/Istanbul',          label: 'Istanbul (TRT)' },
+  { value: 'Asia/Dubai',               label: 'Dubai (GST)' },
+  { value: 'Asia/Kolkata',             label: 'India (IST)' },
+  { value: 'Asia/Bangkok',             label: 'Bangkok (ICT)' },
+  { value: 'Asia/Singapore',           label: 'Singapore (SGT)' },
+  { value: 'Asia/Shanghai',            label: 'China (CST)' },
+  { value: 'Asia/Tokyo',               label: 'Tokyo (JST)' },
+  { value: 'Asia/Seoul',               label: 'Seoul (KST)' },
+  { value: 'Asia/Kuala_Lumpur',        label: 'Kuala Lumpur (MYT)' },
+  { value: 'Australia/Sydney',         label: 'Sydney (AEST/AEDT)' },
+  { value: 'Pacific/Auckland',         label: 'Auckland (NZST/NZDT)' },
+  { value: 'America/New_York',         label: 'New York (ET)' },
+  { value: 'America/Los_Angeles',      label: 'Los Angeles (PT)' },
+  { value: 'America/Sao_Paulo',        label: 'São Paulo (BRT)' },
+];
+
+function TzSelect({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="modal-label">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="modal-input">
+        {COMMON_TZ_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
 import CityInput from './CityInput.jsx';
 
 const DEFAULT_FORM = {
@@ -40,6 +74,8 @@ const DEFAULT_FORM = {
   confirmationRef: '',
   bookingSource: '',
   showInItinerary: null,
+  originTz: '',
+  destinationTz: '',
   detailsJson: {},
 };
 
@@ -99,6 +135,8 @@ function normalizeForm(form) {
     confirmationRef: form.confirmationRef,
     bookingSource: form.bookingSource,
     showInItinerary: showInItineraryValue(form),
+    originTz:      form.originTz      || null,
+    destinationTz: form.destinationTz || null,
   };
 
   if (form.type === 'hotel') {
@@ -201,6 +239,8 @@ function hydrateFormFromBooking(booking) {
     confirmationRef: booking.confirmationRef || '',
     bookingSource: booking.bookingSource || '',
     showInItinerary: booking.showInItinerary ?? null,
+    originTz:      booking.originTz      || '',
+    destinationTz: booking.destinationTz || '',
     detailsJson: dj,
   };
 
@@ -344,6 +384,8 @@ export default function AddBookingModal({
         departure: f.startDatetime || current.departure,
         arrival: f.endDatetime || current.arrival,
         terminalOrigin: current.terminalOrigin,
+        originTz:      f.originTz      || current.originTz,
+        destinationTz: f.destinationTz || current.destinationTz,
         detailsJson: {
           ...current.detailsJson,
           ...f.detailsJson,
@@ -423,6 +465,8 @@ export default function AddBookingModal({
         hotelName: cleanTitle,
         hotelAddress: place?.address || suggestion.secondaryText || current.hotelAddress,
         hotelCity: place?.city || current.hotelCity,
+        originTz:      place?.tz || current.originTz,
+        destinationTz: place?.tz || current.destinationTz,
         detailsJson: {
           ...current.detailsJson,
           placeId: suggestion.placeId,
@@ -432,6 +476,7 @@ export default function AddBookingModal({
           displayName: cleanTitle,
           formattedAddress: place?.address || suggestion.secondaryText || '',
           city: place?.city || current.detailsJson?.city || null,
+          tz: place?.tz || current.detailsJson?.tz || null,
         },
       }));
     } catch {
@@ -698,6 +743,18 @@ export default function AddBookingModal({
                 <input type="datetime-local" {...field('trainArrival')} />
               </label>
 
+              <TzSelect
+                label="Departure Timezone"
+                value={form.originTz}
+                onChange={(v) => setForm((c) => ({ ...c, originTz: v }))}
+              />
+
+              <TzSelect
+                label="Arrival Timezone"
+                value={form.destinationTz}
+                onChange={(v) => setForm((c) => ({ ...c, destinationTz: v }))}
+              />
+
               <label className="block sm:col-span-2">
                 <span className="modal-label">Seat Class</span>
                 <input {...field('seatClass')} placeholder="e.g. Business / 商务座, Second / 二等座" />
@@ -742,6 +799,12 @@ export default function AddBookingModal({
                 <span className="modal-label">Notes</span>
                 <input {...field('notes')} placeholder="Any additional details" />
               </label>
+
+              <TzSelect
+                label="Timezone"
+                value={form.originTz}
+                onChange={(v) => setForm((c) => ({ ...c, originTz: v, destinationTz: v }))}
+              />
 
               <label className="block">
                 <span className="modal-label">Confirmation Ref</span>

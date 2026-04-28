@@ -25,6 +25,8 @@ function formatBooking(row) {
     destination: row.destination,
     terminalOrStation: row.terminal_or_station,
     showInItinerary: Boolean(row.show_in_itinerary),
+    originTz:      row.origin_tz      || null,
+    destinationTz: row.destination_tz || null,
     detailsJson: parseJson(row.details_json),
     createdAt: row.created_at,
   };
@@ -75,9 +77,10 @@ export async function createBooking(userId, tripId, input) {
   const row = db.prepare(`
     INSERT INTO bookings (
       trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
-      origin, destination, terminal_or_station, details_json, show_in_itinerary
+      origin, destination, terminal_or_station, details_json, show_in_itinerary,
+      origin_tz, destination_tz
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     tripId,
@@ -92,6 +95,8 @@ export async function createBooking(userId, tripId, input) {
     input.terminalOrStation || null,
     normalizeDetailsJson(input.detailsJson),
     defaultShowInItinerary(input),
+    input.originTz      || null,
+    input.destinationTz || null,
   );
 
   await syncStopWithBooking(row);
@@ -116,7 +121,9 @@ export async function updateBooking(userId, bookingId, input) {
       destination = ?,
       terminal_or_station = ?,
       details_json = ?,
-      show_in_itinerary = ?
+      show_in_itinerary = ?,
+      origin_tz = ?,
+      destination_tz = ?
     WHERE id = ?
     RETURNING *
   `).get(
@@ -131,6 +138,8 @@ export async function updateBooking(userId, bookingId, input) {
     input.terminalOrStation ?? existing.terminal_or_station,
     input.detailsJson !== undefined ? normalizeDetailsJson(input.detailsJson) : existing.details_json,
     input.showInItinerary !== undefined ? (input.showInItinerary ? 1 : 0) : existing.show_in_itinerary,
+    input.originTz      !== undefined ? (input.originTz      || null) : existing.origin_tz,
+    input.destinationTz !== undefined ? (input.destinationTz || null) : existing.destination_tz,
     bookingId,
   );
 

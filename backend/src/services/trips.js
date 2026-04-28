@@ -82,6 +82,8 @@ function mapBooking(row) {
     destination: row.destination,
     terminalOrStation: row.terminal_or_station,
     showInItinerary: Boolean(row.show_in_itinerary),
+    originTz:      row.origin_tz      || null,
+    destinationTz: row.destination_tz || null,
     detailsJson: parseJson(row.details_json, {}),
     createdAt: row.created_at,
   };

@@ -14,6 +14,8 @@ export default function TicketStubCard({
   rightLabel,
   leftDate,
   rightDate,
+  leftTzBadge,
+  rightTzBadge,
   footerLeft,
   footerRight,
   connector = false,
@@ -49,12 +51,28 @@ export default function TicketStubCard({
         {(leftTime || rightTime) && (
           <div className="logistics-time-grid">
             <div>
-              <p className="logistics-time">{leftTime}</p>
+              <div className="flex items-baseline gap-1">
+                <p className="logistics-time">{leftTime}</p>
+                {leftTzBadge && (
+                  <span className="font-mono text-[10px] tracking-[0.18em] uppercase"
+                        style={{ color: 'rgba(240,234,216,0.40)' }}>
+                    {leftTzBadge}
+                  </span>
+                )}
+              </div>
               {leftLabel && <p className="logistics-time-label">{leftLabel}</p>}
               {leftDate && <p className="logistics-date">{leftDate}</p>}
             </div>
             <div className="text-right">
-              <p className="logistics-time">{rightTime}</p>
+              <div className="flex items-baseline justify-end gap-1">
+                {rightTzBadge && (
+                  <span className="font-mono text-[10px] tracking-[0.18em] uppercase"
+                        style={{ color: 'rgba(240,234,216,0.40)' }}>
+                    {rightTzBadge}
+                  </span>
+                )}
+                <p className="logistics-time">{rightTime}</p>
+              </div>
               {rightLabel && <p className="logistics-time-label">{rightLabel}</p>}
               {rightDate && <p className="logistics-date">{rightDate}</p>}
             </div>

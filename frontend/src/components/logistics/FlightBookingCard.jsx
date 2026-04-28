@@ -1,4 +1,5 @@
 import { iataFromOriginString, formatTime, formatShortDate } from './bookingCardUtils.js';
+import { tzFromIata } from '../../utils/airports.js';
 import TicketStubCard from './TicketStubCard.jsx';
 
 export default function FlightBookingCard({ booking, onOpen }) {
@@ -23,10 +24,13 @@ export default function FlightBookingCard({ booking, onOpen }) {
     ? `${carrierCode} ${flightNumber}`
     : booking.title;
 
-  const leftTime = formatTime(booking.startDatetime);
-  const rightTime = formatTime(booking.endDatetime);
-  const leftDate = formatShortDate(booking.startDatetime);
-  const rightDate = formatShortDate(booking.endDatetime);
+  const originTz = booking.originTz || tzFromIata(originIata) || null;
+  const destTz   = booking.destinationTz || tzFromIata(destIata) || null;
+
+  const leftTime = formatTime(booking.startDatetime, originTz);
+  const rightTime = formatTime(booking.endDatetime, destTz);
+  const leftDate = formatShortDate(booking.startDatetime, originTz);
+  const rightDate = formatShortDate(booking.endDatetime, destTz);
 
   // Depart label includes the IATA for clarity (matches boarding-pass convention).
   const leftLabel = originIata ? `DEPART · ${originIata}` : 'DEPART';
