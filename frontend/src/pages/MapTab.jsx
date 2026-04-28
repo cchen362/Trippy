@@ -211,7 +211,7 @@ export default function MapTab() {
             ))}
           </div>
         )}
-        {!configLoading && mapConfig && (
+        {!configLoading && mapConfig && !correctionStop && (
           <MapSequencePanel
             stops={stops}
             focusedSegmentId={focusedSegmentId}
