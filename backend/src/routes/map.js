@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getMapConfig } from '../services/mapConfig.js';
 import { getTripMapData } from '../services/mapData.js';
+import { repairTripStopLocations } from '../services/stops.js';
 
 const router = Router();
 
@@ -20,6 +21,15 @@ router.get('/:tripId/map-config', requireAuth, requireTripAccess, (req, res, nex
 router.get('/:tripId/map-data', requireAuth, requireTripAccess, (req, res, next) => {
   try {
     res.json(getTripMapData(req.user.id, req.params.tripId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:tripId/repair-stop-locations', requireAuth, requireTripAccess, async (req, res, next) => {
+  try {
+    const result = await repairTripStopLocations(req.user.id, req.params.tripId);
+    res.json(result);
   } catch (error) {
     next(error);
   }

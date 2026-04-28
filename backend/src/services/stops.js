@@ -544,6 +544,65 @@ export async function backfillTripPhotos(userId, tripId) {
   return updated;
 }
 
+export async function repairTripStopLocations(userId, tripId) {
+  const db = getDb();
+  const trip = db.prepare('SELECT id FROM trips WHERE id = ? AND owner_id = ?').get(tripId, userId);
+  if (!trip) throw Object.assign(new Error('Not found'), { status: 404 });
+
+  const stopsToRepair = db.prepare(`
+    SELECT s.*, d.city, d.city_override, t.destination_countries
+    FROM stops s
+    JOIN days d ON d.id = s.day_id
+    JOIN trips t ON t.id = d.trip_id
+    WHERE d.trip_id = ?
+      AND s.coordinate_system = 'unknown'
+      AND s.location_status != 'user_confirmed'
+      AND (s.location_query IS NOT NULL OR s.title IS NOT NULL)
+  `).all(tripId);
+
+  let repairedCount = 0;
+  for (const stop of stopsToRepair) {
+    const queryText = (stop.location_query || stop.title).trim();
+    const city = stop.city_override || stop.city;
+    let country;
+    try {
+      const countries = JSON.parse(stop.destination_countries || '[]');
+      country = Array.isArray(countries) ? countries[0] : null;
+    } catch {
+      country = null;
+    }
+
+    let resolution = await resolvePlace({ queryText, city, country, allowNetwork: false });
+    if (resolution.coordinateSystem === 'unknown' && city) {
+      resolution = await resolvePlace({ queryText, city: null, country, allowNetwork: false });
+    }
+    if (resolution.coordinateSystem !== 'unknown' && resolution.lat !== null) {
+      db.prepare(`
+        UPDATE stops
+        SET lat = ?, lng = ?, coordinate_system = ?, coordinate_source = ?,
+            location_status = ?, location_confidence = ?, provider_id = ?,
+            resolved_name = COALESCE(resolved_name, ?),
+            resolved_address = COALESCE(resolved_address, ?)
+        WHERE id = ?
+      `).run(
+        resolution.lat,
+        resolution.lng,
+        resolution.coordinateSystem,
+        resolution.coordinateSource,
+        resolution.locationStatus,
+        resolution.confidence,
+        resolution.providerId,
+        resolution.resolvedName,
+        resolution.resolvedAddress,
+        stop.id,
+      );
+      repairedCount += 1;
+    }
+  }
+
+  return { repaired: repairedCount, total: stopsToRepair.length };
+}
+
 export async function syncStopWithBooking(booking) {
   const db = getDb();
   const existingStop = db.prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
