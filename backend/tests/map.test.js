@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getMapConfig, buildDeepLink, wgs84ToGcj02 } from '../src/services/mapConfig.js';
+import { getMapConfig, buildDeepLink } from '../src/services/mapConfig.js';
+import { gcj02ToWgs84, toDisplayCoordinates, wgs84ToGcj02 } from '../src/services/coordinates.js';
 
 describe('getMapConfig', () => {
   it('returns amap config for CN', () => {
@@ -97,5 +98,101 @@ describe('wgs84ToGcj02', () => {
     const result = wgs84ToGcj02(35.68, 139.69);
     expect(result.lat).toBe(35.68);
     expect(result.lng).toBe(139.69);
+  });
+});
+
+describe('gcj02ToWgs84', () => {
+  it('approximately reverses WGS-84 to GCJ-02 conversion in China', () => {
+    const original = { lat: 29.5605, lng: 106.5655 };
+    const gcj = wgs84ToGcj02(original.lat, original.lng);
+    const wgs = gcj02ToWgs84(gcj.lat, gcj.lng);
+
+    expect(wgs.lat).toBeCloseTo(original.lat, 5);
+    expect(wgs.lng).toBeCloseTo(original.lng, 5);
+  });
+});
+
+describe('toDisplayCoordinates', () => {
+  const amap = { coordinateSystem: 'gcj02' };
+  const osm = { coordinateSystem: 'wgs84' };
+
+  it('converts WGS-84 stops once for Amap display', () => {
+    const stop = {
+      lat: 29.5605,
+      lng: 106.5655,
+      coordinate_system: 'wgs84',
+      location_status: 'resolved',
+    };
+
+    const display = toDisplayCoordinates(stop, amap);
+
+    expect(display.canRenderMarker).toBe(true);
+    expect(display.displayCoordinateSystem).toBe('gcj02');
+    expect(display.displayLat).not.toBe(stop.lat);
+    expect(display.displayLng).not.toBe(stop.lng);
+  });
+
+  it('passes GCJ-02 stops through for Amap display', () => {
+    const stop = {
+      lat: 29.5605,
+      lng: 106.5655,
+      coordinate_system: 'gcj02',
+      location_status: 'resolved',
+    };
+
+    const display = toDisplayCoordinates(stop, amap);
+
+    expect(display.displayLat).toBe(stop.lat);
+    expect(display.displayLng).toBe(stop.lng);
+    expect(display.displayCoordinateSystem).toBe('gcj02');
+  });
+
+  it('converts GCJ-02 stops to WGS-84 for non-China map display', () => {
+    const wgs = { lat: 29.5605, lng: 106.5655 };
+    const gcj = wgs84ToGcj02(wgs.lat, wgs.lng);
+    const stop = {
+      lat: gcj.lat,
+      lng: gcj.lng,
+      coordinate_system: 'gcj02',
+      location_status: 'resolved',
+    };
+
+    const display = toDisplayCoordinates(stop, osm);
+
+    expect(display.displayCoordinateSystem).toBe('wgs84');
+    expect(display.displayLat).toBeCloseTo(wgs.lat, 5);
+    expect(display.displayLng).toBeCloseTo(wgs.lng, 5);
+  });
+
+  it('does not blindly convert unknown coordinates', () => {
+    const stop = {
+      lat: 29.5605,
+      lng: 106.5655,
+      coordinate_system: 'unknown',
+      location_status: 'resolved',
+    };
+
+    const display = toDisplayCoordinates(stop, amap);
+
+    expect(display.canRenderMarker).toBe(false);
+    expect(display.displayLat).toBeNull();
+    expect(display.displayLng).toBeNull();
+  });
+
+  it('allows unknown coordinates only as estimated passthrough', () => {
+    const stop = {
+      lat: 29.5605,
+      lng: 106.5655,
+      coordinate_system: 'unknown',
+      location_status: 'estimated',
+    };
+
+    const display = toDisplayCoordinates(stop, amap);
+
+    expect(display.canRenderMarker).toBe(true);
+    expect(display.isEstimated).toBe(true);
+    expect(display.displayLat).toBe(stop.lat);
+    expect(display.displayLng).toBe(stop.lng);
+    expect(display.displayCoordinateSystem).toBe('unknown');
   });
 });
