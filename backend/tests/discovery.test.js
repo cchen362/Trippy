@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createHash } from 'crypto';
 
 // --- Mock claude.js before importing the route ---
 const mockDiscoverDestination = vi.fn();
@@ -32,97 +31,19 @@ let tmpDir;
 let userId;
 let tripId;
 
-// Helper: compute the same hash the route uses
-function computeHash(destination, tags) {
-  return createHash('sha256')
-    .update(JSON.stringify([destination.toLowerCase(), ...[...tags].sort()]))
-    .digest('hex');
-}
-
-// Helper: simulate the route handler directly (bypassing Express middleware)
-// so tests don't need a running HTTP server
-async function callDiscover(body, tripRow = null) {
-  const { default: handler } = await import('../src/routes/discovery.js');
-
-  // Build a minimal mock request
-  const req = {
-    params: { tripId },
-    body,
-    user: { id: userId },
-    trip: tripRow ?? getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
-  };
-
-  let statusCode = 200;
-  let responseBody;
-  const res = {
-    status(code) { statusCode = code; return res; },
-    json(data) { responseBody = data; return res; },
-  };
-
-  let nextErr;
-  const next = (err) => { nextErr = err; };
-
-  // Find the POST /:tripId/discover handler in the router stack
-  // Router stack: index 0 = requireAuth, then the route layers
-  const stack = handler.stack;
-  // Grab all layers matching /:tripId/discover with POST method
-  const layer = stack.find(
-    (l) => l.route && l.route.path === '/:tripId/discover' && l.route.methods.post,
-  );
-
-  if (!layer) throw new Error('Route layer not found');
-
-  // Run each handler in the route stack (skip middleware we've already applied)
-  const routeHandlers = layer.route.stack;
-  // routeHandlers: [requireTripAccess, async handler]
-  // For tests we set req.trip directly, skip requireTripAccess
-  const asyncHandler = routeHandlers[routeHandlers.length - 1].handle;
-  await asyncHandler(req, res, next);
-
-  return { statusCode, responseBody, error: nextErr };
-}
-
-async function callDeleteCache(tripRow = null) {
-  const { default: handler } = await import('../src/routes/discovery.js');
-
-  const req = {
-    params: { tripId },
-    user: { id: userId },
-    trip: tripRow ?? getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
-  };
-
-  let responseBody;
-  const res = {
-    json(data) { responseBody = data; return res; },
-  };
-
-  let nextErr;
-  const next = (err) => { nextErr = err; };
-
-  const stack = handler.stack;
-  const layer = stack.find(
-    (l) => l.route && l.route.path === '/:tripId/discover/cache' && l.route.methods.delete,
-  );
-
-  if (!layer) throw new Error('Delete cache route layer not found');
-
-  const routeHandlers = layer.route.stack;
-  const deleteHandler = routeHandlers[routeHandlers.length - 1].handle;
-  deleteHandler(req, res, next);
-
-  return { responseBody, error: nextErr };
-}
+const FAKE_CATEGORIES = [
+  { category: 'culture', items: [{ name: 'Fushimi Inari', lat: 34.97, lng: 135.77 }] },
+  { category: 'food', items: [] },
+];
 
 beforeAll(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-discovery-test-'));
   initDb(join(tmpDir, 'test.db'));
   runMigrations();
 
-  // Create a user
   const result = authService.setup('admin', 'password123', 'Admin');
   userId = result.user.id;
 
-  // Create a trip with interest_tags
   const trip = tripService.createTrip(userId, {
     title: 'Test Trip',
     startDate: '2026-06-01',
@@ -143,9 +64,76 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Clear cache between tests
-  getDb().prepare('DELETE FROM discovery_cache WHERE trip_id = ?').run(tripId);
+  getDb().prepare('DELETE FROM global_discovery_cache').run();
 });
+
+// Helper: build an SSE-capable mock res and collect emitted events
+function makeSseRes() {
+  const events = [];
+  const res = {
+    destroyed: false,
+    writableEnded: false,
+    headersSent: false,
+    setHeader() {},
+    flushHeaders() { this.headersSent = true; },
+    write(chunk) {
+      const line = chunk.replace(/^data: /, '').trim();
+      try { events.push(JSON.parse(line)); } catch { /* ignore non-JSON */ }
+    },
+    end() { this.writableEnded = true; },
+  };
+  return { res, events };
+}
+
+// Helper: invoke the POST /:tripId/discover handler directly
+async function callDiscover(body) {
+  const { default: handler } = await import('../src/routes/discovery.js');
+  const req = {
+    params: { tripId },
+    body,
+    user: { id: userId },
+    trip: getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
+  };
+  const { res, events } = makeSseRes();
+  let nextErr;
+  const next = (err) => { nextErr = err; };
+
+  const layer = handler.stack.find(
+    (l) => l.route?.path === '/:tripId/discover' && l.route.methods.post,
+  );
+  if (!layer) throw new Error('Route layer not found');
+  await layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+
+  return { events, error: nextErr };
+}
+
+// Helper: invoke the DELETE /:tripId/discover/cache handler directly
+function callDeleteCache(body = {}) {
+  const { default: handler } = require('../src/routes/discovery.js');
+  return _callDeleteCacheAsync(body);
+}
+
+async function _callDeleteCacheAsync(body = {}) {
+  const { default: handler } = await import('../src/routes/discovery.js');
+  const req = {
+    params: { tripId },
+    body,
+    user: { id: userId },
+    trip: getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
+  };
+  let responseBody;
+  const res = { json(data) { responseBody = data; } };
+  let nextErr;
+  const next = (err) => { nextErr = err; };
+
+  const layer = handler.stack.find(
+    (l) => l.route?.path === '/:tripId/discover/cache' && l.route.methods.delete,
+  );
+  if (!layer) throw new Error('Delete cache route layer not found');
+  layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+
+  return { responseBody, error: nextErr };
+}
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -171,25 +159,22 @@ describe('POST /trips/:tripId/discover — validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/discover — cache hit', () => {
-  it('returns cached result with cached: true when within 48h', async () => {
-    const destination = 'Kyoto';
-    const tags = ['culture', 'food'];
-    const hash = computeHash(destination, tags);
-    const fakeResults = { culture: [{ name: 'Temple' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
+  it('streams cached categories and done:{cached:true} when within TTL', async () => {
+    const storedCategories = [
+      { category: 'culture', items: [{ name: 'Kinkakuji', lat: null, lng: null }] },
+    ];
+    getDb().prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('kyoto', JSON.stringify(storedCategories));
 
-    // Insert a fresh cache row — destination is stored normalized (lowercase)
-    getDb().prepare(`
-      INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
-      VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-    `).run(tripId, destination.toLowerCase(), hash, JSON.stringify({ results: fakeResults, source: 'web' }));
-
-    const { responseBody, error } = await callDiscover({ destination, interestTags: tags });
+    const { events, error } = await callDiscover({ destination: 'Kyoto' });
 
     expect(error).toBeUndefined();
-    expect(responseBody.discovery.cached).toBe(true);
-    expect(responseBody.discovery.results).toEqual(fakeResults);
-    expect(responseBody.discovery.source).toBe('web');
     expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
+    const categoryEvent = events.find((e) => e.type === 'category');
+    expect(categoryEvent?.category).toBe('culture');
   });
 });
 
@@ -198,48 +183,24 @@ describe('POST /trips/:tripId/discover — cache hit', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/discover — cache miss', () => {
-  it('calls discoverDestination and stores result in cache', async () => {
-    const destination = 'Tokyo';
-    const tags = ['nightlife'];
-    const fakeResults = { culture: [], food: [], nature: [], nightlife: [{ name: 'Shinjuku' }], hidden_gems: [] };
+  it('calls discoverDestination and stores result in global cache', async () => {
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
 
-    mockDiscoverDestination.mockResolvedValue({ results: fakeResults, source: 'web' });
-
-    const { responseBody, error } = await callDiscover({ destination, interestTags: tags });
+    const { events, error } = await callDiscover({ destination: 'Tokyo' });
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
-    const tripRow = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
-    // Route normalizes destination to lowercase before calling discoverDestination
-    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination.toLowerCase(), tags, 'relaxed', tripRow.travellers);
+    expect(mockDiscoverDestination.mock.calls[0][0]).toBe('tokyo');
 
-    expect(responseBody.discovery.cached).toBe(false);
-    expect(responseBody.discovery.results).toEqual(fakeResults);
-    expect(responseBody.discovery.source).toBe('web');
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(false);
 
-    // Verify stored in DB — destination stored normalized (lowercase)
-    const hash = computeHash(destination, tags);
-    const row = getDb().prepare(
-      'SELECT * FROM discovery_cache WHERE trip_id = ? AND destination = ? AND interest_hash = ?'
-    ).get(tripId, destination.toLowerCase(), hash);
+    const row = getDb().prepare('SELECT * FROM global_discovery_cache WHERE destination = ?').get('tokyo');
     expect(row).toBeDefined();
-    const stored = JSON.parse(row.result_json);
-    expect(stored.results).toEqual(fakeResults);
-  });
-
-  it('falls back to trip interest_tags when interestTags not provided in body', async () => {
-    const destination = 'Osaka';
-    const fakeResults = { culture: [], food: [], nature: [], nightlife: [], hidden_gems: [] };
-    mockDiscoverDestination.mockResolvedValue({ results: fakeResults, source: 'ai' });
-
-    const { responseBody, error } = await callDiscover({ destination });
-
-    expect(error).toBeUndefined();
-    // Should have used the trip's interest_tags: ['culture', 'food']
-    // Route normalizes destination to lowercase before calling discoverDestination
-    const tripRow = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
-    expect(mockDiscoverDestination).toHaveBeenCalledWith(destination.toLowerCase(), ['culture', 'food'], 'relaxed', tripRow.travellers);
-    expect(responseBody.discovery.cached).toBe(false);
+    expect(JSON.parse(row.result_json)).toHaveLength(FAKE_CATEGORIES.length);
   });
 });
 
@@ -248,52 +209,45 @@ describe('POST /trips/:tripId/discover — cache miss', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/discover — expired cache', () => {
-  it('treats cache row older than 48h as a miss', async () => {
-    const destination = 'Hiroshima';
-    const tags = ['history'];
-    const hash = computeHash(destination, tags);
-    const staleResults = { culture: [{ name: 'Old result' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
-    const freshResults = { culture: [{ name: 'New result' }], food: [], nature: [], nightlife: [], hidden_gems: [] };
+  it('treats cache row older than 7 days as a miss', async () => {
+    const staleCategories = [{ category: 'culture', items: [{ name: 'Old result', lat: null, lng: null }] }];
+    const freshCategories = [{ category: 'culture', items: [{ name: 'New result', lat: null, lng: null }] }];
 
-    // Insert expired cache row (51 hours ago) — stored with normalized lowercase destination
-    const expiredTime = new Date(Date.now() - 51 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
-    getDb().prepare(`
-      INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
-      VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-    `).run(tripId, destination.toLowerCase(), hash, JSON.stringify({ results: staleResults, source: 'web' }), expiredTime);
+    const expiredTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    getDb().prepare(
+      'INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, ?)',
+    ).run('hiroshima', JSON.stringify(staleCategories), expiredTime);
 
-    mockDiscoverDestination.mockResolvedValue({ results: freshResults, source: 'web' });
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      freshCategories.forEach((cat) => onCategory(cat));
+      return freshCategories;
+    });
 
-    const { responseBody, error } = await callDiscover({ destination, interestTags: tags });
+    const { events, error } = await callDiscover({ destination: 'Hiroshima' });
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
-    expect(responseBody.discovery.results).toEqual(freshResults);
-    expect(responseBody.discovery.cached).toBe(false);
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Hash determinism
+// Destination key normalization
 // ---------------------------------------------------------------------------
 
-describe('interest_hash determinism', () => {
-  it('produces the same hash for same destination+tags regardless of tag order', () => {
-    const h1 = computeHash('Kyoto', ['food', 'culture']);
-    const h2 = computeHash('Kyoto', ['culture', 'food']);
-    expect(h1).toBe(h2);
-  });
+describe('destination key normalization', () => {
+  it('matches cached entry regardless of input case', async () => {
+    getDb().prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('osaka', JSON.stringify([{ category: 'food', items: [] }]));
 
-  it('produces different hashes for different destinations', () => {
-    const h1 = computeHash('Kyoto', ['culture']);
-    const h2 = computeHash('Tokyo', ['culture']);
-    expect(h1).not.toBe(h2);
-  });
+    const { events, error } = await callDiscover({ destination: 'OSAKA' });
 
-  it('is case-insensitive for destination', () => {
-    const h1 = computeHash('kyoto', ['culture']);
-    const h2 = computeHash('KYOTO', ['culture']);
-    expect(h1).toBe(h2);
+    expect(error).toBeUndefined();
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
   });
 });
 
@@ -302,30 +256,26 @@ describe('interest_hash determinism', () => {
 // ---------------------------------------------------------------------------
 
 describe('DELETE /trips/:tripId/discover/cache', () => {
-  it('deletes all cache rows for the trip and returns { ok: true }', async () => {
+  it('deletes the global cache row for the given destination and returns { ok: true }', async () => {
     const db = getDb();
+    db.prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('nara', JSON.stringify([]));
+    db.prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('osaka', JSON.stringify([]));
 
-    // Insert some cache rows
-    const hash1 = computeHash('Nara', ['culture']);
-    const hash2 = computeHash('Osaka', ['food']);
-    db.prepare(`
-      INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
-      VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-    `).run(tripId, 'Nara', hash1, JSON.stringify({ results: {}, source: 'web' }));
-    db.prepare(`
-      INSERT INTO discovery_cache (id, trip_id, destination, interest_hash, result_json, fetched_at)
-      VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'))
-    `).run(tripId, 'Osaka', hash2, JSON.stringify({ results: {}, source: 'web' }));
-
-    const count = db.prepare('SELECT COUNT(*) as c FROM discovery_cache WHERE trip_id = ?').get(tripId);
-    expect(count.c).toBe(2);
-
-    const { responseBody, error } = await callDeleteCache();
+    const { responseBody, error } = await _callDeleteCacheAsync({ destination: 'Nara' });
 
     expect(error).toBeUndefined();
     expect(responseBody).toEqual({ ok: true });
+    expect(db.prepare('SELECT COUNT(*) as c FROM global_discovery_cache WHERE destination = ?').get('nara').c).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) as c FROM global_discovery_cache WHERE destination = ?').get('osaka').c).toBe(1);
+  });
 
-    const afterCount = db.prepare('SELECT COUNT(*) as c FROM discovery_cache WHERE trip_id = ?').get(tripId);
-    expect(afterCount.c).toBe(0);
+  it('returns { ok: true } with no destination (no-op)', async () => {
+    const { responseBody, error } = await _callDeleteCacheAsync({});
+    expect(error).toBeUndefined();
+    expect(responseBody).toEqual({ ok: true });
   });
 });
