@@ -39,6 +39,7 @@ const DEFAULT_FORM = {
   // shared
   confirmationRef: '',
   bookingSource: '',
+  showInItinerary: null,
   detailsJson: {},
 };
 
@@ -83,10 +84,21 @@ function withDefaultTime(datetimeStr, defaultTime) {
   return `${datetimeStr}T${defaultTime}`;
 }
 
+function defaultShowInItinerary(form) {
+  if (form.type === 'hotel' || form.type === 'flight' || form.type === 'train') return true;
+  if (form.type === 'other') return Boolean(form.otherStart && form.location.trim());
+  return false;
+}
+
+function showInItineraryValue(form) {
+  return form.showInItinerary ?? defaultShowInItinerary(form);
+}
+
 function normalizeForm(form) {
   const shared = {
     confirmationRef: form.confirmationRef,
     bookingSource: form.bookingSource,
+    showInItinerary: showInItineraryValue(form),
   };
 
   if (form.type === 'hotel') {
@@ -188,6 +200,7 @@ function hydrateFormFromBooking(booking) {
     type: booking.type || 'other',
     confirmationRef: booking.confirmationRef || '',
     bookingSource: booking.bookingSource || '',
+    showInItinerary: booking.showInItinerary ?? null,
     detailsJson: dj,
   };
 
@@ -373,6 +386,7 @@ export default function AddBookingModal({
       type,
       confirmationRef: form.confirmationRef,
       bookingSource: form.bookingSource,
+      showInItinerary: null,
     });
   };
 
@@ -441,6 +455,7 @@ export default function AddBookingModal({
     onChange: (e) => setForm((c) => ({ ...c, [key]: e.target.value })),
     className: 'modal-input',
   });
+  const showInItinerary = showInItineraryValue(form);
 
   return (
     <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
@@ -739,6 +754,18 @@ export default function AddBookingModal({
               </label>
             </div>
           )}
+
+          <label className="mt-5 flex items-center gap-3 rounded-xl border px-4 py-3" style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}>
+            <input
+              type="checkbox"
+              checked={showInItinerary}
+              onChange={(e) => setForm((current) => ({ ...current, showInItinerary: e.target.checked }))}
+              style={{ width: 18, height: 18, accentColor: 'var(--gold)' }}
+            />
+            <span className="font-mono text-[11px] tracking-[0.18em] uppercase">
+              Show in itinerary
+            </span>
+          </label>
 
           {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
 

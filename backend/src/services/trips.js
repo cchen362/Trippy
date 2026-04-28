@@ -49,6 +49,14 @@ function mapStop(row) {
     note: row.note,
     lat: row.lat,
     lng: row.lng,
+    locationQuery: row.location_query,
+    resolvedName: row.resolved_name,
+    resolvedAddress: row.resolved_address,
+    coordinateSystem: row.coordinate_system,
+    coordinateSource: row.coordinate_source,
+    locationStatus: row.location_status,
+    locationConfidence: row.location_confidence,
+    providerId: row.provider_id,
     unsplashPhotoUrl: row.unsplash_photo_url,
     estimatedCost: row.estimated_cost,
     bookingRequired: Boolean(row.booking_required),
@@ -73,6 +81,7 @@ function mapBooking(row) {
     origin: row.origin,
     destination: row.destination,
     terminalOrStation: row.terminal_or_station,
+    showInItinerary: Boolean(row.show_in_itinerary),
     detailsJson: parseJson(row.details_json, {}),
     createdAt: row.created_at,
   };
@@ -182,7 +191,7 @@ export function assertTripAccess(userId, tripId) {
 export function assertDayAccess(userId, dayId) {
   const db = getDb();
   const row = db.prepare(`
-    SELECT d.*, t.owner_id
+    SELECT d.*, t.owner_id, t.destination_countries
     FROM days d
     JOIN trips t ON t.id = d.trip_id
     LEFT JOIN trip_collaborators tc ON tc.trip_id = t.id
@@ -423,7 +432,7 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
     SELECT *
     FROM stops
     WHERE day_id IN (SELECT id FROM days WHERE trip_id = ?)
-    ORDER BY COALESCE(time, '99:99') ASC, sort_order ASC, created_at ASC
+    ORDER BY sort_order ASC, created_at ASC
   `).all(tripId).map(mapStop);
   const stopsByDay = new Map(days.map((day) => [day.id, []]));
 

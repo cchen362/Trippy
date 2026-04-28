@@ -36,7 +36,11 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
-# Brainstorm session files (keep mockups, not server state)
+# Local AI/tooling artifacts
+.superpowers/
+.claude/settings.local.json
+
+# Brainstorm session files
 .superpowers/brainstorm/*/state/
 
 # Git worktrees (Claude Code creates these under .claude/worktrees/)

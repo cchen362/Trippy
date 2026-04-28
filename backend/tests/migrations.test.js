@@ -35,7 +35,30 @@ describe('migrations', () => {
     expect(tables).toContain('stops');
     expect(tables).toContain('bookings');
     expect(tables).toContain('discovery_cache');
+    expect(tables).toContain('global_discovery_cache');
+    expect(tables).toContain('place_resolution_cache');
     expect(tables).toContain('copilot_messages');
+  });
+
+  it('adds stop location metadata columns', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(stops)').all().map((r) => r.name);
+
+    expect(columns).toContain('location_query');
+    expect(columns).toContain('resolved_name');
+    expect(columns).toContain('resolved_address');
+    expect(columns).toContain('coordinate_system');
+    expect(columns).toContain('coordinate_source');
+    expect(columns).toContain('location_status');
+    expect(columns).toContain('location_confidence');
+    expect(columns).toContain('provider_id');
+  });
+
+  it('adds booking itinerary visibility column', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(bookings)').all().map((r) => r.name);
+
+    expect(columns).toContain('show_in_itinerary');
   });
 
   it('tracks migration versions to avoid re-running', () => {
@@ -43,6 +66,6 @@ describe('migrations', () => {
     // Running again should not throw
     expect(() => runMigrations()).not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(6);
+    expect(count.c).toBe(9);
   });
 });

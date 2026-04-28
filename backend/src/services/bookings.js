@@ -24,6 +24,7 @@ function formatBooking(row) {
     origin: row.origin,
     destination: row.destination,
     terminalOrStation: row.terminal_or_station,
+    showInItinerary: Boolean(row.show_in_itinerary),
     detailsJson: parseJson(row.details_json),
     createdAt: row.created_at,
   };
@@ -48,6 +49,13 @@ function validateBookingPayload(input, { partial = false } = {}) {
   }
 }
 
+function defaultShowInItinerary(input) {
+  if (input.showInItinerary !== undefined) return input.showInItinerary ? 1 : 0;
+  if (input.type === 'hotel' || input.type === 'train' || input.type === 'flight') return 1;
+  if (input.type === 'other') return input.startDatetime && input.destination ? 1 : 0;
+  return 0;
+}
+
 export function listBookings(userId, tripId) {
   assertTripAccess(userId, tripId);
   const db = getDb();
@@ -67,9 +75,9 @@ export async function createBooking(userId, tripId, input) {
   const row = db.prepare(`
     INSERT INTO bookings (
       trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
-      origin, destination, terminal_or_station, details_json
+      origin, destination, terminal_or_station, details_json, show_in_itinerary
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     tripId,
@@ -83,6 +91,7 @@ export async function createBooking(userId, tripId, input) {
     input.destination || null,
     input.terminalOrStation || null,
     normalizeDetailsJson(input.detailsJson),
+    defaultShowInItinerary(input),
   );
 
   await syncStopWithBooking(row);
@@ -106,7 +115,8 @@ export async function updateBooking(userId, bookingId, input) {
       origin = ?,
       destination = ?,
       terminal_or_station = ?,
-      details_json = ?
+      details_json = ?,
+      show_in_itinerary = ?
     WHERE id = ?
     RETURNING *
   `).get(
@@ -120,6 +130,7 @@ export async function updateBooking(userId, bookingId, input) {
     input.destination ?? existing.destination,
     input.terminalOrStation ?? existing.terminal_or_station,
     input.detailsJson !== undefined ? normalizeDetailsJson(input.detailsJson) : existing.details_json,
+    input.showInItinerary !== undefined ? (input.showInItinerary ? 1 : 0) : existing.show_in_itinerary,
     bookingId,
   );
 
@@ -130,7 +141,8 @@ export async function updateBooking(userId, bookingId, input) {
 export function deleteBooking(userId, bookingId) {
   const db = getDb();
   assertBookingAccess(userId, bookingId);
-  db.prepare('DELETE FROM stops WHERE booking_id = ?').run(bookingId);
+  db.prepare('DELETE FROM stops WHERE booking_id = ? AND booking_required = 1').run(bookingId);
+  db.prepare('UPDATE stops SET booking_id = NULL WHERE booking_id = ?').run(bookingId);
   db.prepare('DELETE FROM bookings WHERE id = ?').run(bookingId);
   return { ok: true };
 }

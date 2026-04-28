@@ -1,27 +1,35 @@
 import { Reorder, motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import StopCard from './StopCard.jsx';
 import TransitStop from './TransitStop.jsx';
 
 export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, days, onMove }) {
   const [expandedId, setExpandedId] = useState(null);
   const [items, setItems] = useState(day?.stops || []);
+  const itemsRef = useRef(items);
 
   useEffect(() => {
-    setItems(day?.stops || []);
+    const nextItems = day?.stops || [];
+    itemsRef.current = nextItems;
+    setItems(nextItems);
   }, [day]);
+
+  const handleReorder = (nextItems) => {
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+  };
 
   if (!day) return null;
 
   return (
     <div className="relative pl-2">
       <div className="absolute left-[12px] top-0 bottom-0 w-px" style={{ background: 'rgba(240,234,216,0.1)' }} />
-      <Reorder.Group axis="y" values={items} onReorder={setItems} className="space-y-4">
+      <Reorder.Group axis="y" values={items} onReorder={handleReorder} className="space-y-4">
         {items.map((stop, index) => (
           <Reorder.Item
             key={stop.id}
             value={stop}
-            onDragEnd={() => onReorder(items.map((item) => item.id))}
+            onDragEnd={() => onReorder(itemsRef.current.map((item) => item.id))}
             as="div"
             className="list-none"
           >
