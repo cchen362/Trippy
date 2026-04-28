@@ -12,7 +12,28 @@ function statusColor(stop) {
   return 'rgba(240,234,216,0.66)';
 }
 
-export default function MapSequencePanel({ stops }) {
+const placeButtonStyle = {
+  marginTop: 6,
+  border: '1px solid rgba(224,138,58,0.42)',
+  borderRadius: 999,
+  background: 'rgba(224,138,58,0.12)',
+  color: '#e08a3a',
+  fontFamily: "'DM Mono', monospace",
+  fontSize: 9,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  padding: '5px 8px',
+  cursor: 'pointer',
+};
+
+const checkButtonStyle = {
+  ...placeButtonStyle,
+  border: '1px solid rgba(201,168,76,0.42)',
+  background: 'rgba(201,168,76,0.08)',
+  color: 'var(--gold)',
+};
+
+export default function MapSequencePanel({ stops, focusedSegmentId = 'all', onPlaceStop }) {
   if (!stops.length) return null;
 
   return (
@@ -20,10 +41,10 @@ export default function MapSequencePanel({ stops }) {
       style={{
         position: 'absolute',
         right: 12,
-        top: 12,
+        top: 62,
         zIndex: 900,
         width: 'min(320px, calc(100% - 24px))',
-        maxHeight: 'calc(100% - 24px)',
+        maxHeight: 'calc(100% - 74px)',
         overflow: 'auto',
         border: '1px solid rgba(255,255,255,0.10)',
         borderRadius: 8,
@@ -56,6 +77,9 @@ export default function MapSequencePanel({ stops }) {
               alignItems: 'center',
               gap: 9,
               padding: '7px 12px',
+              background: focusedSegmentId !== 'all' && stop.routeSegmentId === focusedSegmentId
+                ? 'rgba(201,168,76,0.08)'
+                : 'transparent',
             }}
           >
             <span
@@ -104,6 +128,24 @@ export default function MapSequencePanel({ stops }) {
               >
                 {stop.time || 'Flexible'}
               </p>
+              {!stop.canRenderMarker && onPlaceStop && (
+                <button
+                  type="button"
+                  onClick={() => onPlaceStop(stop)}
+                  style={placeButtonStyle}
+                >
+                  Place on map
+                </button>
+              )}
+              {stop.canRenderMarker && stop.isEstimated && onPlaceStop && (
+                <button
+                  type="button"
+                  onClick={() => onPlaceStop(stop)}
+                  style={checkButtonStyle}
+                >
+                  Check location
+                </button>
+              )}
             </div>
             <span
               style={{

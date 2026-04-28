@@ -29,13 +29,29 @@ function buildStopIcon(stop) {
   });
 }
 
-export default function StopMarker({ stop, deepLinkProvider }) {
+const actionStyle = {
+  width: '100%',
+  marginTop: 7,
+  border: '1px solid rgba(201,168,76,0.5)',
+  borderRadius: 999,
+  background: 'rgba(201,168,76,0.14)',
+  color: 'var(--gold)',
+  fontFamily: "'DM Mono', monospace",
+  fontSize: 10,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  padding: '7px 10px',
+  cursor: 'pointer',
+};
+
+export default function StopMarker({ stop, deepLinkProvider, muted = false, onStartCorrection }) {
   const lat = stop.displayLat ?? stop.lat;
   const lng = stop.displayLng ?? stop.lng;
   const icon = buildStopIcon(stop);
+  const correctionLabel = stop.isEstimated || stop.locationStatus === 'estimated' ? 'Check location' : 'Move pin';
 
   return (
-    <Marker position={[lat, lng]} icon={icon}>
+    <Marker position={[lat, lng]} icon={icon} opacity={muted ? 0.42 : 1}>
       <Popup>
         <div style={{ background: '#1c1a17', color: '#f0ead8', minWidth: 160, padding: '8px 0' }}>
           <div style={{
@@ -58,6 +74,15 @@ export default function StopMarker({ stop, deepLinkProvider }) {
           )}
           {Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) && (
             <OpenInMapsButton lat={lat} lng={lng} label={stop.title} deepLinkProvider={deepLinkProvider} />
+          )}
+          {onStartCorrection && (
+            <button
+              type="button"
+              onClick={() => onStartCorrection(stop)}
+              style={actionStyle}
+            >
+              {correctionLabel}
+            </button>
           )}
         </div>
       </Popup>

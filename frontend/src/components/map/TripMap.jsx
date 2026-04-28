@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import { useEffect, useMemo } from 'react';
-import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import StopMarker from './StopMarker.jsx';
 
 function hasDisplayCoordinates(stop) {
@@ -9,13 +9,44 @@ function hasDisplayCoordinates(stop) {
     && Number.isFinite(Number(stop.displayLng));
 }
 
-function MapBounds({ stops }) {
+function MapBounds({ stops, boundsKey }) {
   const map = useMap();
   useEffect(() => {
     if (stops.length === 0) return;
     const bounds = stops.map(s => [s.displayLat, s.displayLng]);
     map.fitBounds(bounds, { padding: [40, 40] });
-  }, [stops, map]);
+  }, [boundsKey, map]);
+  return null;
+}
+
+function MapCenterReporter({ enabled, onChange }) {
+  const map = useMapEvents({
+    moveend: () => {
+      if (!enabled || !onChange) return;
+      const center = map.getCenter();
+      onChange({ lat: center.lat, lng: center.lng });
+    },
+    click: (event) => {
+      if (!enabled) return;
+      map.panTo(event.latlng);
+    },
+  });
+
+  useEffect(() => {
+    if (!enabled || !onChange) return;
+    const center = map.getCenter();
+    onChange({ lat: center.lat, lng: center.lng });
+  }, [enabled, map, onChange]);
+
+  return null;
+}
+
+function CorrectionTargetPan({ stop }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!hasDisplayCoordinates(stop)) return;
+    map.panTo([stop.displayLat, stop.displayLng]);
+  }, [stop?.id, map]);
   return null;
 }
 
@@ -98,9 +129,26 @@ function ArrowMarker({ connector }) {
   );
 }
 
-export default function TripMap({ stops, mapConfig }) {
+export default function TripMap({
+  stops,
+  mapConfig,
+  focusedSegmentId = 'all',
+  correctionStop = null,
+  onMapCenterChange,
+  onStartCorrection,
+}) {
   const pinnedStops = stops.filter(hasDisplayCoordinates);
+  const focusedStops = focusedSegmentId === 'all'
+    ? pinnedStops
+    : pinnedStops.filter((stop) => stop.routeSegmentId === focusedSegmentId);
+  const boundsStops = focusedStops.length > 0 ? focusedStops : pinnedStops;
+  const boundsKey = `${focusedSegmentId}:${boundsStops.map((stop) => `${stop.id}:${stop.displayLat}:${stop.displayLng}`).join('|')}`;
   const connectors = buildConnectors(stops);
+  const correctionMode = Boolean(correctionStop);
+
+  const isMuted = (stop) => focusedSegmentId !== 'all' && stop.routeSegmentId !== focusedSegmentId;
+  const isConnectorMuted = (connector) => focusedSegmentId !== 'all'
+    && !connector.id.split(':').some((id) => stops.find((stop) => stop.id === id)?.routeSegmentId === focusedSegmentId);
 
   return (
     <MapContainer
@@ -114,7 +162,9 @@ export default function TripMap({ stops, mapConfig }) {
         subdomains={mapConfig.tileSubdomains}
         attribution={mapConfig.tileAttribution}
       />
-      <MapBounds stops={pinnedStops} />
+      <MapBounds stops={boundsStops} boundsKey={boundsKey} />
+      <MapCenterReporter enabled={correctionMode} onChange={onMapCenterChange} />
+      {correctionMode && <CorrectionTargetPan stop={correctionStop} />}
       {connectors.map((connector) => (
         <Polyline
           key={connector.id}
@@ -122,7 +172,7 @@ export default function TripMap({ stops, mapConfig }) {
           pathOptions={{
             color: connector.dashed ? 'rgba(240,234,216,0.66)' : '#c9a84c',
             weight: connector.dashed ? 2 : 3,
-            opacity: connector.dashed ? 0.72 : 0.86,
+            opacity: isConnectorMuted(connector) ? 0.24 : (connector.dashed ? 0.72 : 0.86),
             dashArray: connector.dashed ? '7 8' : null,
           }}
         />
@@ -135,6 +185,8 @@ export default function TripMap({ stops, mapConfig }) {
           key={stop.id}
           stop={stop}
           deepLinkProvider={mapConfig.deepLinkProvider}
+          muted={isMuted(stop)}
+          onStartCorrection={onStartCorrection}
         />
       ))}
     </MapContainer>
