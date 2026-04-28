@@ -40,7 +40,7 @@ describe('lookupHotelDetails', () => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': 'places-key',
-          'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents',
+          'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents,location',
         },
       },
     );
@@ -49,6 +49,7 @@ describe('lookupHotelDetails', () => {
       name: 'Waldorf Astoria Chengdu',
       address: '1199 Tianfu Avenue North, Chengdu, Sichuan, China',
       city: null,
+      tz: null,
     });
   });
 });

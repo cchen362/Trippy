@@ -61,11 +61,19 @@ describe('migrations', () => {
     expect(columns).toContain('show_in_itinerary');
   });
 
+  it('adds booking timezone columns', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(bookings)').all().map((r) => r.name);
+
+    expect(columns).toContain('origin_tz');
+    expect(columns).toContain('destination_tz');
+  });
+
   it('tracks migration versions to avoid re-running', () => {
     const db = getDb();
     // Running again should not throw
     expect(() => runMigrations()).not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(9);
+    expect(count.c).toBe(10);
   });
 });

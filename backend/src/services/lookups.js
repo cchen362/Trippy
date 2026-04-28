@@ -1,3 +1,4 @@
+import { find as tzFind } from 'geo-tz';
 import { config } from '../config.js';
 import { searchPhotos } from './unsplash.js';
 
@@ -69,7 +70,7 @@ export async function lookupHotelDetails(placeId, sessionToken) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': config.googlePlacesKey,
-      'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents',
+      'X-Goog-FieldMask': 'id,displayName,formattedAddress,addressComponents,location',
     },
   });
 
@@ -81,11 +82,16 @@ export async function lookupHotelDetails(placeId, sessionToken) {
   }
 
   const place = await response.json();
+  let tz = null;
+  if (place.location?.latitude != null && place.location?.longitude != null) {
+    tz = tzFind(place.location.latitude, place.location.longitude)[0] || null;
+  }
   return {
     placeId: place.id || normalizedPlaceId,
     name: place.displayName?.text || '',
     address: place.formattedAddress || '',
     city: extractCityFromAddressComponents(place.addressComponents),
+    tz,
   };
 }
 
@@ -230,6 +236,8 @@ function normalizeAeroDataBoxFlight(rawFlight, normalized, departureDate) {
     destination: formatAirport(rawFlight.arrival?.airport),
     startDatetime: toDatetimeLocal(scheduledLocal(rawFlight.departure)),
     endDatetime: toDatetimeLocal(scheduledLocal(rawFlight.arrival)),
+    originTz:      rawFlight.departure?.airport?.timeZone || null,
+    destinationTz: rawFlight.arrival?.airport?.timeZone  || null,
     airlineName: rawFlight.airline?.name || null,
     aircraft,
     detailsJson: {
