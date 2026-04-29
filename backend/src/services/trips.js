@@ -453,6 +453,16 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
   };
 }
 
+export function deleteTrip(userId, tripId) {
+  const trip = assertTripAccess(userId, tripId);
+  if (trip.owner_id !== userId) {
+    throw Object.assign(new Error('Only the trip owner can delete this trip'), { status: 403 });
+  }
+  const db = getDb();
+  db.prepare('DELETE FROM trips WHERE id = ?').run(tripId);
+  return { deleted: true };
+}
+
 export function updateDayCityOverride(userId, tripId, date, cityOverride) {
   assertTripAccess(userId, tripId);
   const db = getDb();

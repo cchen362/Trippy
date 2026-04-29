@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useOutletContext, useParams } from 'react-router-dom';
+import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Edit2, Users } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
@@ -23,6 +23,7 @@ export function useTripContext() {
 
 export default function TripPage() {
   const { tripId } = useParams();
+  const navigate = useNavigate();
   const tripState = useTrip(tripId);
   const stopActions = useStops({ onChanged: tripState.refresh });
   const bookingActions = useBookings({ tripId, onChanged: tripState.refresh });
@@ -31,6 +32,7 @@ export default function TripPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const discovery = useDiscovery(tripId);
 
   useEffect(() => {
@@ -47,6 +49,16 @@ export default function TripPage() {
     if (!destination) return;
     discovery.discover(destination);
   }, [tripState.trip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await tripsApi.remove(tripId);
+      navigate('/');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleEditSave = async (updates) => {
     setEditSaving(true);
@@ -133,6 +145,8 @@ export default function TripPage() {
             onClose={() => setEditOpen(false)}
             onSubmit={handleEditSave}
             saving={editSaving}
+            onDelete={handleDelete}
+            deleting={deleting}
           />
         )}
       </AnimatePresence>

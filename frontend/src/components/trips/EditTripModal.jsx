@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
 
-export default function EditTripModal({ trip, open, onClose, onSubmit, saving }) {
+export default function EditTripModal({ trip, open, onClose, onSubmit, saving, onDelete, deleting }) {
   const [form, setForm] = useState({
     title: trip.title ?? '',
     endDate: trip.endDate ?? '',
@@ -10,8 +10,14 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving })
     interestTags: trip.interestTags ?? [],
   });
   const [error, setError] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!open) return null;
+
+  const handleClose = () => {
+    setConfirmDelete(false);
+    onClose();
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -39,7 +45,7 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving })
                 Refine the plan.
               </h2>
             </div>
-            <button type="button" onClick={onClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
+            <button type="button" onClick={handleClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
               Close
             </button>
           </div>
@@ -135,18 +141,52 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving })
 
           {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
 
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button type="button" onClick={onClose} className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border" style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!form.title.trim() || saving}
-              className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
-              style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !form.title.trim() || saving ? 0.6 : 1 }}
-            >
-              {saving ? 'Saving...' : 'Save Changes'}
-            </button>
+          <div className="mt-6 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {confirmDelete ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    className="px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+                    style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDelete}
+                    disabled={deleting}
+                    className="px-4 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
+                    style={{ background: '#c0392b', color: '#fff', opacity: deleting ? 0.6 : 1 }}
+                  >
+                    {deleting ? 'Deleting…' : 'Confirm delete'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+                  style={{ color: '#c0392b', borderColor: 'rgba(192,57,43,0.3)' }}
+                >
+                  Delete trip
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleClose} className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border" style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!form.title.trim() || saving}
+                className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
+                style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !form.title.trim() || saving ? 0.6 : 1 }}
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
