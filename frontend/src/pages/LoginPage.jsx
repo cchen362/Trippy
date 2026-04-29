@@ -1,6 +1,200 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 
+function LuxInput({ label, type = 'text', autoComplete, value, onChange }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <label style={{
+        fontFamily: "'DM Mono', monospace", fontSize: 10,
+        letterSpacing: '0.14em', textTransform: 'uppercase',
+        color: focused ? '#c9a050' : '#504438',
+        transition: 'color 200ms',
+      }}>{label}</label>
+      <input
+        type={type}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 400,
+          color: '#f0ebe3', background: 'rgba(13,11,9,0.7)',
+          border: `1px solid ${focused ? 'rgba(201,160,80,0.5)' : 'rgba(201,160,80,0.14)'}`,
+          borderRadius: 4, padding: '11px 16px', width: '100%',
+          letterSpacing: '0.01em', outline: 'none',
+          transition: 'border-color 200ms, box-shadow 200ms',
+          boxShadow: focused
+            ? '0 0 0 1px rgba(201,160,80,0.08), inset 0 1px 3px rgba(0,0,0,0.4)'
+            : 'inset 0 1px 3px rgba(0,0,0,0.4)',
+        }}
+      />
+    </div>
+  );
+}
+
+function LuxButton({ children, loading, disabled }) {
+  const [hov, setHov] = useState(false);
+  const [press, setPress] = useState(false);
+  return (
+    <button
+      type="submit"
+      disabled={disabled || loading}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => { setHov(false); setPress(false); }}
+      onMouseDown={() => setPress(true)}
+      onMouseUp={() => setPress(false)}
+      style={{
+        fontFamily: "'DM Mono', monospace", fontSize: 11,
+        letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 500,
+        border: 'none', borderRadius: 3, padding: '13px 24px',
+        width: '100%', cursor: (disabled || loading) ? 'wait' : 'pointer',
+        background: hov ? '#d4b470' : '#c9a050',
+        color: '#0d0b09',
+        transform: press ? 'scale(0.985)' : 'scale(1)',
+        transition: 'all 180ms cubic-bezier(0.25,0.1,0.25,1)',
+        opacity: (disabled || loading) ? 0.65 : 1,
+      }}
+    >
+      {loading ? 'Signing in…' : children}
+    </button>
+  );
+}
+
+function LoginCard({ isDesktop, tab, setTab, form, setForm, onSubmit, loading, error, clearError }) {
+  const isRegister = tab === 'register';
+
+  const field = (name, label, type = 'text', autoComplete) => (
+    <LuxInput
+      label={label}
+      type={type}
+      autoComplete={autoComplete}
+      value={form[name]}
+      onChange={v => setForm(f => ({ ...f, [name]: v }))}
+    />
+  );
+
+  return (
+    <div style={{
+      width: isDesktop ? 390 : '100%',
+      background: 'rgba(10,8,7,0.92)',
+      backdropFilter: 'blur(24px)',
+      WebkitBackdropFilter: 'blur(24px)',
+      border: '1px solid rgba(201,160,80,0.16)',
+      borderRadius: 4,
+      padding: isDesktop ? '48px 48px 44px' : '36px 32px 32px',
+      position: 'relative',
+      flexShrink: 0,
+      animation: 'lp-fadeUp 0.9s cubic-bezier(0.25,0.1,0.25,1) both, lp-cardGlow 6s 1s ease-in-out infinite',
+    }}>
+      {/* Gold crown line */}
+      <div style={{
+        position: 'absolute', top: -1, left: '20%', right: '20%', height: 1,
+        background: 'linear-gradient(90deg, transparent, #c9a050 40%, #c9a050 60%, transparent)',
+        animation: 'lp-goldBar 4s ease-in-out infinite',
+      }} />
+
+      {/* Wordmark */}
+      <div style={{ textAlign: 'center', marginBottom: isDesktop ? 32 : 28 }}>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: isDesktop ? 12 : 11,
+          fontWeight: 300, color: '#f0ebe3',
+          letterSpacing: '0.42em', textTransform: 'uppercase',
+          marginBottom: isDesktop ? 10 : 8,
+        }}>Trippy</div>
+        <div style={{
+          width: isDesktop ? 28 : 24, height: 1,
+          background: 'rgba(201,160,80,0.5)',
+          margin: '0 auto',
+        }} />
+      </div>
+
+      {/* Tabs */}
+      <div style={{
+        display: 'flex', gap: 0,
+        marginBottom: isDesktop ? 32 : 28,
+        borderBottom: '1px solid rgba(201,160,80,0.1)',
+      }}>
+        {[{ key: 'login', label: 'Sign in' }, { key: 'register', label: 'Register' }].map(({ key, label }) => {
+          const active = tab === key;
+          return (
+            <button key={key} type="button" onClick={() => { setTab(key); clearError(); setForm({ username: '', password: '', displayName: '', inviteCode: '' }); }} style={{
+              flex: 1, background: 'none', border: 'none', cursor: 'pointer',
+              paddingBottom: isDesktop ? 12 : 10, paddingTop: 4,
+              fontFamily: "'DM Mono', monospace",
+              fontSize: isDesktop ? 10 : 9,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: active ? '#c9a050' : '#3a3028',
+              borderBottom: active ? '1px solid #c9a050' : '1px solid transparent',
+              marginBottom: -1,
+              transition: 'color 200ms, border-color 200ms',
+            }}>{label}</button>
+          );
+        })}
+      </div>
+
+      {/* Tagline */}
+      <div style={{ textAlign: 'center', marginBottom: isDesktop ? 28 : 24 }}>
+        <div style={{
+          fontFamily: "'Playfair Display', serif", fontStyle: 'italic',
+          fontSize: isDesktop ? 34 : 28, fontWeight: 500,
+          color: '#f0ebe3', letterSpacing: '-0.02em',
+          lineHeight: 1.15, marginBottom: isDesktop ? 8 : 6,
+        }}>
+          {isRegister ? 'Join us.' : 'Welcome back.'}
+        </div>
+        <p style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontSize: isDesktop ? 15 : 14,
+          color: '#504438', letterSpacing: '0.02em',
+        }}>
+          {isRegister ? 'Create your member account.' : 'Your journeys are waiting.'}
+        </p>
+      </div>
+
+      {/* Form */}
+      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? 18 : 16 }}>
+        {isRegister && field('displayName', 'Display Name', 'text', 'name')}
+        {field('username', 'Username', 'text', 'username')}
+        {field('password', 'Password', 'password', isRegister ? 'new-password' : 'current-password')}
+        {isRegister && field('inviteCode', 'Invite Code', 'text', 'one-time-code')}
+
+        {!isRegister && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -4 }}>
+            <span style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 9,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: '#3a3028', cursor: 'default',
+            }}>Forgot password</span>
+          </div>
+        )}
+
+        {error && (
+          <p style={{
+            margin: 0, color: '#e08a7a',
+            fontFamily: "'DM Mono', monospace",
+            fontSize: 11, letterSpacing: '0.08em', lineHeight: 1.45,
+            textTransform: 'uppercase',
+          }}>{error}</p>
+        )}
+
+        <div style={{ marginTop: isDesktop ? 6 : 4 }}>
+          <LuxButton loading={loading} disabled={loading}>
+            {isRegister ? 'Create account' : 'Sign in'}
+          </LuxButton>
+        </div>
+      </form>
+
+      {/* Bottom gold line */}
+      <div style={{
+        position: 'absolute', bottom: -1, left: '20%', right: '20%', height: 1,
+        background: 'linear-gradient(90deg, transparent, rgba(201,160,80,0.2), transparent)',
+      }} />
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { login, register, error, clearError } = useAuth();
   const [tab, setTab] = useState('login');
@@ -14,359 +208,119 @@ export default function LoginPage() {
     try {
       if (tab === 'login') await login(form.username, form.password);
       else await register(form.username, form.password, form.displayName, form.inviteCode);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const field = (name, label, type = 'text', autoComplete = undefined) => (
-    <div className="login-field">
-      <label className="login-label" htmlFor={`login-${name}`}>{label}</label>
-      <input
-        id={`login-${name}`}
-        type={type}
-        autoComplete={autoComplete}
-        value={form[name]}
-        onChange={e => setForm(f => ({ ...f, [name]: e.target.value }))}
-        required
-        className="login-input"
-      />
-    </div>
-  );
+  const cardProps = { tab, setTab, form, setForm, onSubmit: handleSubmit, loading, error, clearError };
 
   return (
-    <div className="login-shell">
-      <main className="login-content" aria-label="Trippy account access">
-        <section className="login-intro">
-          <div className="login-gold-rule" />
-          <p className="login-eyebrow">Private itinerary</p>
-          <h1>Open your travel dossier.</h1>
-          <p className="login-copy">
-            Sign in to continue shaping the route, reservations, and quiet details of your next journey.
-          </p>
-        </section>
+    <>
+      {/* Mobile layout */}
+      <div className="lp-mobile">
+        <div className="lp-medallion-wrap">
+          <img src="/assets/mobile-vignette.png" alt="" className="lp-medallion-img" />
+          <div className="lp-medallion-fade" />
+        </div>
+        <div className="lp-mobile-card-wrap">
+          <LoginCard isDesktop={false} {...cardProps} />
+        </div>
+      </div>
 
-        <section className="login-card" aria-label="Account form">
-          <div className="login-card-head">
-            <p className="login-card-label">Trippy <span /> Access</p>
-            <div className="login-route" aria-hidden="true">
-              <span>Home</span>
-              <i />
-              <span>Afar</span>
-            </div>
-          </div>
-
-          <div className="login-card-body">
-            <div className="login-tabs" role="tablist" aria-label="Account access mode">
-              {['login', 'register'].map(t => (
-                <button
-                  key={t}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t}
-                  onClick={() => { setTab(t); clearError(); setForm({ username: '', password: '', displayName: '', inviteCode: '' }); }}
-                  className="login-tab"
-                  data-active={tab === t}
-                >
-                  {t === 'login' ? 'Sign In' : 'Register'}
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleSubmit} className="login-form">
-              {tab === 'register' && field('displayName', 'Display Name', 'text', 'name')}
-              {field('username', 'Username', 'text', 'username')}
-              {field('password', 'Password', 'password', tab === 'register' ? 'new-password' : 'current-password')}
-              {tab === 'register' && field('inviteCode', 'Invite Code', 'text', 'one-time-code')}
-
-              {error && <p className="login-error">{error}</p>}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="login-submit"
-              >
-                {loading ? '...' : tab === 'login' ? 'Open Dossier' : 'Create Dossier'}
-              </button>
-            </form>
-          </div>
-        </section>
-      </main>
+      {/* Desktop layout */}
+      <div className="lp-desktop">
+        <div className="lp-desktop-overlay" />
+        <div className="lp-desktop-card-wrap">
+          <LoginCard isDesktop={true} {...cardProps} />
+        </div>
+      </div>
 
       <style>{`
-        .login-shell {
-          position: relative;
-          min-height: 100vh;
-          overflow: hidden;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 28px 20px;
-          background:
-            radial-gradient(circle at 82% 10%, rgba(201, 168, 76, 0.14), transparent 18rem),
-            radial-gradient(circle at 16% 92%, rgba(240, 234, 216, 0.045), transparent 18rem),
-            var(--ink-deep);
+        @keyframes lp-fadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes lp-cardGlow {
+          0%, 100% { box-shadow: 0 8px 48px rgba(0,0,0,0.75), 0 0 0 1px rgba(201,160,80,0.1); }
+          50%       { box-shadow: 0 8px 60px rgba(0,0,0,0.8), 0 0 24px rgba(201,160,80,0.06), 0 0 0 1px rgba(201,160,80,0.18); }
+        }
+        @keyframes lp-goldBar {
+          0%   { opacity: 0.4; transform: scaleX(0.6); }
+          50%  { opacity: 0.9; transform: scaleX(1); }
+          100% { opacity: 0.4; transform: scaleX(0.6); }
         }
 
-        .login-shell::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          background:
-            linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 34%),
-            linear-gradient(180deg, transparent 0%, rgba(13, 11, 9, 0.36) 100%);
+        input:-webkit-autofill {
+          -webkit-box-shadow: 0 0 0 100px #1a1410 inset !important;
+          -webkit-text-fill-color: #f0ebe3 !important;
+          caret-color: #f0ebe3;
         }
+        input::placeholder { color: #3a3028; }
 
-        .login-content {
-          position: relative;
-          z-index: 2;
-          width: min(100%, 390px);
-        }
-
-        .login-intro {
-          margin-bottom: 22px;
-        }
-
-        .login-gold-rule {
-          width: 24px;
-          height: 1px;
-          margin-bottom: 14px;
-          background: var(--gold);
-        }
-
-        .login-eyebrow,
-        .login-card-label,
-        .login-label,
-        .login-tab,
-        .login-submit,
-        .login-error {
-          font-family: 'DM Mono', monospace;
-          text-transform: uppercase;
-        }
-
-        .login-eyebrow {
-          margin: 0 0 8px;
-          color: var(--gold);
-          font-size: 11px;
-          letter-spacing: 0.28em;
-        }
-
-        .login-intro h1 {
-          margin: 0;
-          color: var(--cream);
-          font-family: 'Playfair Display', serif;
-          font-size: 40px;
-          font-style: italic;
-          font-weight: 400;
-          line-height: 0.98;
-        }
-
-        .login-copy {
-          margin: 12px 0 0;
-          max-width: 30rem;
-          color: var(--cream-dim);
-          font-family: 'Cormorant Garamond', serif;
-          font-size: 18px;
-          font-weight: 300;
-          line-height: 1.28;
-        }
-
-        .login-card {
-          overflow: hidden;
-          border: 1px solid var(--ink-border);
-          border-radius: 12px;
-          background: linear-gradient(180deg, rgba(35, 32, 24, 0.97), rgba(28, 26, 23, 0.98));
-          box-shadow: 0 26px 90px rgba(0, 0, 0, 0.36);
-        }
-
-        .login-card-head {
-          padding: 18px 18px 15px;
-          border-bottom: 1px solid var(--ink-border);
-        }
-
-        .login-card-label {
-          margin: 0;
-          color: var(--gold);
-          font-size: 10px;
-          letter-spacing: 0.24em;
-        }
-
-        .login-card-label span {
-          display: inline-block;
-          width: 3px;
-          height: 3px;
-          margin: 0 7px 2px;
-          border-radius: 50%;
-          background: var(--gold);
-        }
-
-        .login-route {
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          margin-top: 19px;
-        }
-
-        .login-route span {
-          color: var(--cream);
-          font-family: 'Playfair Display', serif;
-          font-size: 32px;
-          font-style: italic;
-          line-height: 1;
-        }
-
-        .login-route i {
-          position: relative;
-          flex: 1;
-          height: 1px;
-          background: repeating-linear-gradient(
-            to right,
-            rgba(201, 168, 76, 0.42) 0,
-            rgba(201, 168, 76, 0.42) 2px,
-            transparent 2px,
-            transparent 7px
-          );
-        }
-
-        .login-route i::before,
-        .login-route i::after {
-          content: '';
-          position: absolute;
-          top: -3px;
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: rgba(201, 168, 76, 0.72);
-        }
-
-        .login-route i::before { left: 0; }
-        .login-route i::after { right: 0; }
-
-        .login-card-body {
-          padding: 18px;
-        }
-
-        .login-tabs {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 6px;
-          margin-bottom: 18px;
-        }
-
-        .login-tab {
-          min-height: 42px;
-          border: 1px solid var(--ink-border);
-          border-radius: 8px;
-          background: transparent;
-          color: var(--cream-mute);
-          font-size: 10px;
-          letter-spacing: 0.2em;
-          transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
-        }
-
-        .login-tab[data-active='true'] {
-          border-color: var(--gold-line);
-          background: var(--gold-soft);
-          color: var(--gold);
-        }
-
-        .login-form {
+        /* ── Mobile (default) ─────────────────────── */
+        .lp-mobile {
           display: flex;
           flex-direction: column;
-          gap: 15px;
+          align-items: center;
+          min-height: 100vh;
+          overflow-x: hidden;
+          background: #0d0b09;
         }
+        .lp-desktop { display: none; }
 
-        .login-label {
+        .lp-medallion-wrap {
+          position: relative;
+          width: min(80vw, 320px);
+          flex-shrink: 0;
+          margin-top: clamp(16px, 4vh, 40px);
+          animation: lp-fadeUp 0.8s cubic-bezier(0.25,0.1,0.25,1) both;
+        }
+        .lp-medallion-img {
+          width: 100%;
+          height: auto;
           display: block;
-          margin-bottom: 7px;
-          color: var(--cream-mute);
-          font-size: 10px;
-          letter-spacing: 0.24em;
+        }
+        .lp-medallion-fade {
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(ellipse 80% 60% at 50% 110%, #0d0b09 0%, transparent 70%);
+          pointer-events: none;
         }
 
-        .login-input {
+        .lp-mobile-card-wrap {
           width: 100%;
-          min-height: 48px;
-          border: 1px solid var(--ink-border);
-          border-radius: 8px;
-          background: rgba(13, 11, 9, 0.48);
-          color: var(--cream);
-          font-family: 'DM Mono', monospace;
-          font-size: 14px;
-          outline: none;
-          padding: 0 13px;
-          transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+          max-width: 390px;
+          padding: 0 20px 48px;
+          animation: lp-fadeUp 0.9s 0.2s cubic-bezier(0.25,0.1,0.25,1) both;
         }
 
-        .login-input:focus {
-          border-color: var(--gold-line);
-          background: rgba(13, 11, 9, 0.68);
-          box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.08);
-        }
-
-        .login-error {
-          margin: 0;
-          color: #e08a7a;
-          font-size: 11px;
-          letter-spacing: 0.08em;
-          line-height: 1.45;
-        }
-
-        .login-submit {
-          width: 100%;
-          min-height: 50px;
-          margin-top: 3px;
-          border: 0;
-          border-radius: 8px;
-          background: var(--gold);
-          color: var(--ink-deep);
-          font-size: 10px;
-          letter-spacing: 0.24em;
-          transition: opacity 180ms ease, transform 180ms ease;
-        }
-
-        .login-submit:not(:disabled):hover {
-          transform: translateY(-1px);
-        }
-
-        .login-submit:disabled {
-          cursor: wait;
-          opacity: 0.6;
-        }
-
-        @media (min-width: 900px) {
-          .login-shell {
-            justify-content: center;
-            padding: 56px clamp(48px, 8vw, 118px);
+        /* ── Desktop (≥800px) ─────────────────────── */
+        @media (min-width: 800px) {
+          .lp-mobile  { display: none; }
+          .lp-desktop {
+            display: flex;
+            align-items: center;
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
+            padding-left: clamp(120px, 18vw, 260px);
+            background-image: url('/assets/illustration-login.png');
+            background-size: cover;
+            background-position: center right;
           }
-
-          .login-content {
-            width: min(100%, 430px);
+          .lp-desktop-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, rgba(13,11,9,0.18) 0%, transparent 28%);
+            pointer-events: none;
           }
-
-          .login-intro h1 {
-            font-size: clamp(44px, 4.8vw, 72px);
-          }
-
-          .login-copy {
-            font-size: 20px;
-          }
-        }
-
-        @media (max-width: 420px) {
-          .login-shell {
-            align-items: flex-start;
-            padding: 24px 18px;
-          }
-
-          .login-intro h1 {
-            font-size: 36px;
-          }
-
-          .login-copy {
-            font-size: 17px;
+          .lp-desktop-card-wrap {
+            position: relative;
+            z-index: 2;
           }
         }
       `}</style>
-    </div>
+    </>
   );
 }
