@@ -184,7 +184,7 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
         <div style={{ width: 28, height: 1, background: 'rgba(201,160,80,0.35)' }} />
       </div>
 
-      {/* Description — 3-line clamp */}
+      {/* Description */}
       {description && (
         <p style={{
           fontFamily: "'Cormorant Garamond', serif",
@@ -193,10 +193,6 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
           color: '#8a7a6a',
           letterSpacing: '0.01em',
           margin: 0,
-          display: '-webkit-box',
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
         }}>
           {description}
         </p>
@@ -275,7 +271,7 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
               textTransform: 'uppercase',
               cursor: 'pointer',
               borderRadius: 3,
-              padding: '9px 16px',
+              padding: '12px 16px',
               background: isInTrip ? 'rgba(201,160,80,0.1)' : 'transparent',
               color: isInTrip ? '#c9a050' : '#504438',
               border: `1px solid ${isInTrip ? 'rgba(201,160,80,0.35)' : 'rgba(201,160,80,0.12)'}`,

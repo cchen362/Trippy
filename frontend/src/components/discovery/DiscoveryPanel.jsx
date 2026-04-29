@@ -28,8 +28,6 @@ const CATEGORY_LABELS = {
   wellness: 'Wellness',
 };
 
-const PAGE_SIZE = 5;
-
 function normalizeName(str) {
   return str
     .toLowerCase()
@@ -156,13 +154,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [inputFocused, setInputFocused] = useState(false);
   const tabs = buildTabs(trip.interestTags);
   const [activeCategory, setActiveCategory] = useState(tabs[0]);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [surprisePick, setSurprisePick] = useState(null);
 
   const { discover, refresh, getDestination } = discovery;
   const { partialResults, completedCategories, loading, error } = getDestination(destination);
-
-  useEffect(() => setVisibleCount(PAGE_SIZE), [activeCategory]);
 
   useEffect(() => {
     if (destination) discover(destination);
@@ -180,7 +175,6 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     if (destination.trim()) {
       discover(destination.trim());
       setActiveCategory(tabs[0]);
-      setVisibleCount(PAGE_SIZE);
     }
   };
 
@@ -214,8 +208,6 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   };
 
   const activeItems = partialResults[activeCategory] ?? [];
-  const visibleItems = activeItems.slice(0, visibleCount);
-  const hasMore = activeItems.length > visibleCount;
   const categoryLoaded = completedCategories.has(activeCategory);
   const anyResults = Object.keys(partialResults).length > 0;
   const totalCount = Object.values(partialResults).flat().length;
@@ -415,44 +407,20 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!error && visibleItems.length > 0 && (
-          <div>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
-              gap: 16,
-            }}>
-              {visibleItems.map((suggestion, idx) => (
-                <SuggestionCard
-                  key={suggestion.name ?? idx}
-                  suggestion={suggestion}
-                  days={days}
-                  onAddToDay={handleAddToDay}
-                />
-              ))}
-            </div>
-
-            {hasMore && (
-              <button
-                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  marginTop: 16,
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: 11, letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: 'rgba(240,234,216,0.50)',
-                  border: '1px solid rgba(240,235,227,0.08)',
-                  borderRadius: 4,
-                  padding: '12px',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                }}
-              >
-                Show more ({activeItems.length - visibleCount} remaining)
-              </button>
-            )}
+        {!error && activeItems.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
+            gap: 16,
+          }}>
+            {activeItems.map((suggestion, idx) => (
+              <SuggestionCard
+                key={suggestion.name ?? idx}
+                suggestion={suggestion}
+                days={days}
+                onAddToDay={handleAddToDay}
+              />
+            ))}
           </div>
         )}
 

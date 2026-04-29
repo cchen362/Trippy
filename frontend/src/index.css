@@ -145,6 +145,9 @@ select {
 .discovery-card:hover .discovery-card-hint {
   opacity: 1;
 }
+@media (hover: none) {
+  .discovery-card-hint { opacity: 1; }
+}
 
 .discovery-tab-btn { transition: color 150ms, border-color 150ms; }
 .discovery-tab-btn:hover { color: var(--cream) !important; }
