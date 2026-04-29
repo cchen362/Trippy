@@ -100,21 +100,13 @@ function buildConnectors(stops) {
 function ArrowMarker({ connector }) {
   const center = midpoint(connector.from, connector.to);
   const rotation = bearingDegrees(connector.from, connector.to);
+  const arrowColor = connector.dashed ? 'rgba(240,234,216,0.72)' : '#f0ebe3';
   const icon = useMemo(() => L.divIcon({
     className: '',
-    html: `<span style="
-      width: 18px;
-      height: 18px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: ${connector.dashed ? 'rgba(240,234,216,0.72)' : '#c9a84c'};
-      font-family: DM Mono, monospace;
-      font-size: 18px;
-      line-height: 1;
-      text-shadow: 0 1px 4px rgba(13,11,9,0.9);
-      transform: rotate(${rotation}deg);
-    ">↑</span>`,
+    html: `<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="9" cy="9" r="8" fill="#0d0b09" fill-opacity="0.82" stroke="rgba(240,234,216,0.18)" stroke-width="1"/>
+      <text x="9" y="13" text-anchor="middle" font-family="DM Mono,monospace" font-size="11" fill="${arrowColor}" transform="rotate(${rotation}, 9, 9)">↑</text>
+    </svg>`,
     iconSize: [18, 18],
     iconAnchor: [9, 9],
   }), [connector.dashed, rotation]);
@@ -165,15 +157,37 @@ export default function TripMap({
       <MapBounds stops={boundsStops} boundsKey={boundsKey} />
       <MapCenterReporter enabled={correctionMode} onChange={onMapCenterChange} />
       {correctionMode && <CorrectionTargetPan stop={correctionStop} />}
-      {connectors.map((connector) => (
+      {connectors.filter((c) => !c.dashed).map((connector) => (
+        <Polyline
+          key={`${connector.id}:under`}
+          positions={[connector.from, connector.to]}
+          pathOptions={{
+            color: '#0d0b09',
+            weight: 5,
+            opacity: isConnectorMuted(connector) ? 0.24 : 0.65,
+          }}
+        />
+      ))}
+      {connectors.filter((c) => !c.dashed).map((connector) => (
+        <Polyline
+          key={`${connector.id}:pearl`}
+          positions={[connector.from, connector.to]}
+          pathOptions={{
+            color: '#f0ebe3',
+            weight: 2.5,
+            opacity: isConnectorMuted(connector) ? 0.24 : 0.92,
+          }}
+        />
+      ))}
+      {connectors.filter((c) => c.dashed).map((connector) => (
         <Polyline
           key={connector.id}
           positions={[connector.from, connector.to]}
           pathOptions={{
-            color: connector.dashed ? 'rgba(240,234,216,0.66)' : '#c9a84c',
-            weight: connector.dashed ? 2 : 3,
-            opacity: isConnectorMuted(connector) ? 0.24 : (connector.dashed ? 0.72 : 0.86),
-            dashArray: connector.dashed ? '7 8' : null,
+            color: 'rgba(240,234,216,0.66)',
+            weight: 2,
+            opacity: isConnectorMuted(connector) ? 0.24 : 0.72,
+            dashArray: '7 8',
           }}
         />
       ))}

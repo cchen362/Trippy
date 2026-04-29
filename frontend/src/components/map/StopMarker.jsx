@@ -14,7 +14,7 @@ function buildStopIcon(stop) {
   const fill = estimated ? 'rgba(201,168,76,0.72)' : '#c9a84c';
   const ring = estimated
     ? '<circle cx="16" cy="16" r="13" fill="none" stroke="rgba(240,234,216,0.82)" stroke-width="2" stroke-dasharray="3 4"/>'
-    : '<circle cx="16" cy="16" r="13" fill="none" stroke="#0d0b09" stroke-width="3"/>';
+    : '<circle cx="16" cy="16" r="13" fill="none" stroke="#0d0b09" stroke-width="4"/>';
 
   return L.divIcon({
     className: '',

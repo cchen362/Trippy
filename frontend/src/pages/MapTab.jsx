@@ -188,7 +188,9 @@ export default function MapTab() {
               display: 'flex',
               gap: 8,
               maxWidth: 'calc(100% - 24px)',
+              maxHeight: 40,
               overflowX: 'auto',
+              overflowY: 'hidden',
               paddingBottom: 2,
             }}
           >
