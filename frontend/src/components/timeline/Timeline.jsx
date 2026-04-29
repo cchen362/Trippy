@@ -23,7 +23,7 @@ export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, d
 
   return (
     <div className="relative pl-2">
-      <div className="absolute left-[12px] top-0 bottom-0 w-px" style={{ background: 'rgba(240,234,216,0.1)' }} />
+      <div className="absolute left-[20px] top-0 bottom-0 w-px" style={{ background: 'linear-gradient(to bottom, rgba(201,168,76,0) 0%, rgba(201,168,76,0.35) 20%, rgba(201,168,76,0.35) 80%, rgba(201,168,76,0) 100%)' }} />
       <Reorder.Group axis="y" values={items} onReorder={handleReorder} className="space-y-4">
         {items.map((stop, index) => (
           <Reorder.Item

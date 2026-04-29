@@ -57,16 +57,16 @@ export default function PlanTab() {
             fontSize: '11px',
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
-            color: 'var(--ink-deep)',
-            border: '1px solid rgba(201,168,76,0.55)',
+            color: 'var(--gold)',
+            border: '1px solid rgba(201,168,76,0.4)',
             borderRadius: '999px',
             padding: '5px 14px',
-            background: 'var(--gold)',
+            background: 'transparent',
             cursor: activeDay ? 'pointer' : 'not-allowed',
             display: 'flex',
             alignItems: 'center',
             gap: '7px',
-            opacity: activeDay ? 1 : 0.55,
+            opacity: activeDay ? 1 : 0.45,
           }}
         >
           <Plus size={13} />

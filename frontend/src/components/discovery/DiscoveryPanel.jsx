@@ -309,18 +309,17 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               fontFamily: "'DM Mono', monospace",
               fontSize: 11, letterSpacing: '0.18em',
               textTransform: 'uppercase',
-              color: (loading || !destination.trim()) ? 'rgba(13,11,9,0.5)' : '#0d0b09',
-              background: (loading || !destination.trim()) ? 'rgba(201,160,80,0.4)' : '#c9a050',
-              border: 'none',
-              borderRadius: 3,
-              padding: '11px 22px',
+              color: (loading || !destination.trim()) ? 'rgba(201,168,76,0.35)' : 'var(--gold)',
+              background: 'transparent',
+              border: `1px solid ${(loading || !destination.trim()) ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.5)'}`,
+              borderRadius: 4,
+              padding: '10px 22px',
               cursor: (loading || !destination.trim()) ? 'default' : 'pointer',
-              fontWeight: 500,
               whiteSpace: 'nowrap',
-              transition: 'background 150ms',
+              transition: 'border-color 150ms, color 150ms',
             }}
           >
-            Go
+            {loading ? '...' : 'Go'}
           </button>
         </div>
       </div>

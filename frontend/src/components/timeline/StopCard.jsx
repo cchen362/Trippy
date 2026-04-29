@@ -74,8 +74,13 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                   {stop.title}
                 </h3>
               </button>
-              <span className="rounded-full border px-3 py-2 font-mono text-[10px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-dim)', borderColor: 'rgba(240,234,216,0.18)', background: 'rgba(13,11,9,0.22)' }}>
-                Drag
+              <span
+                className="cursor-grab active:cursor-grabbing"
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 4px)', gap: '3px', padding: '4px' }}
+              >
+                {[...Array(6)].map((_, i) => (
+                  <span key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(240,234,216,0.3)' }} />
+                ))}
               </span>
             </div>
 
