@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SuggestionCard from './SuggestionCard.jsx';
 
-// Maps user interest tags → discovery category keys
 const TAG_TO_CATEGORY = {
   'food & drink': 'food',
   'nature': 'nature',
@@ -29,8 +28,6 @@ const CATEGORY_LABELS = {
   wellness: 'Wellness',
 };
 
-const PAGE_SIZE = 5;
-
 function normalizeName(str) {
   return str
     .toLowerCase()
@@ -40,8 +37,6 @@ function normalizeName(str) {
     .trim();
 }
 
-// Derives which category tabs to show based on user interest tags.
-// Always includes 'essentials'. Deduplicates mapped categories.
 function buildTabs(interestTags) {
   const categories = ['essentials'];
   const seen = new Set(['essentials']);
@@ -52,7 +47,6 @@ function buildTabs(interestTags) {
       seen.add(cat);
     }
   }
-  // If no tags, show all 8 categories so the panel is still useful
   if (categories.length === 1) {
     for (const cat of Object.keys(CATEGORY_LABELS)) {
       if (!seen.has(cat)) {
@@ -77,15 +71,15 @@ function pickSurprise(partialResults, days) {
 
 function TabSkeleton() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '8px' }}>
       {[0, 1, 2].map((i) => (
         <div
           key={i}
           style={{
-            background: '#1c1a17',
-            borderRadius: '12px',
-            height: '100px',
-            border: '1px solid rgba(255,255,255,0.07)',
+            background: '#1a1410',
+            borderRadius: 4,
+            height: 120,
+            border: '1px solid rgba(201,160,80,0.08)',
             animation: 'pulse 1.6s ease-in-out infinite',
             opacity: 1 - i * 0.2,
           }}
@@ -95,28 +89,80 @@ function TabSkeleton() {
   );
 }
 
+function DestinationHero({ city, count }) {
+  if (!city) return null;
+  return (
+    <div style={{
+      position: 'relative',
+      padding: '32px 20px 28px',
+      borderBottom: '1px solid rgba(201,160,80,0.1)',
+      overflow: 'hidden',
+      flexShrink: 0,
+    }}>
+      {/* Celadon ambient tint */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0, width: '55%', height: '100%',
+        background: 'linear-gradient(135deg, transparent 40%, rgba(22,42,32,0.25) 100%)',
+        pointerEvents: 'none',
+      }} />
+      {/* Ghost city name */}
+      <div style={{
+        position: 'absolute', top: '-15%', right: '-5%',
+        fontFamily: "'Playfair Display', serif", fontStyle: 'italic', fontWeight: 500,
+        fontSize: 'clamp(80px, 28vw, 180px)',
+        color: '#f0ebe3', opacity: 0.025,
+        lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
+        letterSpacing: '-0.03em', whiteSpace: 'nowrap',
+      }}>
+        {city}
+      </div>
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 10,
+          letterSpacing: '0.22em', textTransform: 'uppercase',
+          color: '#504438', marginBottom: 12,
+        }}>
+          Destination
+        </div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif", fontStyle: 'italic', fontWeight: 500,
+          fontSize: 'clamp(36px, 12vw, 64px)',
+          color: '#f0ebe3', letterSpacing: '-0.025em',
+          lineHeight: 1, marginBottom: 16,
+        }}>
+          {city}
+        </div>
+        {count > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 28, height: 1, background: 'rgba(201,160,80,0.4)', flexShrink: 0 }} />
+            <span style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 10,
+              letterSpacing: '0.16em', textTransform: 'uppercase', color: '#6e5e50',
+            }}>
+              {count} curated {count === 1 ? 'place' : 'places'}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const [destination, setDestination] = useState(defaultDestination);
+  const [inputFocused, setInputFocused] = useState(false);
   const tabs = buildTabs(trip.interestTags);
   const [activeCategory, setActiveCategory] = useState(tabs[0]);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [surprisePick, setSurprisePick] = useState(null);
 
   const { discover, refresh, getDestination } = discovery;
-  // Per-destination state — updates independently from other cities in the cache
   const { partialResults, completedCategories, loading, error } = getDestination(destination);
 
-  // Reset visible count when switching tabs
-  useEffect(() => setVisibleCount(PAGE_SIZE), [activeCategory]);
-
-  // On mount: trigger discovery for this destination if not already fetched/loading.
-  // discover() internally guards against duplicate calls.
   useEffect(() => {
     if (destination) discover(destination);
   }, []); // intentional mount-only
 
-  // When results arrive after a pending Surprise Me, surface the pick
   const surprisePendingRef = useRef(false);
   useEffect(() => {
     if (surprisePendingRef.current && Object.keys(partialResults).length > 0 && !loading) {
@@ -129,7 +175,6 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     if (destination.trim()) {
       discover(destination.trim());
       setActiveCategory(tabs[0]);
-      setVisibleCount(PAGE_SIZE);
     }
   };
 
@@ -163,10 +208,9 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   };
 
   const activeItems = partialResults[activeCategory] ?? [];
-  const visibleItems = activeItems.slice(0, visibleCount);
-  const hasMore = activeItems.length > visibleCount;
   const categoryLoaded = completedCategories.has(activeCategory);
   const anyResults = Object.keys(partialResults).length > 0;
+  const totalCount = Object.values(partialResults).flat().length;
 
   return (
     <motion.div
@@ -184,60 +228,47 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       }}
     >
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 20px 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
-          flexShrink: 0,
-        }}
-      >
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '16px 20px 12px',
+        borderBottom: '1px solid rgba(240,235,227,0.07)',
+        flexShrink: 0,
+      }}>
         <button
           onClick={onClose}
+          aria-label="Close discovery panel"
           style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
+            background: 'none', border: 'none', cursor: 'pointer',
             color: 'rgba(240,234,216,0.60)',
             fontFamily: "'DM Mono', monospace",
-            fontSize: '18px',
-            padding: '0',
-            lineHeight: '1',
+            fontSize: 18, padding: 0, lineHeight: 1,
           }}
-          aria-label="Close discovery panel"
         >
           ✕
         </button>
 
-        <span
-          style={{
-            fontFamily: "'DM Mono', monospace",
-            fontSize: '11px',
-            letterSpacing: '0.28em',
-            textTransform: 'uppercase',
-            color: 'var(--cream)',
-          }}
-        >
-          DISCOVER
+        <span style={{
+          fontFamily: "'DM Mono', monospace",
+          fontSize: 11, letterSpacing: '0.3em',
+          textTransform: 'uppercase', color: '#f0ebe3',
+        }}>
+          Discover
         </span>
 
-        <div style={{ minWidth: '80px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+        <div style={{ minWidth: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
           {anyResults && (
             <button
               onClick={() => refresh(destination.trim())}
               disabled={loading}
               aria-label="Refresh discovery results"
               style={{
-                background: 'none',
-                border: 'none',
+                background: 'none', border: 'none',
                 cursor: loading ? 'default' : 'pointer',
                 color: loading ? 'rgba(240,234,216,0.28)' : 'rgba(240,234,216,0.60)',
                 fontFamily: "'DM Mono', monospace",
-                fontSize: '14px',
-                padding: '0',
-                lineHeight: '1',
+                fontSize: 16, padding: 0, lineHeight: 1,
               }}
             >
               ↺
@@ -246,25 +277,29 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </div>
       </div>
 
-      {/* Destination input */}
-      <div style={{ padding: '14px 20px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+      {/* Search input */}
+      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
           <input
             type="text"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleDiscover()}
-            placeholder="Enter destination..."
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            placeholder="Destination"
             style={{
               flex: 1,
-              background: '#1c1a17',
-              border: '1px solid rgba(255,255,255,0.10)',
-              borderRadius: '8px',
-              padding: '8px 12px',
+              background: 'rgba(26,20,16,0.7)',
+              border: `1px solid ${inputFocused ? 'rgba(201,160,80,0.45)' : 'rgba(201,160,80,0.12)'}`,
+              borderRadius: 4,
+              padding: '11px 18px',
               fontFamily: "'Cormorant Garamond', serif",
-              fontSize: '15px',
-              color: 'var(--cream)',
+              fontSize: 20, fontWeight: 400,
+              color: '#f0ebe3', letterSpacing: '0.01em',
               outline: 'none',
+              transition: 'border-color 200ms',
+              boxShadow: inputFocused ? '0 0 0 1px rgba(201,160,80,0.06)' : 'none',
             }}
           />
           <button
@@ -272,90 +307,90 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             disabled={loading || !destination.trim()}
             style={{
               fontFamily: "'DM Mono', monospace",
-              fontSize: '11px',
-              letterSpacing: '0.14em',
-              color: loading ? 'rgba(201,168,76,0.40)' : 'var(--gold)',
-              border: '1px solid rgba(201,168,76,0.4)',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              background: 'transparent',
-              cursor: loading ? 'default' : 'pointer',
+              fontSize: 11, letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              color: (loading || !destination.trim()) ? 'rgba(13,11,9,0.5)' : '#0d0b09',
+              background: (loading || !destination.trim()) ? 'rgba(201,160,80,0.4)' : '#c9a050',
+              border: 'none',
+              borderRadius: 3,
+              padding: '11px 22px',
+              cursor: (loading || !destination.trim()) ? 'default' : 'pointer',
+              fontWeight: 500,
               whiteSpace: 'nowrap',
+              transition: 'background 150ms',
             }}
           >
-            GO
+            Go
           </button>
         </div>
       </div>
 
+      {/* Destination hero */}
+      {anyResults && (
+        <DestinationHero city={destination.trim() || defaultDestination} count={totalCount} />
+      )}
+
       {/* Category tabs */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '0',
-          overflowX: 'auto',
-          padding: '0 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
-          flexShrink: 0,
-        }}
-      >
+      <div style={{
+        display: 'flex',
+        overflowX: 'auto',
+        padding: '0 20px',
+        borderBottom: '1px solid rgba(240,235,227,0.07)',
+        flexShrink: 0,
+        gap: 0,
+      }}>
         {tabs.map((key) => {
           const isActive = activeCategory === key;
           const isLoaded = completedCategories.has(key);
           const isLoading = loading && !isLoaded;
+          const count = partialResults[key]?.length ?? 0;
           return (
             <button
               key={key}
+              className="discovery-tab-btn"
               onClick={() => setActiveCategory(key)}
               style={{
                 fontFamily: "'DM Mono', monospace",
-                fontSize: '10px',
-                letterSpacing: '0.14em',
+                fontSize: 11, letterSpacing: '0.16em',
                 textTransform: 'uppercase',
-                color: isActive ? 'var(--cream)' : 'rgba(240,234,216,0.28)',
-                background: 'none',
-                border: 'none',
-                borderBottom: isActive ? '2px solid var(--gold)' : '2px solid transparent',
-                padding: '10px 12px 8px',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'color 0.15s, border-color 0.15s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
+                color: isActive ? '#f0ebe3' : 'rgba(240,234,216,0.45)',
+                background: 'none', border: 'none',
+                borderBottom: isActive ? '2px solid #c9a050' : '2px solid transparent',
+                padding: '16px 18px 14px',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 7,
               }}
             >
               {CATEGORY_LABELS[key] ?? key}
-              {isLoading && (
-                <span
-                  style={{
-                    width: '5px',
-                    height: '5px',
-                    borderRadius: '50%',
-                    background: 'rgba(201,168,76,0.5)',
-                    display: 'inline-block',
-                    animation: 'trippyPulse 1.4s ease-in-out infinite',
-                  }}
-                />
-              )}
+              {isLoading ? (
+                <span style={{
+                  width: 5, height: 5, borderRadius: '50%',
+                  background: 'rgba(201,160,80,0.5)',
+                  display: 'inline-block',
+                  animation: 'trippyPulse 1.4s ease-in-out infinite',
+                }} />
+              ) : count > 0 ? (
+                <span style={{
+                  fontSize: 9,
+                  color: isActive ? '#c9a050' : 'rgba(201,160,80,0.35)',
+                  letterSpacing: '0.08em',
+                }}>
+                  {count}
+                </span>
+              ) : null}
             </button>
           );
         })}
       </div>
 
       {/* Content area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', position: 'relative' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 120px', position: 'relative' }}>
         {error && (
-          <p
-            style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: '11px',
-              color: '#e05a5a',
-              letterSpacing: '0.08em',
-              textAlign: 'center',
-              marginTop: '40px',
-            }}
-          >
+          <p style={{
+            fontFamily: "'DM Mono', monospace",
+            fontSize: 11, color: '#e05a5a',
+            letterSpacing: '0.08em', textAlign: 'center', marginTop: 40,
+          }}>
             {error.message || 'Discovery failed. Please try again.'}
           </p>
         )}
@@ -363,22 +398,22 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         {!error && !categoryLoaded && loading && <TabSkeleton />}
 
         {!error && categoryLoaded && activeItems.length === 0 && (
-          <p
-            style={{
-              fontFamily: "'Cormorant Garamond', serif",
-              fontSize: '14px',
-              color: 'rgba(240,234,216,0.40)',
-              textAlign: 'center',
-              marginTop: '40px',
-            }}
-          >
-            Nothing found for this category
+          <p style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            fontSize: 20, color: '#504438',
+            textAlign: 'center', marginTop: 80, lineHeight: 1.7,
+          }}>
+            Nothing curated for this category yet.
           </p>
         )}
 
-        {!error && visibleItems.length > 0 && (
-          <div>
-            {visibleItems.map((suggestion, idx) => (
+        {!error && activeItems.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
+            gap: 16,
+          }}>
+            {activeItems.map((suggestion, idx) => (
               <SuggestionCard
                 key={suggestion.name ?? idx}
                 suggestion={suggestion}
@@ -386,44 +421,16 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 onAddToDay={handleAddToDay}
               />
             ))}
-
-            {hasMore && (
-              <button
-                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  marginTop: '12px',
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: '11px',
-                  letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: 'rgba(240,234,216,0.50)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  padding: '10px',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                }}
-              >
-                Show more ({activeItems.length - visibleCount} remaining)
-              </button>
-            )}
           </div>
         )}
 
         {!error && !loading && !anyResults && (
-          <p
-            style={{
-              fontFamily: "'Cormorant Garamond', serif",
-              fontSize: '15px',
-              color: 'rgba(240,234,216,0.35)',
-              textAlign: 'center',
-              marginTop: '60px',
-              lineHeight: '1.6',
-            }}
-          >
-            Enter a destination and tap GO to find things to do.
+          <p style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            fontSize: 20, color: 'rgba(240,234,216,0.35)',
+            textAlign: 'center', marginTop: 80, lineHeight: 1.7,
+          }}>
+            Enter a destination and tap Go to find things to do.
           </p>
         )}
 
@@ -438,33 +445,22 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               transition={{ duration: 0.18 }}
               onClick={() => setSurprisePick(null)}
               style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'rgba(13,11,9,0.88)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '24px 20px',
-                zIndex: 10,
+                position: 'absolute', inset: 0,
+                background: 'rgba(13,11,9,0.92)',
+                backdropFilter: 'blur(8px)',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                padding: '24px 20px', zIndex: 10,
               }}
             >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{ width: '100%', maxWidth: '420px' }}
-              >
-                <p
-                  style={{
-                    fontFamily: "'DM Mono', monospace",
-                    fontSize: '10px',
-                    letterSpacing: '0.22em',
-                    color: 'var(--gold)',
-                    textAlign: 'center',
-                    marginBottom: '14px',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  ✦ Your Surprise
+              <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 480 }}>
+                <p style={{
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 10, letterSpacing: '0.22em',
+                  color: '#c9a050', textAlign: 'center',
+                  marginBottom: 20, textTransform: 'uppercase',
+                }}>
+                  ✦ &nbsp; Your surprise
                 </p>
 
                 <SuggestionCard
@@ -476,40 +472,34 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                   }}
                 />
 
-                <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
                   <button
                     onClick={() => setSurprisePick(pickSurprise(partialResults, days))}
                     style={{
                       flex: 1,
                       fontFamily: "'DM Mono', monospace",
-                      fontSize: '11px',
-                      letterSpacing: '0.14em',
-                      color: 'rgba(240,234,216,0.60)',
-                      border: '1px solid rgba(255,255,255,0.10)',
-                      borderRadius: '8px',
-                      padding: '10px',
-                      background: 'transparent',
-                      cursor: 'pointer',
+                      fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                      color: '#8a7a6a',
+                      border: '1px solid rgba(240,235,227,0.1)',
+                      borderRadius: 3, padding: 12,
+                      background: 'transparent', cursor: 'pointer',
                     }}
                   >
-                    ANOTHER
+                    Another
                   </button>
                   <button
                     onClick={() => setSurprisePick(null)}
                     style={{
                       flex: 1,
                       fontFamily: "'DM Mono', monospace",
-                      fontSize: '11px',
-                      letterSpacing: '0.14em',
-                      color: 'rgba(240,234,216,0.60)',
-                      border: '1px solid rgba(255,255,255,0.10)',
-                      borderRadius: '8px',
-                      padding: '10px',
-                      background: 'transparent',
-                      cursor: 'pointer',
+                      fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                      color: '#8a7a6a',
+                      border: '1px solid rgba(240,235,227,0.1)',
+                      borderRadius: 3, padding: 12,
+                      background: 'transparent', cursor: 'pointer',
                     }}
                   >
-                    DISMISS
+                    Dismiss
                   </button>
                 </div>
               </div>
@@ -518,32 +508,32 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </AnimatePresence>
       </div>
 
-      {/* Surprise Me button */}
-      <div
-        style={{
-          padding: '14px 20px',
-          borderTop: '1px solid rgba(255,255,255,0.07)',
-          flexShrink: 0,
-        }}
-      >
+      {/* Surprise Me footer */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        padding: '20px 20px 24px',
+        background: 'linear-gradient(transparent, rgba(13,11,9,0.98) 40%)',
+        zIndex: 5,
+        pointerEvents: 'none',
+      }}>
         <button
           onClick={handleSurpriseMe}
           disabled={loading && !anyResults}
           style={{
             width: '100%',
             fontFamily: "'DM Mono', monospace",
-            fontSize: '12px',
-            letterSpacing: '0.18em',
+            fontSize: 12, letterSpacing: '0.22em',
             textTransform: 'uppercase',
-            color: (loading && !anyResults) ? 'rgba(201,168,76,0.40)' : 'var(--gold)',
-            background: 'rgba(201,168,76,0.08)',
-            border: '1px solid rgba(201,168,76,0.35)',
-            borderRadius: '10px',
-            padding: '12px',
+            color: (loading && !anyResults) ? 'rgba(201,160,80,0.40)' : '#c9a050',
+            background: 'rgba(201,160,80,0.06)',
+            border: '1px solid rgba(201,160,80,0.28)',
+            borderRadius: 3, padding: '14px',
             cursor: (loading && !anyResults) ? 'default' : 'pointer',
+            transition: 'all 200ms',
+            pointerEvents: 'auto',
           }}
         >
-          SURPRISE ME
+          Surprise me
         </button>
       </div>
     </motion.div>
