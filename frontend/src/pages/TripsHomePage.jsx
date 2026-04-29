@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
+import UserAccountButton from '../components/common/UserAccountButton.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
 import NewTripModal from '../components/trips/NewTripModal.jsx';
 import TripCard from '../components/trips/TripCard.jsx';
@@ -86,7 +87,10 @@ export default function TripsHomePage() {
                 Your journeys, bookings, and day plans stay in one quietly dramatic place.
               </p>
             </div>
-            <AdminSettingsPanel />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <UserAccountButton />
+              <AdminSettingsPanel />
+            </div>
           </div>
         </section>
 
