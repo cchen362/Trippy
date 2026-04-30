@@ -11,7 +11,7 @@ const monoStyle = {
   padding: 0,
 };
 
-export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove }) {
+export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps }) {
   const [action, setAction] = useState(null); // null | 'delete' | 'move'
   const [noteValue, setNoteValue] = useState(stop.note || '');
   const [noteDirty, setNoteDirty] = useState(false);
@@ -40,7 +40,7 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
         style={{ background: 'var(--gold)' }}
       />
       <div
-        className="rounded-2xl overflow-hidden border"
+        className="timeline-card rounded-2xl overflow-hidden border"
         style={{
           borderColor: stop.isFeatured ? 'var(--gold-line)' : 'var(--ink-border)',
           minHeight: stop.isFeatured ? '180px' : '136px',
@@ -75,8 +75,18 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                 </h3>
               </button>
               <span
-                className="cursor-grab active:cursor-grabbing"
-                style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 4px)', gap: '3px', padding: '4px' }}
+                {...dragHandleProps}
+                className="timeline-drag-handle cursor-grab active:cursor-grabbing"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 4px)',
+                  placeContent: 'center',
+                  gap: '3px',
+                  minWidth: '44px',
+                  minHeight: '44px',
+                  margin: '-10px -10px 0 0',
+                  padding: '10px',
+                }}
               >
                 {[...Array(6)].map((_, i) => (
                   <span key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(240,234,216,0.3)' }} />

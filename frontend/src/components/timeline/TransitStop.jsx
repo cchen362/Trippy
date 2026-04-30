@@ -11,7 +11,7 @@ const monoStyle = {
   padding: 0,
 };
 
-export default function TransitStop({ stop, index, expanded, onExpand, onDelete, onUpdate, days, onMove }) {
+export default function TransitStop({ stop, index, expanded, onExpand, onDelete, onUpdate, days, onMove, dragHandleProps }) {
   const [action, setAction] = useState(null); // null | 'delete' | 'move'
   const [noteValue, setNoteValue] = useState(stop.note || '');
   const [noteDirty, setNoteDirty] = useState(false);
@@ -40,6 +40,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
         style={{ borderColor: 'rgba(240,234,216,0.25)' }}
       />
       <div
+        className="timeline-card"
         style={{
           background: 'var(--ink-surface)',
           borderRadius: '12px',
@@ -51,11 +52,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
         }}
       >
         <div style={{ padding: '12px 16px' }}>
-          <button
-            type="button"
-            onClick={() => onExpand(stop.id)}
-            style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-          >
+          <div>
             <p style={{
               fontFamily: "'DM Mono', monospace",
               fontSize: '10px',
@@ -66,31 +63,58 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
             }}>
               TRANSIT
             </p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
-              <h3 style={{
-                fontFamily: "'Playfair Display', serif",
-                fontStyle: 'italic',
-                fontSize: '18px',
-                color: 'var(--cream)',
-                margin: 0,
-                lineHeight: 1.3,
-              }}>
-                {stop.title}
-              </h3>
-              {(stop.time || index !== undefined) && (
-                <span style={{
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: '11px',
-                  letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: 'rgba(240,234,216,0.45)',
-                  whiteSpace: 'nowrap',
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => onExpand(stop.id)}
+                style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                <h3 style={{
+                  fontFamily: "'Playfair Display', serif",
+                  fontStyle: 'italic',
+                  fontSize: '18px',
+                  color: 'var(--cream)',
+                  margin: 0,
+                  lineHeight: 1.3,
                 }}>
-                  {stop.time || `${index + 1}`}
+                  {stop.title}
+                </h3>
+              </button>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                {(stop.time || index !== undefined) && (
+                  <span style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: '11px',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(240,234,216,0.45)',
+                    whiteSpace: 'nowrap',
+                    paddingTop: '4px',
+                  }}>
+                    {stop.time || `${index + 1}`}
+                  </span>
+                )}
+                <span
+                  {...dragHandleProps}
+                  className="timeline-drag-handle cursor-grab active:cursor-grabbing"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 4px)',
+                    placeContent: 'center',
+                    gap: '3px',
+                    minWidth: '44px',
+                    minHeight: '44px',
+                    margin: '-12px -12px 0 0',
+                    padding: '10px',
+                  }}
+                >
+                  {[...Array(6)].map((_, i) => (
+                    <span key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(240,234,216,0.3)' }} />
+                  ))}
                 </span>
-              )}
+              </span>
             </div>
-          </button>
+          </div>
 
           {expanded && (
             <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(240,234,216,0.10)' }}>
