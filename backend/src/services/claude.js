@@ -10,6 +10,142 @@ function getClient() {
 
 export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
 
+export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
+
+const EXTRACTION_SYSTEM = `You are a travel-booking extraction engine. You receive raw content (pasted text, email text, screenshots, or PDFs of travel confirmations) and must extract every distinct booking as structured JSON.
+
+Output ONLY a single fenced JSON code block (\`\`\`json fence). No prose before or after it.
+
+Output shape:
+{
+  "isTravelRelated": boolean,
+  "summary": "one-line human summary of what was found",
+  "language": "ISO 639-1 code of the input's primary language, e.g. \\"en\\", \\"zh\\"",
+  "bookings": [
+    {
+      "type": "flight" | "train" | "bus" | "ferry" | "hotel" | "other",
+      "title": "short human title, e.g. flight/train number or hotel name",
+      "confirmationRef": string | null,
+      "bookingSource": string | null,
+      "startDatetime": "YYYY-MM-DDTHH:MM" | null,
+      "endDatetime": "YYYY-MM-DDTHH:MM" | null,
+      "origin": string | null,
+      "destination": string | null,
+      "terminalOrStation": string | null,
+      "originTz": "IANA timezone" | null,
+      "destinationTz": "IANA timezone" | null,
+      "details": {
+        "originCity": string | null, "destinationCity": string | null,
+        "originCountryCode": "ISO 3166-1 alpha-2" | null, "destinationCountryCode": string | null,
+        "city": string | null,
+        "carrierCode": string | null, "flightNumber": string | null, "airlineName": string | null,
+        "trainNumber": string | null, "originStation": string | null, "destinationStation": string | null,
+        "seatClass": string | null, "address": string | null, "localName": string | null, "note": string | null
+      },
+      "confidence": { "overall": "high"|"medium"|"low", "fields": { "fieldName": "high"|"medium"|"low" } },
+      "assumptions": ["short strings describing any inference you made"]
+    }
+  ]
+}
+
+Rules:
+1. Extract every distinct booking present in the input — a single email or screenshot may contain more than one (e.g. outbound + return flight, or multiple train legs).
+2. NEVER invent a value. If you cannot read or infer a field with reasonable confidence, set it to null and lower that field's confidence entry instead of guessing.
+3. Date inference: today's date and (if provided) the trip's destination and date range are injected below as context. Use them to resolve ambiguous or partial dates:
+   - If a booking's year is missing, infer it from the trip's date range if the trip context is given; otherwise infer the nearest future occurrence of that month/day relative to today, and record the inference in "assumptions".
+   - If a date is ambiguous between DD/MM and MM/DD, prefer the interpretation that falls inside the trip's date range if a trip is given; otherwise pick the more common international DD/MM interpretation and set that field's confidence to "low".
+4. Hotel bookings that only specify check-in/check-out dates without times: default startDatetime to T15:00 and endDatetime to T11:00, and add an assumption noting the default check-in/check-out time was applied.
+5. Multilingual input: put the English/exonym city name in details.originCity / details.destinationCity / details.city; preserve the original local-script name in details.localName; set the top-level "language" field to the input's primary language code.
+6. If the input is not travel-related (or contains no extractable booking), return isTravelRelated:false, bookings:[], and a one-line summary explaining why. Do not fabricate a booking to fill the array.
+7. Timezones: emit your best-guess IANA timezone (e.g. "Asia/Shanghai") for originTz/destinationTz. If you are not reasonably confident, use null — do not guess a generic value like "UTC".
+8. Ground transfers, car rentals, tour tickets, event tickets, and anything that does not fit flight/train/bus/ferry/hotel should use type "other" with a descriptive title (e.g. "Airport transfer — Chengdu Shuangliu to hotel").
+9. Output nothing outside the single fenced JSON block. Do not explain your reasoning in prose.`;
+
+// Extracts structured bookings from pasted text / uploaded images / PDFs via a single
+// non-streaming Claude call. files: [{ kind: 'text'|'image'|'pdf', mediaType, content }]
+// where content is a UTF-8 string for 'text' and base64 (no data-URI prefix) otherwise.
+export async function extractBookings({ files, contextText, tripContext }) {
+  const client = getClient();
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  let contextBlock = `Today's date: ${todayIso}.`;
+  if (tripContext) {
+    contextBlock += ` Trip date range: ${tripContext.startDate} to ${tripContext.endDate}.`;
+    if (tripContext.destinations?.length) {
+      contextBlock += ` Trip destinations: ${tripContext.destinations.join(', ')}.`;
+    }
+  } else {
+    contextBlock += ' No trip context given — infer the nearest future date when year/date is ambiguous.';
+  }
+
+  const content = [{ type: 'text', text: contextBlock }];
+  if (contextText?.trim()) {
+    content.push({ type: 'text', text: `Additional user-provided context:\n${contextText.trim()}` });
+  }
+
+  for (const file of files) {
+    if (file.kind === 'text') {
+      content.push({ type: 'text', text: file.content });
+    } else if (file.kind === 'image') {
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: file.mediaType, data: file.content },
+      });
+    } else if (file.kind === 'pdf') {
+      content.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: file.content },
+      });
+    }
+  }
+
+  console.log('[import] extract files=%d', files.length);
+
+  const response = await client.messages.create({
+    model: EXTRACTION_MODEL,
+    max_tokens: 8192,
+    system: EXTRACTION_SYSTEM,
+    messages: [{ role: 'user', content }],
+  });
+
+  const inTok = response.usage?.input_tokens ?? 0;
+  const outTok = response.usage?.output_tokens ?? 0;
+  console.log('[import] extract files=%d in=%d out=%d', files.length, inTok, outTok);
+
+  const fullText = response.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+
+  const matches = [...fullText.matchAll(/```json\r?\n([\s\S]*?)\r?\n?```/g)];
+  const lastMatch = matches.at(-1);
+  if (!lastMatch) {
+    throw Object.assign(new Error('Claude extraction returned no JSON block'), {
+      status: 502,
+      raw: fullText.slice(0, 2000),
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lastMatch[1]);
+  } catch (e) {
+    throw Object.assign(new Error(`Claude extraction returned malformed JSON: ${e.message}`), {
+      status: 502,
+      raw: lastMatch[1].slice(0, 2000),
+    });
+  }
+
+  if (typeof parsed.isTravelRelated !== 'boolean' || !Array.isArray(parsed.bookings)) {
+    throw Object.assign(new Error('Claude extraction JSON missing required fields'), {
+      status: 502,
+      raw: JSON.stringify(parsed).slice(0, 2000),
+    });
+  }
+
+  return { extraction: parsed, model: EXTRACTION_MODEL, usage: { input_tokens: inTok, output_tokens: outTok } };
+}
+
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
 // and "Dujiangyan Scenic Area" collapse to the same canonical key.
 function normalizeName(str) {

@@ -1,0 +1,11 @@
+Your booking is confirmed!
+
+China Eastern Airlines
+Booking reference: ABC123
+
+Outbound flight MU5401
+Shanghai Hongqiao (SHA), Terminal 2 -> Chengdu Tianfu (CTU)
+Departure: 14 Sep 2026, 08:35
+Arrival: 14 Sep 2026, 11:50
+
+Thank you for booking with Trip.com.

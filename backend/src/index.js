@@ -16,6 +16,7 @@ import dayRoutes from './routes/days.js';
 import copilotRoutes from './routes/copilot.js';
 import discoveryRoutes from './routes/discovery.js';
 import healthRoutes from './routes/health.js';
+import importRoutes from './routes/imports.js';
 import lookupRoutes from './routes/lookups.js';
 import mapRoutes from './routes/map.js';
 import shareRoutes from './routes/share.js';
@@ -31,7 +32,7 @@ app.use(cors({
   origin: config.frontendUrl,
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '16mb' }));
 app.use(cookieParser());
 
 app.use('/api/health', healthRoutes);
@@ -45,6 +46,7 @@ app.use('/api/trips', discoveryRoutes);
 app.use('/api', dayRoutes);
 app.use('/api', stopRoutes);
 app.use('/api', bookingRoutes);
+app.use('/api', importRoutes);
 app.use('/api/lookups', lookupRoutes);
 
 if (config.isProd) {
