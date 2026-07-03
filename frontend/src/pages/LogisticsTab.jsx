@@ -4,6 +4,7 @@ import FlightBookingCard from '../components/logistics/FlightBookingCard.jsx';
 import TrainBookingCard from '../components/logistics/TrainBookingCard.jsx';
 import HotelBookingCard from '../components/logistics/HotelBookingCard.jsx';
 import OtherBookingCard from '../components/logistics/OtherBookingCard.jsx';
+import CaptureFlow from '../components/import/CaptureFlow.jsx';
 import { useTripContext } from './TripPage.jsx';
 
 const CARD_BY_TYPE = {
@@ -28,7 +29,9 @@ function sectionGridClass(section) {
 
 export default function LogisticsTab() {
   const {
+    trip,
     bookings,
+    refresh,
     createBooking,
     updateBooking,
     deleteBooking,
@@ -40,6 +43,7 @@ export default function LogisticsTab() {
   } = useTripContext();
 
   const [addOpen, setAddOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [editing, setEditing] = useState(null);
 
@@ -61,14 +65,24 @@ export default function LogisticsTab() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase"
-          style={{ background: 'var(--gold)', color: 'var(--ink-deep)' }}
-        >
-          + Add Booking
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={() => setCaptureOpen(true)}
+            className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase"
+            style={{ background: 'var(--gold)', color: 'var(--ink-deep)' }}
+          >
+            + Add bookings
+          </button>
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="font-mono text-[11px] tracking-[0.22em] uppercase"
+            style={{ color: 'var(--cream-dim)' }}
+          >
+            enter manually
+          </button>
+        </div>
       </section>
 
       {/* Per-type sections */}
@@ -171,6 +185,24 @@ export default function LogisticsTab() {
           lookupFlight={lookupFlight}
           lookupCities={lookupCities}
           booking={editing}
+        />
+      )}
+
+      {/* Capture flow — conditional mount so state resets cleanly every time it reopens */}
+      {captureOpen && (
+        <CaptureFlow
+          open={captureOpen}
+          onClose={() => setCaptureOpen(false)}
+          tripId={trip.id}
+          tripDates={{ startDate: trip.startDate, endDate: trip.endDate }}
+          onConfirmed={async () => {
+            await refresh();
+            setCaptureOpen(false);
+          }}
+          lookupHotels={lookupHotels}
+          lookupHotelDetails={lookupHotelDetails}
+          lookupFlight={lookupFlight}
+          lookupCities={lookupCities}
         />
       )}
     </div>

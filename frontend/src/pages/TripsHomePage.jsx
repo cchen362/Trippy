@@ -8,6 +8,8 @@ import BottomNav from '../components/nav/BottomNav.jsx';
 import NewTripModal from '../components/trips/NewTripModal.jsx';
 import TripCard from '../components/trips/TripCard.jsx';
 import { tripsApi } from '../services/tripsApi.js';
+import { bookingsApi } from '../services/bookingsApi.js';
+import { importApi } from '../services/importApi.js';
 
 function groupTrips(trips) {
   return {
@@ -55,13 +57,25 @@ export default function TripsHomePage() {
 
   const grouped = useMemo(() => groupTrips(trips), [trips]);
 
-  const handleCreateTrip = async (payload) => {
+  const handleCreateTrip = async ({ captureArtifactId, captureBookings, ...tripFields }) => {
     setSaving(true);
     try {
-      const created = await tripsApi.create(payload);
+      const created = await tripsApi.create(tripFields);
       setOpen(false);
       await loadTrips();
-      navigate(`/trips/${created.trip.id}/plan`);
+      if (captureArtifactId) {
+        // Trip creation is the point of no return — if confirming the captured
+        // bookings fails, the trip still exists (recoverable via Logistics' own
+        // capture entry point) rather than risking a duplicate trip on retry.
+        try {
+          await importApi.confirm(captureArtifactId, { tripId: created.trip.id, bookings: captureBookings });
+        } catch (err) {
+          console.error('Failed to import captured bookings into new trip', err);
+        }
+        navigate(`/trips/${created.trip.id}/logistics`);
+      } else {
+        navigate(`/trips/${created.trip.id}/plan`);
+      }
     } finally {
       setSaving(false);
     }
@@ -129,7 +143,13 @@ export default function TripsHomePage() {
       </main>
 
       <BottomNav />
-      <NewTripModal open={open} onClose={() => setOpen(false)} onSubmit={handleCreateTrip} saving={saving} />
+      <NewTripModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onSubmit={handleCreateTrip}
+        saving={saving}
+        lookupCities={bookingsApi.lookupCities}
+      />
     </div>
   );
 }

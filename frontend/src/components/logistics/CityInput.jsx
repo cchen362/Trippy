@@ -30,7 +30,7 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
   const handleSelect = (suggestion) => {
     setSelectedText(suggestion.city);
     setSuggestions([]);
-    onCitySelect(suggestion.city);
+    onCitySelect(suggestion);
   };
 
   return (

@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5174,
+      "cwd": "frontend"
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--watch", "src/index.js"],
+      "port": 3002,
+      "cwd": "backend",
+      "env": { "NODE_ENV": "test", "PORT": "3002" }
+    }
+  ]
+}
