@@ -1,5 +1,6 @@
 import { getDb } from '../db/database.js';
 import { cityFromIata, cityFromAirportString, canonicalCity } from '../utils/airports.js';
+import { countryCodeFromName } from '../utils/countries.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -280,7 +281,8 @@ export function createTrip(userId, input) {
   }
 
   const destinations = normalizeArray(input.destinations);
-  const destinationCountries = normalizeArray(input.destinationCountries);
+  const destinationCountries = normalizeArray(input.destinationCountries)
+    .map((raw) => countryCodeFromName(raw) ?? raw);
   const interestTags = normalizeArray(input.interestTags);
   const defaultCity = destinations[0] || title;
   const tripDates = eachDate(startDate, endDate);
@@ -341,6 +343,39 @@ export function updateTrip(userId, tripId, input) {
     : parseJson(existingRow.interest_tags, []);
 
   let newEndDate = existingRow.end_date;
+  let newStartDate = existingRow.start_date;
+
+  if (input.startDate && input.startDate !== existingRow.start_date) {
+    if (input.startDate > existingRow.start_date) {
+      // Block shortening from the front if any removed day has stops
+      const blockedDay = db.prepare(`
+        SELECT d.date FROM days d
+        JOIN stops s ON s.day_id = d.id
+        WHERE d.trip_id = ? AND d.date < ?
+        ORDER BY d.date ASC LIMIT 1
+      `).get(tripId, input.startDate);
+
+      if (blockedDay) {
+        throw Object.assign(
+          new Error(`Cannot shorten trip — ${blockedDay.date} has stops. Remove them first.`),
+          { status: 400 },
+        );
+      }
+      db.prepare('DELETE FROM days WHERE trip_id = ? AND date < ?').run(tripId, input.startDate);
+      newStartDate = input.startDate;
+    } else {
+      // Extension backward — auto-generate new days before the current start
+      const defaultCity = parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const beforeCurrent = new Date(`${existingRow.start_date}T00:00:00Z`);
+      beforeCurrent.setUTCDate(beforeCurrent.getUTCDate() - 1);
+      const newDates = eachDate(input.startDate, beforeCurrent.toISOString().slice(0, 10));
+      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city) VALUES (?, ?, ?)');
+      for (const date of newDates) {
+        insertDay.run(tripId, date, defaultCity);
+      }
+      newStartDate = input.startDate;
+    }
+  }
 
   if (input.endDate && input.endDate !== existingRow.end_date) {
     if (input.endDate < existingRow.end_date) {
@@ -375,9 +410,9 @@ export function updateTrip(userId, tripId, input) {
   }
 
   db.prepare(`
-    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, end_date = ?
+    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?
     WHERE id = ?
-  `).run(title, travellers, JSON.stringify(interestTags), pace, newEndDate, tripId);
+  `).run(title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, tripId);
 
   return getTripDetail(tripId, userId);
 }

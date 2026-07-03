@@ -203,7 +203,7 @@ function computeWarnings(tripId, extraction) {
 
     const startDate = b.startDatetime?.slice(0, 10);
     if (startDate && startDate < trip.start_date) {
-      warnings.push({ type: 'beforeTripStart', bookingIndex: index });
+      warnings.push({ type: 'beforeTripStart', bookingIndex: index, suggestedStartDate: startDate });
     }
     if (startDate && startDate > trip.end_date) {
       warnings.push({ type: 'afterTripEnd', bookingIndex: index, suggestedEndDate: startDate });

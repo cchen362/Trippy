@@ -222,6 +222,7 @@ describe('createArtifactAndExtract — warnings', () => {
     const after = result.warnings.find((w) => w.type === 'afterTripEnd');
     expect(before).toBeDefined();
     expect(before.bookingIndex).toBe(0);
+    expect(before.suggestedStartDate).toBe('2026-09-01');
     expect(after).toBeDefined();
     expect(after.bookingIndex).toBe(1);
     expect(after.suggestedEndDate).toBe('2026-09-25');

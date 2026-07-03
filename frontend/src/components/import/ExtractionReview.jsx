@@ -7,11 +7,13 @@ export default function ExtractionReview({
   onToggleIncluded,
   onEditCard,
   onExtendTrip,
+  onExtendTripStart,
   onRetry,
   onConfirm,
   confirming,
   submitError,
   tripEndDate,
+  tripStartDate,
 }) {
   const isEmpty = !extraction.isTravelRelated || extraction.bookings.length === 0;
   const includedCount = draftBookings.filter((d) => d.included).length;
@@ -47,6 +49,8 @@ export default function ExtractionReview({
             onEdit={onEditCard}
             onExtendTrip={onExtendTrip}
             tripEndDate={tripEndDate}
+            onExtendTripStart={onExtendTripStart}
+            tripStartDate={tripStartDate}
           />
         ))}
       </div>

@@ -24,7 +24,9 @@ function whereString(data) {
   return data.destination || data.origin || null;
 }
 
-export default function ExtractedBookingCard({ draft, onToggleIncluded, onEdit, onExtendTrip, tripEndDate }) {
+export default function ExtractedBookingCard({
+  draft, onToggleIncluded, onEdit, onExtendTrip, tripEndDate, onExtendTripStart, tripStartDate,
+}) {
   const { data, warnings, included } = draft;
   const duplicateWarning = warnings.find((w) => w.type === 'duplicate');
   const afterTripEndWarning = warnings.find((w) => w.type === 'afterTripEnd');
@@ -84,9 +86,18 @@ export default function ExtractedBookingCard({ draft, onToggleIncluded, onEdit, 
             </p>
           )}
           {beforeTripStartWarning && (
-            <p className="font-body text-sm" style={{ color: 'var(--cream-mute)' }}>
-              This is before your trip starts — it'll still be saved.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="font-body text-sm" style={{ color: 'var(--cream-mute)' }}>
+                This is before your trip starts ({tripStartDate}).
+              </p>
+              <button
+                type="button"
+                onClick={() => onExtendTripStart(beforeTripStartWarning.suggestedStartDate)}
+                className="modal-action"
+              >
+                Extend trip to {beforeTripStartWarning.suggestedStartDate}
+              </button>
+            </div>
           )}
           {afterTripEndWarning && (
             <div className="flex flex-wrap items-center gap-3">

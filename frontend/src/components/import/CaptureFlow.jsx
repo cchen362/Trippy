@@ -4,6 +4,7 @@ import CaptureInput from './CaptureInput.jsx';
 import ExtractionReview from './ExtractionReview.jsx';
 import { importApi, fileToInput, textToInput, MAX_INPUTS } from '../../services/importApi.js';
 import { tripsApi } from '../../services/tripsApi.js';
+import { toBookingConfirmPayload } from '../../services/bookingPayload.js';
 
 function buildDraftBookings(bookings, warnings) {
   return bookings.map((data, index) => ({
@@ -36,6 +37,7 @@ export default function CaptureFlow({
   const [confirming, setConfirming] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [tripEndDate, setTripEndDate] = useState(tripDates.endDate);
+  const [tripStartDate, setTripStartDate] = useState(tripDates.startDate);
 
   if (!open) return null;
 
@@ -112,6 +114,15 @@ export default function CaptureFlow({
     })));
   };
 
+  const handleExtendTripStart = async (suggestedStartDate) => {
+    await tripsApi.update(tripId, { startDate: suggestedStartDate });
+    setTripStartDate(suggestedStartDate);
+    setDraftBookings((current) => current.map((d) => ({
+      ...d,
+      warnings: d.warnings.filter((w) => w.type !== 'beforeTripStart'),
+    })));
+  };
+
   const handleDraftSubmit = (localId, formData) => {
     setDraftBookings((current) => current.map((d) =>
       d.localId === localId ? { ...d, data: { ...d.data, ...formData } } : d));
@@ -125,22 +136,7 @@ export default function CaptureFlow({
     setConfirming(true);
     setSubmitError(null);
     try {
-      const payloadBookings = included.map(({ data }) => ({
-        type: data.type,
-        title: data.title,
-        confirmationRef: data.confirmationRef,
-        bookingSource: data.bookingSource,
-        startDatetime: data.startDatetime,
-        endDatetime: data.endDatetime,
-        origin: data.origin,
-        destination: data.destination,
-        terminalOrStation: data.terminalOrStation,
-        originTz: data.originTz,
-        destinationTz: data.destinationTz,
-        detailsJson: data.detailsJson,
-        confidence: data.confidence,
-        assumptions: data.assumptions,
-      }));
+      const payloadBookings = included.map(({ data }) => toBookingConfirmPayload(data));
       const result = await importApi.confirm(artifact.id, { tripId, bookings: payloadBookings });
       await onConfirmed?.(result.bookings);
     } catch (err) {
@@ -190,11 +186,13 @@ export default function CaptureFlow({
               onToggleIncluded={handleToggleIncluded}
               onEditCard={setEditingLocalId}
               onExtendTrip={handleExtendTrip}
+              onExtendTripStart={handleExtendTripStart}
               onRetry={() => setPhase('input')}
               onConfirm={handleConfirm}
               confirming={confirming}
               submitError={submitError}
               tripEndDate={tripEndDate}
+              tripStartDate={tripStartDate}
             />
           )}
         </div>

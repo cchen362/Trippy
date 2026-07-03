@@ -712,7 +712,7 @@ export default function AddBookingModal({
               <CityInput
                 value={form.fromCity}
                 onChange={(v) => setForm((c) => ({ ...c, fromCity: v }))}
-                onCitySelect={(city) => setForm((c) => ({ ...c, fromCity: city }))}
+                onCitySelect={({ city }) => setForm((c) => ({ ...c, fromCity: city }))}
                 lookupCities={lookupCities}
                 placeholder="e.g. Chengdu"
                 label="From — City"
@@ -726,7 +726,7 @@ export default function AddBookingModal({
               <CityInput
                 value={form.toCity}
                 onChange={(v) => setForm((c) => ({ ...c, toCity: v }))}
-                onCitySelect={(city) => setForm((c) => ({ ...c, toCity: city }))}
+                onCitySelect={({ city }) => setForm((c) => ({ ...c, toCity: city }))}
                 lookupCities={lookupCities}
                 placeholder="e.g. Chongqing"
                 label="To — City"
