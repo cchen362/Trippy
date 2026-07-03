@@ -36,6 +36,10 @@ function TzSelect({ label, value, onChange }) {
 }
 import CityInput from './CityInput.jsx';
 
+// train/bus/ferry share one form (route + station + departure/arrival + seat/class);
+// this just relabels the section for whichever type is active.
+const TRANSIT_LABEL = { train: 'Train', bus: 'Bus', ferry: 'Ferry' };
+
 const DEFAULT_FORM = {
   type: 'hotel',
   // hotel
@@ -121,7 +125,7 @@ function withDefaultTime(datetimeStr, defaultTime) {
 }
 
 function defaultShowInItinerary(form) {
-  if (form.type === 'hotel' || form.type === 'flight' || form.type === 'train') return true;
+  if (['hotel', 'flight', 'train', 'bus', 'ferry'].includes(form.type)) return true;
   if (form.type === 'other') return Boolean(form.otherStart && form.location.trim());
   return false;
 }
@@ -186,14 +190,14 @@ function normalizeForm(form) {
     };
   }
 
-  if (form.type === 'train') {
+  if (['train', 'bus', 'ferry'].includes(form.type)) {
     const fromStation = form.originStation || form.fromCity || '';
     const toStation = form.destinationStation || form.toCity || '';
     const title = [form.trainNumber, fromStation && toStation ? `${fromStation} → ${toStation}` : fromStation || toStation]
       .filter(Boolean).join(' ');
     return {
-      type: 'train',
-      title: title || 'Train',
+      type: form.type,
+      title: title || TRANSIT_LABEL[form.type],
       ...shared,
       startDatetime: form.trainDeparture || null,
       endDatetime: form.trainArrival || null,
@@ -273,7 +277,7 @@ function hydrateFormFromBooking(booking) {
     };
   }
 
-  if (booking.type === 'train') {
+  if (['train', 'bus', 'ferry'].includes(booking.type)) {
     return {
       ...base,
       trainNumber: dj.trainNumber || '',
@@ -522,7 +526,7 @@ export default function AddBookingModal({
 
           {/* Type selector — locked in edit mode to prevent reshaping detailsJson */}
           <div className="flex flex-wrap gap-2 mb-6">
-            {['hotel', 'flight', 'train', 'other'].map((type) => (
+            {['hotel', 'flight', 'train', 'bus', 'ferry', 'other'].map((type) => (
               <button
                 key={type}
                 type="button"
@@ -697,11 +701,11 @@ export default function AddBookingModal({
             </div>
           )}
 
-          {/* ── Train ── */}
-          {form.type === 'train' && (
+          {/* ── Train / Bus / Ferry ── */}
+          {['train', 'bus', 'ferry'].includes(form.type) && (
             <div className="grid sm:grid-cols-2 gap-4">
               <label className="block sm:col-span-2">
-                <span className="modal-label">Train Number</span>
+                <span className="modal-label">{TRANSIT_LABEL[form.type]} Number</span>
                 <input {...field('trainNumber')} placeholder="e.g. G8694 or D3212" />
               </label>
 

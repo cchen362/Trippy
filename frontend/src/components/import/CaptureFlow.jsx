@@ -14,14 +14,6 @@ function buildDraftBookings(bookings, warnings) {
   }));
 }
 
-// AddBookingModal only renders field blocks for hotel/flight/train/other and locks the
-// type selector in edit mode — bus/ferry would match none of its blocks. Remap for the
-// editor only; the card's own badge keeps showing the true extracted type.
-function remapForEditing(data) {
-  if (data.type === 'bus' || data.type === 'ferry') return { ...data, type: 'other' };
-  return data;
-}
-
 export default function CaptureFlow({
   open,
   onClose,
@@ -219,7 +211,7 @@ export default function CaptureFlow({
           lookupHotelDetails={lookupHotelDetails}
           lookupFlight={lookupFlight}
           lookupCities={lookupCities}
-          booking={remapForEditing(editingDraft.data)}
+          booking={editingDraft.data}
         />
       )}
     </div>
