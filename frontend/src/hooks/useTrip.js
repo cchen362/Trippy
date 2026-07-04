@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tripsApi } from '../services/tripsApi.js';
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
+import { localIso } from '../utils/date.js';
 
 function pickDefaultDay(days) {
   if (!days.length) return null;
-  const today = todayIso();
+  const today = localIso();
   const todayMatch = days.find((day) => day.date === today);
   return todayMatch?.id || days[0].id;
 }

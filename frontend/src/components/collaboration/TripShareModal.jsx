@@ -64,6 +64,7 @@ export default function TripShareModal({ tripId, onClose }) {
               shareLink={collaboration.shareLink}
               saving={collaboration.saving}
               onCreateShare={collaboration.createShare}
+              onRevokeShare={collaboration.revokeShare}
             />
           </div>
         )}

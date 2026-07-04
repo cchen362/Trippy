@@ -1,7 +1,7 @@
 import { request } from './api.js';
 
 export const tripsApi = {
-  list: () => request('/api/trips'),
+  list: (today) => request(today ? `/api/trips?today=${today}` : '/api/trips'),
   create: (data) => request('/api/trips', { method: 'POST', body: data }),
   detail: (tripId) => request(`/api/trips/${tripId}/detail`),
   days: (tripId) => request(`/api/trips/${tripId}/days`),
@@ -14,6 +14,7 @@ export const tripsApi = {
     method: 'DELETE',
   }),
   createShareLink: (tripId) => request(`/api/trips/${tripId}/share`, { method: 'POST' }),
+  revokeShareLink: (tripId) => request(`/api/trips/${tripId}/share`, { method: 'DELETE' }),
   update: (tripId, data) => request(`/api/trips/${tripId}`, { method: 'PATCH', body: data }),
   remove: (tripId) => request(`/api/trips/${tripId}`, { method: 'DELETE' }),
   sharedDetail: (token) => request(`/api/share/${token}`, { silent401: true }),

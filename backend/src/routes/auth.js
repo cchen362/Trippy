@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import * as authService from '../services/auth.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { authLimiter } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 
 const router = Router();
+
+router.use(authLimiter);
 
 const COOKIE_OPTS = (isProd) => ({
   httpOnly: true,

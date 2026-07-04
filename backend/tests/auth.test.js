@@ -2,9 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import express from 'express';
+import cookieParser from 'cookie-parser';
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
+import authRoutes from '../src/routes/auth.js';
 
 let tmpDir;
 
@@ -87,5 +90,49 @@ describe('authService.validateToken', () => {
 
   it('returns null for invalid token', () => {
     expect(authService.validateToken('bad-token')).toBeNull();
+  });
+});
+
+describe('rate limiting on /api/auth', () => {
+  let server;
+  let baseUrl;
+
+  beforeAll(async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+    app.use('/api/auth', authRoutes);
+    await new Promise((resolve) => {
+      server = app.listen(0, () => {
+        baseUrl = `http://127.0.0.1:${server.address().port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(() => new Promise((resolve) => server.close(resolve)));
+
+  it('allows normal login traffic under the cap', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'password123' }),
+      });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('returns 429 once the request cap is exceeded', async () => {
+    let lastStatus;
+    for (let i = 0; i < 20; i++) {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'password123' }),
+      });
+      lastStatus = res.status;
+    }
+    expect(lastStatus).toBe(429);
   });
 });

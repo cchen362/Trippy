@@ -10,6 +10,7 @@ describe('getMapConfig', () => {
     expect(config.deepLinkProvider).toBe('amap');
     expect(config.tileSubdomains).toEqual(['1', '2', '3', '4']);
     expect(config.tileAttribution).toBe('© AutoNavi');
+    expect(config.tileUrl.startsWith('https://')).toBe(true);
   });
 
   it('returns maptiler + naver for KR when MapTiler is configured', () => {

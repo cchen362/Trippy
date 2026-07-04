@@ -10,6 +10,7 @@ import TripCard from '../components/trips/TripCard.jsx';
 import { tripsApi } from '../services/tripsApi.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { importApi } from '../services/importApi.js';
+import { localIso } from '../utils/date.js';
 
 function groupTrips(trips) {
   return {
@@ -34,7 +35,7 @@ export default function TripsHomePage() {
   const loadTrips = async () => {
     setLoading(true);
     try {
-      const response = await tripsApi.list();
+      const response = await tripsApi.list(localIso());
       setTrips(response.trips || []);
     } catch (err) {
       setError(err.message);

@@ -124,6 +124,13 @@ export function createShareLink(userId, tripId) {
   return { token: row.token, createdAt: row.created_at };
 }
 
+export function revokeShareLink(userId, tripId) {
+  const db = getDb();
+  assertTripAccess(userId, tripId);
+  db.prepare('DELETE FROM share_links WHERE trip_id = ?').run(tripId);
+  return { ok: true };
+}
+
 export function getSharedTrip(token) {
   const db = getDb();
   const normalizedToken = token?.trim();

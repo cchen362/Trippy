@@ -2,6 +2,20 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { authApi } from '../services/api.js';
 
 const AuthContext = createContext(null);
+const CACHED_USER_KEY = 'trippy:cachedUser';
+
+function readCachedUser() {
+  try {
+    const raw = window.localStorage.getItem(CACHED_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearCachedUser() {
+  window.localStorage.removeItem(CACHED_USER_KEY);
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -13,19 +27,44 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    authApi.status()
-      .then(({ needsSetup }) => {
+
+    (async () => {
+      try {
+        const { needsSetup } = await authApi.status();
         if (cancelled) return;
         if (needsSetup) { setNeedsSetup(true); return; }
-        return authApi.me().then(({ user }) => { if (!cancelled) setUser(user); }).catch(() => {});
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
+
+        try {
+          const { user } = await authApi.me();
+          if (cancelled) return;
+          setUser(user);
+          window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+        } catch (err) {
+          if (cancelled) return;
+          if (err.status === 401) {
+            clearCachedUser();
+          } else {
+            // Network failure (offline) — fall back to the last known session
+            // instead of dropping the user at the login page.
+            const cached = readCachedUser();
+            if (cached) setUser(cached);
+          }
+        }
+      } catch {
+        // status() itself failed to reach the network — same offline fallback.
+        if (cancelled) return;
+        const cached = readCachedUser();
+        if (cached) setUser(cached);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    const handler = () => { setUser(null); };
+    const handler = () => { setUser(null); clearCachedUser(); };
     window.addEventListener('auth:unauthorized', handler);
     return () => window.removeEventListener('auth:unauthorized', handler);
   }, []);
@@ -36,6 +75,7 @@ export function AuthProvider({ children }) {
       const { user } = await authApi.setup({ username, password, displayName });
       setNeedsSetup(false);
       setUser(user);
+      window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
     } catch (err) { setError(err.message); throw err; }
   }, []);
 
@@ -44,6 +84,7 @@ export function AuthProvider({ children }) {
     try {
       const { user } = await authApi.login({ username, password });
       setUser(user);
+      window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
     } catch (err) { setError(err.message); throw err; }
   }, []);
 
@@ -52,12 +93,14 @@ export function AuthProvider({ children }) {
     try {
       const { user } = await authApi.register({ username, password, displayName, inviteCode });
       setUser(user);
+      window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
     } catch (err) { setError(err.message); throw err; }
   }, []);
 
   const logout = useCallback(async () => {
     await authApi.logout().catch(() => {});
     setUser(null);
+    clearCachedUser();
   }, []);
 
   return (

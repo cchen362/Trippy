@@ -68,6 +68,20 @@ export function useCollaboration(tripId, enabled = true) {
     }
   }, [tripId]);
 
+  const revokeShare = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await tripsApi.revokeShareLink(tripId);
+      setShareLink(null);
+    } catch (err) {
+      setError(err);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [tripId]);
+
   return {
     owner: data?.owner || null,
     collaborators: data?.collaborators || [],
@@ -79,6 +93,7 @@ export function useCollaboration(tripId, enabled = true) {
     invite,
     remove,
     createShare,
+    revokeShare,
     refresh: load,
   };
 }

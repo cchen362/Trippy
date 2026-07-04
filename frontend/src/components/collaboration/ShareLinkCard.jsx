@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Copy, Link as LinkIcon, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
-export default function ShareLinkCard({ tripId, shareLink, saving, onCreateShare }) {
+export default function ShareLinkCard({ tripId, shareLink, saving, onCreateShare, onRevokeShare }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = useMemo(() => {
     if (!shareLink?.token) return '';
@@ -58,14 +58,25 @@ export default function ShareLinkCard({ tripId, shareLink, saving, onCreateShare
                 {shareUrl}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="modal-action inline-flex items-center justify-center gap-2"
-            >
-              <Copy size={15} />
-              {copied ? 'Copied' : 'Copy link'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="modal-action inline-flex items-center justify-center gap-2"
+              >
+                <Copy size={15} />
+                {copied ? 'Copied' : 'Copy link'}
+              </button>
+              <button
+                type="button"
+                onClick={onRevokeShare}
+                disabled={saving}
+                className="font-mono text-[11px] tracking-[0.18em] uppercase underline underline-offset-4"
+                style={{ color: 'var(--cream-mute)', opacity: saving ? 0.55 : 1 }}
+              >
+                Revoke
+              </button>
+            </div>
           </div>
         </div>
       )}

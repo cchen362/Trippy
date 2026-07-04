@@ -7,9 +7,12 @@ const router = Router();
 
 router.use(requireAuth);
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 router.get('/', (req, res, next) => {
   try {
-    res.json({ trips: listTripsForUser(req.user.id) });
+    const today = ISO_DATE.test(req.query.today || '') ? req.query.today : undefined;
+    res.json({ trips: listTripsForUser(req.user.id, today ? { today } : undefined) });
   } catch (error) {
     next(error);
   }

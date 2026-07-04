@@ -25,7 +25,7 @@ export function getMapConfig(destinationCountries, options = {}) {
   if (upper.includes('CN')) {
     return {
       tileProvider: 'amap',
-      tileUrl: 'http://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7',
+      tileUrl: 'https://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7',
       tileSubdomains: ['1', '2', '3', '4'],
       tileAttribution: '© AutoNavi',
       coordinateSystem: 'gcj02',
