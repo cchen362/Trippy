@@ -66,7 +66,7 @@ export default function HeroCard({ item, deepLinkProvider }) {
       <div className="flex items-center gap-2 flex-wrap">
         <NavigateIcon lat={lat} lng={lng} label={navLabel} deepLinkProvider={deepLinkProvider} />
         <TicketButton documents={booking?.documents} />
-        {showStatus && <StatusPill />}
+        {showStatus && <StatusPill booking={booking} />}
       </div>
     </div>
   );

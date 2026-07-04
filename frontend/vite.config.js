@@ -67,6 +67,37 @@ export default defineConfig({
               networkTimeoutSeconds: 3,
             },
           },
+          {
+            // Import artifact files (original ticket/booking screenshots) are
+            // immutable once uploaded — CacheFirst so tickets open offline.
+            urlPattern: ({ url, request }) => (
+              request.method === 'GET' &&
+              /^\/api\/import\/artifacts\/[^/]+\/files\/\d+$/.test(url.pathname)
+            ),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'trippy-artifact-files',
+              expiration: {
+                maxEntries: 60,
+                maxAgeSeconds: 365 * 24 * 60 * 60,
+              },
+            },
+          },
+          {
+            // Manual booking attachments — same immutability rationale.
+            urlPattern: ({ url, request }) => (
+              request.method === 'GET' &&
+              /^\/api\/bookings\/[^/]+\/attachments\/[^/]+$/.test(url.pathname)
+            ),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'trippy-booking-attachments',
+              expiration: {
+                maxEntries: 60,
+                maxAgeSeconds: 365 * 24 * 60 * 60,
+              },
+            },
+          },
         ],
       },
     }),

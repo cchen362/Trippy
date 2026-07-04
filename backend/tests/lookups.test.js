@@ -105,13 +105,20 @@ describe('lookupFlightDetails', () => {
         {
           number: 'SQ317',
           airline: { name: 'Singapore Airlines', iata: 'SQ' },
+          status: 'Delayed',
           departure: {
             airport: { iata: 'LHR', name: 'London Heathrow' },
             scheduledTime: { local: '2026-01-03 10:55+00:00' },
+            terminal: '5',
+            gate: 'B12',
+            revisedTime: { local: '2026-01-03 11:30+00:00' },
           },
           arrival: {
             airport: { iata: 'SIN', name: 'Singapore Changi' },
             scheduledTime: { local: '2026-01-04 07:50+08:00' },
+            terminal: '1',
+            gate: 'D40',
+            revisedTime: { local: '2026-01-04 08:25+08:00' },
           },
           aircraft: { model: 'Airbus A380' },
         },
@@ -145,6 +152,50 @@ describe('lookupFlightDetails', () => {
       endDatetime: '2026-01-04T07:50',
       airlineName: 'Singapore Airlines',
       aircraft: 'Airbus A380',
+      status: 'Delayed',
+      departureTerminal: '5',
+      departureGate: 'B12',
+      arrivalTerminal: '1',
+      arrivalGate: 'D40',
+      revisedDeparture: '2026-01-03T11:30',
+      revisedArrival: '2026-01-04T08:25',
+    });
+  });
+
+  it('resolves live status fields to null when AeroDataBox omits them', async () => {
+    mockConfig.flightDataProvider = 'aerodatabox';
+    mockConfig.aerodataboxApiKey = 'rapid-key';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          number: 'SQ317',
+          airline: { name: 'Singapore Airlines', iata: 'SQ' },
+          departure: {
+            airport: { iata: 'LHR', name: 'London Heathrow' },
+            scheduledTime: { local: '2026-01-03 10:55+00:00' },
+          },
+          arrival: {
+            airport: { iata: 'SIN', name: 'Singapore Changi' },
+            scheduledTime: { local: '2026-01-04 07:50+08:00' },
+          },
+        },
+      ],
+    });
+
+    const flight = await lookupFlightDetails({
+      flightQuery: 'SQ 317',
+      departureDate: '2026-01-03',
+    });
+
+    expect(flight).toMatchObject({
+      status: null,
+      departureTerminal: null,
+      departureGate: null,
+      arrivalTerminal: null,
+      arrivalGate: null,
+      revisedDeparture: null,
+      revisedArrival: null,
     });
   });
 

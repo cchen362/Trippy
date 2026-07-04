@@ -240,6 +240,15 @@ function normalizeAeroDataBoxFlight(rawFlight, normalized, departureDate) {
     destinationTz: rawFlight.arrival?.airport?.timeZone  || null,
     airlineName: rawFlight.airline?.name || null,
     aircraft,
+    // Live fields (D6) — coverage varies by airport/carrier; every field here
+    // is optional and the frontend must treat absence as "not reported yet".
+    status: rawFlight.status || null,
+    departureTerminal: rawFlight.departure?.terminal || null,
+    departureGate: rawFlight.departure?.gate || null,
+    arrivalTerminal: rawFlight.arrival?.terminal || null,
+    arrivalGate: rawFlight.arrival?.gate || null,
+    revisedDeparture: toDatetimeLocal(rawFlight.departure?.revisedTime?.local) || null,
+    revisedArrival: toDatetimeLocal(rawFlight.arrival?.revisedTime?.local) || null,
     detailsJson: {
       provider: 'aerodatabox',
       providerPayload: rawFlight,

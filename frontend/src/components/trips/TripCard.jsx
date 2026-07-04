@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { tripIsLive } from '../../utils/tripStatus.js';
 
 function formatDateRange(startDate, endDate) {
   const formatter = new Intl.DateTimeFormat(undefined, {
@@ -20,7 +21,7 @@ export default function TripCard({ trip }) {
 
   return (
     <Link
-      to={`/trips/${trip.id}/plan`}
+      to={`/trips/${trip.id}/${tripIsLive(trip) ? 'today' : 'plan'}`}
       className="block rounded-2xl overflow-hidden border transition-transform duration-300 hover:-translate-y-1"
       style={{
         borderColor: trip.status === 'active' ? 'var(--gold-line)' : 'var(--ink-border)',
