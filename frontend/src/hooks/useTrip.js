@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { tripsApi } from '../services/tripsApi.js';
 import { localIso } from '../utils/date.js';
 
@@ -14,15 +14,21 @@ export function useTrip(tripId) {
   const [activeDayId, setActiveDayId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    hasLoadedRef.current = false;
+  }, [tripId]);
 
   const refresh = useCallback(async () => {
     if (!tripId) return;
 
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     try {
       const nextDetail = await tripsApi.detail(tripId);
       setDetail(nextDetail);
+      hasLoadedRef.current = true;
       setActiveDayId((current) => {
         if (current && nextDetail.days.some((day) => day.id === current)) {
           return current;

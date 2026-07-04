@@ -263,13 +263,14 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
         <div style={{ position: 'relative' }}>
           <button
             ref={btnRef}
-            onClick={() => setPickerOpen(v => !v)}
+            onClick={() => !isInTrip && setPickerOpen(v => !v)}
+            disabled={isInTrip}
             style={{
               fontFamily: "'DM Mono', monospace",
               fontSize: 10,
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
-              cursor: 'pointer',
+              cursor: isInTrip ? 'default' : 'pointer',
               borderRadius: 3,
               padding: '12px 16px',
               background: isInTrip ? 'rgba(201,160,80,0.1)' : 'transparent',
@@ -281,7 +282,7 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
             {isInTrip ? '✓ Added' : 'Add to day'}
           </button>
 
-          {pickerOpen && days.length > 0 && (
+          {!isInTrip && pickerOpen && days.length > 0 && (
             <DayPicker
               addedDayIds={addedToDayIds}
               days={days}
