@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { createBooking, deleteBooking, listBookings, updateBooking } from '../services/bookings.js';
+import { addAttachment, deleteAttachment, getAttachmentFile, listAttachments } from '../services/attachments.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 
 const router = Router();
@@ -30,6 +31,43 @@ router.patch('/bookings/:bookingId', (req, res, next) => {
 router.delete('/bookings/:bookingId', (req, res, next) => {
   try {
     res.json(deleteBooking(req.user.id, req.params.bookingId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/bookings/:bookingId/attachments', (req, res, next) => {
+  try {
+    res.json({ attachments: listAttachments(req.user.id, req.params.bookingId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/bookings/:bookingId/attachments', (req, res, next) => {
+  try {
+    const { mediaType, filename, content } = req.body || {};
+    const attachment = addAttachment(req.user.id, req.params.bookingId, { mediaType, filename, content });
+    res.status(201).json({ attachment });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/bookings/:bookingId/attachments/:attachmentId', (req, res, next) => {
+  try {
+    const file = getAttachmentFile(req.user.id, req.params.bookingId, req.params.attachmentId);
+    res.set('Content-Type', file.media_type);
+    res.set('Content-Disposition', `inline${file.filename ? `; filename="${file.filename}"` : ''}`);
+    res.send(file.content);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/bookings/:bookingId/attachments/:attachmentId', (req, res, next) => {
+  try {
+    res.json(deleteAttachment(req.user.id, req.params.bookingId, req.params.attachmentId));
   } catch (error) {
     next(error);
   }

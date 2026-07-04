@@ -397,6 +397,20 @@ export function getArtifactDetail(userId, artifactId) {
   return { artifact: mapArtifactMetadata(row), extraction };
 }
 
+export function getArtifactFile(userId, artifactId, position) {
+  assertArtifactAccess(userId, artifactId);
+  const db = getDb();
+  const file = db.prepare(`
+    SELECT media_type, filename, content
+    FROM import_artifact_files
+    WHERE artifact_id = ? AND position = ?
+  `).get(artifactId, Number(position));
+  if (!file) {
+    throw Object.assign(new Error('File not found'), { status: 404 });
+  }
+  return file;
+}
+
 export function deleteArtifact(userId, artifactId) {
   assertArtifactAccess(userId, artifactId);
   const db = getDb();

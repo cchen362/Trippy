@@ -74,6 +74,6 @@ describe('migrations', () => {
     // Running again should not throw
     expect(() => runMigrations()).not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(11);
+    expect(count.c).toBe(12);
   });
 });

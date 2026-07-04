@@ -54,6 +54,7 @@ export default function FlightBookingCard({ booking, onOpen }) {
       footerLeft={booking.confirmationRef ? 'BOOKING REF' : undefined}
       footerRight={booking.confirmationRef || undefined}
       connector
+      hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}
     />
   );

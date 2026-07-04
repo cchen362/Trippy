@@ -7,6 +7,7 @@ import {
   confirmArtifact,
   listArtifactsForTrip,
   getArtifactDetail,
+  getArtifactFile,
   deleteArtifact,
 } from '../services/importer.js';
 
@@ -44,6 +45,17 @@ router.get('/trips/:tripId/import/artifacts', requireTripAccess, (req, res, next
 router.get('/import/artifacts/:id', (req, res, next) => {
   try {
     res.json(getArtifactDetail(req.user.id, req.params.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/import/artifacts/:id/files/:position', (req, res, next) => {
+  try {
+    const file = getArtifactFile(req.user.id, req.params.id, req.params.position);
+    res.set('Content-Type', file.media_type);
+    res.set('Content-Disposition', `inline${file.filename ? `; filename="${file.filename}"` : ''}`);
+    res.send(file.content);
   } catch (error) {
     next(error);
   }

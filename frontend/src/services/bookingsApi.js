@@ -5,6 +5,11 @@ export const bookingsApi = {
   create: (tripId, data) => request(`/api/trips/${tripId}/bookings`, { method: 'POST', body: data }),
   update: (bookingId, data) => request(`/api/bookings/${bookingId}`, { method: 'PATCH', body: data }),
   remove: (bookingId) => request(`/api/bookings/${bookingId}`, { method: 'DELETE' }),
+  listAttachments: (bookingId) => request(`/api/bookings/${bookingId}/attachments`),
+  addAttachment: (bookingId, { mediaType, filename, content }) =>
+    request(`/api/bookings/${bookingId}/attachments`, { method: 'POST', body: { mediaType, filename, content } }),
+  removeAttachment: (bookingId, attachmentId) =>
+    request(`/api/bookings/${bookingId}/attachments/${attachmentId}`, { method: 'DELETE' }),
   lookupHotels: (query, sessionToken) => {
     const params = new URLSearchParams({ q: query });
     if (sessionToken) params.set('sessionToken', sessionToken);

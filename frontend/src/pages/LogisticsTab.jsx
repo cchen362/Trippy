@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { Paperclip, FileText } from 'lucide-react';
 import AddBookingModal from '../components/logistics/AddBookingModal.jsx';
 import FlightBookingCard from '../components/logistics/FlightBookingCard.jsx';
 import TrainBookingCard from '../components/logistics/TrainBookingCard.jsx';
 import HotelBookingCard from '../components/logistics/HotelBookingCard.jsx';
 import OtherBookingCard from '../components/logistics/OtherBookingCard.jsx';
 import CaptureFlow from '../components/import/CaptureFlow.jsx';
+import DocumentViewer from '../components/documents/DocumentViewer.jsx';
+import { bookingsApi } from '../services/bookingsApi.js';
+import { fileToInput } from '../services/importApi.js';
 import { useTripContext } from './TripPage.jsx';
 
 const CARD_BY_TYPE = {
@@ -46,8 +50,36 @@ export default function LogisticsTab() {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [viewerDoc, setViewerDoc] = useState(null);
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState(null);
+  const fileInputRef = useRef(null);
 
   const grouped = useMemo(() => groupBookings(bookings), [bookings]);
+
+  // selectedBooking is a snapshot from the moment its card was tapped; re-derive from the
+  // live `bookings` list so a newly attached/removed document appears without closing the sheet.
+  const liveSelected = selectedBooking
+    ? bookings.find((b) => b.id === selectedBooking.id) || selectedBooking
+    : null;
+
+  async function handleAttach(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !liveSelected) return;
+
+    setAttachError(null);
+    setAttaching(true);
+    try {
+      const input = await fileToInput(file);
+      await bookingsApi.addAttachment(liveSelected.id, input);
+      await refresh();
+    } catch (err) {
+      setAttachError(err.message);
+    } finally {
+      setAttaching(false);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -108,16 +140,16 @@ export default function LogisticsTab() {
       ))}
 
       {/* Detail sheet */}
-      {selectedBooking && (
+      {liveSelected && (
         <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
           <div className="w-full max-w-xl rounded-[22px] border p-6" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
                 <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                  {selectedBooking.type}
+                  {liveSelected.type}
                 </p>
                 <h3 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                  {selectedBooking.title}
+                  {liveSelected.title}
                 </h3>
               </div>
               <button type="button" onClick={() => setSelectedBooking(null)} className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-dim)' }}>
@@ -126,18 +158,60 @@ export default function LogisticsTab() {
             </div>
 
             <div className="space-y-3 font-body text-lg" style={{ color: 'var(--cream-dim)' }}>
-              {selectedBooking.startDatetime && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Start</span><br />{selectedBooking.startDatetime.replace('T', ' ')}</p>}
-              {selectedBooking.endDatetime && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>End</span><br />{selectedBooking.endDatetime.replace('T', ' ')}</p>}
-              {selectedBooking.origin && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Origin</span><br />{selectedBooking.origin}</p>}
-              {selectedBooking.destination && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Destination</span><br />{selectedBooking.destination}</p>}
-              {selectedBooking.confirmationRef && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Reference</span><br />{selectedBooking.confirmationRef}</p>}
+              {liveSelected.startDatetime && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Start</span><br />{liveSelected.startDatetime.replace('T', ' ')}</p>}
+              {liveSelected.endDatetime && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>End</span><br />{liveSelected.endDatetime.replace('T', ' ')}</p>}
+              {liveSelected.origin && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Origin</span><br />{liveSelected.origin}</p>}
+              {liveSelected.destination && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Destination</span><br />{liveSelected.destination}</p>}
+              {liveSelected.confirmationRef && <p><span className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>Reference</span><br />{liveSelected.confirmationRef}</p>}
             </div>
+
+            {liveSelected.documents?.length > 0 && (
+              <div className="mt-4">
+                <p className="font-mono text-xs tracking-[0.22em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>Documents</p>
+                <div className="flex flex-wrap gap-2">
+                  {liveSelected.documents.map((doc, i) => (
+                    <button
+                      key={doc.url}
+                      type="button"
+                      onClick={() => setViewerDoc(doc)}
+                      className="px-3 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase flex items-center gap-2"
+                      style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
+                    >
+                      <FileText size={14} />
+                      {doc.filename || (doc.mediaType === 'application/pdf' ? `Document ${i + 1}` : `Photo ${i + 1}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {attachError && (
+              <p className="mt-3 font-body text-sm" style={{ color: '#f8b4b4' }}>{attachError}</p>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              onChange={handleAttach}
+              className="sr-only"
+            />
 
             <div className="mt-6 flex justify-between gap-3">
               <button
                 type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={attaching}
+                className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase flex items-center gap-2"
+                style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+              >
+                <Paperclip size={14} />
+                {attaching ? 'Attaching…' : 'Attach'}
+              </button>
+              <button
+                type="button"
                 onClick={() => {
-                  setEditing(selectedBooking);
+                  setEditing(liveSelected);
                   setSelectedBooking(null);
                 }}
                 className="modal-action"
@@ -147,7 +221,7 @@ export default function LogisticsTab() {
               <button
                 type="button"
                 onClick={async () => {
-                  await deleteBooking(selectedBooking.id);
+                  await deleteBooking(liveSelected.id);
                   setSelectedBooking(null);
                 }}
                 className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
@@ -159,6 +233,8 @@ export default function LogisticsTab() {
           </div>
         </div>
       )}
+
+      <DocumentViewer document={viewerDoc} onClose={() => setViewerDoc(null)} />
 
       {/* Create modal */}
       <AddBookingModal

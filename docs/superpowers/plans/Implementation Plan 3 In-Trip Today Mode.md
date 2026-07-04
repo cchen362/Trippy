@@ -80,12 +80,14 @@ Rules:
 
 ### M1 — Document vault (backend + Logistics surfacing)
 
-- [ ] Artifact file content endpoint (D4) + tests (auth, wrong-user 404, correct content-type round-trip).
-- [ ] Migration `012_booking_attachments` + attachment endpoints (D4) + tests (caps, cascade delete with booking).
-- [ ] Booking → documents resolution in booking payloads: `documents: [{ source: 'import'|'attachment', url, mediaType, filename }]` assembled server-side (from `importedFrom.artifactId` files + attachments).
-- [ ] Full-screen document viewer component (D5).
-- [ ] Logistics booking cards: document chip(s) when present; "attach photo/PDF" action on the booking detail sheet (base64 JSON upload reusing `fileToInput` from `importApi.js`).
-- Verify: import a booking from a screenshot → open its card → original screenshot views full-screen; manually attach a PDF to a hand-entered hotel → persists, views, caps enforced.
+- [x] Artifact file content endpoint (D4) + tests (auth, wrong-user 404, correct content-type round-trip). **Done 2026-07-04** — `getArtifactFile` in `importer.js`, `GET /api/import/artifacts/:id/files/:position`.
+- [x] Migration `012_booking_attachments` + attachment endpoints (D4) + tests (caps, cascade delete with booking). **Done 2026-07-04** — `backend/src/services/attachments.js`, `POST/GET/DELETE /api/bookings/:id/attachments(/:attachmentId)`.
+- [x] Booking → documents resolution in booking payloads: `documents: [{ source: 'import'|'attachment', url, mediaType, filename }]` assembled server-side (from `importedFrom.artifactId` files + attachments). **Done 2026-07-04** — shared `backend/src/services/documents.js::resolveBookingDocuments`, used by both `bookings.js::formatBooking` and `trips.js::mapBooking` (the latter powers `/api/trips/:id/detail`, which the frontend actually reads — initially missed, caught during live verification and fixed at the root by de-duplicating the two booking-mapping functions onto one shared resolver).
+- [x] Full-screen document viewer component (D5). **Done 2026-07-04** — `frontend/src/components/documents/DocumentViewer.jsx`; dark chrome header, near-white content pane (image `<img>` / PDF `<embed>`) so an imported QR/barcode screenshot stays scannable.
+- [x] Logistics booking cards: document chip(s) when present; "attach photo/PDF" action on the booking detail sheet (base64 JSON upload reusing `fileToInput` from `importApi.js`). **Done 2026-07-04** — passive gold paperclip chip on all 4 card types (`TicketStubCard.jsx` + `HotelBookingCard.jsx` + `OtherBookingCard.jsx`), Documents row + Attach button wired into `LogisticsTab.jsx`'s detail sheet.
+- Verify: import a booking from a screenshot → open its card → original screenshot views full-screen; manually attach a PDF to a hand-entered hotel → persists, views, caps enforced. **Verified live 2026-07-04** — 175 backend tests pass; browser-driven pass confirmed chip rendering, image + PDF viewer, and the 5th-attachment cap rejection with the error surfaced in the sheet.
+
+**M1 status:** Shipped and verified end-to-end. Backend: new migration, `attachments.js` service, shared `documents.js` resolver, extended `imports.js`/`bookings.js` routes, 3 new/extended test files (175 total passing). Frontend: `DocumentViewer.jsx`, booking-card chips, detail-sheet attach flow, `bookingsApi.js` additions. Ready for M2 (Today tab), which reuses this viewer for the hero's `Ticket` action.
 
 ### M2 — Today tab
 

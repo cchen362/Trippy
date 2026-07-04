@@ -1,3 +1,4 @@
+import { Paperclip } from 'lucide-react';
 import { formatShortDate, computeNights } from './bookingCardUtils.js';
 
 function Row({ label, value, valueStyle, last }) {
@@ -37,13 +38,18 @@ export default function HotelBookingCard({ booking, onOpen }) {
       onClick={() => onOpen(booking)}
       className="logistics-card w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]"
     >
-      <div className="logistics-card-top">
-        <p className="logistics-eyebrow">
-          Accommodation
-        </p>
-        <h3 className="logistics-card-title">
-          {booking.title}
-        </h3>
+      <div className="logistics-card-top flex items-start justify-between gap-2">
+        <div>
+          <p className="logistics-eyebrow">
+            Accommodation
+          </p>
+          <h3 className="logistics-card-title">
+            {booking.title}
+          </h3>
+        </div>
+        {booking.documents?.length > 0 && (
+          <Paperclip size={16} style={{ color: 'var(--gold)' }} aria-label="Documents attached" />
+        )}
       </div>
 
       <div className="logistics-card-rows">

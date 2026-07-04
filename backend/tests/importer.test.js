@@ -32,6 +32,7 @@ const {
   confirmArtifact,
   listArtifactsForTrip,
   getArtifactDetail,
+  getArtifactFile,
   deleteArtifact,
   normalizeExtractedBooking,
 } = await import('../src/services/importer.js');
@@ -373,6 +374,53 @@ describe('image input path', () => {
     expect(imageBlock).toBeDefined();
     expect(imageBlock.source.type).toBe('base64');
     expect(imageBlock.source.media_type).toBe('image/png');
+  });
+});
+
+describe('getArtifactFile', () => {
+  it('returns the exact bytes and media type of the stored input file', async () => {
+    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    const extracted = await createArtifactAndExtract(owner.id, {
+      tripId: null,
+      inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
+    });
+
+    const file = getArtifactFile(owner.id, extracted.artifact.id, 0);
+    expect(file.media_type).toBe('image/png');
+    expect(file.content.toString('base64')).toBe(trainTicketBase64);
+  });
+
+  it('404s for a user with no relationship to the artifact', async () => {
+    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    const extracted = await createArtifactAndExtract(owner.id, {
+      tripId: null,
+      inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
+    });
+
+    const inviteCode = authService.getInviteCode();
+    const stranger = authService.register('stranger', 'password123', 'Stranger', inviteCode).user;
+
+    expect(() => getArtifactFile(stranger.id, extracted.artifact.id, 0)).toThrow();
+    try {
+      getArtifactFile(stranger.id, extracted.artifact.id, 0);
+    } catch (err) {
+      expect(err.status).toBe(404);
+    }
+  });
+
+  it('404s for a nonexistent position on a valid artifact', async () => {
+    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    const extracted = await createArtifactAndExtract(owner.id, {
+      tripId: null,
+      inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
+    });
+
+    expect(() => getArtifactFile(owner.id, extracted.artifact.id, 5)).toThrow();
+    try {
+      getArtifactFile(owner.id, extracted.artifact.id, 5);
+    } catch (err) {
+      expect(err.status).toBe(404);
+    }
   });
 });
 

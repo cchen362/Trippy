@@ -43,6 +43,7 @@ export default function TrainBookingCard({ booking, onOpen }) {
       footerLeft={seatClass ? seatClass.toUpperCase() : (booking.confirmationRef ? 'BOOKING REF' : undefined)}
       footerRight={booking.confirmationRef || undefined}
       connector
+      hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}
     />
   );

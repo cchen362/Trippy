@@ -1,6 +1,7 @@
 import { getDb } from '../db/database.js';
 import { cityFromIata, cityFromAirportString, canonicalCity } from '../utils/airports.js';
 import { countryCodeFromName } from '../utils/countries.js';
+import { resolveBookingDocuments } from './documents.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -70,6 +71,7 @@ function mapStop(row) {
 }
 
 function mapBooking(row) {
+  const detailsJson = parseJson(row.details_json, {});
   return {
     id: row.id,
     tripId: row.trip_id,
@@ -85,8 +87,9 @@ function mapBooking(row) {
     showInItinerary: Boolean(row.show_in_itinerary),
     originTz:      row.origin_tz      || null,
     destinationTz: row.destination_tz || null,
-    detailsJson: parseJson(row.details_json, {}),
+    detailsJson,
     createdAt: row.created_at,
+    documents: resolveBookingDocuments(row.id, detailsJson),
   };
 }
 

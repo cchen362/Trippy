@@ -1,3 +1,5 @@
+import { Paperclip } from 'lucide-react';
+
 // Shared transit-card primitive used by FlightBookingCard and TrainBookingCard.
 // Accepts display-ready values only; no booking data access here.
 export default function TicketStubCard({
@@ -19,14 +21,23 @@ export default function TicketStubCard({
   footerLeft,
   footerRight,
   connector = false,
+  hasDocuments = false,
   onClick,
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`logistics-card logistics-transit-card ${cardClassName} w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]`}
+      className={`logistics-card logistics-transit-card relative ${cardClassName} w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]`}
     >
+      {hasDocuments && (
+        <Paperclip
+          size={16}
+          className="absolute top-3 right-3"
+          style={{ color: 'var(--gold)' }}
+          aria-label="Documents attached"
+        />
+      )}
       <div className="logistics-card-top logistics-transit-top">
         <p className="logistics-eyebrow">{eyebrow}</p>
 

@@ -1,6 +1,7 @@
 import { getDb } from '../db/database.js';
 import { syncStopWithBooking } from './stops.js';
 import { assertBookingAccess, assertTripAccess } from './trips.js';
+import { resolveBookingDocuments } from './documents.js';
 
 function parseJson(value) {
   if (!value) return {};
@@ -12,6 +13,7 @@ function parseJson(value) {
 }
 
 function formatBooking(row) {
+  const detailsJson = parseJson(row.details_json);
   return {
     id: row.id,
     tripId: row.trip_id,
@@ -27,8 +29,9 @@ function formatBooking(row) {
     showInItinerary: Boolean(row.show_in_itinerary),
     originTz:      row.origin_tz      || null,
     destinationTz: row.destination_tz || null,
-    detailsJson: parseJson(row.details_json),
+    detailsJson,
     createdAt: row.created_at,
+    documents: resolveBookingDocuments(row.id, detailsJson),
   };
 }
 
