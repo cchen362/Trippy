@@ -1,3 +1,5 @@
+import { naiveIsoToAbsolute } from '../../utils/date.js';
+
 // ES2015+ treats date-only strings ("2026-06-11") as UTC midnight,
 // which flips day-of-week for users east of UTC. Force local-time parsing.
 function toLocalDate(input) {
@@ -5,26 +7,6 @@ function toLocalDate(input) {
   const iso = typeof input === 'string' && !input.includes('T') ? `${input}T00:00:00` : input;
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
-}
-
-// Converts a naive wall-clock ISO string (e.g. "2026-06-08T08:45") to the
-// absolute UTC instant that corresponds to that wall-clock time in `tz`.
-// Required because new Date("2026-06-08T08:45") parses in the *device* timezone,
-// so passing { timeZone } to the formatter afterward corrects the wrong reference.
-function naiveIsoToAbsolute(iso, tz) {
-  const [datePart, timePart = '00:00'] = iso.split('T');
-  const [year, month, day] = datePart.split('-').map(Number);
-  const [hour, minute]     = timePart.slice(0, 5).split(':').map(Number);
-  const utcCandidate = Date.UTC(year, month - 1, day, hour, minute);
-  const d = new Date(utcCandidate);
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(d);
-  const get = (t) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  const offsetMs = ((hour - get('hour')) * 60 + (minute - get('minute'))) * 60_000;
-  return new Date(utcCandidate + offsetMs);
 }
 
 export function formatShortDate(iso, tz) {

@@ -1,17 +1,11 @@
-export default function OpenInMapsButton({ lat, lng, label, deepLinkProvider }) {
-  let href;
-  let buttonLabel;
+import { buildDeepLink } from '../../utils/deepLink.js';
 
-  if (deepLinkProvider === 'amap') {
-    href = `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(label)}`;
-    buttonLabel = 'Open in Amap';
-  } else if (deepLinkProvider === 'naver') {
-    href = `https://map.naver.com/p/search/${encodeURIComponent(label)}?c=${lng},${lat},15,0,0,0,dh`;
-    buttonLabel = 'Open in Naver Maps';
-  } else {
-    href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-    buttonLabel = 'Open in Google Maps';
-  }
+export default function OpenInMapsButton({ lat, lng, label, deepLinkProvider }) {
+  const href = buildDeepLink(deepLinkProvider, lat, lng, label);
+  const buttonLabel =
+    deepLinkProvider === 'amap' ? 'Open in Amap' :
+    deepLinkProvider === 'naver' ? 'Open in Naver Maps' :
+    'Open in Google Maps';
 
   return (
     <a

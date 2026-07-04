@@ -7,6 +7,8 @@ import MapTab from './pages/MapTab.jsx';
 import PlanTab from './pages/PlanTab.jsx';
 import ShareViewPage from './pages/ShareViewPage.jsx';
 import SetupPage from './pages/SetupPage.jsx';
+import TodayTab from './pages/TodayTab.jsx';
+import TripIndexRedirect from './pages/TripIndexRedirect.jsx';
 import TripPage from './pages/TripPage.jsx';
 import TripsHomePage from './pages/TripsHomePage.jsx';
 
@@ -32,7 +34,8 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/trips" replace />} />
       <Route path="/trips" element={<TripsHomePage />} />
       <Route path="/trips/:tripId" element={<TripPage />}>
-        <Route index element={<Navigate to="plan" replace />} />
+        <Route index element={<TripIndexRedirect />} />
+        <Route path="today" element={<TodayTab />} />
         <Route path="plan" element={<PlanTab />} />
         <Route path="logistics" element={<LogisticsTab />} />
         <Route path="map" element={<MapTab />} />

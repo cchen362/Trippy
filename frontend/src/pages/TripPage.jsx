@@ -16,6 +16,7 @@ import { useDiscovery } from '../hooks/useDiscovery.js';
 import { useStops } from '../hooks/useStops.js';
 import { useTrip } from '../hooks/useTrip.js';
 import { tripsApi } from '../services/tripsApi.js';
+import { tripIsLive } from '../utils/tripStatus.js';
 
 export function useTripContext() {
   return useOutletContext();
@@ -89,6 +90,8 @@ export default function TripPage() {
     );
   }
 
+  const isLive = tripIsLive(tripState.trip);
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--ink-deep)' }}>
       <TopBar
@@ -120,7 +123,7 @@ export default function TripPage() {
         )}
       />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
-        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery }} />
+        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive }} />
       </main>
       {!copilotOpen && <CopilotFab onClick={() => setCopilotOpen(true)} />}
       <AnimatePresence>
@@ -150,7 +153,7 @@ export default function TripPage() {
           />
         )}
       </AnimatePresence>
-      <BottomNav tripId={tripId} />
+      <BottomNav tripId={tripId} live={isLive} />
     </div>
   );
 }

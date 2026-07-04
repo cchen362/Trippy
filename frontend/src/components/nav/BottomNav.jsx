@@ -27,7 +27,7 @@ function NavItem({ to, label, disabled = false, end = false }) {
   );
 }
 
-export default function BottomNav({ tripId = null }) {
+export default function BottomNav({ tripId = null, live = false }) {
   const inTrip = Boolean(tripId);
 
   return (
@@ -37,7 +37,9 @@ export default function BottomNav({ tripId = null }) {
     >
       <div className="max-w-6xl mx-auto px-3">
         <div className="flex items-center">
-          <NavItem to="/trips" label="Trips" end />
+          {live && inTrip
+            ? <NavItem to={`/trips/${tripId}/today`} label="Today" end />
+            : <NavItem to="/trips" label="Trips" end />}
           <NavItem to={inTrip ? `/trips/${tripId}/plan` : '#'} label="Plan" disabled={!inTrip} />
           <NavItem to={inTrip ? `/trips/${tripId}/logistics` : '#'} label="Logistics" disabled={!inTrip} />
           <NavItem to={inTrip ? `/trips/${tripId}/map` : '#'} label="Map" disabled={!inTrip} />
