@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SuggestionCard from './SuggestionCard.jsx';
+import DayPicker from './DayPicker.jsx';
+import { bookingsApi } from '../../services/bookingsApi.js';
 
 const TAG_TO_CATEGORY = {
   'food & drink': 'food',
@@ -29,7 +31,7 @@ const CATEGORY_LABELS = {
 };
 
 function normalizeName(str) {
-  return str
+  return (str ?? '')
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
     .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
@@ -67,6 +69,20 @@ function pickSurprise(partialResults, days) {
   );
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Matches a loaded suggestion against a search query across name, localName,
+// aliases, and description — case-insensitive substring match.
+function suggestionMatchesQuery(suggestion, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  const haystacks = [
+    suggestion?.name,
+    suggestion?.localName,
+    ...(Array.isArray(suggestion?.aliases) ? suggestion.aliases : []),
+    suggestion?.description,
+  ];
+  return haystacks.some((h) => typeof h === 'string' && h.toLowerCase().includes(q));
 }
 
 function TabSkeleton() {
@@ -148,6 +164,86 @@ function DestinationHero({ city, count }) {
   );
 }
 
+// Compact row for a Google Places prediction under "On the map". Tapping "Add"
+// opens a DayPicker; picking a day resolves place details then adds the stop.
+function PlaceResultRow({ prediction, days, onAdd }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const btnRef = useRef(null);
+
+  const handlePick = async (dayId) => {
+    setResolving(true);
+    try {
+      await onAdd(dayId, prediction);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, padding: '12px 14px',
+        background: '#1a1410',
+        border: '1px solid rgba(201,160,80,0.1)',
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontSize: 17, color: '#f0ebe3',
+          letterSpacing: '0.01em',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {prediction.mainText || prediction.text}
+        </div>
+        {prediction.secondaryText && (
+          <div style={{
+            fontFamily: "'DM Mono', monospace",
+            fontSize: 10, letterSpacing: '0.04em',
+            color: '#6e5e50',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            marginTop: 3,
+          }}>
+            {prediction.secondaryText}
+          </div>
+        )}
+      </div>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          ref={btnRef}
+          onClick={() => setPickerOpen((v) => !v)}
+          disabled={resolving}
+          style={{
+            fontFamily: "'DM Mono', monospace",
+            fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+            color: resolving ? 'rgba(201,160,80,0.35)' : '#c9a050',
+            background: 'rgba(201,160,80,0.06)',
+            border: '1px solid rgba(201,160,80,0.28)',
+            borderRadius: 3, padding: '8px 14px',
+            cursor: resolving ? 'default' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {resolving ? '...' : 'Add'}
+        </button>
+        {pickerOpen && (
+          <DayPicker
+            addedDayIds={new Set()}
+            days={days}
+            suggestion={prediction}
+            onAddToDay={(dayId) => handlePick(dayId)}
+            onClose={() => setPickerOpen(false)}
+            anchorRef={btnRef}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const [destination, setDestination] = useState(defaultDestination);
@@ -156,7 +252,13 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [activeCategory, setActiveCategory] = useState(tabs[0]);
   const [surprisePick, setSurprisePick] = useState(null);
 
-  const { discover, refresh, getDestination } = discovery;
+  // Search-inside-Discover state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [placePredictions, setPlacePredictions] = useState([]);
+  const [placeSearching, setPlaceSearching] = useState(false);
+  const sessionTokenRef = useRef(null);
+
+  const { discover, showMore, getDestination } = discovery;
   const { partialResults, completedCategories, loading, error } = getDestination(destination);
 
   useEffect(() => {
@@ -171,6 +273,28 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     }
   }, [partialResults, loading]);
 
+  // Debounced Google Places lookup while searching, so "I heard about this place
+  // but it's not in Discover" always has a real-world escape hatch.
+  useEffect(() => {
+    if (searchQuery.trim().length < 3) {
+      setPlacePredictions([]);
+      return;
+    }
+    if (!sessionTokenRef.current) sessionTokenRef.current = crypto.randomUUID();
+    const timer = setTimeout(async () => {
+      setPlaceSearching(true);
+      try {
+        const response = await bookingsApi.lookupPlaces(searchQuery.trim(), sessionTokenRef.current, destination.trim());
+        setPlacePredictions(response?.suggestions ?? []);
+      } catch {
+        setPlacePredictions([]);
+      } finally {
+        setPlaceSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery, destination]);
+
   const handleDiscover = () => {
     if (destination.trim()) {
       discover(destination.trim());
@@ -183,18 +307,54 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       title: suggestion.name,
       type: 'experience',
       note: suggestion.description,
-      lat: suggestion.lat,
-      lng: suggestion.lng,
       locationQuery: suggestion.name,
       locationCity: destination.trim(),
       localName: suggestion.localName,
       locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
-      coordinateSystem: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 'wgs84' : undefined,
-      coordinateSource: 'discovery',
-      locationStatus: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 'estimated' : undefined,
-      locationConfidence: Number.isFinite(Number(suggestion.lat)) && Number.isFinite(Number(suggestion.lng)) ? 0.68 : undefined,
       duration: suggestion.estimatedDuration,
     });
+  };
+
+  // Adds a place picked from the "On the map" Google Places results. Resolves
+  // exact details first — if coordinates come back, use the trusted-coordinates
+  // fast path; otherwise fall back to free-text resolution server-side.
+  const handleAddPlaceResult = async (dayId, prediction) => {
+    const sessionToken = sessionTokenRef.current;
+    sessionTokenRef.current = null; // session ends with the details call
+    let place = null;
+    try {
+      const response = await bookingsApi.lookupHotelDetails(prediction.placeId, sessionToken);
+      place = response?.place;
+    } catch {
+      place = null;
+    }
+
+    const name = place?.name || prediction.mainText || prediction.text;
+
+    if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+      await onAddStop(dayId, {
+        title: name,
+        type: 'experience',
+        note: place.address || '',
+        lat: place.lat,
+        lng: place.lng,
+        coordinateSystem: 'wgs84',
+        coordinateSource: 'places',
+        locationStatus: 'resolved',
+        locationConfidence: 0.95,
+        providerId: `google:${place.placeId || prediction.placeId}`,
+        resolvedName: name,
+        resolvedAddress: place.address,
+        locationQuery: name,
+      });
+    } else {
+      await onAddStop(dayId, {
+        title: name,
+        locationQuery: name,
+        type: 'experience',
+        note: place?.address || prediction.secondaryText || '',
+      });
+    }
   };
 
   const handleSurpriseMe = () => {
@@ -207,10 +367,21 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     setSurprisePick(pickSurprise(partialResults, days));
   };
 
+  const handleShowMore = () => {
+    if (destination.trim()) showMore(destination.trim());
+  };
+
   const activeItems = partialResults[activeCategory] ?? [];
   const categoryLoaded = completedCategories.has(activeCategory);
   const anyResults = Object.keys(partialResults).length > 0;
   const totalCount = Object.values(partialResults).flat().length;
+
+  const isSearching = searchQuery.trim().length >= 2;
+  const searchMatches = isSearching
+    ? Object.values(partialResults).flat().filter((s) => suggestionMatchesQuery(s, searchQuery))
+    : [];
+  const showPlaceResults = searchQuery.trim().length >= 3;
+  const noSearchResults = isSearching && searchMatches.length === 0 && (!showPlaceResults || (!placeSearching && placePredictions.length === 0));
 
   return (
     <motion.div
@@ -257,27 +428,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           Discover
         </span>
 
-        <div style={{ minWidth: 56, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-          {anyResults && (
-            <button
-              onClick={() => refresh(destination.trim())}
-              disabled={loading}
-              aria-label="Refresh discovery results"
-              style={{
-                background: 'none', border: 'none',
-                cursor: loading ? 'default' : 'pointer',
-                color: loading ? 'rgba(240,234,216,0.28)' : 'rgba(240,234,216,0.60)',
-                fontFamily: "'DM Mono', monospace",
-                fontSize: 16, padding: 0, lineHeight: 1,
-              }}
-            >
-              ↺
-            </button>
-          )}
-        </div>
+        <div style={{ minWidth: 56 }} />
       </div>
 
-      {/* Search input */}
+      {/* Destination input */}
       <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 10 }}>
           <input
@@ -382,6 +536,29 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         })}
       </div>
 
+      {/* Search inside Discover */}
+      {anyResults && (
+        <div style={{ padding: '14px 20px 0', flexShrink: 0 }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Find a place…"
+            style={{
+              width: '100%',
+              background: 'rgba(26,20,16,0.5)',
+              border: '1px solid rgba(240,235,227,0.1)',
+              borderRadius: 4,
+              padding: '10px 16px',
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: 17, fontWeight: 400,
+              color: '#f0ebe3', letterSpacing: '0.01em',
+              outline: 'none',
+            }}
+          />
+        </div>
+      )}
+
       {/* Content area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 120px', position: 'relative' }}>
         {error && (
@@ -394,9 +571,71 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!error && !categoryLoaded && loading && <TabSkeleton />}
+        {!error && isSearching && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {searchMatches.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
+                gap: 16,
+              }}>
+                {searchMatches.map((suggestion, idx) => (
+                  <SuggestionCard
+                    key={suggestion.name ?? idx}
+                    suggestion={suggestion}
+                    days={days}
+                    onAddToDay={handleAddToDay}
+                  />
+                ))}
+              </div>
+            )}
 
-        {!error && categoryLoaded && activeItems.length === 0 && (
+            {showPlaceResults && (
+              <div>
+                <div style={{
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 10, letterSpacing: '0.22em', textTransform: 'uppercase',
+                  color: '#504438', marginBottom: 10,
+                }}>
+                  On the map
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {placeSearching && placePredictions.length === 0 && (
+                    <p style={{
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: 11, letterSpacing: '0.1em',
+                      color: 'rgba(240,234,216,0.35)',
+                    }}>
+                      Searching…
+                    </p>
+                  )}
+                  {placePredictions.map((prediction) => (
+                    <PlaceResultRow
+                      key={prediction.placeId}
+                      prediction={prediction}
+                      days={days}
+                      onAdd={handleAddPlaceResult}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {noSearchResults && (
+              <p style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 20, color: 'rgba(240,234,216,0.35)',
+                textAlign: 'center', marginTop: 40, lineHeight: 1.7,
+              }}>
+                Nothing found. Keep typing to search the map.
+              </p>
+            )}
+          </div>
+        )}
+
+        {!error && !isSearching && !categoryLoaded && loading && <TabSkeleton />}
+
+        {!error && !isSearching && categoryLoaded && activeItems.length === 0 && (
           <p style={{
             fontFamily: "'Cormorant Garamond', serif",
             fontSize: 20, color: '#504438',
@@ -406,7 +645,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!error && activeItems.length > 0 && (
+        {!error && !isSearching && activeItems.length > 0 && (
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
@@ -423,7 +662,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </div>
         )}
 
-        {!error && !loading && !anyResults && (
+        {!error && !isSearching && !loading && !anyResults && (
           <p style={{
             fontFamily: "'Cormorant Garamond', serif",
             fontSize: 20, color: 'rgba(240,234,216,0.35)',
@@ -507,19 +746,42 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </AnimatePresence>
       </div>
 
-      {/* Surprise Me footer */}
+      {/* Footer: Show more + Surprise me */}
       <div style={{
         position: 'absolute', bottom: 0, left: 0, right: 0,
         padding: '20px 20px 24px',
         background: 'linear-gradient(transparent, rgba(13,11,9,0.98) 40%)',
         zIndex: 5,
         pointerEvents: 'none',
+        display: 'flex',
+        gap: 12,
       }}>
+        {anyResults && (
+          <button
+            onClick={handleShowMore}
+            disabled={loading}
+            style={{
+              flex: 1,
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 12, letterSpacing: '0.22em',
+              textTransform: 'uppercase',
+              color: loading ? 'rgba(240,234,216,0.28)' : 'rgba(240,234,216,0.75)',
+              background: 'transparent',
+              border: '1px solid rgba(240,235,227,0.18)',
+              borderRadius: 3, padding: '14px',
+              cursor: loading ? 'default' : 'pointer',
+              transition: 'all 200ms',
+              pointerEvents: 'auto',
+            }}
+          >
+            Show more
+          </button>
+        )}
         <button
           onClick={handleSurpriseMe}
           disabled={loading && !anyResults}
           style={{
-            width: '100%',
+            flex: 1,
             fontFamily: "'DM Mono', monospace",
             fontSize: 12, letterSpacing: '0.22em',
             textTransform: 'uppercase',

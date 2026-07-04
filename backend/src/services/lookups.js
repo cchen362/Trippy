@@ -50,6 +50,55 @@ export async function lookupHotelPredictions(input, sessionToken) {
     }));
 }
 
+export async function lookupPlacePredictions(input, sessionToken, near) {
+  const query = input?.trim();
+  if (!query || query.length < 3) {
+    throw Object.assign(new Error('Place query must be at least 3 characters'), {
+      status: 400,
+    });
+  }
+
+  if (!config.googlePlacesKey) {
+    throw Object.assign(new Error('Google Places API key is not configured'), {
+      status: 503,
+    });
+  }
+
+  const biasedQuery = near?.trim() ? `${query}, ${near.trim()}` : query;
+
+  const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': config.googlePlacesKey,
+    },
+    body: JSON.stringify({
+      input: biasedQuery,
+      languageCode: 'en',
+      ...(sessionToken ? { sessionToken } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(body || 'Google Places lookup failed'), {
+      status: 502,
+    });
+  }
+
+  const payload = await response.json();
+  return (payload.suggestions || [])
+    .map((suggestion) => suggestion.placePrediction)
+    .filter(Boolean)
+    .map((prediction) => ({
+      place: prediction.place,
+      placeId: prediction.placeId,
+      text: prediction.text?.text || prediction.structuredFormat?.mainText?.text || '',
+      mainText: prediction.structuredFormat?.mainText?.text || '',
+      secondaryText: prediction.structuredFormat?.secondaryText?.text || '',
+    }));
+}
+
 export async function lookupHotelDetails(placeId, sessionToken) {
   const normalizedPlaceId = placeId?.trim();
   if (!normalizedPlaceId) {
@@ -82,16 +131,18 @@ export async function lookupHotelDetails(placeId, sessionToken) {
   }
 
   const place = await response.json();
-  let tz = null;
-  if (place.location?.latitude != null && place.location?.longitude != null) {
-    tz = tzFind(place.location.latitude, place.location.longitude)[0] || null;
-  }
+  const hasLocation = place.location?.latitude != null && place.location?.longitude != null;
+  const tz = hasLocation
+    ? tzFind(place.location.latitude, place.location.longitude)[0] || null
+    : null;
   return {
     placeId: place.id || normalizedPlaceId,
     name: place.displayName?.text || '',
     address: place.formattedAddress || '',
     city: extractCityFromAddressComponents(place.addressComponents),
     tz,
+    lat: hasLocation ? place.location.latitude : null,
+    lng: hasLocation ? place.location.longitude : null,
   };
 }
 

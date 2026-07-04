@@ -4,9 +4,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
+import { config } from '../src/config.js';
 import { __resetPlaceResolverForTests, buildPlaceQueryKey, resolvePlace } from '../src/services/placeResolver.js';
 
 let tmpDir;
+let originalGooglePlacesKey;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-resolver-test-'));
@@ -14,9 +16,14 @@ beforeEach(() => {
   runMigrations();
   __resetPlaceResolverForTests();
   vi.restoreAllMocks();
+  // Default to no Google key so Nominatim-only behavior is deterministic. Tests that
+  // exercise the Google Places fallback opt in by setting config.googlePlacesKey.
+  originalGooglePlacesKey = config.googlePlacesKey;
+  config.googlePlacesKey = '';
 });
 
 afterEach(() => {
+  config.googlePlacesKey = originalGooglePlacesKey;
   vi.useRealTimers();
   getDb().close();
   rmSync(tmpDir, { recursive: true });
@@ -80,36 +87,6 @@ describe('resolvePlace', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses exact discovery cache matches before Nominatim and caches the result', async () => {
-    const db = getDb();
-    db.prepare(`
-      INSERT INTO global_discovery_cache (destination, result_json)
-      VALUES (?, ?)
-    `).run('chongqing', JSON.stringify([
-      {
-        category: 'essentials',
-        items: [
-          { name: 'Tiny Test Museum', description: 'A test place.', lat: 29.61, lng: 106.51 },
-        ],
-      },
-    ]));
-    const fetchMock = vi.spyOn(globalThis, 'fetch');
-
-    const result = await resolvePlace({ queryText: 'Tiny Test Museum', city: 'Chongqing', country: 'CN' });
-    const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Tiny Test Museum');
-
-    expect(result).toMatchObject({
-      lat: 29.61,
-      lng: 106.51,
-      coordinateSystem: 'wgs84',
-      coordinateSource: 'discovery',
-      locationStatus: 'estimated',
-      provider: 'discovery_cache',
-    });
-    expect(cached.provider).toBe('discovery_cache');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('caches failed Nominatim lookups as unresolved', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -121,6 +98,8 @@ describe('resolvePlace', () => {
 
     expect(first).toMatchObject({ locationStatus: 'unresolved', coordinateSystem: 'unknown' });
     expect(second).toMatchObject({ locationStatus: 'unresolved', coordinateSystem: 'unknown' });
+    // With no Google key, only Nominatim is hit on the first call; the second lookup
+    // short-circuits on the fresh (< 1h) unresolved cache row without any network call.
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -288,6 +267,102 @@ describe('resolvePlace', () => {
       provider: 'nominatim',
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to Google Places Text Search when Nominatim misses', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const db = getDb();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return { ok: true, json: async () => [] };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_test_place',
+            displayName: { text: 'Test Coffee Roasters' },
+            formattedAddress: '1 Test Street, Kuala Lumpur, Malaysia',
+            location: { latitude: 3.1478, longitude: 101.6953 },
+          }],
+        }),
+      };
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Test Coffee Roasters',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+    });
+
+    const googleCall = fetchMock.mock.calls.find(([url]) => String(url).includes('places.googleapis.com'));
+    expect(googleCall).toBeTruthy();
+    expect(String(googleCall[0])).toBe('https://places.googleapis.com/v1/places:searchText');
+    expect(googleCall[1].method).toBe('POST');
+    expect(googleCall[1].headers['X-Goog-FieldMask']).toBe('places.id,places.displayName,places.formattedAddress,places.location');
+    const body = JSON.parse(googleCall[1].body);
+    expect(body).toMatchObject({
+      textQuery: 'Test Coffee Roasters, Kuala Lumpur',
+      languageCode: 'en',
+      pageSize: 1,
+      regionCode: 'MY',
+    });
+
+    expect(result).toMatchObject({
+      lat: 3.1478,
+      lng: 101.6953,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      provider: 'google_places',
+      providerId: 'google:ChIJ_test_place',
+    });
+    expect(result).not.toHaveProperty('updatedAtMs');
+
+    const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Test Coffee Roasters');
+    expect(cached.provider).toBe('google_places');
+    expect(cached.provider_id).toBe('google:ChIJ_test_place');
+  });
+
+  it('retries stale unresolved cache rows over the network but keeps fresh ones short-circuited', async () => {
+    const db = getDb();
+    const staleKey = buildPlaceQueryKey({ queryText: 'Stale Miss Place', city: 'Ipoh', country: 'MY' });
+    const freshKey = buildPlaceQueryKey({ queryText: 'Fresh Miss Place', city: 'Ipoh', country: 'MY' });
+
+    const insertUnresolved = (queryKey, queryText, age) => {
+      db.prepare(`
+        INSERT INTO place_resolution_cache (
+          query_key, query_text, city, country, provider, provider_id, name, address,
+          lat, lng, coordinate_system, confidence, raw_json, updated_at
+        )
+        VALUES (?, ?, 'Ipoh', 'MY', 'nominatim', NULL, NULL, NULL, NULL, NULL, 'unknown', 0, NULL, datetime('now', ?))
+      `).run(queryKey, queryText, age);
+    };
+
+    // Two hours old -> should be retried over the network.
+    insertUnresolved(staleKey, 'Stale Miss Place', '-2 hours');
+    // One minute old -> should still short-circuit.
+    insertUnresolved(freshKey, 'Fresh Miss Place', '-1 minutes');
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '4.597479',
+        lon: '101.090106',
+        display_name: 'Ipoh, Perak, Malaysia',
+        name: 'Ipoh',
+        osm_type: 'relation',
+        osm_id: '123',
+      }],
+    });
+
+    const stale = await resolvePlace({ queryText: 'Stale Miss Place', city: 'Ipoh', country: 'MY' });
+    expect(stale).toMatchObject({ lat: 4.597479, lng: 101.090106, provider: 'nominatim' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const fresh = await resolvePlace({ queryText: 'Fresh Miss Place', city: 'Ipoh', country: 'MY' });
+    expect(fresh).toMatchObject({ locationStatus: 'unresolved', coordinateSystem: 'unknown' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('throttles Nominatim requests to one per second', async () => {

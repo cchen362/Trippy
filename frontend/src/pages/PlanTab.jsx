@@ -7,6 +7,7 @@ import DayTabs from '../components/timeline/DayTabs.jsx';
 import Timeline from '../components/timeline/Timeline.jsx';
 import DiscoveryPanel from '../components/discovery/DiscoveryPanel.jsx';
 import { tripsApi } from '../services/tripsApi.js';
+import { bookingsApi } from '../services/bookingsApi.js';
 import { useTripContext } from './TripPage.jsx';
 
 export default function PlanTab() {
@@ -146,6 +147,8 @@ export default function PlanTab() {
             saving={saving}
             onClose={() => setAddPlaceOpen(false)}
             onSubmit={handleAddPlace}
+            lookupPlaces={bookingsApi.lookupPlaces}
+            lookupPlaceDetails={bookingsApi.lookupHotelDetails}
           />
         )}
       </AnimatePresence>

@@ -21,6 +21,12 @@ export const bookingsApi = {
     const qs = params.size ? `?${params}` : '';
     return request(`/api/lookups/places/${encodeURIComponent(placeId)}${qs}`);
   },
+  lookupPlaces: (query, sessionToken, near) => {
+    const params = new URLSearchParams({ q: query });
+    if (sessionToken) params.set('sessionToken', sessionToken);
+    if (near) params.set('near', near);
+    return request(`/api/lookups/places/search?${params}`);
+  },
   lookupCities: (query) => request(`/api/lookups/cities?q=${encodeURIComponent(query)}`),
   lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
     const params = new URLSearchParams({ departureDate });

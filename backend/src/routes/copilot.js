@@ -10,6 +10,21 @@ const router = Router();
 
 router.use(requireAuth);
 
+// The co-pilot LLM emits stops as { title, type, time, note, lat, lng } with no
+// locationQuery. Default the query to the title so the resolver attempts a geocode,
+// and tag any model-supplied coordinates as 'copilot' so stops.js routes them through
+// the generated-coordinate verification path instead of trusting hallucinated values.
+function enrichCopilotStop(stop) {
+  const enriched = {
+    ...stop,
+    locationQuery: stop?.locationQuery ?? stop?.title,
+  };
+  if (stop?.lat != null && stop?.lng != null) {
+    enriched.coordinateSource = 'copilot';
+  }
+  return enriched;
+}
+
 // GET /trips/:tripId/copilot/history
 router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
@@ -152,7 +167,7 @@ router.post('/:tripId/copilot/apply', requireTripAccess, async (req, res, next) 
     const updateOps = ops.filter((op) => op.action === 'update_stop');
 
     await Promise.all([
-      ...addOps.map((op) => createStop(userId, op.dayId, op.stop)),
+      ...addOps.map((op) => createStop(userId, op.dayId, enrichCopilotStop(op.stop))),
       ...updateOps.map((op) => updateStop(userId, op.stopId, op.fields)),
     ]);
 

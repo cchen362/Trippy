@@ -50,6 +50,8 @@ describe('lookupHotelDetails', () => {
       address: '1199 Tianfu Avenue North, Chengdu, Sichuan, China',
       city: null,
       tz: null,
+      lat: null,
+      lng: null,
     });
   });
 });

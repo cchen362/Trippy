@@ -2,6 +2,7 @@ import { getDb } from '../db/database.js';
 import { pickPhoto } from './unsplash.js';
 import { assertDayAccess, assertStopAccess } from './trips.js';
 import { resolvePlace } from './placeResolver.js';
+import { lookupHotelDetails } from './lookups.js';
 
 function formatStop(row) {
   return {
@@ -96,7 +97,9 @@ function countryForDay(day) {
 }
 
 function hasCoordinates(input) {
-  return Number.isFinite(Number(input?.lat)) && Number.isFinite(Number(input?.lng));
+  const { lat, lng } = input ?? {};
+  if (lat === null || lat === undefined || lng === null || lng === undefined) return false;
+  return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
 }
 
 function hasTrustedCoordinateMetadata(input) {
@@ -663,6 +666,50 @@ export async function repairTripStopLocations(userId, tripId) {
   return { repaired: repairedCount, total: stopsToRepair.length };
 }
 
+function parseBookingDetails(booking) {
+  try {
+    return JSON.parse(booking.details_json || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+// Bookings created via Google Places autocomplete carry a placeId (and, since the
+// coordinate plumbing fix, exact lat/lng) in details_json. Those coordinates are
+// authoritative — using them skips the free-text geocoding chain entirely.
+async function bookingPlaceLocation(booking) {
+  const details = parseBookingDetails(booking);
+  if (!details.placeId) return null;
+
+  let { lat, lng } = details;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    // Legacy booking: placeId was stored before coordinates were kept. Backfill once.
+    try {
+      const place = await lookupHotelDetails(details.placeId);
+      if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return null;
+      lat = place.lat;
+      lng = place.lng;
+      getDb().prepare('UPDATE bookings SET details_json = ? WHERE id = ?')
+        .run(JSON.stringify({ ...details, lat, lng }), booking.id);
+    } catch (error) {
+      console.error('[stops] placeId coordinate backfill failed for booking %s: %s', booking.id, error.message);
+      return null;
+    }
+  }
+
+  return {
+    lat,
+    lng,
+    coordinateSystem: 'wgs84',
+    coordinateSource: 'places',
+    locationStatus: 'resolved',
+    locationConfidence: 0.95,
+    providerId: `google:${details.placeId}`,
+    resolvedName: details.displayName || booking.title,
+    resolvedAddress: details.formattedAddress || null,
+  };
+}
+
 export async function syncStopWithBooking(booking) {
   const db = getDb();
   const existingStop = db.prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
@@ -685,14 +732,17 @@ export async function syncStopWithBooking(booking) {
     return null;
   }
 
+  const placeLocation = await bookingPlaceLocation(booking);
   const location = await resolveLocationForStop({
     day,
     title: inferred.title,
-    input: {
-      title: inferred.title,
-      locationQuery: inferred.locationQuery,
-      coordinateSource: 'booking',
-    },
+    input: placeLocation
+      ? { title: inferred.title, locationQuery: inferred.locationQuery, ...placeLocation }
+      : {
+        title: inferred.title,
+        locationQuery: inferred.locationQuery,
+        coordinateSource: 'booking',
+      },
     existing: existingStop,
   });
 

@@ -4,6 +4,7 @@ import { useMapData } from '../hooks/useMapData.js';
 import DayTabs from '../components/timeline/DayTabs.jsx';
 import MapSequencePanel from '../components/map/MapSequencePanel.jsx';
 import TripMap from '../components/map/TripMap.jsx';
+import { bookingsApi } from '../services/bookingsApi.js';
 
 // TopBar ~56px + BottomNav ~64px + DayTabs ~52px + main vertical padding ~48px = ~220px
 const MAP_HEIGHT = 'calc(100vh - 220px)';
@@ -24,6 +25,14 @@ export default function MapTab() {
   const [focusedSegmentId, setFocusedSegmentId] = useState('all');
   const [correctionStop, setCorrectionStop] = useState(null);
   const [correctionCenter, setCorrectionCenter] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const [sessionToken, setSessionToken] = useState(null);
+
+  const activeDay = days.find((day) => day.id === activeDayId);
+  const nearCity = activeDay?.cityOverride || activeDay?.resolvedCity || activeDay?.city || '';
   const mapRefreshKey = JSON.stringify([
     ...days.map((day) => ({
       id: day.id,
@@ -58,6 +67,10 @@ export default function MapTab() {
     setFocusedSegmentId('all');
     setCorrectionStop(null);
     setCorrectionCenter(null);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchError(null);
+    setSessionToken(null);
   }, [activeDayId]);
 
   const startCorrection = (stop) => {
@@ -67,11 +80,19 @@ export default function MapTab() {
         ? { lat: Number(stop.displayLat), lng: Number(stop.displayLng) }
         : null,
     );
+    setSearchQuery(stop.title || '');
+    setSearchResults([]);
+    setSearchError(null);
+    setSessionToken(null);
   };
 
   const cancelCorrection = () => {
     setCorrectionStop(null);
     setCorrectionCenter(null);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchError(null);
+    setSessionToken(null);
   };
 
   const saveCorrection = async () => {
@@ -85,6 +106,63 @@ export default function MapTab() {
       locationConfidence: 1,
     });
     cancelCorrection();
+  };
+
+  const handleSearchChange = (event) => {
+    const value = event.target.value;
+    setSearchQuery(value);
+    setSearchError(null);
+    if (!sessionToken) setSessionToken(crypto.randomUUID());
+  };
+
+  useEffect(() => {
+    if (!correctionStop || searchQuery.trim().length < 3) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const response = await bookingsApi.lookupPlaces(searchQuery, sessionToken, nearCity);
+        setSearchResults(response.suggestions || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, correctionStop, sessionToken, nearCity]);
+
+  const handlePickResult = async (result) => {
+    if (!correctionStop) return;
+    setSearchError(null);
+    setSearching(true);
+    try {
+      const response = await bookingsApi.lookupHotelDetails(result.placeId, sessionToken);
+      setSessionToken(null);
+      const place = response?.place;
+      if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+        await updateStop(correctionStop.id, {
+          lat: place.lat,
+          lng: place.lng,
+          coordinateSystem: 'wgs84',
+          coordinateSource: 'places',
+          locationStatus: 'resolved',
+          locationConfidence: 0.95,
+          providerId: `google:${place.placeId || result.placeId}`,
+          resolvedName: place.name || result.mainText || result.text,
+          resolvedAddress: place.address || '',
+        });
+        cancelCorrection();
+      } else {
+        setSearchError('No coordinates found for that place. Try another result or pan the map.');
+      }
+    } catch {
+      setSearchError('Could not look up that place. Try another result or pan the map.');
+    } finally {
+      setSearching(false);
+    }
   };
 
   const chipStyle = (active) => ({
@@ -229,9 +307,8 @@ export default function MapTab() {
               bottom: 12,
               zIndex: 930,
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
+              flexDirection: 'column',
+              gap: 10,
               padding: 12,
               border: '1px solid rgba(201,168,76,0.32)',
               borderRadius: 8,
@@ -264,33 +341,161 @@ export default function MapTab() {
                 {correctionStop.title}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={cancelCorrection}
+
+            <div>
+              <p style={{
+                margin: '0 0 4px',
+                color: 'rgba(240,234,216,0.45)',
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 9,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+              }}>
+                Search for the place{nearCity ? ` in ${nearCity}` : ''}
+              </p>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={handleSearchChange}
+                placeholder="Search by name..."
+                autoComplete="off"
                 style={{
-                  ...chipBaseStyle,
-                  color: 'rgba(240,234,216,0.62)',
-                  background: 'transparent',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '8px 10px',
+                  borderRadius: 6,
                   border: '1px solid rgba(240,234,216,0.18)',
+                  background: 'rgba(240,234,216,0.05)',
+                  color: 'var(--cream)',
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 12,
+                  outline: 'none',
                 }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveCorrection}
-                disabled={saving || !correctionCenter}
-                style={{
-                  ...chipBaseStyle,
-                  color: 'var(--ink-deep)',
-                  background: 'var(--gold)',
-                  border: '1px solid rgba(13,11,9,0.6)',
-                  opacity: saving || !correctionCenter ? 0.55 : 1,
-                }}
-              >
-                Set here
-              </button>
+              />
+              {searching && (
+                <p style={{
+                  margin: '4px 0 0',
+                  color: 'rgba(240,234,216,0.4)',
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 9,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                }}>
+                  Searching...
+                </p>
+              )}
+              {searchError && (
+                <p style={{
+                  margin: '4px 0 0',
+                  color: '#e08a3a',
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 9,
+                  letterSpacing: '0.04em',
+                }}>
+                  {searchError}
+                </p>
+              )}
+              {searchResults.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                    border: '1px solid rgba(240,234,216,0.12)',
+                    borderRadius: 6,
+                    background: 'var(--ink-surface)',
+                  }}
+                >
+                  {searchResults.slice(0, 6).map((result) => (
+                    <button
+                      key={result.placeId || `${result.text}`}
+                      type="button"
+                      onClick={() => handlePickResult(result)}
+                      disabled={searching}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 12px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderBottom: '1px solid rgba(240,234,216,0.08)',
+                        cursor: searching ? 'wait' : 'pointer',
+                        opacity: searching ? 0.6 : 1,
+                      }}
+                    >
+                      <span style={{
+                        display: 'block',
+                        fontFamily: "'DM Mono', monospace",
+                        fontSize: 11,
+                        letterSpacing: '0.04em',
+                        color: 'var(--cream)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {result.mainText || result.text}
+                      </span>
+                      {result.secondaryText && (
+                        <span style={{
+                          display: 'block',
+                          marginTop: 2,
+                          fontFamily: "'DM Mono', monospace",
+                          fontSize: 9,
+                          letterSpacing: '0.04em',
+                          color: 'rgba(240,234,216,0.45)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {result.secondaryText}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <p style={{
+                margin: 0,
+                color: 'rgba(240,234,216,0.4)',
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 9,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+              }}>
+                Or pan map, set manually
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={cancelCorrection}
+                  style={{
+                    ...chipBaseStyle,
+                    color: 'rgba(240,234,216,0.62)',
+                    background: 'transparent',
+                    border: '1px solid rgba(240,234,216,0.18)',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCorrection}
+                  disabled={saving || !correctionCenter}
+                  style={{
+                    ...chipBaseStyle,
+                    color: 'var(--ink-deep)',
+                    background: 'var(--gold)',
+                    border: '1px solid rgba(13,11,9,0.6)',
+                    opacity: saving || !correctionCenter ? 0.55 : 1,
+                  }}
+                >
+                  Set here
+                </button>
+              </div>
             </div>
           </div>
         )}

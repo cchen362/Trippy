@@ -83,6 +83,11 @@ describe('resolver-aware stops', () => {
   });
 
   it('does not save unverified generated coordinates', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
     const stop = await createStop(user.id, dayId, {
       title: 'AI Guess Place',
       lat: 29.5,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const monoStyle = {
   fontFamily: "'DM Mono', monospace",
@@ -11,10 +12,33 @@ const monoStyle = {
   padding: 0,
 };
 
+const noPinChipStyle = {
+  marginTop: 4,
+  display: 'inline-flex',
+  alignItems: 'center',
+  border: '1px solid rgba(224,138,58,0.42)',
+  borderRadius: 999,
+  background: 'rgba(224,138,58,0.12)',
+  color: '#e08a3a',
+  fontFamily: "'DM Mono', monospace",
+  fontSize: 9,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  padding: '3px 8px',
+  cursor: 'pointer',
+};
+
 export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps }) {
+  const navigate = useNavigate();
   const [action, setAction] = useState(null); // null | 'delete' | 'move'
   const [noteValue, setNoteValue] = useState(stop.note || '');
   const [noteDirty, setNoteDirty] = useState(false);
+  const hasNoPin = stop.type !== 'transit' && (stop.locationStatus === 'unresolved' || stop.lat == null);
+
+  const handleNoPinClick = (event) => {
+    event.stopPropagation();
+    navigate(`../map`, { relative: 'path' });
+  };
 
   useEffect(() => {
     if (!expanded) setAction(null);
@@ -101,6 +125,15 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                 </p>
                 {stop.duration && (
                   <p className="font-body text-base" style={{ color: 'var(--cream-dim)' }}>{stop.duration}</p>
+                )}
+                {hasNoPin && (
+                  <button
+                    type="button"
+                    onClick={handleNoPinClick}
+                    style={noPinChipStyle}
+                  >
+                    No map pin
+                  </button>
                 )}
               </div>
               {stop.estimatedCost && (

@@ -302,13 +302,45 @@ describe('POST /trips/:tripId/copilot/apply', () => {
     await callHandler('post', `/${tripId}/copilot/apply`, req, res);
 
     expect(mockCreateStop).toHaveBeenCalledOnce();
+    // The apply route defaults locationQuery to the title so the resolver attempts a geocode.
     expect(mockCreateStop).toHaveBeenCalledWith(
       userId,
       dayId,
-      { title: 'Giant Panda Base', type: 'experience' },
+      { title: 'Giant Panda Base', type: 'experience', locationQuery: 'Giant Panda Base' },
     );
     expect(res._body).toBeDefined();
     expect(res._body.trip).toBeDefined();
+  });
+
+  it('tags model-supplied coordinates as copilot-sourced for verification', async () => {
+    mockCreateStop.mockResolvedValue({ id: 'new-stop-2', dayId, title: 'Hallucinated Cafe' });
+
+    const req = makeReq({
+      params: { tripId },
+      body: {
+        mutation: {
+          operations: [
+            { action: 'add_stop', dayId, stop: { title: 'Hallucinated Cafe', type: 'food', lat: 29.5, lng: 106.5 } },
+          ],
+        },
+      },
+    });
+    const res = makeRes();
+
+    await callHandler('post', `/${tripId}/copilot/apply`, req, res);
+
+    expect(mockCreateStop).toHaveBeenCalledWith(
+      userId,
+      dayId,
+      {
+        title: 'Hallucinated Cafe',
+        type: 'food',
+        lat: 29.5,
+        lng: 106.5,
+        locationQuery: 'Hallucinated Cafe',
+        coordinateSource: 'copilot',
+      },
+    );
   });
 
   // 6. POST /apply with invalid operations array returns 400

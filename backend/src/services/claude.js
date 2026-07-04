@@ -148,7 +148,7 @@ export async function extractBookings({ files, contextText, tripContext }) {
 
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
 // and "Dujiangyan Scenic Area" collapse to the same canonical key.
-function normalizeName(str) {
+export function normalizeName(str) {
   return str
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
@@ -187,7 +187,7 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   const client = getClient();
 
   const existingLine = existingStopTitles.length > 0
-    ? `\nAlready in itinerary — do not suggest these or close variants:\n${existingStopTitles.map((t) => `- ${t}`).join('\n')}`
+    ? `\nAlready shown or in itinerary — do not suggest these or close variants:\n${existingStopTitles.map((t) => `- ${t}`).join('\n')}`
     : '';
 
   const systemPrompt = existingLine ? `${DISCOVER_SYSTEM}${existingLine}` : DISCOVER_SYSTEM;

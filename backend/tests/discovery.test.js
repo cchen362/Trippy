@@ -6,8 +6,20 @@ import { tmpdir } from 'os';
 // --- Mock claude.js before importing the route ---
 const mockDiscoverDestination = vi.fn();
 
+// Mirrors the real normalizeName in src/services/claude.js closely enough for these tests —
+// the real dedupe behavior is covered separately by discoveryMerge.test.js and claude.test.js.
+function normalizeName(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
+  normalizeName,
 }));
 
 // --- Mock config to avoid env var validation ---
@@ -105,34 +117,6 @@ async function callDiscover(body) {
   await layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
 
   return { events, error: nextErr };
-}
-
-// Helper: invoke the DELETE /:tripId/discover/cache handler directly
-function callDeleteCache(body = {}) {
-  const { default: handler } = require('../src/routes/discovery.js');
-  return _callDeleteCacheAsync(body);
-}
-
-async function _callDeleteCacheAsync(body = {}) {
-  const { default: handler } = await import('../src/routes/discovery.js');
-  const req = {
-    params: { tripId },
-    body,
-    user: { id: userId },
-    trip: getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
-  };
-  let responseBody;
-  const res = { json(data) { responseBody = data; } };
-  let nextErr;
-  const next = (err) => { nextErr = err; };
-
-  const layer = handler.stack.find(
-    (l) => l.route?.path === '/:tripId/discover/cache' && l.route.methods.delete,
-  );
-  if (!layer) throw new Error('Delete cache route layer not found');
-  layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
-
-  return { responseBody, error: nextErr };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,30 +236,89 @@ describe('destination key normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// DELETE cache
+// Show more (append mode)
 // ---------------------------------------------------------------------------
 
-describe('DELETE /trips/:tripId/discover/cache', () => {
-  it('deletes the global cache row for the given destination and returns { ok: true }', async () => {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
-    ).run('nara', JSON.stringify([]));
-    db.prepare(
-      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
-    ).run('osaka', JSON.stringify([]));
+describe('POST /trips/:tripId/discover — more:true (append mode)', () => {
+  it('behaves like a normal first generation when no cache row exists', async () => {
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
 
-    const { responseBody, error } = await _callDeleteCacheAsync({ destination: 'Nara' });
+    const { events, error } = await callDiscover({ destination: 'Nagoya', more: true });
 
     expect(error).toBeUndefined();
-    expect(responseBody).toEqual({ ok: true });
-    expect(db.prepare('SELECT COUNT(*) as c FROM global_discovery_cache WHERE destination = ?').get('nara').c).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) as c FROM global_discovery_cache WHERE destination = ?').get('osaka').c).toBe(1);
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const categoryEvents = events.filter((e) => e.type === 'category');
+    expect(categoryEvents.every((e) => !e.append)).toBe(true);
+
+    const row = getDb().prepare('SELECT * FROM global_discovery_cache WHERE destination = ?').get('nagoya');
+    expect(row).toBeDefined();
   });
 
-  it('returns { ok: true } with no destination (no-op)', async () => {
-    const { responseBody, error } = await _callDeleteCacheAsync({});
+  it('excludes cached item names and existing stop titles, streams append:true chunks, and merges into the cache', async () => {
+    const db = getDb();
+    const existingCategories = [
+      { category: 'culture', items: [{ name: 'Kinkakuji', lat: null, lng: null }] },
+      { category: 'food', items: [{ name: 'Ramen Alley', lat: null, lng: null }] },
+    ];
+    db.prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('kyoto', JSON.stringify(existingCategories));
+
+    const newCategories = [
+      { category: 'culture', items: [{ name: 'Nijo Castle', lat: 35.0, lng: 135.7 }] },
+      { category: 'nightlife', items: [{ name: 'Pontocho Alley', lat: 35.0, lng: 135.7 }] },
+    ];
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      newCategories.forEach((cat) => onCategory(cat));
+      return newCategories;
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Kyoto', more: true });
+
     expect(error).toBeUndefined();
-    expect(responseBody).toEqual({ ok: true });
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const exclusionList = mockDiscoverDestination.mock.calls[0][1];
+    expect(exclusionList).toEqual(expect.arrayContaining(['Kinkakuji', 'Ramen Alley']));
+
+    const categoryEvents = events.filter((e) => e.type === 'category');
+    expect(categoryEvents.length).toBe(2);
+    expect(categoryEvents.every((e) => e.append === true)).toBe(true);
+    // Only the NEW items are streamed, not the pre-existing cached ones
+    expect(categoryEvents.find((e) => e.category === 'culture').items.map((i) => i.name)).toEqual(['Nijo Castle']);
+
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.append).toBe(true);
+
+    const row = db.prepare('SELECT * FROM global_discovery_cache WHERE destination = ?').get('kyoto');
+    const merged = JSON.parse(row.result_json);
+    const cultureCat = merged.find((c) => c.category === 'culture');
+    expect(cultureCat.items.map((i) => i.name)).toEqual(['Kinkakuji', 'Nijo Castle']);
+    const nightlifeCat = merged.find((c) => c.category === 'nightlife');
+    expect(nightlifeCat.items.map((i) => i.name)).toEqual(['Pontocho Alley']);
+    // Untouched category still present
+    const foodCat = merged.find((c) => c.category === 'food');
+    expect(foodCat.items.map((i) => i.name)).toEqual(['Ramen Alley']);
+  });
+
+  it('never removes existing cached items even when the new batch is empty', async () => {
+    const db = getDb();
+    const existingCategories = [
+      { category: 'culture', items: [{ name: 'Kinkakuji', lat: null, lng: null }] },
+    ];
+    db.prepare(
+      `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
+    ).run('kobe', JSON.stringify(existingCategories));
+
+    mockDiscoverDestination.mockImplementation(async () => []);
+
+    const { error } = await callDiscover({ destination: 'Kobe', more: true });
+
+    expect(error).toBeUndefined();
+    const row = db.prepare('SELECT * FROM global_discovery_cache WHERE destination = ?').get('kobe');
+    const merged = JSON.parse(row.result_json);
+    expect(merged.find((c) => c.category === 'culture').items.map((i) => i.name)).toEqual(['Kinkakuji']);
   });
 });

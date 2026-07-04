@@ -4,6 +4,13 @@ import { config } from '../config.js';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const NOMINATIM_INTERVAL_MS = 1000;
 
+// Providers whose cached coordinates are accurate enough to satisfy preferNominatim callers.
+const ACCURATE_PROVIDERS = new Set(['nominatim', 'google_places']);
+
+// Unresolved cache rows older than this are retried over the network instead of poisoning
+// the lookup forever. Fresh unresolved rows still short-circuit to avoid hammering providers.
+const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
+
 let nextNominatimRequestAt = 0;
 
 // Curated place coordinates are OSM/WGS-84 reference values used as starting points only.
@@ -179,6 +186,12 @@ function formatResolution({
   };
 }
 
+// Strip cache-only bookkeeping fields (e.g. updatedAtMs) before returning to callers.
+function stripInternalFields(resolution) {
+  const { updatedAtMs, ...rest } = resolution;
+  return rest;
+}
+
 function findCuratedPlace({ queryText, city, country }) {
   const query = normalizeText(queryText);
   const normalizedCity = normalizeText(city);
@@ -226,15 +239,31 @@ function fromCurated(place) {
   });
 }
 
+// SQLite datetime('now') writes 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
+// Parse that as UTC; also accept values already stored in ISO form (with 'T'/'Z').
+function cacheTimestampToEpochMs(value) {
+  if (!value) return null;
+  const text = String(value);
+  const iso = /[TZ]/.test(text) ? text : `${text.replace(' ', 'T')}Z`;
+  const epoch = Date.parse(iso);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+function cacheCoordinateSource(provider) {
+  if (provider === 'nominatim') return 'manual_lookup';
+  if (provider === 'google_places') return 'places';
+  return 'cache';
+}
+
 function readCache(queryKey) {
   const row = getDb().prepare('SELECT * FROM place_resolution_cache WHERE query_key = ?').get(queryKey);
   if (!row) return null;
   const hasCoordinate = row.lat !== null && row.lng !== null;
-  return formatResolution({
+  const resolution = formatResolution({
     lat: row.lat,
     lng: row.lng,
     coordinateSystem: row.coordinate_system,
-    coordinateSource: row.provider === 'nominatim' ? 'manual_lookup' : 'cache',
+    coordinateSource: cacheCoordinateSource(row.provider),
     locationStatus: hasCoordinate ? (row.confidence !== null && row.confidence < 0.7 ? 'estimated' : 'resolved') : 'unresolved',
     confidence: row.confidence,
     resolvedName: row.name,
@@ -242,6 +271,10 @@ function readCache(queryKey) {
     providerId: row.provider_id,
     provider: row.provider,
   });
+  // updatedAtMs is an internal field for negative-cache TTL checks; it is stripped
+  // before the resolution is returned to callers (see resolvePlace).
+  resolution.updatedAtMs = cacheTimestampToEpochMs(row.updated_at);
+  return resolution;
 }
 
 function writeCache({ queryKey, queryText, city, country, provider, result, rawJson = null }) {
@@ -280,55 +313,6 @@ function writeCache({ queryKey, queryText, city, country, provider, result, rawJ
     result.confidence ?? null,
     rawJson ? JSON.stringify(rawJson) : null,
   );
-}
-
-function scoreDiscoveryMatch(item, queryText) {
-  const query = normalizeText(queryText);
-  const name = normalizeText(item?.name);
-  if (!query || !name) return 0;
-  if (name === query) return 1;
-  if (name.includes(query) || query.includes(name)) return 0.86;
-  return 0;
-}
-
-function findDiscoveryCacheMatch({ queryText, city }) {
-  const destinationKey = normalizeText(city).replace(/\s+/g, '');
-  if (!destinationKey) return null;
-  const row = getDb().prepare('SELECT result_json FROM global_discovery_cache WHERE destination = ?').get(destinationKey);
-  if (!row) return null;
-
-  let categories;
-  try {
-    categories = JSON.parse(row.result_json);
-  } catch {
-    return null;
-  }
-
-  let best = null;
-  for (const category of categories || []) {
-    for (const item of category.items || []) {
-      const score = scoreDiscoveryMatch(item, queryText);
-      if (score > (best?.score || 0) && Number.isFinite(item.lat) && Number.isFinite(item.lng)) {
-        best = { item, score };
-      }
-    }
-  }
-  return best?.score >= 0.85 ? best : null;
-}
-
-function fromDiscovery(match) {
-  return formatResolution({
-    lat: match.item.lat,
-    lng: match.item.lng,
-    coordinateSystem: 'wgs84',
-    coordinateSource: 'discovery',
-    locationStatus: 'estimated',
-    confidence: Math.min(match.score, 0.68),
-    resolvedName: match.item.name,
-    resolvedAddress: null,
-    providerId: `discovery:${normalizeText(match.item.name).replace(/\s+/g, '-')}`,
-    provider: 'discovery_cache',
-  });
 }
 
 async function waitForNominatimSlot() {
@@ -467,6 +451,67 @@ async function searchNominatim({ queryText, city, country, aliases = [] }) {
   return { result: null, rawJson: attempts };
 }
 
+// Google Places Text Search fallback — only used when Nominatim (OSM) produces no result.
+// Text Search is a single billed request per query and does not use session tokens.
+async function searchGooglePlaces({ queryText, city, country }) {
+  if (!config.googlePlacesKey) return null;
+
+  const canonicalCity = canonicalizeCity(city);
+  const textQuery = [queryText, canonicalCity].filter(Boolean).join(', ');
+  const countryCode = String(country || '').trim().toUpperCase();
+  const body = {
+    textQuery,
+    languageCode: 'en',
+    pageSize: 1,
+  };
+  if (/^[A-Z]{2}$/.test(countryCode)) {
+    body.regionCode = countryCode;
+  }
+
+  const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': config.googlePlacesKey,
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw Object.assign(new Error(`Google Places searchText failed: ${detail || response.status}`), {
+      status: 502,
+    });
+  }
+
+  const payload = await response.json();
+  const place = Array.isArray(payload.places) ? payload.places[0] : null;
+  if (!place) return { result: null, rawJson: payload };
+
+  const lat = place.location?.latitude;
+  const lng = place.location?.longitude;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { result: null, rawJson: payload };
+  }
+
+  return {
+    result: formatResolution({
+      lat,
+      lng,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      confidence: 0.9,
+      resolvedName: place.displayName?.text || queryText,
+      resolvedAddress: place.formattedAddress || null,
+      providerId: place.id ? `google:${place.id}` : null,
+      provider: 'google_places',
+    }),
+    rawJson: payload,
+  };
+}
+
 function unresolved() {
   return formatResolution({
     coordinateSystem: 'unknown',
@@ -486,8 +531,8 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
   const queryKey = buildPlaceQueryKey({ queryText: query, city, country });
   const lookupQueries = resolverQueryTexts(query, aliases);
 
-  // Skip curated and discovery when preferNominatim is active and network is available —
-  // these sources are AI-estimated and unreliable for accurate map placement.
+  // Skip curated when preferNominatim is active and network is available — curated
+  // coordinates are AI-estimated and unreliable for accurate map placement.
   const useFallbackChain = !preferNominatim || !allowNetwork;
 
   if (useFallbackChain) {
@@ -499,19 +544,19 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
 
   const cached = readCache(queryKey);
   if (cached) {
-    if (!preferNominatim) return cached;
-    // With preferNominatim, only short-circuit on a previous successful Nominatim result
-    if (cached.provider === 'nominatim' && cached.locationStatus !== 'unresolved') return cached;
-  }
+    const cacheAgeMs = cached.updatedAtMs === null ? Infinity : Date.now() - cached.updatedAtMs;
+    const staleUnresolved = cached.locationStatus === 'unresolved'
+      && allowNetwork
+      && cacheAgeMs > NEGATIVE_CACHE_TTL_MS;
 
-  if (useFallbackChain) {
-    const discoveryMatch = lookupQueries
-      .map((candidate) => findDiscoveryCacheMatch({ queryText: candidate, city }))
-      .find(Boolean);
-    if (discoveryMatch) {
-      const result = fromDiscovery(discoveryMatch);
-      writeCache({ queryKey, queryText: query, city, country, provider: 'discovery_cache', result });
-      return result;
+    if (!staleUnresolved) {
+      // preferNominatim means "prefer accurate geocoders over AI-estimated sources":
+      // short-circuit on successful cached rows from accurate providers (Nominatim or
+      // Google Places), but never on unresolved rows so they can retry over the network.
+      if (!preferNominatim) return stripInternalFields(cached);
+      if (ACCURATE_PROVIDERS.has(cached.provider) && cached.locationStatus !== 'unresolved') {
+        return stripInternalFields(cached);
+      }
     }
   }
 
@@ -519,28 +564,42 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
     return unresolved();
   }
 
+  let nominatimRaw = null;
   try {
     const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases });
+    nominatimRaw = rawJson;
     if (result) {
       writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result, rawJson });
       return result;
     }
-    const fallback = unresolved();
-    writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result: fallback, rawJson });
-    return fallback;
   } catch (error) {
-    const fallback = unresolved();
-    writeCache({
-      queryKey,
-      queryText: query,
-      city,
-      country,
-      provider: 'nominatim',
-      result: fallback,
-      rawJson: { error: error.message },
-    });
-    return fallback;
+    nominatimRaw = { error: error.message };
   }
+
+  // Nominatim produced no result (or threw) — try Google Places Text Search.
+  if (config.googlePlacesKey) {
+    try {
+      const google = await searchGooglePlaces({ queryText: query, city, country });
+      if (google?.result) {
+        writeCache({
+          queryKey,
+          queryText: query,
+          city,
+          country,
+          provider: 'google_places',
+          result: google.result,
+          rawJson: google.rawJson,
+        });
+        return google.result;
+      }
+    } catch (error) {
+      console.error('[placeResolver] Google Places searchText failed for "%s": %s', query, error.message);
+    }
+  }
+
+  const fallback = unresolved();
+  writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result: fallback, rawJson: nominatimRaw });
+  return fallback;
 }
 
 export function __resetPlaceResolverForTests() {

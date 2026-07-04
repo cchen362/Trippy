@@ -481,6 +481,8 @@ export default function AddBookingModal({
           formattedAddress: place?.address || suggestion.secondaryText || '',
           city: place?.city || current.detailsJson?.city || null,
           tz: place?.tz || current.detailsJson?.tz || null,
+          lat: Number.isFinite(place?.lat) ? place.lat : current.detailsJson?.lat ?? null,
+          lng: Number.isFinite(place?.lng) ? place.lng : current.detailsJson?.lng ?? null,
         },
       }));
     } catch {

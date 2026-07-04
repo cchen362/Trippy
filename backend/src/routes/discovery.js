@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
-import { discoverDestination } from '../services/claude.js';
+import { discoverDestination, normalizeName } from '../services/claude.js';
 
 const router = Router();
 
@@ -25,9 +25,48 @@ function sanitizeDiscoveryCategories(categories) {
   return (categories || []).map(sanitizeDiscoveryCategory);
 }
 
+// Merges freshly-generated categories into a cached category list, appending new
+// items to their matching category (creating the category if it didn't exist yet)
+// and de-duplicating by the same normalizeName logic discoverDestination uses.
+// Pure function — does not touch the DB. Returns the merged categories array.
+export function mergeDiscoveryCategories(existingCategories, newCategories) {
+  const merged = (existingCategories || []).map((cat) => ({
+    category: cat.category,
+    items: [...(cat.items || [])],
+  }));
+
+  const seen = new Set();
+  for (const cat of merged) {
+    for (const item of cat.items) {
+      if (item?.name) seen.add(normalizeName(item.name));
+    }
+  }
+
+  for (const newCat of (newCategories || [])) {
+    const dedupedNewItems = (newCat.items || []).filter((item) => {
+      if (!item?.name) return false;
+      const n = normalizeName(item.name);
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    });
+
+    if (dedupedNewItems.length === 0) continue;
+
+    const existing = merged.find((c) => c.category === newCat.category);
+    if (existing) {
+      existing.items = [...existing.items, ...dedupedNewItems];
+    } else {
+      merged.push({ category: newCat.category, items: dedupedNewItems });
+    }
+  }
+
+  return merged;
+}
+
 router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
   try {
-    const { destination } = req.body;
+    const { destination, more } = req.body;
 
     if (!destination || typeof destination !== 'string' || !destination.trim()) {
       throw Object.assign(new Error('destination is required'), { status: 400 });
@@ -59,19 +98,26 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       'SELECT * FROM global_discovery_cache WHERE destination = ?',
     ).get(cacheKey);
 
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.fetched_at).getTime();
-      if (ageMs < CACHE_TTL_MS) {
-        const categories = sanitizeDiscoveryCategories(JSON.parse(cached.result_json));
-        for (const cat of categories) {
-          write({ type: 'category', category: cat.category, items: cat.items });
-        }
-        write({ type: 'done', cached: true });
-        return res.end();
+    const cachedCategories = cached ? JSON.parse(cached.result_json) : null;
+    const cacheIsFresh = cached
+      ? (Date.now() - new Date(cached.fetched_at).getTime()) < CACHE_TTL_MS
+      : false;
+
+    if (!more && cached && cacheIsFresh) {
+      const categories = sanitizeDiscoveryCategories(cachedCategories);
+      for (const cat of categories) {
+        write({ type: 'category', category: cat.category, items: cat.items });
       }
+      write({ type: 'done', cached: true });
+      return res.end();
     }
 
-    // Cache miss — keep connection alive with pings while Claude generates
+    // "Show more" against an existing cache row: build the exclusion list from
+    // everything already shown (cached items) plus stops already in the trip,
+    // then stream ONLY the newly generated items back, merging them into the cache.
+    const isAppend = Boolean(more) && Boolean(cached);
+
+    // Cache miss (or append) — keep connection alive with pings while Claude generates
     const ping = setInterval(() => write({ type: 'thinking' }), 8000);
 
     try {
@@ -81,23 +127,39 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         WHERE d.trip_id = ?
       `).all(req.params.tripId).map((r) => r.title);
 
+      const exclusionTitles = isAppend
+        ? [
+          ...(cachedCategories || []).flatMap((cat) => (cat.items || []).map((item) => item.name).filter(Boolean)),
+          ...existingStopTitles,
+        ]
+        : existingStopTitles;
+
       const accumulated = await discoverDestination(
         claudeDestination,
-        existingStopTitles,
-        (categoryObj) => write({ type: 'category', ...sanitizeDiscoveryCategory(categoryObj) }),
+        exclusionTitles,
+        (categoryObj) => {
+          const sanitizedCategory = sanitizeDiscoveryCategory(categoryObj);
+          write({ type: 'category', ...sanitizedCategory, ...(isAppend ? { append: true } : {}) });
+        },
       );
       const sanitized = sanitizeDiscoveryCategories(accumulated);
 
       clearInterval(ping);
 
-      if (sanitized.length > 0) {
+      if (isAppend) {
+        const merged = mergeDiscoveryCategories(cachedCategories, sanitized);
+        db.prepare(`
+          UPDATE global_discovery_cache SET result_json = ?, fetched_at = datetime('now')
+          WHERE destination = ?
+        `).run(JSON.stringify(merged), cacheKey);
+      } else if (sanitized.length > 0) {
         db.prepare(`
           INSERT OR REPLACE INTO global_discovery_cache (destination, result_json, fetched_at)
           VALUES (?, ?, datetime('now'))
         `).run(cacheKey, JSON.stringify(sanitized));
       }
 
-      write({ type: 'done', cached: false });
+      write({ type: 'done', cached: false, ...(isAppend ? { append: true } : {}) });
     } catch (err) {
       clearInterval(ping);
       write({ type: 'error', message: err.message || 'Discovery failed' });
@@ -109,23 +171,6 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       res.write(`data: ${JSON.stringify({ type: 'error', message: err.message || 'Discovery failed' })}\n\n`);
       return res.end();
     }
-    next(err);
-  }
-});
-
-// Clears the global destination cache for a specific destination (used by refresh button)
-router.delete('/:tripId/discover/cache', requireTripAccess, (req, res, next) => {
-  try {
-    const { destination } = req.body;
-    const db = getDb();
-    if (destination) {
-      const key = destination.trim().toLowerCase()
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/[\s'''\-\.]/g, '');
-      db.prepare('DELETE FROM global_discovery_cache WHERE destination = ?').run(key);
-    }
-    res.json({ ok: true });
-  } catch (err) {
     next(err);
   }
 });
