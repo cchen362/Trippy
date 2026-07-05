@@ -18,15 +18,27 @@ function normalizeName(str) {
     .trim();
 }
 
-export default function SuggestionCard({ suggestion, days, onAddToDay }) {
+export default function SuggestionCard({ suggestion, days, onAddToDay, destination }) {
   const { name, localName, description, whyItFits, whyItMatches, estimatedDuration, openingHours } = suggestion;
   const whyText = whyItFits ?? whyItMatches;
   const showLocalName = localName && normalizeName(localName) !== normalizeName(name);
   const displayName = showLocalName ? `${name} (${localName})` : name;
 
+  // "In trip" matches by normalized title alone, which false-positives on generic
+  // names ("Old Town", "Central Market") shared across unrelated cities and would
+  // permanently disable Add for a place the trip has never actually visited.
+  // Scope the match to days whose resolved city matches the destination currently
+  // being browsed in Discover — that's the tightest boundary the data supports
+  // (suggestions don't carry their own city; they're all fetched per-destination),
+  // and it keeps the indicator meaningful: a same-named place added under a
+  // different city no longer shadows this one.
+  const normalizedDestination = normalizeName(destination ?? '');
   const normalizedName = normalizeName(name ?? '');
+  const relevantDays = normalizedDestination
+    ? (days ?? []).filter((d) => normalizeName(d.resolvedCity ?? d.city ?? '') === normalizedDestination)
+    : (days ?? []);
   const addedToDayIds = new Set(
-    (days ?? []).flatMap((d) =>
+    relevantDays.flatMap((d) =>
       (d.stops ?? [])
         .filter((s) => normalizeName(s.title ?? '') === normalizedName)
         .map(() => d.id),
@@ -149,16 +161,22 @@ export default function SuggestionCard({ suggestion, days, onAddToDay }) {
           </span>
         )}
         {openingHours && (
-          <span style={{
-            fontFamily: "'DM Mono', monospace",
-            fontSize: 11,
-            letterSpacing: '0.08em',
-            color: '#8a7a6a',
-            border: '1px solid rgba(240,235,227,0.1)',
-            borderRadius: 2,
-            padding: '4px 10px',
-          }}>
-            {openingHours}
+          // Cached discovery results can sit for up to 48h (and the underlying
+          // Claude data may itself be older), so hours are a hint, not a fact
+          // of record — never render this as if it were freshly verified.
+          <span
+            title="Hours may be outdated — confirm before you go"
+            style={{
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              color: '#6e5e50',
+              fontStyle: 'italic',
+              border: '1px dashed rgba(240,235,227,0.1)',
+              borderRadius: 2,
+              padding: '4px 10px',
+            }}>
+            {openingHours} — verify
           </span>
         )}
       </div>

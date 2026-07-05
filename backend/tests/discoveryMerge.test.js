@@ -58,9 +58,34 @@ describe('mergeDiscoveryCategories', () => {
   it('handles a null/undefined existing categories list (first generation)', () => {
     const incoming = [{ category: 'culture', items: [{ name: 'Kinkakuji' }] }];
 
-    const merged = mergeDiscoveryCategories(null, incoming);
+    const merged = mergeDiscoveryCategories(null, incoming, '2026-01-01T00:00:00.000Z');
 
-    expect(merged).toEqual([{ category: 'culture', items: [{ name: 'Kinkakuji' }] }]);
+    expect(merged).toEqual([{ category: 'culture', items: [{ name: 'Kinkakuji', generatedAt: '2026-01-01T00:00:00.000Z' }] }]);
+  });
+
+  it('stamps newly merged items with the provided generatedAt without touching existing items', () => {
+    const existing = [{ category: 'culture', items: [{ name: 'Kinkakuji', generatedAt: '2025-01-01T00:00:00.000Z' }] }];
+    const incoming = [{ category: 'culture', items: [{ name: 'Nijo Castle' }] }];
+
+    const merged = mergeDiscoveryCategories(existing, incoming, '2026-01-01T00:00:00.000Z');
+
+    const items = merged.find((c) => c.category === 'culture').items;
+    expect(items).toEqual([
+      { name: 'Kinkakuji', generatedAt: '2025-01-01T00:00:00.000Z' },
+      { name: 'Nijo Castle', generatedAt: '2026-01-01T00:00:00.000Z' },
+    ]);
+  });
+
+  it('defaults generatedAt to the current time when not provided', () => {
+    const incoming = [{ category: 'culture', items: [{ name: 'Kinkakuji' }] }];
+
+    const before = Date.now();
+    const merged = mergeDiscoveryCategories(null, incoming);
+    const after = Date.now();
+
+    const stampMs = new Date(merged[0].items[0].generatedAt).getTime();
+    expect(stampMs).toBeGreaterThanOrEqual(before);
+    expect(stampMs).toBeLessThanOrEqual(after);
   });
 
   it('does not mutate the input arrays', () => {

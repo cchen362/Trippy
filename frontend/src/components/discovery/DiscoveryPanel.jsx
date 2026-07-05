@@ -246,7 +246,14 @@ function PlaceResultRow({ prediction, days, onAdd }) {
 
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
+
+  // `destination` is the live input draft (updates every keystroke).
+  // `committedDestination` is the lookup/search key — it only changes when the
+  // user explicitly commits (submit, or the default recomputes on open/day change).
+  // Keeping these separate means typing never blanks the results view mid-keystroke,
+  // since `getDestination(partialText)` would otherwise look up an empty cache entry.
   const [destination, setDestination] = useState(defaultDestination);
+  const [committedDestination, setCommittedDestination] = useState(defaultDestination);
   const [inputFocused, setInputFocused] = useState(false);
   const tabs = buildTabs(trip.interestTags);
   const [activeCategory, setActiveCategory] = useState(tabs[0]);
@@ -259,11 +266,19 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const sessionTokenRef = useRef(null);
 
   const { discover, showMore, getDestination } = discovery;
-  const { partialResults, completedCategories, loading, error } = getDestination(destination);
+  const { partialResults, completedCategories, loading, error } = getDestination(committedDestination);
 
+  // Recompute the default destination whenever the active day changes (the
+  // panel itself is only ever mounted while open, so mounting already covers
+  // "the panel opens") so a stale default from a previous day never lingers,
+  // and kick off discovery for it.
   useEffect(() => {
-    if (destination) discover(destination);
-  }, []); // intentional mount-only
+    if (!defaultDestination) return;
+    setDestination(defaultDestination);
+    setCommittedDestination(defaultDestination);
+    discover(defaultDestination);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultDestination]);
 
   const surprisePendingRef = useRef(false);
   useEffect(() => {
@@ -284,7 +299,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     const timer = setTimeout(async () => {
       setPlaceSearching(true);
       try {
-        const response = await bookingsApi.lookupPlaces(searchQuery.trim(), sessionTokenRef.current, destination.trim());
+        const response = await bookingsApi.lookupPlaces(searchQuery.trim(), sessionTokenRef.current, committedDestination.trim());
         setPlacePredictions(response?.suggestions ?? []);
       } catch {
         setPlacePredictions([]);
@@ -293,10 +308,11 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       }
     }, 350);
     return () => clearTimeout(timer);
-  }, [searchQuery, destination]);
+  }, [searchQuery, committedDestination]);
 
   const handleDiscover = () => {
     if (destination.trim()) {
+      setCommittedDestination(destination.trim());
       discover(destination.trim());
       setActiveCategory(tabs[0]);
     }
@@ -308,7 +324,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       type: 'experience',
       note: suggestion.description,
       locationQuery: suggestion.name,
-      locationCity: destination.trim(),
+      locationCity: committedDestination.trim(),
       localName: suggestion.localName,
       locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
       duration: suggestion.estimatedDuration,
@@ -359,16 +375,16 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
 
   const handleSurpriseMe = () => {
     const hasResults = Object.keys(partialResults).length > 0;
-    if (!hasResults && destination.trim()) {
+    if (!hasResults && committedDestination.trim()) {
       surprisePendingRef.current = true;
-      discover(destination.trim());
+      discover(committedDestination.trim());
       return;
     }
     setSurprisePick(pickSurprise(partialResults, days));
   };
 
   const handleShowMore = () => {
-    if (destination.trim()) showMore(destination.trim());
+    if (committedDestination.trim()) showMore(committedDestination.trim());
   };
 
   const activeItems = partialResults[activeCategory] ?? [];
@@ -480,7 +496,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
 
       {/* Destination hero */}
       {anyResults && (
-        <DestinationHero city={destination.trim() || defaultDestination} count={totalCount} />
+        <DestinationHero city={committedDestination.trim() || defaultDestination} count={totalCount} />
       )}
 
       {/* Category tabs */}
@@ -584,6 +600,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     key={suggestion.name ?? idx}
                     suggestion={suggestion}
                     days={days}
+                    destination={committedDestination}
                     onAddToDay={handleAddToDay}
                   />
                 ))}
@@ -656,6 +673,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 key={suggestion.name ?? idx}
                 suggestion={suggestion}
                 days={days}
+                destination={committedDestination}
                 onAddToDay={handleAddToDay}
               />
             ))}
@@ -704,6 +722,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                 <SuggestionCard
                   suggestion={surprisePick}
                   days={days}
+                  destination={committedDestination}
                   onAddToDay={async (dayId, suggestion) => {
                     await handleAddToDay(dayId, suggestion);
                     setSurprisePick(null);

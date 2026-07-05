@@ -13,7 +13,8 @@ export default function DayPicker({ addedDayIds, days, suggestion, onAddToDay, o
   const [pos, setPos] = useState({ top: 0, left: 0, width: 220 });
 
   useEffect(() => {
-    if (anchorRef.current) {
+    function updatePosition() {
+      if (!anchorRef.current) return;
       const rect = anchorRef.current.getBoundingClientRect();
       const popoverHeight = Math.min(days.length * 44 + 52, 320);
       const spaceAbove = rect.top;
@@ -25,7 +26,17 @@ export default function DayPicker({ addedDayIds, days, suggestion, onAddToDay, o
       });
     }
 
-    function onMouseDown(e) {
+    updatePosition();
+
+    // The popover is `position: fixed`, anchored to the trigger button's
+    // viewport coordinates. The panel content scrolls (DiscoveryPanel's
+    // content area, or the page itself), which moves the anchor without
+    // firing resize — so we must also reposition on scroll. Capture phase
+    // catches scroll events from any nested scrollable ancestor, not just window.
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    function onOutsideInteraction(e) {
       if (
         ref.current && !ref.current.contains(e.target) &&
         anchorRef.current && !anchorRef.current.contains(e.target)
@@ -33,8 +44,19 @@ export default function DayPicker({ addedDayIds, days, suggestion, onAddToDay, o
         onClose();
       }
     }
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onOutsideInteraction);
+    document.addEventListener('touchstart', onOutsideInteraction);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+      document.removeEventListener('mousedown', onOutsideInteraction);
+      document.removeEventListener('touchstart', onOutsideInteraction);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   return (
@@ -70,7 +92,7 @@ export default function DayPicker({ addedDayIds, days, suggestion, onAddToDay, o
         const added = addedDayIds.has(day.id);
         const label = day.date
           ? parseLocalDateParts(day.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-          : `Day ${day.day_number ?? day.id}`;
+          : `Day ${(day.dayIndex ?? 0) + 1}`;
         return (
           <button
             key={day.id}

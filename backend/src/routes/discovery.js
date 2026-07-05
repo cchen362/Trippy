@@ -10,6 +10,20 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 router.use(requireAuth);
 
+// SQLite datetime('now') writes 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker,
+// but JS `new Date(...)` on that string parses it as LOCAL time — only correct when
+// the server process itself runs in UTC. Explicitly mark the string as UTC before
+// parsing so the TTL check is correct regardless of the server's TZ. Mirrors the
+// same fix already applied to place_resolution_cache (see cacheTimestampToEpochMs
+// in services/placeResolver.js).
+function cacheTimestampToEpochMs(value) {
+  if (!value) return null;
+  const text = String(value);
+  const iso = /[TZ]/.test(text) ? text : `${text.replace(' ', 'T')}Z`;
+  const epoch = Date.parse(iso);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
 function sanitizeDiscoveryCategory(categoryObj) {
   return {
     ...categoryObj,
@@ -28,8 +42,11 @@ function sanitizeDiscoveryCategories(categories) {
 // Merges freshly-generated categories into a cached category list, appending new
 // items to their matching category (creating the category if it didn't exist yet)
 // and de-duplicating by the same normalizeName logic discoverDestination uses.
-// Pure function — does not touch the DB. Returns the merged categories array.
-export function mergeDiscoveryCategories(existingCategories, newCategories) {
+// Newly merged items are stamped with `generatedAt` (ISO string) so the payload
+// records when each batch was added, enabling a future "refreshed N days ago"
+// hint without a schema change — existing items keep whatever stamp they already
+// carry. Pure function — does not touch the DB. Returns the merged categories array.
+export function mergeDiscoveryCategories(existingCategories, newCategories, generatedAt = new Date().toISOString()) {
   const merged = (existingCategories || []).map((cat) => ({
     category: cat.category,
     items: [...(cat.items || [])],
@@ -49,7 +66,7 @@ export function mergeDiscoveryCategories(existingCategories, newCategories) {
       if (seen.has(n)) return false;
       seen.add(n);
       return true;
-    });
+    }).map((item) => ({ ...item, generatedAt }));
 
     if (dedupedNewItems.length === 0) continue;
 
@@ -99,8 +116,9 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     ).get(cacheKey);
 
     const cachedCategories = cached ? JSON.parse(cached.result_json) : null;
-    const cacheIsFresh = cached
-      ? (Date.now() - new Date(cached.fetched_at).getTime()) < CACHE_TTL_MS
+    const cachedAtMs = cached ? cacheTimestampToEpochMs(cached.fetched_at) : null;
+    const cacheIsFresh = cachedAtMs !== null
+      ? (Date.now() - cachedAtMs) < CACHE_TTL_MS
       : false;
 
     if (!more && cached && cacheIsFresh) {
@@ -113,31 +131,53 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     }
 
     // "Show more" against an existing cache row: build the exclusion list from
-    // everything already shown (cached items) plus stops already in the trip,
-    // then stream ONLY the newly generated items back, merging them into the cache.
+    // everything already shown (cached items in the GLOBAL cache), then stream
+    // ONLY the newly generated items back, merging them into the cache.
+    //
+    // Note: exclusions here are deliberately NOT built from the requesting trip's
+    // stop titles. The global cache is shared across all trips/users — if we fed
+    // one trip's itinerary in as exclusions, that trip would permanently shape
+    // (and shrink) what every other trip sees for the same destination for the
+    // life of the cache row. Trip-owned items are filtered at *display time* on
+    // the frontend (normalizeName-based "In trip" matching), not baked into the
+    // shared cache. Excluding items already present in the cache itself (below)
+    // is a different, correct concern: it's de-duplication for "show more", not
+    // per-trip pollution.
     const isAppend = Boolean(more) && Boolean(cached);
+    // A stale cache row (TTL expired) that isn't an explicit "show more" request:
+    // regenerate and MERGE into the existing row rather than replacing it wholesale,
+    // so breadth accumulates across refreshes instead of resetting to whatever one
+    // generation happened to return. Also excludes already-cached titles from the
+    // Claude call for the same de-duplication reason "show more" does.
+    const isStaleRefresh = !more && Boolean(cached) && !cacheIsFresh;
+    const isMerge = isAppend || isStaleRefresh;
 
-    // Cache miss (or append) — keep connection alive with pings while Claude generates
+    // A stale refresh regenerates only a delta (cached titles are excluded), but
+    // the client's non-append protocol REPLACES each category it receives — so
+    // streaming the delta alone would shrink the visible grid to just-new items
+    // while the DB holds the merged breadth. Instead: stream the cached breadth
+    // up front (instant full grid), suppress the mid-generation delta chunks
+    // (they'd clobber the cached categories), and stream the full merged set
+    // once generation completes.
+    if (isStaleRefresh) {
+      for (const cat of sanitizeDiscoveryCategories(cachedCategories)) {
+        write({ type: 'category', category: cat.category, items: cat.items });
+      }
+    }
+
+    // Cache miss (or append/refresh) — keep connection alive with pings while Claude generates
     const ping = setInterval(() => write({ type: 'thinking' }), 8000);
 
     try {
-      const existingStopTitles = db.prepare(`
-        SELECT s.title FROM stops s
-        JOIN days d ON s.day_id = d.id
-        WHERE d.trip_id = ?
-      `).all(req.params.tripId).map((r) => r.title);
-
-      const exclusionTitles = isAppend
-        ? [
-          ...(cachedCategories || []).flatMap((cat) => (cat.items || []).map((item) => item.name).filter(Boolean)),
-          ...existingStopTitles,
-        ]
-        : existingStopTitles;
+      const exclusionTitles = isMerge
+        ? (cachedCategories || []).flatMap((cat) => (cat.items || []).map((item) => item.name).filter(Boolean))
+        : [];
 
       const accumulated = await discoverDestination(
         claudeDestination,
         exclusionTitles,
         (categoryObj) => {
+          if (isStaleRefresh) return;
           const sanitizedCategory = sanitizeDiscoveryCategory(categoryObj);
           write({ type: 'category', ...sanitizedCategory, ...(isAppend ? { append: true } : {}) });
         },
@@ -146,17 +186,28 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
 
       clearInterval(ping);
 
-      if (isAppend) {
-        const merged = mergeDiscoveryCategories(cachedCategories, sanitized);
+      const generatedAt = new Date().toISOString();
+
+      if (isMerge) {
+        const merged = mergeDiscoveryCategories(cachedCategories, sanitized, generatedAt);
         db.prepare(`
           UPDATE global_discovery_cache SET result_json = ?, fetched_at = datetime('now')
           WHERE destination = ?
         `).run(JSON.stringify(merged), cacheKey);
+        if (isStaleRefresh) {
+          for (const cat of sanitizeDiscoveryCategories(merged)) {
+            write({ type: 'category', category: cat.category, items: cat.items });
+          }
+        }
       } else if (sanitized.length > 0) {
+        const stamped = sanitized.map((cat) => ({
+          ...cat,
+          items: (cat.items || []).map((item) => ({ ...item, generatedAt })),
+        }));
         db.prepare(`
           INSERT OR REPLACE INTO global_discovery_cache (destination, result_json, fetched_at)
           VALUES (?, ?, datetime('now'))
-        `).run(cacheKey, JSON.stringify(sanitized));
+        `).run(cacheKey, JSON.stringify(stamped));
       }
 
       write({ type: 'done', cached: false, ...(isAppend ? { append: true } : {}) });
