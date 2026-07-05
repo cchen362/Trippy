@@ -83,6 +83,33 @@ function flightBooking(overrides = {}) {
   };
 }
 
+function hotelBooking(overrides = {}) {
+  return {
+    type: 'hotel',
+    title: 'Regent Chongqing',
+    confirmationRef: 'HTL789',
+    bookingSource: 'Trip.com',
+    startDatetime: '2026-09-15T15:00',
+    endDatetime: '2026-09-17T11:00',
+    origin: null,
+    destination: 'Chongqing',
+    terminalOrStation: null,
+    originTz: null,
+    destinationTz: 'Asia/Shanghai',
+    details: {
+      originCity: null, destinationCity: null,
+      originCountryCode: null, destinationCountryCode: null,
+      city: 'Chongqing', countryCode: 'CN',
+      carrierCode: null, flightNumber: null, airlineName: null,
+      trainNumber: null, originStation: null, destinationStation: null,
+      seatClass: null, address: null, localName: null, note: null,
+    },
+    confidence: { overall: 'high', fields: {} },
+    assumptions: [],
+    ...overrides,
+  };
+}
+
 let tmpDir;
 let owner;
 
@@ -155,6 +182,12 @@ describe('normalizeExtractedBooking', () => {
     expect(twice.detailsJson.destinationCity).toBe('Chengdu');
     expect(twice.detailsJson.originCity).toBe('Shanghai');
     expect(twice.detailsJson.importedFrom).toEqual({ artifactId: 'a2', model: 'm2', extractedAt: 'later' });
+  });
+
+  it('carries a hotel booking countryCode through into detailsJson', () => {
+    const result = normalizeExtractedBooking(hotelBooking(), { artifactId: 'a1', model: 'm', extractedAt: 'now' });
+    expect(result.detailsJson.city).toBe('Chongqing');
+    expect(result.detailsJson.countryCode).toBe('CN');
   });
 });
 

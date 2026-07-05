@@ -133,6 +133,33 @@ describe('resolvePlace', () => {
     });
   });
 
+  it('captures the resolved country from Nominatim addressdetails', async () => {
+    const db = getDb();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '3.1579679',
+        lon: '101.7112048',
+        display_name: 'Petronas Twin Towers, Kuala Lumpur, Malaysia',
+        name: 'Petronas Twin Towers',
+        osm_type: 'way',
+        osm_id: '279944536',
+        address: { country_code: 'my' },
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Petronas Twin Towers',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      preferNominatim: true,
+    });
+
+    expect(result.countryCode).toBe('MY');
+    const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Petronas Twin Towers');
+    expect(cached.resolved_country).toBe('MY');
+  });
+
   it('canonicalizes spaced China city names for Nominatim queries', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -284,6 +311,10 @@ describe('resolvePlace', () => {
             displayName: { text: 'Test Coffee Roasters' },
             formattedAddress: '1 Test Street, Kuala Lumpur, Malaysia',
             location: { latitude: 3.1478, longitude: 101.6953 },
+            addressComponents: [
+              { longText: 'Kuala Lumpur', shortText: 'Kuala Lumpur', types: ['locality'] },
+              { longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] },
+            ],
           }],
         }),
       };
@@ -299,7 +330,7 @@ describe('resolvePlace', () => {
     expect(googleCall).toBeTruthy();
     expect(String(googleCall[0])).toBe('https://places.googleapis.com/v1/places:searchText');
     expect(googleCall[1].method).toBe('POST');
-    expect(googleCall[1].headers['X-Goog-FieldMask']).toBe('places.id,places.displayName,places.formattedAddress,places.location');
+    expect(googleCall[1].headers['X-Goog-FieldMask']).toBe('places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents');
     const body = JSON.parse(googleCall[1].body);
     expect(body).toMatchObject({
       textQuery: 'Test Coffee Roasters, Kuala Lumpur',
@@ -316,12 +347,14 @@ describe('resolvePlace', () => {
       locationStatus: 'resolved',
       provider: 'google_places',
       providerId: 'google:ChIJ_test_place',
+      countryCode: 'MY',
     });
     expect(result).not.toHaveProperty('updatedAtMs');
 
     const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Test Coffee Roasters');
     expect(cached.provider).toBe('google_places');
     expect(cached.provider_id).toBe('google:ChIJ_test_place');
+    expect(cached.resolved_country).toBe('MY');
   });
 
   it('retries stale unresolved cache rows over the network but keeps fresh ones short-circuited', async () => {

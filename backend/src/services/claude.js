@@ -37,7 +37,7 @@ Output shape:
       "details": {
         "originCity": string | null, "destinationCity": string | null,
         "originCountryCode": "ISO 3166-1 alpha-2" | null, "destinationCountryCode": string | null,
-        "city": string | null,
+        "city": string | null, "countryCode": "ISO 3166-1 alpha-2" | null,
         "carrierCode": string | null, "flightNumber": string | null, "airlineName": string | null,
         "trainNumber": string | null, "originStation": string | null, "destinationStation": string | null,
         "seatClass": string | null, "address": string | null, "localName": string | null, "note": string | null
@@ -56,6 +56,7 @@ Rules:
    - If a date is ambiguous between DD/MM and MM/DD, prefer the interpretation that falls inside the trip's date range if a trip is given; otherwise pick the more common international DD/MM interpretation and set that field's confidence to "low".
 4. Hotel bookings that only specify check-in/check-out dates without times: default startDatetime to T15:00 and endDatetime to T11:00, and add an assumption noting the default check-in/check-out time was applied.
 5. Multilingual input: put the English/exonym city name in details.originCity / details.destinationCity / details.city; preserve the original local-script name in details.localName; set the top-level "language" field to the input's primary language code.
+5a. Hotel and "other" bookings: set details.countryCode to the ISO 3166-1 alpha-2 code of the country details.city is in, using the same confidence discipline as originCountryCode/destinationCountryCode — null if you cannot infer it with reasonable confidence, never a guess.
 6. If the input is not travel-related (or contains no extractable booking), return isTravelRelated:false, bookings:[], and a one-line summary explaining why. Do not fabricate a booking to fill the array.
 7. Timezones: emit your best-guess IANA timezone (e.g. "Asia/Shanghai") for originTz/destinationTz. If you are not reasonably confident, use null — do not guess a generic value like "UTC".
 8. Ground transfers, car rentals, tour tickets, event tickets, and anything that does not fit flight/train/bus/ferry/hotel should use type "other" with a descriptive title (e.g. "Airport transfer — Chengdu Shuangliu to hotel").

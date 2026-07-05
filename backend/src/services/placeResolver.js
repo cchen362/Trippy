@@ -171,6 +171,7 @@ function formatResolution({
   resolvedAddress = null,
   providerId = null,
   provider = null,
+  countryCode = null,
 }) {
   return {
     lat,
@@ -183,6 +184,7 @@ function formatResolution({
     resolvedAddress,
     providerId,
     provider,
+    countryCode,
   };
 }
 
@@ -236,6 +238,7 @@ function fromCurated(place) {
     resolvedAddress: place.address,
     providerId: place.providerId,
     provider: 'curated',
+    countryCode: place.country ? place.country.toUpperCase() : null,
   });
 }
 
@@ -270,6 +273,7 @@ function readCache(queryKey) {
     resolvedAddress: row.address,
     providerId: row.provider_id,
     provider: row.provider,
+    countryCode: row.resolved_country,
   });
   // updatedAtMs is an internal field for negative-cache TTL checks; it is stripped
   // before the resolution is returned to callers (see resolvePlace).
@@ -281,9 +285,9 @@ function writeCache({ queryKey, queryText, city, country, provider, result, rawJ
   getDb().prepare(`
     INSERT INTO place_resolution_cache (
       query_key, query_text, city, country, provider, provider_id, name, address,
-      lat, lng, coordinate_system, confidence, raw_json, updated_at
+      lat, lng, coordinate_system, confidence, raw_json, resolved_country, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(query_key) DO UPDATE SET
       query_text = excluded.query_text,
       city = excluded.city,
@@ -297,6 +301,7 @@ function writeCache({ queryKey, queryText, city, country, provider, result, rawJ
       coordinate_system = excluded.coordinate_system,
       confidence = excluded.confidence,
       raw_json = excluded.raw_json,
+      resolved_country = excluded.resolved_country,
       updated_at = datetime('now')
   `).run(
     queryKey,
@@ -312,6 +317,7 @@ function writeCache({ queryKey, queryText, city, country, provider, result, rawJ
     result.coordinateSystem || 'unknown',
     result.confidence ?? null,
     rawJson ? JSON.stringify(rawJson) : null,
+    result.countryCode || null,
   );
 }
 
@@ -443,6 +449,7 @@ async function searchNominatim({ queryText, city, country, aliases = [] }) {
         resolvedAddress: place.display_name || null,
         providerId: place.osm_type && place.osm_id ? `${place.osm_type}:${place.osm_id}` : null,
         provider: 'nominatim',
+        countryCode: place.address?.country_code ? place.address.country_code.toUpperCase() : null,
       }),
       rawJson: attempts,
     };
@@ -473,7 +480,7 @@ async function searchGooglePlaces({ queryText, city, country }) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': config.googlePlacesKey,
-      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location',
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents',
     },
     body: JSON.stringify(body),
   });
@@ -495,6 +502,9 @@ async function searchGooglePlaces({ queryText, city, country }) {
     return { result: null, rawJson: payload };
   }
 
+  const countryComponent = (place.addressComponents || [])
+    .find((component) => Array.isArray(component.types) && component.types.includes('country'));
+
   return {
     result: formatResolution({
       lat,
@@ -507,6 +517,7 @@ async function searchGooglePlaces({ queryText, city, country }) {
       resolvedAddress: place.formattedAddress || null,
       providerId: place.id ? `google:${place.id}` : null,
       provider: 'google_places',
+      countryCode: countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null,
     }),
     rawJson: payload,
   };

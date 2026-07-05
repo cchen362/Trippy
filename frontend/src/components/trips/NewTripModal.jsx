@@ -17,11 +17,9 @@ const EMPTY_FORM = {
 const TRANSIT_TYPES = ['flight', 'train', 'bus'];
 
 // Chips = unique {city, country} pairs in chronological booking order; dates = the
-// span across every extracted booking; title = "{firstCity} {Month YYYY}". Hotel/other
-// bookings only carry a city (no country field in the extraction schema — see
-// backend/src/services/claude.js), so their chips have country: null and simply don't
-// contribute to destinationCountries (destinations/destinationCountries are independent
-// arrays on the trip record, not a 1:1 pairing).
+// span across every extracted booking; title = "{firstCity} {Month YYYY}".
+// destinations/destinationCountries are independent arrays on the trip record, not a
+// 1:1 pairing — chips just happen to carry both fields together here.
 function deriveTripPrefill(extraction) {
   const bookings = extraction.bookings || [];
   const sorted = [...bookings].sort((a, b) => (a.startDatetime || '').localeCompare(b.startDatetime || ''));
@@ -35,7 +33,7 @@ function deriveTripPrefill(extraction) {
           { city: details.originCity, country: details.originCountryCode },
           { city: details.destinationCity, country: details.destinationCountryCode },
         ]
-      : [{ city: details.city, country: null }];
+      : [{ city: details.city, country: details.countryCode || null }];
     for (const { city, country } of candidates) {
       if (!city || seen.has(city)) continue;
       seen.add(city);
@@ -165,8 +163,7 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
     setError(null);
     const payload = {
       ...form,
-      destinations: destinationChips.map((chip) => chip.city),
-      destinationCountries: destinationChips.map((chip) => chip.country).filter(Boolean),
+      destinations: destinationChips.map((chip) => ({ city: chip.city, countryCode: chip.country || null })),
     };
     if (captureResult) {
       payload.captureArtifactId = captureResult.artifactId;

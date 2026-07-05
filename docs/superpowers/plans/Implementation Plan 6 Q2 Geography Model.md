@@ -1,6 +1,6 @@
 # Implementation Plan 6 — Q2 Geography Model (Gate A)
 
-**Status:** Ready for implementation sessions — not started
+**Status:** Wave 1 COMPLETE (2026-07-06) — schema, extraction, resolver, and paired-seed changes shipped and tested (backend 204/204, frontend 28/28). Wave 2 (derivation and backend consumers) next.
 **Decision record:** [Gate A CLOSED, owner decisions 2026-07-06](../reviews/2026-07-06-product-architecture-risk-review.md#gate-a-closed--owner-decisions-2026-07-06)
 **Design source:** [Completed Q2 review](../reviews/2026-07-06-q2-trip-geography-and-map-architecture.md) — all §-references below point there unless stated otherwise.
 **Model guidance:** Fable orchestrates and QAs; coding delegated to Sonnet subagents wave by wave.
@@ -52,7 +52,7 @@ weeks behind main.
 
 ---
 
-## Wave 1 — Schema additions and data inputs
+## Wave 1 — Schema additions and data inputs (COMPLETE 2026-07-06)
 
 **Goal:** every ingredient the derivation needs exists in the database and in new extractions.
 Additive only; nothing reads the new columns yet, so this wave is independently shippable.

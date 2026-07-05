@@ -109,3 +109,59 @@ describe('updateTrip — start-date extend/shorten (M4)', () => {
     expect(updated.days).toHaveLength(11); // unchanged day count
   });
 });
+
+function rawDay(tripId, date) {
+  return getDb().prepare('SELECT city, city_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, date);
+}
+
+describe('createTrip — paired destinations (Plan 6 Wave 1)', () => {
+  it('accepts destinations as {city, countryCode} pairs and seeds city_country from the first pair', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Multi-city Trip',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+
+    expect(trip.trip.destinations).toEqual(['Chengdu', 'Chongqing']);
+    expect(trip.trip.destinationCountries).toEqual(['CN', 'CN']);
+    const day = rawDay(trip.trip.id, '2026-09-10');
+    expect(day.city).toBe('Chengdu');
+    expect(day.city_country).toBe('CN');
+  });
+
+  it('still accepts the legacy string-array destinations shape', () => {
+    const trip = makeTrip();
+    const day = rawDay(trip.trip.id, '2026-09-10');
+    expect(day.city).toBe('Chengdu');
+    expect(day.city_country).toBe('CN');
+  });
+});
+
+describe('updateTrip — extension seeding from the adjacent day (Plan 6 Wave 1)', () => {
+  it("seeds a forward extension from the current last day's pair, not destinations[0]", () => {
+    const trip = makeTrip(); // destinations ['Chengdu'] / ['CN'], 2026-09-10..20
+    // Simulate the last day's resolved identity having diverged from the trip's first destination.
+    getDb().prepare('UPDATE days SET city = ?, city_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Chongqing', 'CN', trip.trip.id, '2026-09-20');
+
+    const updated = updateTrip(owner.id, trip.trip.id, { endDate: '2026-09-22' });
+    const newDay = updated.days.find((d) => d.date === '2026-09-21');
+    expect(newDay.city).toBe('Chongqing');
+    expect(rawDay(trip.trip.id, '2026-09-21').city_country).toBe('CN');
+  });
+
+  it("seeds a backward extension from the current first day's pair, not destinations[0]", () => {
+    const trip = makeTrip();
+    getDb().prepare('UPDATE days SET city = ?, city_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Macau', 'MO', trip.trip.id, '2026-09-10');
+
+    const updated = updateTrip(owner.id, trip.trip.id, { startDate: '2026-09-08' });
+    const newDay = updated.days.find((d) => d.date === '2026-09-09');
+    expect(newDay.city).toBe('Macau');
+    expect(rawDay(trip.trip.id, '2026-09-09').city_country).toBe('MO');
+  });
+});

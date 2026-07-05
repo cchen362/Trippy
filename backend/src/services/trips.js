@@ -112,6 +112,29 @@ function normalizeArray(value) {
   return [];
 }
 
+// destinations accepts either the legacy string-array shape (["Chengdu"]) or the new
+// paired shape ([{ city, countryCode }]) — both normalize to { city, countryCode } pairs.
+function normalizeDestinationPairs(value) {
+  if (!Array.isArray(value)) {
+    const city = typeof value === 'string' ? value.trim() : '';
+    return city ? [{ city, countryCode: null }] : [];
+  }
+
+  return value
+    .map((item) => {
+      if (item && typeof item === 'object') {
+        const city = String(item.city || '').trim();
+        if (!city) return null;
+        const rawCode = item.countryCode ? String(item.countryCode).trim() : '';
+        const countryCode = rawCode ? (countryCodeFromName(rawCode) ?? rawCode.toUpperCase()) : null;
+        return { city, countryCode };
+      }
+      const city = String(item || '').trim();
+      return city ? { city, countryCode: null } : null;
+    })
+    .filter(Boolean);
+}
+
 /**
  * Extracts a clean city name from a booking's structured detailsJson.
  * Returns null if no city can be determined — never guesses from station names.
@@ -283,11 +306,15 @@ export function createTrip(userId, input) {
     });
   }
 
-  const destinations = normalizeArray(input.destinations);
-  const destinationCountries = normalizeArray(input.destinationCountries)
+  const destinationPairs = normalizeDestinationPairs(input.destinations);
+  const destinations = destinationPairs.map((pair) => pair.city);
+  const legacyCountries = normalizeArray(input.destinationCountries)
     .map((raw) => countryCodeFromName(raw) ?? raw);
+  const pairCountries = destinationPairs.map((pair) => pair.countryCode).filter(Boolean);
+  const destinationCountries = legacyCountries.length ? legacyCountries : pairCountries;
   const interestTags = normalizeArray(input.interestTags);
   const defaultCity = destinations[0] || title;
+  const defaultCityCountry = destinationPairs[0]?.countryCode || destinationCountries[0] || null;
   const tripDates = eachDate(startDate, endDate);
 
   const create = db.transaction(() => {
@@ -311,8 +338,8 @@ export function createTrip(userId, input) {
     );
 
     const insertDay = db.prepare(`
-      INSERT INTO days (trip_id, date, city, phase, hotel, theme, color_code)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO days (trip_id, date, city, phase, hotel, theme, color_code, city_country)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const date of tripDates) {
@@ -324,6 +351,7 @@ export function createTrip(userId, input) {
         null,
         null,
         null,
+        defaultCityCountry,
       );
     }
 
@@ -367,14 +395,18 @@ export function updateTrip(userId, tripId, input) {
       db.prepare('DELETE FROM days WHERE trip_id = ? AND date < ?').run(tripId, input.startDate);
       newStartDate = input.startDate;
     } else {
-      // Extension backward — auto-generate new days before the current start
-      const defaultCity = parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      // Extension backward — seed new days from the day that is currently first,
+      // not the trip's first destination (that day's city may have been overridden
+      // or derived from a later booking and no longer matches destinations[0]).
+      const firstDay = db.prepare('SELECT city, city_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, existingRow.start_date);
+      const seedCity = firstDay?.city || parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const seedCountry = firstDay?.city_country || null;
       const beforeCurrent = new Date(`${existingRow.start_date}T00:00:00Z`);
       beforeCurrent.setUTCDate(beforeCurrent.getUTCDate() - 1);
       const newDates = eachDate(input.startDate, beforeCurrent.toISOString().slice(0, 10));
-      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city) VALUES (?, ?, ?)');
+      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city, city_country) VALUES (?, ?, ?, ?)');
       for (const date of newDates) {
-        insertDay.run(tripId, date, defaultCity);
+        insertDay.run(tripId, date, seedCity, seedCountry);
       }
       newStartDate = input.startDate;
     }
@@ -399,14 +431,18 @@ export function updateTrip(userId, tripId, input) {
       db.prepare('DELETE FROM days WHERE trip_id = ? AND date > ?').run(tripId, input.endDate);
       newEndDate = input.endDate;
     } else {
-      // Extension — auto-generate new days
-      const defaultCity = parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      // Extension forward — seed from the day that is currently last (fixes the prior
+      // defect of seeding from destinations[0], which is wrong once the trip's real
+      // last-day city has diverged from its first destination, e.g. a multi-city trip).
+      const lastDay = db.prepare('SELECT city, city_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, existingRow.end_date);
+      const seedCity = lastDay?.city || parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const seedCountry = lastDay?.city_country || null;
       const afterCurrent = new Date(`${existingRow.end_date}T00:00:00Z`);
       afterCurrent.setUTCDate(afterCurrent.getUTCDate() + 1);
       const newDates = eachDate(afterCurrent.toISOString().slice(0, 10), input.endDate);
-      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city) VALUES (?, ?, ?)');
+      const insertDay = db.prepare('INSERT INTO days (trip_id, date, city, city_country) VALUES (?, ?, ?, ?)');
       for (const date of newDates) {
-        insertDay.run(tripId, date, defaultCity);
+        insertDay.run(tripId, date, seedCity, seedCountry);
       }
       newEndDate = input.endDate;
     }

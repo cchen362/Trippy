@@ -69,11 +69,23 @@ describe('migrations', () => {
     expect(columns).toContain('destination_tz');
   });
 
+  it('adds day/stop geography columns', () => {
+    const db = getDb();
+    const dayColumns = db.prepare('PRAGMA table_info(days)').all().map((r) => r.name);
+    const stopColumns = db.prepare('PRAGMA table_info(stops)').all().map((r) => r.name);
+    const cacheColumns = db.prepare('PRAGMA table_info(place_resolution_cache)').all().map((r) => r.name);
+
+    expect(dayColumns).toContain('city_country');
+    expect(dayColumns).toContain('city_override_country');
+    expect(stopColumns).toContain('country_code');
+    expect(cacheColumns).toContain('resolved_country');
+  });
+
   it('tracks migration versions to avoid re-running', () => {
     const db = getDb();
-    // Running again should not throw
+    // Running again should not throw (idempotent — already-applied files are skipped)
     expect(() => runMigrations()).not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(12);
+    expect(count.c).toBe(13);
   });
 });

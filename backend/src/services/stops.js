@@ -23,6 +23,7 @@ function formatStop(row) {
     locationStatus: row.location_status,
     locationConfidence: row.location_confidence,
     providerId: row.provider_id,
+    countryCode: row.country_code,
     unsplashPhotoUrl: row.unsplash_photo_url,
     estimatedCost: row.estimated_cost,
     bookingRequired: Boolean(row.booking_required),
@@ -142,6 +143,7 @@ function applyResolutionFields(base, resolution, locationQuery) {
     locationStatus: resolution.locationStatus || 'unresolved',
     locationConfidence: resolution.confidence ?? null,
     providerId: resolution.providerId ?? null,
+    countryCode: resolution.countryCode ?? null,
   };
 }
 
@@ -157,6 +159,7 @@ function preserveLocationFields(input) {
     locationStatus: input.locationStatus || 'resolved',
     locationConfidence: input.locationConfidence ?? null,
     providerId: input.providerId ?? null,
+    countryCode: input.countryCode ?? null,
   };
 }
 
@@ -192,6 +195,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
       locationStatus: existing.location_status,
       locationConfidence: existing.location_confidence,
       providerId: existing.provider_id,
+      countryCode: existing.country_code,
     };
   }
 
@@ -249,6 +253,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
         locationStatus: 'estimated',
         locationConfidence: Math.min(resolution.confidence ?? 0.5, 0.68),
         providerId: resolution.providerId ?? null,
+        countryCode: resolution.countryCode ?? input.countryCode ?? null,
       };
     }
 
@@ -268,6 +273,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
         locationStatus: existing?.location_status ?? 'unresolved',
         locationConfidence: input.locationConfidence ?? existing?.location_confidence ?? null,
         providerId: input.providerId ?? existing?.provider_id ?? null,
+        countryCode: input.countryCode ?? existing?.country_code ?? null,
       };
     }
 
@@ -282,6 +288,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
       locationStatus: input.locationStatus || existing?.location_status || 'estimated',
       locationConfidence: input.locationConfidence ?? existing?.location_confidence ?? null,
       providerId: input.providerId ?? existing?.provider_id ?? null,
+      countryCode: input.countryCode ?? existing?.country_code ?? null,
     };
   }
 
@@ -296,6 +303,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
     locationStatus: existing?.location_status ?? 'unresolved',
     locationConfidence: existing?.location_confidence ?? null,
     providerId: existing?.provider_id ?? null,
+    countryCode: existing?.country_code ?? null,
   };
 }
 
@@ -357,9 +365,9 @@ export async function createStop(userId, dayId, input) {
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
       estimated_cost, booking_required, best_time, duration, sort_order, is_featured,
       location_query, resolved_name, resolved_address, coordinate_system, coordinate_source,
-      location_status, location_confidence, provider_id
+      location_status, location_confidence, provider_id, country_code
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     dayId,
@@ -385,6 +393,7 @@ export async function createStop(userId, dayId, input) {
     location.locationStatus,
     location.locationConfidence,
     location.providerId,
+    location.countryCode,
   );
 
   return formatStop(row);
@@ -439,7 +448,8 @@ export async function updateStop(userId, stopId, input) {
       coordinate_source = ?,
       location_status = ?,
       location_confidence = ?,
-      provider_id = ?
+      provider_id = ?,
+      country_code = ?
     WHERE id = ?
     RETURNING *
   `).get(
@@ -465,6 +475,7 @@ export async function updateStop(userId, stopId, input) {
     location.locationStatus,
     location.locationConfidence,
     location.providerId,
+    location.countryCode,
     stopId,
   );
 
@@ -645,7 +656,8 @@ export async function repairTripStopLocations(userId, tripId) {
         SET lat = ?, lng = ?, coordinate_system = ?, coordinate_source = ?,
             location_status = ?, location_confidence = ?, provider_id = ?,
             resolved_name = COALESCE(resolved_name, ?),
-            resolved_address = COALESCE(resolved_address, ?)
+            resolved_address = COALESCE(resolved_address, ?),
+            country_code = COALESCE(country_code, ?)
         WHERE id = ?
       `).run(
         resolution.lat,
@@ -657,6 +669,7 @@ export async function repairTripStopLocations(userId, tripId) {
         resolution.providerId,
         resolution.resolvedName,
         resolution.resolvedAddress,
+        resolution.countryCode,
         stop.id,
       );
       repairedCount += 1;
@@ -707,7 +720,15 @@ async function bookingPlaceLocation(booking) {
     providerId: `google:${details.placeId}`,
     resolvedName: details.displayName || booking.title,
     resolvedAddress: details.formattedAddress || null,
+    countryCode: null,
   };
+}
+
+// Booking-driven stops fall back to the extraction's own country when the place
+// resolver (or a placeId lookup, which never reports one) didn't provide one.
+function bookingCountryCode(booking) {
+  const details = parseBookingDetails(booking);
+  return details.destinationCountryCode || details.countryCode || null;
 }
 
 export async function syncStopWithBooking(booking) {
@@ -733,7 +754,7 @@ export async function syncStopWithBooking(booking) {
   }
 
   const placeLocation = await bookingPlaceLocation(booking);
-  const location = await resolveLocationForStop({
+  const resolvedLocation = await resolveLocationForStop({
     day,
     title: inferred.title,
     input: placeLocation
@@ -745,6 +766,10 @@ export async function syncStopWithBooking(booking) {
       },
     existing: existingStop,
   });
+  const location = {
+    ...resolvedLocation,
+    countryCode: resolvedLocation.countryCode || bookingCountryCode(booking),
+  };
 
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = await resolvePhotoUrl({
@@ -777,7 +802,8 @@ export async function syncStopWithBooking(booking) {
         coordinate_source = ?,
         location_status = ?,
         location_confidence = ?,
-        provider_id = ?
+        provider_id = ?,
+        country_code = ?
       WHERE id = ?
       RETURNING *
     `).get(
@@ -799,6 +825,7 @@ export async function syncStopWithBooking(booking) {
       location.locationStatus,
       location.locationConfidence,
       location.providerId,
+      location.countryCode,
       existingStop.id,
     );
     return formatStop(row);
@@ -819,7 +846,8 @@ export async function syncStopWithBooking(booking) {
         coordinate_source = COALESCE(coordinate_source, ?),
         location_status = CASE WHEN location_status = 'unresolved' THEN ? ELSE location_status END,
         location_confidence = COALESCE(location_confidence, ?),
-        provider_id = COALESCE(provider_id, ?)
+        provider_id = COALESCE(provider_id, ?),
+        country_code = COALESCE(country_code, ?)
       WHERE id = ?
       RETURNING *
     `).get(
@@ -834,6 +862,7 @@ export async function syncStopWithBooking(booking) {
       location.locationStatus,
       location.locationConfidence,
       location.providerId,
+      location.countryCode,
       matchingStop.id,
     );
     return formatStop(row);
@@ -844,9 +873,9 @@ export async function syncStopWithBooking(booking) {
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
       booking_required, sort_order, is_featured, location_query, resolved_name,
       resolved_address, coordinate_system, coordinate_source, location_status,
-      location_confidence, provider_id
+      location_confidence, provider_id, country_code
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     day.id,
@@ -868,6 +897,7 @@ export async function syncStopWithBooking(booking) {
     location.locationStatus,
     location.locationConfidence,
     location.providerId,
+    location.countryCode,
   );
 
   return formatStop(row);
