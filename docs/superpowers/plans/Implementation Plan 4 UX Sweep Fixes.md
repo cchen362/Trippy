@@ -136,9 +136,41 @@ Design-language drift (fonts/palette/TODOs: none found) · auth offline fallback
 
 ---
 
-## Execution plan (upon approval)
+## Execution plan
 
-**Step 0 — persist the report.** Immediately after approval, write this findings report (with the approved-item checklist) to `docs/superpowers/plans/Implementation Plan 4 UX Sweep Fixes.md`, matching the existing Implementation Plan 2/2A/3 convention, so nothing is lost across sessions or usage-limit resets. Each batch gets a status line (`pending / in progress / done / verified`) that I update as work lands — so if a limit reset interrupts, the doc itself is the resume point and no re-discovery is needed.
+**Step 0 — persist the report: DONE.** This document is that report. Each batch has a status line in the table above (`pending / in progress / done / verified`), updated as work lands — if a session ends or a usage limit resets, this doc is the resume point; no re-discovery needed.
+
+## Session handoff prompt
+
+Paste this to resume implementation in a fresh session:
+
+```
+Continue implementing the approved UX sweep fixes for Trippy (this repo).
+
+Source of truth: docs/superpowers/plans/Implementation Plan 4 UX Sweep Fixes.md
+— read it fully first. It has every finding (C1–C3, H1–H4, M1–M7, L1–L12) with
+root cause, file:line refs, agreed fix, owner product decisions (Q1–Q3), and
+the batch-status table. Check the table for current progress and start at the
+first non-verified wave. (As of 2026-07-05: Wave 1 / timezone C1 is committed
+and verified in cfc03f3 — start at Wave 2.)
+
+Working rules:
+- One wave at a time, max 2 Sonnet subagents in flight (split frontend-heavy
+  vs backend-heavy so they don't collide on files). You orchestrate and QA;
+  never spawn a Fable subagent.
+- Wave order: (2: modal scroll/confirms + 3: copilot stream fix) →
+  (4: PWA/nav + 5: error surfacing/share link) → (6: discovery cache) →
+  (7: Today/map + 8: stragglers).
+- After each wave: backend npm test (186+ passing baseline), frontend
+  npx vitest run (20 passing baseline) + build, 375px preview pass on the
+  affected tabs, update the status table in the plan doc, then commit the wave.
+- Follow CLAUDE.md: no bandaids, no TODO/FIXME, parameterised SQL, fixed
+  palette/typography, mobile-first.
+
+Wave 2 note: C3 (copilot stream) touches frontend/src/hooks/useCopilot.js and
+backend/src/services/claude.js; Batch 2 is frontend modals only — no shared
+files, safe to run in parallel.
+```
 
 **Batches** (self-contained specs, delegated to **Sonnet subagents** — never Fable):
 1. **Timezone** (C1 + originTz day-wrap tests) — highest blast radius, pure-function fix.
