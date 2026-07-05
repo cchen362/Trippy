@@ -4,6 +4,11 @@ Findings report from the 2026-07-05 app-wide UX/UI sweep, approved for implement
 This document is the source of truth for batch status — update the status table below as
 waves land, so any session (or usage-limit reset) can resume from here without re-discovery.
 
+> **STATUS: COMPLETE (2026-07-05).** All 5 waves / 8 batches / 22 findings implemented,
+> verified, and committed to `main`. See the completion summary below the status table.
+> Only remaining follow-up is deploying to production (blocked on Tailscale re-auth,
+> tracked outside this plan).
+
 ## Batch status
 
 | Wave | Batch | Items | Status |
@@ -19,6 +24,56 @@ waves land, so any session (or usage-limit reset) can resume from here without r
 
 Pacing rule: one wave at a time, max 2 agents in flight (frontend-heavy + backend-heavy).
 After each wave: backend `npm test`, frontend build, 375px preview pass, update this table, commit.
+
+## Completion summary (2026-07-05)
+
+**Commits on `main`, one per wave:**
+
+| Wave | Commit | Contents |
+|------|--------|----------|
+| 1 | `cfc03f3` | C1 timezone day-wrap + originTz tests |
+| 2 | `44e3dc5` | H1 modal scroll, M4 destructive confirms, C3/L2 copilot stream recovery |
+| 3 | `bc6800b` | C2 PWA nav guard, H2/M7/L4 error surfacing (new `ErrorBanner`), M3 share-link hydration, L9 SW map-config cache |
+| 4 | `31493fa` | H3 cache-pollution fix + Q3 merge-on-refresh/`generatedAt`, M6 TTL timezone, M1 panel draft/commit split, L5 DayPicker, L11 city-scoped matching |
+| 5 | `2ec3d1e` | H4 GCJ-02 deep links (new `frontend/src/utils/coordinates.js`), M2 hotel-hero nav, L1 StatusPill caching, M5/L3/L6/L7/L8/L10/L12 stragglers |
+
+**Final test baselines:** backend 197 (was 186), frontend 21 (was 20), both builds clean.
+Future waves of work should treat these as the new must-not-regress floors.
+
+**Deviations and additions beyond the original findings (recorded for future readers):**
+
+- **Wave 3 batch seam re-cut:** batches 4 and 5 as written both touched `TripsHomePage.jsx`
+  (C2 vs M7/L4). Items were re-split by file ownership instead — same findings, zero
+  agent collisions. The batch/status table above still reflects the original grouping.
+- **C3 follow-on (orchestrator catch):** the server now emits `done` after `error`, which
+  would have made the client commit the partial assistant reply twice. The `done` handler
+  in `useCopilot.js` is a no-op once the stream already terminated via `error`.
+- **H3/Q3 follow-on (orchestrator catch):** a stale-TTL refresh regenerates only a delta,
+  but the client's non-append protocol replaces each category — streaming the delta alone
+  would have shrunk the visible grid to just-new items. The route now streams cached
+  breadth up front, suppresses mid-generation delta chunks, and streams the full merged
+  set at the end; locked in by test assertions in `discovery.test.js`.
+- **H4 resolved via option (b):** frontend port of `wgs84ToGcj02` in
+  `frontend/src/utils/coordinates.js` (verbatim twin of `backend/src/services/coordinates.js`,
+  verified bit-exact across CN and non-CN samples). If the conversion math ever changes,
+  update both files together. The `coordinate_system` guard means gcj02-stored user pins
+  are never double-converted.
+- **L4 extension:** with bookings present but no `bookingSource` on any of them, the
+  Logistics header now says "N bookings." instead of "N bookings across 0 sources"
+  (the old `|| 1` bandaid was hiding this case).
+- **M6 note:** the fix mirrors `cacheTimestampToEpochMs` from `placeResolver.js`. The same
+  `datetime('now')` → `new Date()` round-trip exists in unrelated subsystems (auth,
+  importer) and was deliberately left untouched per batch scope — harmless while the
+  Docker host runs UTC, but worth folding into any future backend sweep.
+
+**Data caveat for deploy:** `global_discovery_cache` rows generated before the H3 fix
+still carry per-trip exclusion pollution. They self-heal on their next TTL-expiry merge;
+alternatively clear the table at deploy time for an immediate fresh start (cheap — one
+Claude generation per destination on next request, by design).
+
+**Deferred (not regressions):** Q1/Q2 (booking-type edit, destination edit) remain a
+follow-up design task with the downstream-analysis checklist recorded under Product
+decisions below.
 
 ---
 
@@ -140,9 +195,10 @@ Design-language drift (fonts/palette/TODOs: none found) · auth offline fallback
 
 **Step 0 — persist the report: DONE.** This document is that report. Each batch has a status line in the table above (`pending / in progress / done / verified`), updated as work lands — if a session ends or a usage limit resets, this doc is the resume point; no re-discovery needed.
 
-## Session handoff prompt
+## Session handoff prompt (historical — sweep is complete, do not resume from here)
 
-Paste this to resume implementation in a fresh session:
+This prompt was used to resume implementation across sessions while the sweep was in
+progress. Kept for the record of how the work was paced:
 
 ```
 Continue implementing the approved UX sweep fixes for Trippy (this repo).
