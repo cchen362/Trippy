@@ -8,6 +8,10 @@ export default function DayHeader({ day, dayNumber, onCityOverride }) {
   const [saving, setSaving] = useState(false);
   const inputRef = useRef(null);
 
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
   if (!day) return null;
 
   const city = day.resolvedCity ?? day.city;
@@ -16,10 +20,6 @@ export default function DayHeader({ day, dayNumber, onCityOverride }) {
     setDraft(day.cityOverride ?? city ?? '');
     setEditing(true);
   };
-
-  useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
 
   const handleSave = async () => {
     if (!onCityOverride) return;

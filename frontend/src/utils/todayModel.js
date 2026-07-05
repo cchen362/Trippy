@@ -45,6 +45,18 @@ function tonightHotelHero(bookings, todayIso) {
   );
 }
 
+// M2: the hotel stop can live on any day of the stay (usually check-in day),
+// not necessarily today's — so search across every day's stops, mirroring
+// the lookup TodayTab.jsx previously did itself for TonightCard alone.
+function stopForBooking(days, bookingId) {
+  if (!bookingId) return null;
+  for (const d of days) {
+    const found = d.stops.find((s) => s.bookingId === bookingId);
+    if (found) return found;
+  }
+  return null;
+}
+
 function firstTimedItemForDay(day, bookings) {
   if (!day) return null;
   const dayIso = day.date;
@@ -173,7 +185,9 @@ export function computeToday(days, bookings, now = new Date()) {
   const hero = nextAnchor
     ? { kind: nextAnchor.kind, time: nextAnchor.time, stop: nextAnchor.stop, booking: nextAnchor.booking }
     : tonight
-      ? { kind: 'hotel', booking: tonight }
+      // M2: attach the hotel's stop so the hero can still render NavigateIcon
+      // when the hotel itself is the day's hero (no other anchors left).
+      ? { kind: 'hotel', booking: tonight, tonightStop: stopForBooking(days, tonight.id) }
       : null;
 
   let cutoffSortOrder = null;

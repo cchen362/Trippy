@@ -14,8 +14,8 @@ waves land, so any session (or usage-limit reset) can resume from here without r
 | 3 | 4. PWA/nav | C2, L9 | verified (2026-07-05, map-config rule confirmed in built sw.js; C2 session-guard code-reviewed — standalone mode not emulatable in preview) |
 | 3 | 5. Error surfacing + share link | H2, M7, L4, M3 | verified (2026-07-05, live backend-down move → shared ErrorBanner, no silent divergence; share link persists across modal reopen; backend 189/189) |
 | 4 | 6. Discovery | H3 (+Q3 improvements), M1, M6, L5, L11 | verified (2026-07-05, backend 197/197 incl. no-exclusion + TZ + merge-on-refresh tests; 375px preview: no mid-keystroke flicker, "— verify" hours badges, DayPicker Escape/labels; stale-refresh stream contract fixed to deliver merged breadth) |
-| 5 | 7. Today/map | H4, M2, L1, L3, L7 | pending |
-| 5 | 8. Stragglers | M5, L6, L8, L10, L12 | pending |
+| 5 | 7. Today/map | H4, M2, L1, L3, L7 | verified (2026-07-05, frontend 21/21 incl. new M2 test; GCJ-02 port bit-exact vs backend across CN/non-CN samples; L3 verified at 375px) |
+| 5 | 8. Stragglers | M5, L6, L8, L10, L12 | verified (2026-07-05, frontend 21/21 + build; all five reviewed, CaptureFlow confirm mirrors LogisticsTab pattern) |
 
 Pacing rule: one wave at a time, max 2 agents in flight (frontend-heavy + backend-heavy).
 After each wave: backend `npm test`, frontend build, 375px preview pass, update this table, commit.

@@ -38,6 +38,7 @@ export default function CaptureFlow({
   const [submitError, setSubmitError] = useState(null);
   const [tripEndDate, setTripEndDate] = useState(tripDates.endDate);
   const [tripStartDate, setTripStartDate] = useState(tripDates.startDate);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   if (!open) return null;
 
@@ -148,6 +149,16 @@ export default function CaptureFlow({
 
   const editingDraft = draftBookings.find((d) => d.localId === editingLocalId) || null;
   const isReview = phase === 'review';
+  const hasUnsavedWork = phase === 'extracting' || (isReview && draftBookings.some((d) => d.included));
+
+  const handleCloseClick = () => {
+    if (hasUnsavedWork && !confirmClose) {
+      setConfirmClose(true);
+      return;
+    }
+    setConfirmClose(false);
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
@@ -162,9 +173,30 @@ export default function CaptureFlow({
                 {isReview ? "Here's what we found." : 'Dump your travel chaos here.'}
               </h2>
             </div>
-            <button type="button" onClick={onClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
-              Close
-            </button>
+            {confirmClose ? (
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setConfirmClose(false)}
+                  className="font-mono text-xs tracking-[0.24em] uppercase"
+                  style={{ color: 'var(--cream-dim)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseClick}
+                  className="font-mono text-xs tracking-[0.24em] uppercase"
+                  style={{ color: '#f8b4b4' }}
+                >
+                  Discard &amp; Close?
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={handleCloseClick} className="font-mono text-xs tracking-[0.24em] uppercase flex-shrink-0" style={{ color: 'var(--cream-dim)' }}>
+                Close
+              </button>
+            )}
           </div>
 
           {(phase === 'input' || phase === 'extracting') && (

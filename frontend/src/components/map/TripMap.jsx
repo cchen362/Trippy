@@ -14,7 +14,10 @@ function MapBounds({ stops, boundsKey }) {
   useEffect(() => {
     if (stops.length === 0) return;
     const bounds = stops.map(s => [s.displayLat, s.displayLng]);
-    map.fitBounds(bounds, { padding: [40, 40] });
+    // L7: a single-pin day gives fitBounds a zero-area box, which otherwise
+    // zooms all the way to Leaflet's max (street-level, house-number scale).
+    // Cap at a city-block zoom so a lone pin still shows context.
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
   }, [boundsKey, map]);
   return null;
 }

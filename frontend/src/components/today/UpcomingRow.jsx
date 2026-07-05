@@ -1,9 +1,7 @@
 import NavigateIcon from './NavigateIcon.jsx';
 
-export default function UpcomingRow({ item, deepLinkProvider, dim = false }) {
+export default function UpcomingRow({ item, deepLinkProvider, mapConfig, dim = false }) {
   const title = item.booking?.title || item.stop?.title || 'Untitled';
-  const lat = item.stop?.lat ?? null;
-  const lng = item.stop?.lng ?? null;
 
   return (
     <div
@@ -16,7 +14,7 @@ export default function UpcomingRow({ item, deepLinkProvider, dim = false }) {
       <span className="font-body text-base flex-1 min-w-0 truncate" style={{ color: 'var(--cream)' }}>
         {title}
       </span>
-      <NavigateIcon lat={lat} lng={lng} label={title} deepLinkProvider={deepLinkProvider} />
+      <NavigateIcon stop={item.stop} label={title} deepLinkProvider={deepLinkProvider} mapConfig={mapConfig} />
     </div>
   );
 }

@@ -21,12 +21,15 @@ function TicketButton({ documents }) {
   );
 }
 
-export default function HeroCard({ item, deepLinkProvider }) {
+export default function HeroCard({ item, deepLinkProvider, mapConfig }) {
   if (!item) return null;
 
   const isHotel = item.kind === 'hotel';
   const booking = item.booking;
-  const stop = item.stop;
+  // M2: hotel hero now carries a tonightStop (attached in todayModel.js) so
+  // navigation survives into the evening state, when heading to the hotel
+  // matters most.
+  const stop = item.stop || (isHotel ? item.tonightStop : null);
 
   const eyebrow = isHotel ? 'Tonight' : (booking?.type || stop?.type || 'Next');
   const title = booking?.title || stop?.title || 'Untitled';
@@ -34,8 +37,6 @@ export default function HeroCard({ item, deepLinkProvider }) {
   // Status is a flight-only extension point (D6) — trains/others deep-link out instead.
   const showStatus = booking?.type === 'flight';
 
-  const lat = stop?.lat ?? null;
-  const lng = stop?.lng ?? null;
   const navLabel = title;
 
   return (
@@ -64,7 +65,7 @@ export default function HeroCard({ item, deepLinkProvider }) {
         </p>
       )}
       <div className="flex items-center gap-2 flex-wrap">
-        <NavigateIcon lat={lat} lng={lng} label={navLabel} deepLinkProvider={deepLinkProvider} />
+        <NavigateIcon stop={stop} label={navLabel} deepLinkProvider={deepLinkProvider} mapConfig={mapConfig} />
         <TicketButton documents={booking?.documents} />
         {showStatus && <StatusPill booking={booking} />}
       </div>

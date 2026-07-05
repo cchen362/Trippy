@@ -75,7 +75,7 @@ function OperationRow({ op, days }) {
         }}
       >
         <span style={{ color: '#c9a84c' }}>→</span>{' '}
-        Move stop to{' '}
+        Move <strong>{resolveStopLabel(days, op.stopId)}</strong> to{' '}
         <strong>{formatDayLabel(days, op.toDayId || op.dayId)}</strong>
       </div>
     );

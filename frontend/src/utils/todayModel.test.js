@@ -9,8 +9,8 @@ function day(date, stops) {
   return { id: `day-${date}`, date, stops };
 }
 
-function stop({ id, time = null, title, sortOrder, bookingId = null }) {
-  return { id, dayId: null, bookingId, time, title, sortOrder };
+function stop({ id, time = null, title, sortOrder, bookingId = null, lat = null, lng = null }) {
+  return { id, dayId: null, bookingId, time, title, sortOrder, lat, lng };
 }
 
 function booking({ id, type = 'other', title, startDatetime = null, endDatetime = null, originTz = null, showInItinerary = true }) {
@@ -67,6 +67,15 @@ describe('computeToday', () => {
     expect(result.hero.kind).toBe('hotel');
     expect(result.hero.booking.id).toBe('h1');
     expect(result.tonight.id).toBe('h1');
+  });
+
+  it('4b. hotel hero (M2) carries tonightStop so navigation survives into the evening state', () => {
+    const hotel = booking({ id: 'h1', type: 'hotel', title: 'Riverside Inn', startDatetime: `${TODAY}T15:00`, endDatetime: `${TOMORROW}T11:00` });
+    const hotelStop = stop({ id: 'hs1', title: 'Riverside Inn', sortOrder: 1, bookingId: 'h1', lat: 35.68, lng: 139.76 });
+    const days = [day(TODAY, [hotelStop])];
+    const result = computeToday(days, [hotel], nowAt('20:00'));
+    expect(result.hero.kind).toBe('hotel');
+    expect(result.hero.tonightStop).toEqual(hotelStop);
   });
 
   it('5. hotel fallback fires every night of a multi-night stay', () => {

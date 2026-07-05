@@ -86,7 +86,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
                 </h3>
               </button>
               <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                {(stop.time || index !== undefined) && (
+                {stop.time && (
                   <span style={{
                     fontFamily: "'DM Mono', monospace",
                     fontSize: '11px',
@@ -96,7 +96,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
                     whiteSpace: 'nowrap',
                     paddingTop: '4px',
                   }}>
-                    {stop.time || `${index + 1}`}
+                    {stop.time}
                   </span>
                 )}
                 <span

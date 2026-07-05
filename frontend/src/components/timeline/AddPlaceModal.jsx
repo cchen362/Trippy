@@ -29,7 +29,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
   // carried through to the Place Details call, then discarded.
   const [sessionToken, setSessionToken] = useState(null);
   const canSubmit = useMemo(() => form.title.trim().length > 0, [form.title]);
-  const near = day?.city || day?.resolvedCity || '';
+  const near = day?.resolvedCity || day?.city || '';
 
   useEffect(() => {
     if (open) {
