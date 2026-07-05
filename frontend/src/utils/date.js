@@ -23,6 +23,11 @@ export function naiveIsoToAbsolute(iso, tz) {
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(d);
   const get = (t) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  const offsetMs = ((hour - get('hour')) * 60 + (minute - get('minute'))) * 60_000;
+  // Compare the FULL rendered timestamp (year/month/day/hour/minute), not just
+  // hour/minute — otherwise a UTC candidate that lands on a different calendar
+  // day in `tz` (e.g. evenings in UTC+8, early mornings in negative offsets)
+  // produces an offset that's off by a day, shifting the result 24h.
+  const renderedUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  const offsetMs = utcCandidate - renderedUtc;
   return new Date(utcCandidate + offsetMs);
 }

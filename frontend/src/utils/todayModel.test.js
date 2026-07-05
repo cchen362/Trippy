@@ -150,6 +150,37 @@ describe('computeToday', () => {
     expect(result.upcoming.map((i) => i.id)).toEqual(['later']);
   });
 
+  it('13. evening flight booking with originTz Asia/Shanghai is marked passed once departure time has passed in China time', () => {
+    // Wall-clock 18:30 in Asia/Shanghai on TODAY is 2026-07-10T10:30:00.000Z.
+    // Regression guard for the naiveIsoToAbsolute day-wrap bug: the buggy
+    // implementation computed this as 2026-07-11T10:30:00.000Z (24h late),
+    // which would keep this anchor as the hero long after it actually passed.
+    const flight = booking({
+      id: 'f1', type: 'flight', title: 'Evening flight',
+      startDatetime: `${TODAY}T18:30`, originTz: 'Asia/Shanghai',
+    });
+    const days = [day(TODAY, [stop({ id: 's1', title: 'Evening flight', time: '18:30', sortOrder: 1, bookingId: 'f1' })])];
+
+    const afterDeparture = new Date('2026-07-10T11:00:00.000Z'); // 19:00 China time — after 18:30 departure
+    const resultAfter = computeToday(days, [flight], afterDeparture);
+    expect(resultAfter.hero).toBeNull();
+    expect(resultAfter.collapsed.map((i) => i.id)).toEqual(['s1']);
+  });
+
+  it('14. evening flight booking with originTz Asia/Shanghai is the hero before departure time in China time', () => {
+    const flight = booking({
+      id: 'f1', type: 'flight', title: 'Evening flight',
+      startDatetime: `${TODAY}T18:30`, originTz: 'Asia/Shanghai',
+    });
+    const days = [day(TODAY, [stop({ id: 's1', title: 'Evening flight', time: '18:30', sortOrder: 1, bookingId: 'f1' })])];
+
+    const beforeDeparture = new Date('2026-07-10T09:00:00.000Z'); // 17:00 China time — before 18:30 departure
+    const resultBefore = computeToday(days, [flight], beforeDeparture);
+    expect(resultBefore.hero).not.toBeNull();
+    expect(resultBefore.hero.stop.id).toBe('s1');
+    expect(resultBefore.collapsed).toEqual([]);
+  });
+
   it('12. a hidden-from-itinerary booking linked to a stop is not double-counted', () => {
     const linkedFlight = booking({ id: 'f1', type: 'flight', title: 'Flight', startDatetime: `${TODAY}T09:00`, showInItinerary: false });
     const days = [
