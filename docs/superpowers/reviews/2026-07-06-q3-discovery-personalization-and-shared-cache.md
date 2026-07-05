@@ -78,6 +78,33 @@ The review must propose bounds, such as:
 - archival rather than indefinite accumulation;
 - a separate canonical place identity for deduplication.
 
+## Provisional finding Q3-04 — hero count includes categories the user never sees (live observation 2026-07-06)
+
+Live production use (Chengdu trip, post-deploy) surfaced a concrete instance of Q3-03's
+"unbounded catalogue growth" concern: the destination hero's "N curated places" count
+(`DiscoveryPanel.jsx:393`, `totalCount = Object.values(partialResults).flat().length`) sums
+**every** category key present in `partialResults`, while the visible category tabs
+(`DiscoveryPanel.jsx:43-51`) are only `essentials` plus whichever categories map from the
+trip's declared `interestTags`. Any other category the backend/global cache returns into
+state (e.g. via "Show more") inflates the hero total without ever getting a tab the user can
+open — so the number climbs (96 → 183 observed) while the sum of visible per-tab counts stays
+far lower (18 + 17 + 34 = 69 observed), with no way for the user to see or reach the
+uncounted-for-them remainder. Whatever Q3 lands on for the global/trip-specific boundary and
+category selection (Options A/B/C) must make the hero count and the tabs agree — either scope
+the count to categories actually rendered for this trip, or surface the hidden categories
+somewhere reachable.
+
+## Provisional finding Q3-05 — "Show more" has no loading affordance (live observation 2026-07-06)
+
+The Show More button (`DiscoveryPanel.jsx:779-797`) only communicates its `loading` state via
+a dimmed `disabled` style — label text stays "Show more", no spinner, no in-panel progress
+indicator. Observed live: a 15s+ fetch (AI generation + merge) with the button simply greyed
+out reads as frozen/broken rather than working, and it stays dimmed for a beat even after the
+new suggestions have rendered. Any Q3 implementation should carry a visible in-progress state
+(e.g. animated ellipsis / "Finding more places…" label swap) regardless of which
+personalization option is chosen — this is a UX gap independent of the ranking/caching
+architecture decision.
+
 ## Options to investigate
 
 ### Option A — global catalogue, local deterministic ranking
