@@ -85,6 +85,9 @@ These are investigation leads, not approved fixes.
 | Q3-01 | Interests, pace and traveller type are collected but do not personalize discovery | Collected preference data has no visible discovery payoff | Q3 |
 | Q3-02 | “Show more” globally merges increasingly marginal AI suggestions | One user's request changes the catalogue for everyone | Q3, Trust |
 | Q3-03 | Shared discovery cache growth is unbounded | Payload, prompt size, cost and visual noise grow over time | Q3, Trust |
+| Q2-04 | Geocoding bias uses `destination_countries[0]` and the seeded day city for every stop, ignoring the derived day city (added by Q2 review, 2026-07-06) | Stops on later-country days hard-miss Nominatim (`countrycodes` is a filter, not a bias) and fall to billed Google lookups or wrong-country matches | Q2 |
+| Q2-05 | The outside-China coordinate guard is a bounding box (lat 3.86–53.55, lng 73.66–135.05) containing Korea and most of Southeast Asia (added by Q2 review, 2026-07-06) | On GCJ-02 trips, pins in Seoul/Penang/Bangkok etc. are spuriously shifted; KL/Singapore are protected — nuance verified both directions | Q2 |
+| Q2-06 | Map pin correction stores the trip-wide `mapConfig.coordinateSystem` on the stop (added by Q2 review, 2026-07-06) | Corrections made on non-China days of China-including trips are mislabeled `gcj02`, poisoning data that survives a later provider fix | Q2, Trust |
 | TR-01 | Offline document caches can outlive logout or revoked server access | Sensitive tickets may remain available on a device | Trust |
 | TR-02 | Multi-booking imports and co-pilot mutations can partially apply | Users may see duplicate or half-applied changes | Trust, Q1 |
 | TR-03 | Backup/restore, external-call timeouts and operational visibility are incomplete | A failure may cause data loss or an app that silently stalls | Trust |
@@ -228,6 +231,73 @@ reactivated later.
 2. Q2 investigation session — runnable in parallel with 1 (handoff prompt in the same plan).
 3. Owner reviews Gate A recommendation → Q2 implementation plan authored.
 4. Q3, persisted conversion, co-pilot strengthening — re-scoped only after 3.
+
+## Gate A recommendation (Q2 investigation, 2026-07-06)
+
+Full evidence in the [completed Q2 review](2026-07-06-q2-trip-geography-and-map-architecture.md).
+Q2's exit criterion is met; this section is the under-one-page summary for owner sign-off.
+
+### Proposed canonical model
+
+**The day owns geographic identity as a derived `{city, countryCode}` pair.** The existing
+five-layer `deriveDayCity` precedence (override → active hotel → same-day transit arrival →
+previous day → seeded city) is kept exactly as-is and upgraded to carry a country per layer —
+Option A upgraded, with Option C (stop/place country) for deep links. Everything else derives
+from it:
+
+- **Trip destinations** become a summary derived from days; the unpaired
+  `destinations`/`destination_countries` arrays are demoted to a write-through legacy
+  projection (kept one release for share/PWA compatibility, then dropped).
+- **Provider selection** reads the narrowest authority: deep link ← stop's resolved country,
+  else day country; map tiles and coordinate-conversion target ← day country; geocoding bias,
+  discovery identity, and AI-import context ← day pair.
+- **Bookings stay evidence, not authority** — they feed derivation layers 2–3, so Q1 type
+  corrections recompute geography with no reconciliation step.
+
+This is buildable with ingredients already in the system: transit country codes are already
+extracted (`claude.js:39`) and currently discarded; the capture UI already builds
+`{city, country}` pairs and flattens them at submit (`NewTripModal.jsx:168-169`); and the Map
+tab already renders one day at a time (`MapTab.jsx:59`), so per-day tiles need no
+multi-provider canvas. Option B (dated segments) is rejected: it stores a second representation
+of facts bookings already encode, reintroducing the disagreement class under review. Owner
+decision 3 is satisfied — day-level identity, provider selection derivable from it, no
+dominant-country shortcut; only provider-switching UI phases later.
+
+### Decisions needed from the owner (Q2 review §10 has detail)
+
+1. Ship the destination/country **editor** in the same phase as the migration (recommended —
+   it is the recovery path for backfill mistakes), or as a fast follow?
+2. Approve the **stop-level country column** (one additive migration; enables per-place links)?
+3. Approve adding `countryCode` to **hotel/other extraction** (prompt-only change)?
+4. Mislabeled pins (Q2-06): silently relabel the detectable cohort during migration, or surface
+   a per-trip "re-check pins" action?
+5. Retire the legacy destination arrays after one write-through release, or keep indefinitely?
+
+On sign-off, the Q2 implementation plan is authored per Active sequencing step 3; its migration
+must meet the Gate D trust baseline (atomic, backup-first, tested against existing trips).
+
+### Gate A: CLOSED — owner decisions (2026-07-06)
+
+1. **Model + editor together:** recommendation accepted; the destination/country editor ships
+   in the same phase as the migration.
+2. **Stop-level country column:** approved.
+3. **Hotel/other `countryCode` in the extraction prompt:** approved.
+4. **Mislabeled pins:** silently relabel during migration (owner judged relabeling more
+   intuitive than a per-trip action).
+5. **Legacy destination arrays:** retire, provided it yields a cleaner build with little to no
+   downstream debt.
+
+**Owner context that reshapes migration scope:** the app has essentially no usage history —
+one past trip and one upcoming test trip. Backfill is not a priority concern; the work is a
+revamp for future trips. Orchestrator verified against the production DB (2026-07-06, read-only):
+2 trips / 13 days / 35 stops / 10 bookings / 1 share link / 1 user; SQLite 3.45.3 (DROP COLUMN
+supported); exactly one `gcj02`-labeled stop, and it is on the China trip, so the Q2-06
+poisoned-pin cohort in production is zero. The upcoming Kuala Lumpur trip is a live instance of
+scenario S6 (`destinations: ["Kuala Lumpur"]`, `destination_countries: []`). Production runs
+`e870b6e` — everything since Plan 3 M2 is undeployed; the Q2 plan must sequence a
+backup-protected deploy accordingly.
+
+Implementation plan: [Implementation Plan 6 — Q2 Geography Model](../plans/Implementation%20Plan%206%20Q2%20Geography%20Model.md).
 
 ## Final output of this review family
 
