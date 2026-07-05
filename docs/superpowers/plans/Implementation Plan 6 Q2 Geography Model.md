@@ -38,12 +38,17 @@ Server access is restored (`ssh chee@100.94.82.35`, project at `~/Trippy`, DB vo
 `~/Trippy/data/trippy.db`, container `trippy_trippy_1`). Production runs `e870b6e` — four
 weeks behind main.
 
-1. **Deploy current main first** (Plans 3-M3/4/5 content) and verify, so this plan's schema
-   changes are not entangled with a month of undeployed work in one jump.
-2. **Backup before any Plan 6 migration runs in production:** at minimum
-   `sqlite3 trippy.db ".backup trippy-pre-plan6.db"` (or file copy while the container is
-   stopped — the WAL files exist). This is also the moment to finally land the **H2 backup
-   cron** (Plan 3 leftover, now unblocked); Gate D requires backup-first for this migration.
+1. **DONE 2026-07-05** — Deployed current main (`00cc959`, Plans 3-M3/4/5 content) and
+   verified: migrations 011/012 applied cleanly, container stable, share link still resolves.
+   Production baseline is now current main; this plan's schema changes are no longer
+   entangled with a month of undeployed work.
+2. **DONE 2026-07-05** — Backup taken before the deploy:
+   `~/backups/trippy-pre-h1-2026-07-05.db` (385KB, verified restorable). The **H2 backup
+   cron** (Plan 3 leftover) is also now live: `~/trippy-backup.sh` on the host, `0 3 * * *`
+   cron, ran once manually and verified (`~/backups/trippy-2026-07-05.db`, 430KB, opens and
+   `SELECT COUNT(*) FROM trips` returns 2). Gate D's backup-first requirement for the Plan 6
+   migration is satisfied by this nightly cron plus a fresh manual backup immediately before
+   Wave 1's `013_day_stop_geography.sql` runs.
 
 ---
 
