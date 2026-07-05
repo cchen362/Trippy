@@ -177,6 +177,58 @@ This ordering is deliberately tentative:
 Q1 extraction-draft correction may be pulled forward because it is narrower than persisted
 conversion and directly protects the app's primary ingestion promise.
 
+## Owner decisions and orchestrator-verified findings (2026-07-06)
+
+Recorded by the orchestrator after code verification and an owner interview. These decisions
+narrow the review family's active scope; the briefs above remain the reference for anything
+reactivated later.
+
+### Findings verified directly in code (no investigation session needed to re-establish)
+
+| ID | Status | Evidence |
+|---|---|---|
+| Q1-01 | **Confirmed** | `AddBookingModal.jsx:316` (`isEditing = Boolean(booking)`) disables the type selector (`disabled={isEditing}`, line 536); `CaptureFlow.jsx:244` passes the extraction draft through that same `booking` prop, so drafts inherit the persisted-edit lock. |
+| Q2-01 | **Confirmed** | `002_trips.sql`: `destinations` and `destination_countries` are independent JSON arrays, no positional pairing. |
+| Q2-02 | **Confirmed** | `mapConfig.js:21-61`: provider selection is trip-wide; any `CN` → AMap/GCJ-02 for the whole trip, else any `KR` → Naver deep links. |
+| Q2-03 | **Partially confirmed** | A day-level city derivation already exists — `trips.js:147` `deriveDayCity` resolves override → active hotel → transit arrival → previous day → seeded city. It emits a city *string* only (no country) and the map layer ignores it. Q2 is an upgrade of this mechanism, not a greenfield model. |
+| Q3-01 | **Confirmed** | `routes/discovery.js` never reads `interest_tags`, `pace`, or `travellers`; cache key is a normalized city string with no country. |
+| TR-02 | **Partially confirmed** | `routes/copilot.js:149-172`: sync copilot ops run in a transaction, async add/update ops run outside it — multi-op mutations can half-apply. |
+| TR-03 | **Confirmed (known)** | No backup job exists yet; it is the next deploy task, blocked on Tailscale server re-auth. Operational chore, not an investigation item. |
+
+### Decisions
+
+1. **Active scope is two workstreams:** the Q2 geography investigation (Gate A) and the Q1
+   draft-correction fix (extraction-review type change only). Q1 draft correction is pulled
+   forward as this document already anticipated — it is independent of Q2 and protects the
+   primary ingestion promise.
+2. **Persisted booking-type conversion is deferred indefinitely.** Owner assessment: a saved
+   flight does not become a train in practice; delete-and-recreate is acceptable. Revisit only
+   if real usage contradicts this.
+3. **Mixed-country trips are not near-term, but the geography model must be built clean.**
+   Owner explicitly rejected a partial structure that leaves product debt: Q2's recommended
+   model must support day-level city/country identity and provider selection derived from it,
+   even if provider-switching UI ships later. No dominant-country shortcut baked into the data
+   model.
+4. **Q2 runs as a separate investigation session first** (per the agent contract in this
+   document), producing a completed review and a Gate A recommendation for owner sign-off
+   before any implementation plan is written.
+5. **Q3 personalization is deferred until Gate A closes.** Its first question ("should
+   onboarding collect pace/travellers at all?") is a product call to revisit with the Q2 model
+   in hand.
+6. **Co-pilot is parked deliberately.** No feature work now. It is named as the intended
+   payoff surface for Q2/Q3: once structured geography and a personalization contract exist,
+   the co-pilot is the natural place they become user-visible (trip-aware answers,
+   "why this fits" grounded in real preferences). Its TR-02 atomic-apply gap is recorded and
+   travels with the Trust baseline, not with feature work.
+
+### Active sequencing
+
+1. Q1 draft-correction fix — implementable now (spec in
+   [Implementation Plan 5](../plans/Implementation%20Plan%205%20Q2%20Investigation%20and%20Q1%20Draft%20Fix.md)).
+2. Q2 investigation session — runnable in parallel with 1 (handoff prompt in the same plan).
+3. Owner reviews Gate A recommendation → Q2 implementation plan authored.
+4. Q3, persisted conversion, co-pilot strengthening — re-scoped only after 3.
+
 ## Final output of this review family
 
 After all focused reports are reviewed, update this document with:
