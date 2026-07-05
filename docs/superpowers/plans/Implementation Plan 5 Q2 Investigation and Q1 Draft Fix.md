@@ -1,6 +1,6 @@
 # Implementation Plan 5 — Q2 Geography Investigation + Q1 Draft-Correction Fix
 
-**Status:** approved scope, not started
+**Status:** Workstream B COMPLETE (2026-07-06) — draft-mode type correction shipped, tests green (frontend 28, backend 197), 375px selector states verified. Workstream A (Q2 investigation) still pending.
 **Decision record:** [Product and Architecture Risk Review — Owner decisions 2026-07-06](../reviews/2026-07-06-product-architecture-risk-review.md#owner-decisions-and-orchestrator-verified-findings-2026-07-06)
 
 Two independent workstreams. They share no files and can run in separate sessions in either
@@ -170,4 +170,4 @@ Update this plan's status line and commit when verified.
 | Workstream | Status |
 |---|---|
 | A — Q2 investigation | pending |
-| B — Q1 draft fix | pending |
+| B — Q1 draft fix | **complete (2026-07-06)** — `mode` prop on `AddBookingModal`, `draftFormForType` retention via `normalizeForm`→`hydrateFormFromBooking`, pure logic extracted to `bookingForm.js`; 7 new tests; persisted-edit lock verified unchanged |

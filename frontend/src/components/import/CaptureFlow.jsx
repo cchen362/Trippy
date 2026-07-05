@@ -242,6 +242,7 @@ export default function CaptureFlow({
           lookupFlight={lookupFlight}
           lookupCities={lookupCities}
           booking={editingDraft.data}
+          mode="draft"
         />
       )}
     </div>
