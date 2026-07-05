@@ -68,6 +68,23 @@ export default defineConfig({
             },
           },
           {
+            // Map provider config (Google Maps vs AMap) — cache so offline
+            // Today-tab usage doesn't silently fall back to Google Maps deep
+            // links when AMap is the configured provider (e.g. in China).
+            urlPattern: ({ url, request }) => (
+              request.method === 'GET' &&
+              /^\/api\/trips\/[^/]+\/map-config$/.test(url.pathname)
+            ),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'trippy-map-config',
+              expiration: {
+                maxEntries: 20,
+                maxAgeSeconds: 7 * 24 * 60 * 60,
+              },
+            },
+          },
+          {
             // Import artifact files (original ticket/booking screenshots) are
             // immutable once uploaded — CacheFirst so tickets open offline.
             urlPattern: ({ url, request }) => (

@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Paperclip, FileText } from 'lucide-react';
 import AddBookingModal from '../components/logistics/AddBookingModal.jsx';
 import FlightBookingCard from '../components/logistics/FlightBookingCard.jsx';
@@ -7,6 +8,7 @@ import HotelBookingCard from '../components/logistics/HotelBookingCard.jsx';
 import OtherBookingCard from '../components/logistics/OtherBookingCard.jsx';
 import CaptureFlow from '../components/import/CaptureFlow.jsx';
 import DocumentViewer from '../components/documents/DocumentViewer.jsx';
+import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { fileToInput } from '../services/importApi.js';
 import { useTripContext } from './TripPage.jsx';
@@ -56,8 +58,20 @@ export default function LogisticsTab() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const fileInputRef = useRef(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [importBanner, setImportBanner] = useState(location.state?.bannerMessage || null);
+
+  // Clear the navigation-state flag once read so a page refresh or revisit doesn't
+  // resurface the same one-time import-failure message.
+  useEffect(() => {
+    if (location.state?.bannerMessage) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grouped = useMemo(() => groupBookings(bookings), [bookings]);
+  const sourceCount = new Set(bookings.map((b) => b.bookingSource).filter(Boolean)).size;
 
   // selectedBooking is a snapshot from the moment its card was tapped; re-derive from the
   // live `bookings` list so a newly attached/removed document appears without closing the sheet.
@@ -102,6 +116,8 @@ export default function LogisticsTab() {
 
   return (
     <div className="space-y-8">
+      <ErrorBanner message={importBanner} onDismiss={() => setImportBanner(null)} />
+
       {/* Header */}
       <section className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
@@ -112,7 +128,11 @@ export default function LogisticsTab() {
             Your bookings
           </h2>
           <p className="font-body text-xl" style={{ color: 'var(--cream-dim)' }}>
-            {bookings.length} bookings across {new Set(bookings.map((b) => b.bookingSource).filter(Boolean)).size || 1} sources.
+            {bookings.length === 0
+              ? 'No bookings yet — add one to get started.'
+              : sourceCount === 0
+                ? `${bookings.length} booking${bookings.length === 1 ? '' : 's'}.`
+                : `${bookings.length} booking${bookings.length === 1 ? '' : 's'} across ${sourceCount} source${sourceCount === 1 ? '' : 's'}.`}
           </p>
         </div>
 

@@ -31,10 +31,23 @@ export default function PlanTab() {
 
   const handleReorder = async (orderedStopIds) => {
     if (!activeDay || orderedStopIds.length === 0) return;
-    await reorderStops(activeDay.id, orderedStopIds);
+    try {
+      await reorderStops(activeDay.id, orderedStopIds);
+    } catch {
+      // reorderStops already recorded the failure on useStops.error (surfaced by
+      // TripPage's shared banner). The optimistic order in Timeline's local state
+      // never made it to the server, so refetch to re-sync `day.stops` with truth.
+      await refresh();
+    }
   };
 
-  const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId });
+  // updateStop/deleteStop rejections are already recorded on useStops.error
+  // (surfaced by TripPage's shared banner); catch here only to avoid an unhandled
+  // rejection, since these call sites (StopCard/TransitStop buttons) have no
+  // local UI to await the result into.
+  const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId }).catch(() => {});
+
+  const handleDeleteStop = (stopId) => deleteStop(stopId).catch(() => {});
 
   const handleAddPlace = (data) => createStop(activeDay.id, data);
 
@@ -122,7 +135,7 @@ export default function PlanTab() {
             dayNumber={days.findIndex((day) => day.id === activeDayId) + 1}
             onCityOverride={handleCityOverride}
           />
-          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={deleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
+          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={handleDeleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
         </motion.div>
       </AnimatePresence>
 

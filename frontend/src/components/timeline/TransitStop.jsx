@@ -26,8 +26,13 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
 
   const handleNoteBlur = async () => {
     if (!noteDirty) return;
-    setNoteDirty(false);
-    await onUpdate(stop.id, { note: noteValue });
+    try {
+      await onUpdate(stop.id, { note: noteValue });
+      setNoteDirty(false);
+    } catch {
+      // Failed save: keep noteDirty true so the value isn't silently discarded.
+      // useStops.error is already surfaced by the shared TripPage banner.
+    }
   };
 
   const otherDays = days ? days.filter((d) => d.id !== stop.dayId) : [];

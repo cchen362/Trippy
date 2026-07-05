@@ -13,7 +13,9 @@ export function useCollaboration(tripId, enabled = true) {
     setLoading(true);
     setError(null);
     try {
-      setData(await tripsApi.collaborators(tripId));
+      const result = await tripsApi.collaborators(tripId);
+      setData(result);
+      setShareLink(result.shareLink || null);
     } catch (err) {
       setError(err);
     } finally {

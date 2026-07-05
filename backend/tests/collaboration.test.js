@@ -10,7 +10,7 @@ import {
   listCollaborators,
   removeCollaborator,
 } from '../src/services/collaboration.js';
-import { createShareLink, getSharedTrip } from '../src/services/share.js';
+import { createShareLink, getSharedTrip, revokeShareLink } from '../src/services/share.js';
 import { createStop } from '../src/services/stops.js';
 import { createTrip, getTripDetail, listTripsForUser } from '../src/services/trips.js';
 
@@ -120,6 +120,29 @@ describe('collaboration service', () => {
 
   it('keeps unrelated authenticated users from listing collaborators', () => {
     expect(() => listCollaborators(otherUser.id, tripDetail.trip.id)).toThrow('Trip not found');
+  });
+
+  it('reports no share link until one has been created', () => {
+    const collaborators = listCollaborators(owner.id, tripDetail.trip.id);
+
+    expect(collaborators.shareLink).toBeNull();
+  });
+
+  it('surfaces the existing share link so reopening the modal can show it', () => {
+    const created = createShareLink(owner.id, tripDetail.trip.id);
+
+    const collaborators = listCollaborators(owner.id, tripDetail.trip.id);
+
+    expect(collaborators.shareLink).toEqual({ token: created.token, createdAt: created.createdAt });
+  });
+
+  it('reflects revocation by clearing the share link from the collaborators payload', () => {
+    createShareLink(owner.id, tripDetail.trip.id);
+    revokeShareLink(owner.id, tripDetail.trip.id);
+
+    const collaborators = listCollaborators(owner.id, tripDetail.trip.id);
+
+    expect(collaborators.shareLink).toBeNull();
   });
 });
 

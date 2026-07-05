@@ -21,7 +21,7 @@ const chipBaseStyle = {
 };
 
 export default function MapTab() {
-  const { trip, days, bookings, activeDayId, setActiveDayId, updateStop, saving } = useTripContext();
+  const { trip, days, bookings, activeDayId, setActiveDayId, updateStop, saving, reportError } = useTripContext();
   const [focusedSegmentId, setFocusedSegmentId] = useState('all');
   const [correctionStop, setCorrectionStop] = useState(null);
   const [correctionCenter, setCorrectionCenter] = useState(null);
@@ -97,15 +97,19 @@ export default function MapTab() {
 
   const saveCorrection = async () => {
     if (!correctionStop || !correctionCenter || !mapConfig) return;
-    await updateStop(correctionStop.id, {
-      lat: correctionCenter.lat,
-      lng: correctionCenter.lng,
-      coordinateSystem: mapConfig.coordinateSystem || 'wgs84',
-      coordinateSource: 'user_pin',
-      locationStatus: 'user_confirmed',
-      locationConfidence: 1,
-    });
-    cancelCorrection();
+    try {
+      await updateStop(correctionStop.id, {
+        lat: correctionCenter.lat,
+        lng: correctionCenter.lng,
+        coordinateSystem: mapConfig.coordinateSystem || 'wgs84',
+        coordinateSource: 'user_pin',
+        locationStatus: 'user_confirmed',
+        locationConfidence: 1,
+      });
+      cancelCorrection();
+    } catch (err) {
+      reportError?.(err, 'Could not save that pin location.');
+    }
   };
 
   const handleSearchChange = (event) => {

@@ -37,6 +37,7 @@ export default function TripsHomePage() {
     try {
       const response = await tripsApi.list(localIso());
       setTrips(response.trips || []);
+      setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -48,10 +49,16 @@ export default function TripsHomePage() {
     loadTrips();
   }, []);
 
+  // Resume-last-trip only applies to a cold app launch in the installed PWA. Without
+  // a once-per-session guard, mounting this page from in-app navigation (e.g. TopBar's
+  // "← Trips" link) would instantly bounce back to the last trip, making it impossible
+  // to reach the trips list, switch trips, or start a new one while the app is running.
   useEffect(() => {
     if (loading || !isStandalonePwa()) return;
+    if (window.sessionStorage.getItem('trippy:resumedThisSession')) return;
     const lastTripId = window.localStorage.getItem('trippy:lastTripId');
     if (lastTripId && trips.some((trip) => trip.id === lastTripId)) {
+      window.sessionStorage.setItem('trippy:resumedThisSession', '1');
       navigate(`/trips/${lastTripId}/plan`, { replace: true });
     }
   }, [loading, navigate, trips]);
@@ -68,12 +75,18 @@ export default function TripsHomePage() {
         // Trip creation is the point of no return — if confirming the captured
         // bookings fails, the trip still exists (recoverable via Logistics' own
         // capture entry point) rather than risking a duplicate trip on retry.
+        let importFailed = false;
         try {
           await importApi.confirm(captureArtifactId, { tripId: created.trip.id, bookings: captureBookings });
         } catch (err) {
           console.error('Failed to import captured bookings into new trip', err);
+          importFailed = true;
         }
-        navigate(`/trips/${created.trip.id}/logistics`);
+        navigate(`/trips/${created.trip.id}/logistics`, {
+          state: importFailed
+            ? { bannerMessage: "We saved your trip but couldn't import the bookings — try Add bookings again." }
+            : undefined,
+        });
       } else {
         navigate(`/trips/${created.trip.id}/plan`);
       }

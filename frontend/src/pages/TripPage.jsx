@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-d
 import { AnimatePresence } from 'framer-motion';
 import { Edit2, Users } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
+import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
 import TopBar from '../components/nav/TopBar.jsx';
@@ -34,11 +35,24 @@ export default function TripPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pageError, setPageError] = useState(null);
   const discovery = useDiscovery(tripId);
 
   useEffect(() => {
     if (tripId) window.localStorage.setItem('trippy:lastTripId', tripId);
   }, [tripId]);
+
+  // Surface mutation failures from the stop/booking hooks alongside page-level
+  // catch handlers (delete trip, edit trip, map corrections) in one shared banner.
+  useEffect(() => {
+    if (stopActions.error) setPageError(stopActions.error.message || 'Could not save that change.');
+  }, [stopActions.error]);
+
+  useEffect(() => {
+    if (bookingActions.error) setPageError(bookingActions.error.message || 'Could not save that change.');
+  }, [bookingActions.error]);
+
+  const reportError = (err, fallback) => setPageError(err?.message || fallback);
 
   // Pre-warm discovery as soon as trip loads — state lives here so it survives tab navigation.
   useEffect(() => {
@@ -53,9 +67,12 @@ export default function TripPage() {
 
   const handleDelete = async () => {
     setDeleting(true);
+    setPageError(null);
     try {
       await tripsApi.remove(tripId);
       navigate('/');
+    } catch (err) {
+      reportError(err, 'Could not delete this trip.');
     } finally {
       setDeleting(false);
     }
@@ -63,11 +80,14 @@ export default function TripPage() {
 
   const handleEditSave = async (updates) => {
     setEditSaving(true);
+    setPageError(null);
     try {
       await tripsApi.update(tripId, updates);
       await tripState.refresh();
       // If interest tags changed, clear discovery so tabs update on next open
       discovery.reset();
+    } catch (err) {
+      reportError(err, 'Could not save trip settings.');
     } finally {
       setEditSaving(false);
     }
@@ -123,7 +143,8 @@ export default function TripPage() {
         )}
       />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
-        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive }} />
+        <ErrorBanner message={pageError} onDismiss={() => setPageError(null)} className="mb-6" />
+        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive, reportError }} />
       </main>
       {!copilotOpen && <CopilotFab onClick={() => setCopilotOpen(true)} />}
       <AnimatePresence>

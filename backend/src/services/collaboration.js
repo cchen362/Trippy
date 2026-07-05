@@ -52,10 +52,19 @@ export function listCollaborators(userId, tripId) {
     ORDER BY tc.added_at ASC, u.username ASC
   `).all(tripId).map(mapCollaborator);
 
+  const shareLinkRow = db.prepare(`
+    SELECT token, created_at
+    FROM share_links
+    WHERE trip_id = ?
+    ORDER BY created_at ASC
+    LIMIT 1
+  `).get(tripId);
+
   return {
     owner: { ...mapUser(owner), role: 'owner' },
     collaborators,
     canManage: trip.owner_id === userId,
+    shareLink: shareLinkRow ? { token: shareLinkRow.token, createdAt: shareLinkRow.created_at } : null,
   };
 }
 
