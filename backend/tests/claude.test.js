@@ -223,7 +223,7 @@ describe('streamCopilotResponse — mutation JSON block extraction', () => {
     expect(lastEvent.type).toBe('done');
   });
 
-  it('emits error event and ends when stream throws', async () => {
+  it('emits error event followed by a done event and ends when stream throws', async () => {
     const brokenStream = {
       on() { return brokenStream; },
       async finalMessage() { throw new Error('stream failed'); },
@@ -235,6 +235,7 @@ describe('streamCopilotResponse — mutation JSON block extraction', () => {
 
     const events = res.written.map((w) => JSON.parse(w.replace(/^data: /, '').trim()));
     expect(events[0]).toEqual({ type: 'error', message: 'stream failed' });
+    expect(events[1]).toEqual({ type: 'done' });
     expect(res.ended).toBe(true);
   });
 });

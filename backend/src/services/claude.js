@@ -339,6 +339,7 @@ Guidelines:
     streamDone = true;
     console.error('[copilot] stream error:', err);
     write({ type: 'error', message: err.message });
+    write({ type: 'done' });
     res.end();
   }
 

@@ -9,8 +9,8 @@ waves land, so any session (or usage-limit reset) can resume from here without r
 | Wave | Batch | Items | Status |
 |------|-------|-------|--------|
 | 1 | 1. Timezone | C1 + originTz day-wrap tests | verified (2026-07-05, frontend 20/20 + backend 186/186) |
-| 2 | 2. Modal scroll + confirms | H1, M4 | pending |
-| 2 | 3. Stream/state machine | C3, L2 | pending |
+| 2 | 2. Modal scroll + confirms | H1, M4 | verified (2026-07-05, 375px preview: sheet/modal scroll + two-step confirms + inline error on real 429) |
+| 2 | 3. Stream/state machine | C3, L2 | verified (2026-07-05, live 401 stream error → input unlocks, error surfaced; done-after-error dedup guarded client-side) |
 | 3 | 4. PWA/nav | C2, L9 | pending |
 | 3 | 5. Error surfacing + share link | H2, M7, L4, M3 | pending |
 | 4 | 6. Discovery | H3 (+Q3 improvements), M1, M6, L5, L11 | pending |

@@ -53,6 +53,8 @@ export default function LogisticsTab() {
   const [viewerDoc, setViewerDoc] = useState(null);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
   const fileInputRef = useRef(null);
 
   const grouped = useMemo(() => groupBookings(bookings), [bookings]);
@@ -62,6 +64,23 @@ export default function LogisticsTab() {
   const liveSelected = selectedBooking
     ? bookings.find((b) => b.id === selectedBooking.id) || selectedBooking
     : null;
+
+  const closeSheet = () => {
+    setSelectedBooking(null);
+    setConfirmDelete(false);
+    setDeleteError(null);
+  };
+
+  const handleDeleteBooking = async () => {
+    setDeleteError(null);
+    try {
+      await deleteBooking(liveSelected.id);
+      closeSheet();
+    } catch (err) {
+      setDeleteError(err.message || 'Could not delete this booking.');
+      setConfirmDelete(false);
+    }
+  };
 
   async function handleAttach(event) {
     const file = event.target.files?.[0];
@@ -142,7 +161,7 @@ export default function LogisticsTab() {
       {/* Detail sheet */}
       {liveSelected && (
         <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="w-full max-w-xl rounded-[22px] border p-6" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
+          <div className="w-full max-w-xl rounded-[22px] border p-6 max-h-[85vh] overflow-y-auto" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
                 <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
@@ -152,7 +171,7 @@ export default function LogisticsTab() {
                   {liveSelected.title}
                 </h3>
               </div>
-              <button type="button" onClick={() => setSelectedBooking(null)} className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-dim)' }}>
+              <button type="button" onClick={closeSheet} className="font-mono text-xs tracking-[0.22em] uppercase" style={{ color: 'var(--cream-dim)' }}>
                 Close
               </button>
             </div>
@@ -189,6 +208,10 @@ export default function LogisticsTab() {
               <p className="mt-3 font-body text-sm" style={{ color: '#f8b4b4' }}>{attachError}</p>
             )}
 
+            {deleteError && (
+              <p className="mt-3 font-body text-sm" style={{ color: '#f8b4b4' }}>{deleteError}</p>
+            )}
+
             <input
               ref={fileInputRef}
               type="file"
@@ -218,17 +241,36 @@ export default function LogisticsTab() {
               >
                 Edit Booking
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await deleteBooking(liveSelected.id);
-                  setSelectedBooking(null);
-                }}
-                className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-                style={{ color: '#f8b4b4', borderColor: 'rgba(248,180,180,0.22)' }}
-              >
-                Delete Booking
-              </button>
+              {confirmDelete ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    className="font-mono text-xs tracking-[0.22em] uppercase"
+                    style={{ color: 'var(--cream-dim)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteBooking}
+                    disabled={saving}
+                    className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
+                    style={{ color: '#f8b4b4', borderColor: 'rgba(248,180,180,0.22)', opacity: saving ? 0.6 : 1 }}
+                  >
+                    {saving ? 'Deleting…' : 'Confirm?'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
+                  className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
+                  style={{ color: '#f8b4b4', borderColor: 'rgba(248,180,180,0.22)' }}
+                >
+                  Delete Booking
+                </button>
+              )}
             </div>
           </div>
         </div>

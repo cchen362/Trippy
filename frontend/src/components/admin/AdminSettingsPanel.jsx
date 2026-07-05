@@ -13,6 +13,7 @@ export default function AdminSettingsPanel() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [confirmUserId, setConfirmUserId] = useState(null);
 
   const load = async () => {
     if (!user?.is_admin) return;
@@ -56,9 +57,11 @@ export default function AdminSettingsPanel() {
     setError('');
     try {
       await adminApi.deleteUser(userId);
+      setConfirmUserId(null);
       await load();
     } catch (err) {
       setError(err.message || 'Could not remove user.');
+      setConfirmUserId(null);
     } finally {
       setSaving(false);
     }
@@ -162,21 +165,43 @@ export default function AdminSettingsPanel() {
                               @{item.username}{item.is_admin ? ' / admin' : ''}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => removeUser(item.id)}
-                            disabled={saving || isSelf}
-                            className="w-9 h-9 inline-flex items-center justify-center rounded-full border"
-                            style={{
-                              borderColor: isSelf ? 'var(--ink-border)' : 'rgba(224,90,90,0.35)',
-                              color: isSelf ? 'var(--cream-mute)' : '#e05a5a',
-                              opacity: saving || isSelf ? 0.45 : 1,
-                            }}
-                            aria-label={isSelf ? 'Cannot remove yourself' : `Remove ${item.username}`}
-                            title={isSelf ? 'Cannot remove yourself' : `Remove ${item.username}`}
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          {confirmUserId === item.id ? (
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmUserId(null)}
+                                className="font-mono text-[10px] tracking-[0.18em] uppercase"
+                                style={{ color: 'var(--cream-dim)' }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeUser(item.id)}
+                                disabled={saving}
+                                className="px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase"
+                                style={{ borderColor: 'rgba(224,90,90,0.35)', color: '#e05a5a', opacity: saving ? 0.45 : 1 }}
+                              >
+                                {saving ? 'Removing…' : 'Confirm?'}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmUserId(item.id)}
+                              disabled={saving || isSelf}
+                              className="w-9 h-9 inline-flex items-center justify-center rounded-full border"
+                              style={{
+                                borderColor: isSelf ? 'var(--ink-border)' : 'rgba(224,90,90,0.35)',
+                                color: isSelf ? 'var(--cream-mute)' : '#e05a5a',
+                                opacity: saving || isSelf ? 0.45 : 1,
+                              }}
+                              aria-label={isSelf ? 'Cannot remove yourself' : `Remove ${item.username}`}
+                              title={isSelf ? 'Cannot remove yourself' : `Remove ${item.username}`}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       );
                     })}

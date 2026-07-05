@@ -31,6 +31,7 @@ export function useCopilot(tripId) {
     abortRef.current = controller;
 
     let fullText = '';
+    let terminated = false;
     try {
       await copilotApi.send(tripId, text, (chunk) => {
         if (chunk.type === 'text') {
@@ -39,22 +40,41 @@ export function useCopilot(tripId) {
         } else if (chunk.type === 'mutation') {
           setPendingMutation(chunk.mutation);
         } else if (chunk.type === 'error') {
+          terminated = true;
           setError(new Error(chunk.message));
-        } else if (chunk.type === 'done') {
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: fullText,
-            createdAt: new Date().toISOString()
-          }]);
-          setStreamingText('');
-          setStreaming(false);
+          if (fullText) {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: fullText,
+              createdAt: new Date().toISOString()
+            }]);
+          }
+        } else if (chunk.type === 'done' && !terminated) {
+          terminated = true;
+          if (fullText) {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: fullText,
+              createdAt: new Date().toISOString()
+            }]);
+          }
         }
       }, controller.signal);
     } catch (err) {
-      if (err.name !== 'AbortError') setError(err);
+      if (err.name !== 'AbortError') {
+        setError(err);
+      } else if (!terminated && fullText) {
+        // Client-initiated Stop: the server still persists whatever text it had
+        // accumulated, so keep the same partial text locally to match history on reload.
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: fullText,
+          createdAt: new Date().toISOString()
+        }]);
+      }
+    } finally {
       setStreaming(false);
       setStreamingText('');
-    } finally {
       abortRef.current = null;
     }
   }, [tripId, streaming]);
