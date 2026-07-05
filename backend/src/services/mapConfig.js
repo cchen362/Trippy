@@ -18,11 +18,13 @@ function mapTilerConfig(maptilerKey) {
   };
 }
 
-export function getMapConfig(destinationCountries, options = {}) {
-  const upper = (destinationCountries || []).map((c) => c.toUpperCase());
+// The single-country decision: every country-sensitive map/nav choice (tiles,
+// coordinate conversion target, deep links) reduces to this given one ISO code.
+export function getMapConfigForCountry(countryCode, options = {}) {
+  const upper = String(countryCode || '').toUpperCase();
   const maptilerKey = options.maptilerKey ?? config.maptilerKey;
 
-  if (upper.includes('CN')) {
+  if (upper === 'CN') {
     return {
       tileProvider: 'amap',
       tileUrl: 'https://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7',
@@ -33,7 +35,7 @@ export function getMapConfig(destinationCountries, options = {}) {
     };
   }
 
-  if (upper.includes('KR')) {
+  if (upper === 'KR') {
     if (maptilerKey) {
       return {
         ...mapTilerConfig(maptilerKey),
@@ -58,6 +60,15 @@ export function getMapConfig(destinationCountries, options = {}) {
     ...OSM_CONFIG,
     deepLinkProvider: 'google',
   };
+}
+
+// Trip-level fallback for surfaces with no day context: CN > KR > default across the
+// whole destination set (unchanged precedence from before per-day selection existed).
+export function getMapConfig(destinationCountries, options = {}) {
+  const upper = (destinationCountries || []).map((c) => c.toUpperCase());
+  if (upper.includes('CN')) return getMapConfigForCountry('CN', options);
+  if (upper.includes('KR')) return getMapConfigForCountry('KR', options);
+  return getMapConfigForCountry(null, options);
 }
 
 export function buildDeepLink(provider, lat, lng, label) {

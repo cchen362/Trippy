@@ -619,6 +619,92 @@ describe('repair-stop-locations', () => {
   });
 });
 
+describe('per-day geography (Plan 6 Wave 2)', () => {
+  it('CN+KR trip: Seoul day gets wgs84/naver and Chengdu day keeps amap/gcj02 (review §9 fixture)', async () => {
+    const mixedTrip = createTrip(user.id, {
+      title: 'Chengdu then Seoul',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }],
+      startDate: '2026-07-01',
+      endDate: '2026-07-02',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const chengduDay = mixedTrip.days[0].id;
+    const seoulDay = mixedTrip.days[1].id;
+    // Override (layer 1) is the mechanism that actually moves a day's resolved country —
+    // the previous-day layer (4) outranks the seed (5), so a bare seed change on day 2
+    // wouldn't diverge from day 1's carried-forward pair.
+    getDb().prepare('UPDATE days SET city_override = ?, city_override_country = ? WHERE id = ?')
+      .run('Seoul', 'KR', seoulDay);
+
+    await createStop(user.id, chengduDay, {
+      title: 'Chengdu Stop', lat: 30.6, lng: 104.06,
+      coordinateSystem: 'wgs84', coordinateSource: 'user_pin', locationStatus: 'user_confirmed', unsplashPhotoUrl: null,
+    });
+    await createStop(user.id, seoulDay, {
+      title: 'Seoul Stop', lat: 37.57, lng: 126.98,
+      coordinateSystem: 'wgs84', coordinateSource: 'user_pin', locationStatus: 'user_confirmed', unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, mixedTrip.trip.id);
+
+    expect(mapData.mapConfigByDay[chengduDay].coordinateSystem).toBe('gcj02');
+    expect(mapData.mapConfigByDay[chengduDay].deepLinkProvider).toBe('amap');
+    expect(mapData.mapConfigByDay[seoulDay].coordinateSystem).toBe('wgs84');
+    expect(mapData.mapConfigByDay[seoulDay].deepLinkProvider).toBe('naver');
+
+    const seoulStop = mapData.stops.find((s) => s.title === 'Seoul Stop');
+    const chengduStop = mapData.stops.find((s) => s.title === 'Chengdu Stop');
+    // Seoul is inside the China bbox but its own day's config is wgs84 — no spurious shift.
+    expect(seoulStop.displayLat).toBeCloseTo(37.57, 5);
+    expect(seoulStop.displayLng).toBeCloseTo(126.98, 5);
+    expect(seoulStop.deepLinkProvider).toBe('naver');
+    expect(chengduStop.deepLinkProvider).toBe('amap');
+  });
+
+  it("a stop's own country_code outranks its day's for deep-link selection (Option C)", async () => {
+    const stop = await createStop(user.id, dayId, {
+      title: 'Border Town Stop',
+      lat: 29.5, lng: 106.5,
+      coordinateSystem: 'wgs84', coordinateSource: 'user_pin', locationStatus: 'user_confirmed', unsplashPhotoUrl: null,
+    });
+    getDb().prepare('UPDATE stops SET country_code = ? WHERE id = ?').run('KR', stop.id);
+
+    const mapData = getTripMapData(user.id, trip.trip.id);
+    const mapStop = mapData.stops.find((s) => s.id === stop.id);
+
+    // Day country is CN (amap); the stop's own country_code (KR) wins the deep link.
+    expect(mapStop.deepLinkProvider).toBe('naver');
+  });
+
+  it('geocoding bias follows the derived day country, not destination_countries[0]', async () => {
+    const mixedTrip = createTrip(user.id, {
+      title: 'MY then CN',
+      destinations: [{ city: 'Kuala Lumpur', countryCode: 'MY' }],
+      startDate: '2026-07-01',
+      endDate: '2026-07-02',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const chinaDay = mixedTrip.days[1].id;
+    getDb().prepare('UPDATE days SET city_override = ?, city_override_country = ? WHERE id = ?')
+      .run('Chengdu', 'CN', chinaDay);
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    await createStop(user.id, chinaDay, {
+      title: 'Wuhou Shrine',
+      locationQuery: 'Wuhou Shrine',
+      unsplashPhotoUrl: null,
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.searchParams.get('countrycodes')).toBe('cn');
+  });
+});
+
 describe('booking-linked itinerary stops', () => {
   it('defaults booking itinerary visibility by type', async () => {
     const hotel = await createBooking(user.id, trip.trip.id, {

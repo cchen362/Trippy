@@ -1,6 +1,6 @@
 import { getDb } from '../db/database.js';
 import { pickPhoto } from './unsplash.js';
-import { assertDayAccess, assertStopAccess } from './trips.js';
+import { assertDayAccess, assertStopAccess, getDayGeo } from './trips.js';
 import { resolvePlace } from './placeResolver.js';
 import { lookupHotelDetails } from './lookups.js';
 
@@ -88,15 +88,6 @@ function normalizeText(value) {
     .trim();
 }
 
-function countryForDay(day) {
-  try {
-    const countries = JSON.parse(day.destination_countries || '[]');
-    return Array.isArray(countries) ? countries[0] : null;
-  } catch {
-    return null;
-  }
-}
-
 function hasCoordinates(input) {
   const { lat, lng } = input ?? {};
   if (lat === null || lat === undefined || lng === null || lng === undefined) return false;
@@ -166,8 +157,13 @@ function preserveLocationFields(input) {
 async function resolveLocationForStop({ day, title, input, existing = null }) {
   const explicitLocationQuery = input.locationQuery ?? input.location ?? null;
   const locationQuery = (explicitLocationQuery || input.resolvedName || title || '').trim();
-  const resolutionCity = input.locationCity ?? input.city ?? day.resolvedCity ?? day.city;
-  const resolutionCountry = input.locationCountry ?? input.country ?? countryForDay(day);
+  // City/country bias follows the derived day geography (deriveDayGeo via getDayGeo),
+  // not the seeded day row — this is the fix for the geocoder ignoring the derivation
+  // it sits next to (review §1.3): a day whose resolved city has moved past its seed
+  // now biases geocoding correctly. Explicit caller overrides (discovery) still win.
+  const dayGeo = getDayGeo(day.id);
+  const resolutionCity = input.locationCity ?? input.city ?? dayGeo.city ?? day.city;
+  const resolutionCountry = input.locationCountry ?? input.country ?? dayGeo.countryCode;
   const locationAliases = locationAliasesForInput(input);
   const inputHasCoordinates = hasCoordinates(input);
   const trustedCoordinates = inputHasCoordinates && hasTrustedCoordinateMetadata(input);
@@ -617,10 +613,9 @@ export async function repairTripStopLocations(userId, tripId) {
   // Include curated-source stops: they were previously set from AI-estimated curated data
   // and need to be re-resolved with accurate Nominatim data.
   const stopsToRepair = db.prepare(`
-    SELECT s.*, d.city, d.city_override, t.destination_countries
+    SELECT s.*
     FROM stops s
     JOIN days d ON d.id = s.day_id
-    JOIN trips t ON t.id = d.trip_id
     WHERE d.trip_id = ?
       AND s.location_status != 'user_confirmed'
       AND (s.coordinate_system = 'unknown' OR s.coordinate_source = 'curated')
@@ -630,14 +625,11 @@ export async function repairTripStopLocations(userId, tripId) {
   let repairedCount = 0;
   for (const stop of stopsToRepair) {
     const queryText = (stop.location_query || stop.title).trim();
-    const city = stop.city_override || stop.city;
-    let country;
-    try {
-      const countries = JSON.parse(stop.destination_countries || '[]');
-      country = Array.isArray(countries) ? countries[0] : null;
-    } catch {
-      country = null;
-    }
+    // Same derived-geography bias as create/update — city_override alone was the
+    // weakest available signal; the full precedence (hotel/transit/previous-day) wins.
+    const dayGeo = getDayGeo(stop.day_id);
+    const city = dayGeo.city;
+    const country = dayGeo.countryCode;
 
     // Use Nominatim for accurate OSM WGS-84 data; fall back to city=null if city-specific fails
     let resolution = await resolvePlace({ queryText, city, country, allowNetwork: true, preferNominatim: true });
@@ -741,13 +733,8 @@ export async function syncStopWithBooking(booking) {
     return null;
   }
 
-  const day = db.prepare(`
-    SELECT d.*, t.destination_countries
-    FROM days d
-    JOIN trips t ON t.id = d.trip_id
-    WHERE d.trip_id = ? AND d.date = ?
-    LIMIT 1
-  `).get(booking.trip_id, inferred.date);
+  const day = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date = ? LIMIT 1')
+    .get(booking.trip_id, inferred.date);
   if (!day) {
     cleanupLinkedStop(existingStop);
     return null;

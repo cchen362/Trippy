@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
-import { createTrip, updateTrip } from '../src/services/trips.js';
+import { createTrip, updateTrip, listDaysForTrip, getDayGeo } from '../src/services/trips.js';
 
 let tmpDir;
 let owner;
@@ -163,5 +163,103 @@ describe('updateTrip — extension seeding from the adjacent day (Plan 6 Wave 1)
     const newDay = updated.days.find((d) => d.date === '2026-09-09');
     expect(newDay.city).toBe('Macau');
     expect(rawDay(trip.trip.id, '2026-09-09').city_country).toBe('MO');
+  });
+});
+
+describe('deriveDayGeo / listDaysForTrip resolvedCountry (Plan 6 Wave 2)', () => {
+  it('China-only trip: every day resolves the seeded country (regression anchor)', () => {
+    const trip = makeTrip();
+    const days = listDaysForTrip(trip.trip.id, owner.id, []);
+    expect(days.every((d) => d.resolvedCity === 'Chengdu' && d.resolvedCountry === 'CN')).toBe(true);
+  });
+
+  it('carries the pair forward from the previous day when a later day has no seed country', () => {
+    const trip = makeTrip();
+    const db = getDb();
+    // A hotel booking (layer 2) is what actually moves a day's resolved city mid-trip —
+    // the previous-day layer (4) outranks the seed (5), so only override/hotel/transit
+    // evidence can make a day diverge from what the day before it resolved to.
+    db.prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Chongqing Hotel', '2026-09-11T15:00', '2026-09-12T11:00', ?)
+    `).run(trip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
+    db.prepare('UPDATE days SET city_country = NULL WHERE trip_id = ? AND date = ?')
+      .run(trip.trip.id, '2026-09-12');
+
+    const bookings = db.prepare('SELECT * FROM bookings WHERE trip_id = ?').all(trip.trip.id)
+      .map((row) => ({
+        type: row.type,
+        startDatetime: row.start_datetime,
+        endDatetime: row.end_datetime,
+        detailsJson: JSON.parse(row.details_json),
+      }));
+
+    const days = listDaysForTrip(trip.trip.id, owner.id, bookings);
+    const day11 = days.find((d) => d.date === '2026-09-11');
+    const day12 = days.find((d) => d.date === '2026-09-12');
+    expect(day11.resolvedCity).toBe('Chongqing');
+    expect(day11.resolvedCountry).toBe('CN');
+    expect(day12.resolvedCity).toBe('Chongqing'); // carried forward from 09-11
+    expect(day12.resolvedCountry).toBe('CN'); // carried forward despite the null seed country
+  });
+
+  it('city and country may come from different layers: override city with no country falls through to the active hotel country', () => {
+    const trip = makeTrip();
+    const db = getDb();
+    db.prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('Melaka', trip.trip.id, '2026-09-10');
+    db.prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Melaka Hotel', '2026-09-10T15:00', '2026-09-11T11:00', ?)
+    `).run(trip.trip.id, JSON.stringify({ city: 'Melaka', countryCode: 'MY' }));
+
+    const bookings = db.prepare('SELECT * FROM bookings WHERE trip_id = ?').all(trip.trip.id)
+      .map((row) => ({
+        type: row.type,
+        startDatetime: row.start_datetime,
+        endDatetime: row.end_datetime,
+        detailsJson: JSON.parse(row.details_json),
+      }));
+
+    const days = listDaysForTrip(trip.trip.id, owner.id, bookings);
+    const day10 = days.find((d) => d.date === '2026-09-10');
+    expect(day10.resolvedCity).toBe('Melaka'); // override wins city
+    expect(day10.resolvedCountry).toBe('MY'); // no country on the override — falls through to the hotel
+  });
+
+  it('missing-country trip: a null-country day falls through the whole precedence to null', () => {
+    const trip = createTrip(owner.id, {
+      title: 'KL Trip',
+      destinations: ['Kuala Lumpur'],
+      destinationCountries: [],
+      startDate: '2026-10-01',
+      endDate: '2026-10-01',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const days = listDaysForTrip(trip.trip.id, owner.id, []);
+    expect(days[0].resolvedCity).toBe('Kuala Lumpur');
+    expect(days[0].resolvedCountry).toBeNull();
+  });
+});
+
+describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
+  it('resolves the same pair listDaysForTrip would, for a single dayId', () => {
+    const trip = makeTrip();
+    const dayId = dayIdFor(trip.trip.id, '2026-09-10');
+    const geo = getDayGeo(dayId);
+    expect(geo).toEqual({ city: 'Chengdu', countryCode: 'CN' });
+  });
+
+  it('carries the previous day pair forward when walking to the target day', () => {
+    const trip = makeTrip();
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Chongqing Hotel', '2026-09-11T15:00', '2026-09-12T11:00', ?)
+    `).run(trip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
+    const dayId = dayIdFor(trip.trip.id, '2026-09-12');
+    const geo = getDayGeo(dayId);
+    expect(geo).toEqual({ city: 'Chongqing', countryCode: 'CN' });
   });
 });

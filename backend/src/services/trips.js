@@ -136,39 +136,55 @@ function normalizeDestinationPairs(value) {
 }
 
 /**
- * Extracts a clean city name from a booking's structured detailsJson.
- * Returns null if no city can be determined — never guesses from station names.
+ * Extracts a clean {city, countryCode} pair from a booking's structured detailsJson.
+ * City follows the existing per-type rules; countryCode rides along from whichever
+ * extraction field matches that type (destinationCountryCode for transit, countryCode
+ * for hotel/other). Either half may be null — never guessed.
  */
-function extractCityFromBooking(booking) {
+function extractGeoFromBooking(booking) {
   const d = booking.detailsJson || {};
+  let city = null;
+  let countryCode = null;
+
   if (booking.type === 'hotel' || booking.type === 'other') {
-    return canonicalCity(d.city) || null;
+    city = canonicalCity(d.city) || null;
+    countryCode = d.countryCode || null;
+  } else if (booking.type === 'train' || booking.type === 'bus') {
+    city = canonicalCity(d.destinationCity) || null;
+    countryCode = d.destinationCountryCode || null;
+  } else if (booking.type === 'flight') {
+    if (d.destinationCity) {
+      city = canonicalCity(d.destinationCity);
+    } else {
+      // Fall back: IATA from provider payload (AeroDataBox stores arrival.airport.iata)
+      const iata = d.providerPayload?.arrival?.airport?.iata;
+      city = iata ? cityFromIata(iata) : canonicalCity(cityFromAirportString(booking.destination));
+    }
+    countryCode = d.destinationCountryCode || null;
   }
-  if (booking.type === 'train' || booking.type === 'bus') {
-    return canonicalCity(d.destinationCity) || null;
-  }
-  if (booking.type === 'flight') {
-    if (d.destinationCity) return canonicalCity(d.destinationCity);
-    // Fall back: IATA from provider payload (AeroDataBox stores arrival.airport.iata)
-    const iata = d.providerPayload?.arrival?.airport?.iata;
-    if (iata) return cityFromIata(iata); // already canonical from IATA_CITY
-    return canonicalCity(cityFromAirportString(booking.destination));
-  }
-  return null;
+
+  return { city, countryCode: countryCode ? String(countryCode).toUpperCase() : null };
 }
 
 /**
- * Derives the city for a single day given the full bookings list.
+ * Derives {city, countryCode} for a single day given the full bookings list.
  *
- * Priority:
- * 1. Manual city_override on the day row
+ * Priority (unchanged from the original deriveDayCity):
+ * 1. Manual city_override (+ city_override_country) on the day row
  * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date)
  * 3. Last same-day transit arrival (flight/train/bus departing that day)
- * 4. Previous day's resolved city
- * 5. Seeded day.city (trip default)
+ * 4. Previous day's resolved pair
+ * 5. Seeded day.city (+ day.city_country)
+ *
+ * City and country are picked independently, each as the first layer (in this order)
+ * that has a non-null value — so they may come from different layers. E.g. an override
+ * of "Melaka" with no country attached still wins the city; if the active hotel that
+ * night reports countryCode "MY", the day resolves to { city: "Melaka", countryCode: "MY" }.
  */
-function deriveDayCity(day, bookings, previousResolvedCity) {
-  if (day.cityOverride) return day.cityOverride;
+export function deriveDayGeo(day, bookings, previousResolvedGeo) {
+  const overrideGeo = day.cityOverride
+    ? { city: day.cityOverride, countryCode: day.cityOverrideCountry || null }
+    : { city: null, countryCode: null };
 
   // Hotel active tonight: check-in ≤ day.date < check-out
   const activeHotel = bookings.find((b) => {
@@ -177,10 +193,7 @@ function deriveDayCity(day, bookings, previousResolvedCity) {
     const checkOut = b.endDatetime?.slice(0, 10);
     return checkIn && checkOut && checkIn <= day.date && day.date < checkOut;
   });
-  if (activeHotel) {
-    const city = extractCityFromBooking(activeHotel);
-    if (city) return city;
-  }
+  const hotelGeo = activeHotel ? extractGeoFromBooking(activeHotel) : { city: null, countryCode: null };
 
   // Last same-day transit arrival
   const sameDayTransit = bookings
@@ -190,13 +203,23 @@ function deriveDayCity(day, bookings, previousResolvedCity) {
       return b.startDatetime?.slice(0, 10) === day.date;
     })
     .sort((a, b) => (a.startDatetime || '').localeCompare(b.startDatetime || ''));
+  let transitGeo = { city: null, countryCode: null };
   for (let i = sameDayTransit.length - 1; i >= 0; i--) {
-    const city = extractCityFromBooking(sameDayTransit[i]);
-    if (city) return city;
+    const geo = extractGeoFromBooking(sameDayTransit[i]);
+    if (geo.city) {
+      transitGeo = geo;
+      break;
+    }
   }
 
-  if (previousResolvedCity) return previousResolvedCity;
-  return day.city;
+  const previousGeo = previousResolvedGeo || { city: null, countryCode: null };
+  const seedGeo = { city: day.city, countryCode: day.cityCountry || null };
+
+  const layers = [overrideGeo, hotelGeo, transitGeo, previousGeo, seedGeo];
+  return {
+    city: layers.map((l) => l.city).find(Boolean) ?? null,
+    countryCode: layers.map((l) => l.countryCode).find(Boolean) ?? null,
+  };
 }
 
 export function assertTripAccess(userId, tripId) {
@@ -456,6 +479,15 @@ export function updateTrip(userId, tripId, input) {
   return getTripDetail(tripId, userId);
 }
 
+export function listBookingsForTrip(tripId) {
+  return getDb().prepare(`
+    SELECT *
+    FROM bookings
+    WHERE trip_id = ?
+    ORDER BY COALESCE(start_datetime, end_datetime, created_at) ASC, created_at ASC
+  `).all(tripId).map(mapBooking);
+}
+
 export function listDaysForTrip(tripId, userId, bookings = []) {
   assertTripAccess(userId, tripId);
   const db = getDb();
@@ -468,7 +500,7 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
     ORDER BY d.date ASC
   `).all(tripId);
 
-  let previousResolvedCity = null;
+  let previousResolvedGeo = null;
   return rows.map((row, index) => {
     const day = {
       id: row.id,
@@ -476,6 +508,8 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
       date: row.date,
       city: row.city,
       cityOverride: row.city_override ?? null,
+      cityCountry: row.city_country ?? null,
+      cityOverrideCountry: row.city_override_country ?? null,
       phase: row.phase,
       hotel: row.hotel,
       theme: row.theme,
@@ -483,10 +517,41 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
       stopCount: row.stop_count,
       dayIndex: index,
     };
-    const resolvedCity = deriveDayCity(day, bookings, previousResolvedCity);
-    previousResolvedCity = resolvedCity;
-    return { ...day, resolvedCity };
+    const geo = deriveDayGeo(day, bookings, previousResolvedGeo);
+    previousResolvedGeo = geo;
+    return { ...day, resolvedCity: geo.city, resolvedCountry: geo.countryCode };
   });
+}
+
+/**
+ * Derives {city, countryCode} for a single day by id — loads the trip's bookings and
+ * walks the day sequence up to (and including) the target date so layer 4 (previous-day
+ * carry) is correct. Used by geocoding-bias callers that only have a dayId, not a full
+ * pre-loaded day list (stops.js).
+ */
+export function getDayGeo(dayId) {
+  const db = getDb();
+  const targetDay = db.prepare('SELECT * FROM days WHERE id = ?').get(dayId);
+  if (!targetDay) return { city: null, countryCode: null };
+
+  const bookings = listBookingsForTrip(targetDay.trip_id);
+  const rows = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date <= ? ORDER BY date ASC')
+    .all(targetDay.trip_id, targetDay.date);
+
+  let previousResolvedGeo = null;
+  let geo = { city: null, countryCode: null };
+  for (const row of rows) {
+    const day = {
+      date: row.date,
+      city: row.city,
+      cityOverride: row.city_override ?? null,
+      cityCountry: row.city_country ?? null,
+      cityOverrideCountry: row.city_override_country ?? null,
+    };
+    geo = deriveDayGeo(day, bookings, previousResolvedGeo);
+    previousResolvedGeo = geo;
+  }
+  return geo;
 }
 
 export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } = {}) {
@@ -494,13 +559,8 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
   const trip = mapTrip(tripRow, today);
   const db = getDb();
 
-  // Load bookings first so deriveDayCity can use them when building days
-  const bookings = db.prepare(`
-    SELECT *
-    FROM bookings
-    WHERE trip_id = ?
-    ORDER BY COALESCE(start_datetime, end_datetime, created_at) ASC, created_at ASC
-  `).all(tripId).map(mapBooking);
+  // Load bookings first so deriveDayGeo can use them when building days
+  const bookings = listBookingsForTrip(tripId);
 
   const days = listDaysForTrip(tripId, userId, bookings);
 

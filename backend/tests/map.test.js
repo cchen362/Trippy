@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMapConfig, buildDeepLink } from '../src/services/mapConfig.js';
+import { getMapConfig, getMapConfigForCountry, buildDeepLink } from '../src/services/mapConfig.js';
 import { gcj02ToWgs84, toDisplayCoordinates, wgs84ToGcj02 } from '../src/services/coordinates.js';
 
 describe('getMapConfig', () => {
@@ -48,6 +48,47 @@ describe('getMapConfig', () => {
     const config = getMapConfig(['KR', 'CN'], { maptilerKey: 'test-key' });
     expect(config.tileProvider).toBe('amap');
     expect(config.deepLinkProvider).toBe('amap');
+  });
+});
+
+describe('getMapConfigForCountry (Plan 6 Wave 2 — per-day provider selection)', () => {
+  it('returns amap config for CN', () => {
+    const config = getMapConfigForCountry('CN', { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('amap');
+    expect(config.coordinateSystem).toBe('gcj02');
+    expect(config.deepLinkProvider).toBe('amap');
+  });
+
+  it('returns maptiler + naver for KR when MapTiler is configured', () => {
+    const config = getMapConfigForCountry('KR', { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('maptiler');
+    expect(config.coordinateSystem).toBe('wgs84');
+    expect(config.deepLinkProvider).toBe('naver');
+  });
+
+  it('returns osm + naver for KR when MapTiler is not configured', () => {
+    const config = getMapConfigForCountry('KR', { maptilerKey: '' });
+    expect(config.tileProvider).toBe('osm');
+    expect(config.deepLinkProvider).toBe('naver');
+  });
+
+  it('is case-insensitive (lowercase cn)', () => {
+    const config = getMapConfigForCountry('cn', { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('amap');
+  });
+
+  it('falls through to the default (google/maptiler) config for a null country', () => {
+    const config = getMapConfigForCountry(null, { maptilerKey: 'test-key' });
+    expect(config.tileProvider).toBe('maptiler');
+    expect(config.coordinateSystem).toBe('wgs84');
+    expect(config.deepLinkProvider).toBe('google');
+  });
+
+  it('any other country falls to the default google/wgs84 branch', () => {
+    const config = getMapConfigForCountry('JP', { maptilerKey: '' });
+    expect(config.tileProvider).toBe('osm');
+    expect(config.coordinateSystem).toBe('wgs84');
+    expect(config.deepLinkProvider).toBe('google');
   });
 });
 

@@ -1,6 +1,6 @@
 # Implementation Plan 6 — Q2 Geography Model (Gate A)
 
-**Status:** Wave 1 COMPLETE (2026-07-06) — schema, extraction, resolver, and paired-seed changes shipped and tested (backend 204/204, frontend 28/28). Wave 2 (derivation and backend consumers) next.
+**Status:** Wave 1 COMPLETE (2026-07-06) — schema, extraction, resolver, and paired-seed changes shipped and tested (backend 204/204, frontend 28/28). Wave 2 COMPLETE (2026-07-06) — `deriveDayGeo`, per-day `mapConfigByDay`, stop-level deep-link override, and derived-geography geocoding bias shipped and tested (backend 219/219, frontend unchanged at 28/28). Wave 3 (frontend consumers and the destination editor) next.
 **Decision record:** [Gate A CLOSED, owner decisions 2026-07-06](../reviews/2026-07-06-product-architecture-risk-review.md#gate-a-closed--owner-decisions-2026-07-06)
 **Design source:** [Completed Q2 review](../reviews/2026-07-06-q2-trip-geography-and-map-architecture.md) — all §-references below point there unless stated otherwise.
 **Model guidance:** Fable orchestrates and QAs; coding delegated to Sonnet subagents wave by wave.
@@ -108,7 +108,7 @@ day.
 
 ---
 
-## Wave 2 — Derivation and backend consumers
+## Wave 2 — Derivation and backend consumers (COMPLETE 2026-07-06)
 
 **Goal:** one function answers "where is the traveller on this day", and every backend
 country-sensitive decision consults it.

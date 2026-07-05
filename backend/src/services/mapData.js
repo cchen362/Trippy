@@ -1,7 +1,7 @@
 import { getDb } from '../db/database.js';
-import { getMapConfig } from './mapConfig.js';
+import { getMapConfig, getMapConfigForCountry } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
-import { assertTripAccess } from './trips.js';
+import { assertTripAccess, deriveDayGeo } from './trips.js';
 
 const TRANSIT_TYPES = new Set(['flight', 'train', 'bus', 'ferry']);
 
@@ -89,7 +89,7 @@ function buildSegmentsForDay(day, dayStops, bookingById) {
   return segments;
 }
 
-function formatMapStop(row, mapConfig, routeNumber, routeSegmentId) {
+function formatMapStop(row, mapConfig, routeNumber, routeSegmentId, deepLinkProvider) {
   const display = toDisplayCoordinates(row, mapConfig);
   return {
     id: row.id,
@@ -105,6 +105,7 @@ function formatMapStop(row, mapConfig, routeNumber, routeSegmentId) {
     locationConfidence: row.location_confidence,
     routeNumber,
     routeSegmentId,
+    deepLinkProvider,
     canRenderMarker: display.canRenderMarker,
     isEstimated: display.isEstimated,
     bookingId: row.booking_id,
@@ -114,25 +115,69 @@ function formatMapStop(row, mapConfig, routeNumber, routeSegmentId) {
   };
 }
 
-export function getTripMapData(userId, tripId) {
-  const trip = assertTripAccess(userId, tripId);
+// Bookings shaped just enough for deriveDayGeo (type, start/end datetimes, parsed
+// detailsJson, destination) — this file otherwise works with raw snake_case rows for
+// segment-building, so it deliberately doesn't reuse trips.js's full mapBooking().
+function toGeoBooking(row) {
+  return {
+    type: row.type,
+    startDatetime: row.start_datetime,
+    endDatetime: row.end_datetime,
+    detailsJson: parseJson(row.details_json, {}),
+    destination: row.destination,
+  };
+}
+
+function computeDayGeographies(days, bookingRows) {
+  const geoBookings = bookingRows.map(toGeoBooking);
+  const geoByDayId = new Map();
+  let previousResolvedGeo = null;
+  for (const day of days) {
+    const dayForDerivation = {
+      date: day.date,
+      city: day.city,
+      cityOverride: day.city_override ?? null,
+      cityOverrideCountry: day.city_override_country ?? null,
+      cityCountry: day.city_country ?? null,
+    };
+    const geo = deriveDayGeo(dayForDerivation, geoBookings, previousResolvedGeo);
+    previousResolvedGeo = geo;
+    geoByDayId.set(day.id, geo);
+  }
+  return geoByDayId;
+}
+
+// Computes both the trip-level fallback mapConfig (unchanged shape/behavior) and a
+// per-day mapConfig keyed by day id, derived from each day's resolved country. Shared
+// by GET /map-config and GET /map-data so both surfaces agree on per-day provider choice.
+export function getMapConfigsForTrip(trip) {
+  const db = getDb();
   const destinationCountries = parseJson(trip.destination_countries, []);
   const mapConfig = getMapConfig(destinationCountries);
-  const db = getDb();
 
   const days = db.prepare(`
-    SELECT id, date, city, city_override
+    SELECT id, date, city, city_override, city_country, city_override_country
     FROM days
     WHERE trip_id = ?
     ORDER BY date ASC
-  `).all(tripId);
+  `).all(trip.id);
 
-  const bookings = db.prepare(`
-    SELECT *
-    FROM bookings
-    WHERE trip_id = ?
-  `).all(tripId);
-  const bookingById = new Map(bookings.map((booking) => [booking.id, booking]));
+  const bookingRows = db.prepare('SELECT * FROM bookings WHERE trip_id = ?').all(trip.id);
+  const geoByDayId = computeDayGeographies(days, bookingRows);
+
+  const mapConfigByDay = {};
+  for (const day of days) {
+    mapConfigByDay[day.id] = getMapConfigForCountry(geoByDayId.get(day.id)?.countryCode);
+  }
+
+  return { mapConfig, mapConfigByDay, geoByDayId, days, bookingRows };
+}
+
+export function getTripMapData(userId, tripId) {
+  const trip = assertTripAccess(userId, tripId);
+  const { mapConfig, mapConfigByDay, geoByDayId, days, bookingRows } = getMapConfigsForTrip(trip);
+  const db = getDb();
+  const bookingById = new Map(bookingRows.map((booking) => [booking.id, booking]));
 
   const stops = db.prepare(`
     SELECT s.*
@@ -164,11 +209,16 @@ export function getTripMapData(userId, tripId) {
   const mapStops = stops.map((stop) => {
     const routeNumber = (routeCountByDay.get(stop.day_id) || 0) + 1;
     routeCountByDay.set(stop.day_id, routeNumber);
-    return formatMapStop(stop, mapConfig, routeNumber, segmentByStopId.get(stop.id) || null);
+    const dayMapConfig = mapConfigByDay[stop.day_id] || mapConfig;
+    // Option C over A: a stop's own resolved country outranks its day's for deep links.
+    const linkCountry = stop.country_code || geoByDayId.get(stop.day_id)?.countryCode || null;
+    const deepLinkProvider = getMapConfigForCountry(linkCountry).deepLinkProvider;
+    return formatMapStop(stop, dayMapConfig, routeNumber, segmentByStopId.get(stop.id) || null, deepLinkProvider);
   });
 
   return {
     mapConfig,
+    mapConfigByDay,
     segments,
     stops: mapStops,
   };
