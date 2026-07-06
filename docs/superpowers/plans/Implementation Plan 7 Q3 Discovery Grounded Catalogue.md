@@ -55,6 +55,30 @@ place-resolution chain beyond the field-mask addition in 2.2.
 
 ## Wave 1 — Normalized catalogue schema, keyed by the day pair
 
+**Status: COMPLETE (2026-07-07).** Migration `016_discovery_catalogue.js` (JS migration, following
+the 014 pattern) creates `discovery_destinations`/`discovery_places` and backfills every
+`global_discovery_cache` row into them (item-count parity, `whyItFits`→`why_go`,
+`country_code` via `countryCodeFromName`, model lat/lng never carried over, and — a fix made
+during orchestrator review — the old row's `fetched_at` is preserved as `last_generated_at` so a
+destination cached moments before the migration isn't immediately treated as stale and forced
+through an unwanted extra Claude call). New `backend/src/db/discoveryCatalogue.js`
+(`getOrCreateDestination`/`listActivePlaces`/`insertPlaces`/`listExclusionNames`, all
+parameterised, all take `db` explicitly). `routes/discovery.js` rewritten to read/write the new
+tables instead of the blob; `mergeDiscoveryCategories` retired; SSE event shapes unchanged for
+old clients (`whyItFits` etc. still the wire field names — the `whyGo` dual-key change is Wave
+3+); the generation-failure-serves-stored-catalogue behavior (scenario 8) is live. Prompt
+(`claude.js` `DISCOVER_SYSTEM`) rewritten to destination-voice editorial (no traveller/group/
+preference framing) — wire field name `whyItFits` unchanged per spec. `global_discovery_cache`
+is NOT dropped (Wave 4 retires it). Tests: backend 231 → **248/248 green** (17 files);
+`discoveryMerge.test.js` deleted (function retired) and its coverage replaced/exceeded by
+`discoveryCatalogue.test.js` (new) plus expanded `discovery.test.js` (migration idempotence,
+backfill parity, golden-fixture parity, `(city,'')` vs `(city,'MY')` distinctness, generation-
+failure-with-catalogue, and the backfill-freshness fix). Frontend untouched (0 diff, still
+29/29). Delegated to a Sonnet subagent (first pass mistakenly tried to delegate further instead
+of writing code — caught and corrected mid-session); orchestrator reviewed every file against
+this plan and the schema/route/prompt diffs line-by-line before commit, and made one fix
+directly (the `last_generated_at` backfill gap above) rather than a further agent round.
+
 **Goal:** the blob becomes rows; the key gains a country; generation gains country context and
 destination-voice editorial. No verification/ranking yet — behavior-preserving otherwise.
 

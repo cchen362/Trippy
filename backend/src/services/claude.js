@@ -171,7 +171,7 @@ Each line must match exactly:
 Output all 8 categories in this order:
 essentials, culture, food, nature, nightlife, hidden_gems, architecture, wellness
 
-Each item: { "name": string, "description": string (1-2 sentences, specific and factual), "whyItFits": string (one concrete sentence — name atmosphere, crowd level, or specific draw; never generic phrases like "great for couples" or "popular with tourists"), "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }
+Each item: { "name": string, "description": string (1-2 sentences, specific and factual), "whyItFits": string (one concrete sentence — name atmosphere, crowd level, or specific draw; never generic phrases like "great for couples" or "popular with tourists"; describe the PLACE itself, never the traveller — never write "the traveller", "your group", "your trip", "your preferences", or any other personalization framing, since this text is shown for every trip regardless of who's asking), "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }
 
 Additional item fields:
 - Include "localName": string|null and "aliases": string[] on every item.

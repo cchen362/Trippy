@@ -77,3 +77,15 @@ export function countryCodeFromName(input) {
   const segment = trimmed.split(',').pop().trim().toLowerCase();
   return ALIAS_TO_CODE[segment] || NAME_TO_CODE.get(segment) || null;
 }
+
+// ISO alpha-2 code -> English display name (reverse of countryCodeFromName),
+// via the same Intl.DisplayNames instance built above. Used by discovery to
+// compose a disambiguating "City, Country (CC)" string for Claude when the
+// day-pair's country is known (Plan 7 Wave 1, review scenario 4 — homonym
+// cities like Chengdu/multiple Georgetowns).
+export function countryNameFromCode(code) {
+  if (!code || typeof code !== 'string') return null;
+  const upper = code.trim().toUpperCase();
+  if (!REGION_CODE_SET.has(upper)) return null;
+  return displayNames.of(upper) || null;
+}
