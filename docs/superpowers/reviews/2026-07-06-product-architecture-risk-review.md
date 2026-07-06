@@ -88,6 +88,8 @@ These are investigation leads, not approved fixes.
 | Q2-04 | Geocoding bias uses `destination_countries[0]` and the seeded day city for every stop, ignoring the derived day city (added by Q2 review, 2026-07-06) | Stops on later-country days hard-miss Nominatim (`countrycodes` is a filter, not a bias) and fall to billed Google lookups or wrong-country matches | Q2 |
 | Q2-05 | The outside-China coordinate guard is a bounding box (lat 3.86–53.55, lng 73.66–135.05) containing Korea and most of Southeast Asia (added by Q2 review, 2026-07-06) | On GCJ-02 trips, pins in Seoul/Penang/Bangkok etc. are spuriously shifted; KL/Singapore are protected — nuance verified both directions | Q2 |
 | Q2-06 | Map pin correction stores the trip-wide `mapConfig.coordinateSystem` on the stop (added by Q2 review, 2026-07-06) | Corrections made on non-China days of China-including trips are mislabeled `gcj02`, poisoning data that survives a later provider fix | Q2, Trust |
+| Q3-04 | Discovery hero count sums categories the trip's tabs never render (live observation, added by Q3 review, 2026-07-06) | "N curated places" inflates (96 → 183 observed) while only 69 items were reachable via tabs — the count is dishonest and the remainder unreachable | Q3 |
+| Q3-05 | "Show more" communicates a 15s+ generation only by dimming the disabled button (live observation, added by Q3 review, 2026-07-06) | Long generation reads as frozen/broken; no in-progress affordance | Q3 |
 | TR-01 | Offline document caches can outlive logout or revoked server access | Sensitive tickets may remain available on a device | Trust |
 | TR-02 | Multi-booking imports and co-pilot mutations can partially apply | Users may see duplicate or half-applied changes | Trust, Q1 |
 | TR-03 | Backup/restore, external-call timeouts and operational visibility are incomplete | A failure may cause data loss or an app that silently stalls | Trust |
@@ -298,6 +300,63 @@ scenario S6 (`destinations: ["Kuala Lumpur"]`, `destination_countries: []`). Pro
 backup-protected deploy accordingly.
 
 Implementation plan: [Implementation Plan 6 — Q2 Geography Model](../plans/Implementation%20Plan%206%20Q2%20Geography%20Model.md).
+
+## Gate C recommendation (Q3 review, 2026-07-06)
+
+Full evidence in the [completed Q3 review](2026-07-06-q3-discovery-personalization-and-shared-cache.md).
+Q3's exit criterion is met; this is the under-one-page summary for owner sign-off.
+
+### Proposed discovery product contract
+
+**The global catalogue owns place facts; the trip owns fit.** Per owner direction, the design
+follows how established products (Mindtrip, Wanderlog, TripAdvisor) actually work rather than
+inventing a new mechanism — every one of them grounds recommendations in a real-places
+database, shows provenance, and ranks deterministically over metadata; none makes per-browse
+model calls.
+
+- **Global layer:** AI-generated candidates are *verified* against the resolver Trippy already
+  owns (`placeResolver.js` — Nominatim free, Google fallback within free monthly caps),
+  gaining canonical place identity, real coordinates, `businessStatus` (closed places
+  suppressed at ingest), and a provenance badge. Catalogue keyed by the Q2 day pair
+  `(city, countryCode)`; normalized `discovery_destinations`/`discovery_places` tables replace
+  the JSON blob; hard bounds (per-category cap with archival, per-day generation limit,
+  token-capped exclusion lists) close the unbounded-growth finding.
+- **Trip layer:** deterministic zero-model-call ranking from the preferences already collected —
+  interest tags (category order + boost), pace (duration fit), travellers (category
+  adjustment) — plus an honestly-composed fit line. `whyItFits` is reframed as global
+  destination-voice editorial. Option A + Option C; **Option B (per-trip AI reranking)
+  rejected for browse and reserved for the co-pilot** (consistent with decision 6).
+- All three onboarding preference fields are retained and become visibly used (closes Q3-01's
+  "justify or stop collecting").
+
+### Decisions needed from the owner (Q3 review §10 has detail)
+
+1. Unverified items: show with a badge, ranked lower (recommended), or hide entirely?
+2. Capture Google rating/rating count at verification for a quality ranking term
+   (flag-guarded; recommended)?
+3. Report action ⇒ immediate global suppression + audit log (recommended at 1-user scale), or
+   trip-scoped hide with review queue?
+4. Bounds: 45 items/category, 3 generations/destination/day, 400-name exclusion cap — accept?
+5. Ship the Q3-04/Q3-05 UI fixes inside Plan 7's frontend wave (recommended) or cherry-pick
+   sooner?
+
+**Sequencing:** Q3 planning is complete now; implementation starts after Plan 6 Wave 3 (the
+frontend wiring that hands discovery the day's `(city, countryCode)` pair). Plan:
+[Implementation Plan 7 — Q3 Discovery Grounded Catalogue](../plans/Implementation%20Plan%207%20Q3%20Discovery%20Grounded%20Catalogue.md).
+Its migration must meet the Gate D trust baseline.
+
+### Gate C: CLOSED — owner decisions (2026-07-06)
+
+Owner accepted all five recommendations as stated:
+
+1. **Unverified items:** shown with an "Unverified" badge, rank-penalized (not hidden).
+2. **Rating enrichment:** approved, behind the `DISCOVERY_RATING_ENRICHMENT` flag.
+3. **Report semantics:** report ⇒ immediate global suppression + audit log.
+4. **Bounds:** 45 active items/category, 3 generations/destination/day, 400-name exclusion cap.
+5. **Q3-04/Q3-05 fixes:** ship inside Plan 7's frontend wave.
+
+Plan 7 is approved as written; implementation remains sequenced behind Plan 6 Waves 3–4 per
+the plan's preconditions.
 
 ## Final output of this review family
 
