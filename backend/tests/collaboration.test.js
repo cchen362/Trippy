@@ -20,10 +20,10 @@ let collaborator;
 let otherUser;
 let tripDetail;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-collab-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
 
   owner = authService.setup('owner', 'password123', 'Trip Owner').user;
   const inviteCode = authService.getInviteCode();

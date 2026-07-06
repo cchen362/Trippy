@@ -36,10 +36,10 @@ let tripId;
 let dayId;
 let stopId;
 
-beforeAll(() => {
+beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-copilot-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
 
   const db = getDb();
 
@@ -53,8 +53,8 @@ beforeAll(() => {
 
   // Create a trip
   const trip = db.prepare(`
-    INSERT INTO trips (title, owner_id, destinations, destination_countries, start_date, end_date, travellers, interest_tags, pace, status)
-    VALUES ('Test Trip', ?, '[]', '[]', '2026-05-01', '2026-05-03', 'couple', '[]', 'moderate', 'upcoming')
+    INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
+    VALUES ('Test Trip', ?, '2026-05-01', '2026-05-03', 'couple', '[]', 'moderate', 'upcoming')
     RETURNING id
   `).get(userId);
   tripId = trip.id;

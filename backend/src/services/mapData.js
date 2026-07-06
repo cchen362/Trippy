@@ -1,7 +1,7 @@
 import { getDb } from '../db/database.js';
 import { getMapConfig, getMapConfigForCountry } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
-import { assertTripAccess, deriveDayGeo } from './trips.js';
+import { assertTripAccess, deriveDayGeo, deriveTripDestinationsFromDays } from './trips.js';
 
 const TRANSIT_TYPES = new Set(['flight', 'train', 'bus', 'ferry']);
 
@@ -152,8 +152,6 @@ function computeDayGeographies(days, bookingRows) {
 // by GET /map-config and GET /map-data so both surfaces agree on per-day provider choice.
 export function getMapConfigsForTrip(trip) {
   const db = getDb();
-  const destinationCountries = parseJson(trip.destination_countries, []);
-  const mapConfig = getMapConfig(destinationCountries);
 
   const days = db.prepare(`
     SELECT id, date, city, city_override, city_country, city_override_country
@@ -164,6 +162,14 @@ export function getMapConfigsForTrip(trip) {
 
   const bookingRows = db.prepare('SELECT * FROM bookings WHERE trip_id = ?').all(trip.id);
   const geoByDayId = computeDayGeographies(days, bookingRows);
+
+  // Use each day's resolved (override/booking-aware) geo, not the raw seed columns — a
+  // real trip's multi-country identity can come entirely from an active hotel booking
+  // (deriveDayGeo layer 2), with every day's raw seed sharing one country.
+  const { destinationCountries } = deriveTripDestinationsFromDays(
+    days.map((d) => ({ city: geoByDayId.get(d.id)?.city, cityCountry: geoByDayId.get(d.id)?.countryCode })),
+  );
+  const mapConfig = getMapConfig(destinationCountries);
 
   const mapConfigByDay = {};
   for (const day of days) {

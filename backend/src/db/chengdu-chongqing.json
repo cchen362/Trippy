@@ -1,8 +1,6 @@
 {
   "trip": {
     "title": "Chengdu & Chongqing",
-    "destinations": ["Chengdu", "Chongqing"],
-    "destination_countries": ["CN"],
     "start_date": "2025-06-08",
     "end_date": "2025-06-17",
     "travellers": "couple",
@@ -13,6 +11,7 @@
     {
       "date": "2025-06-08",
       "city": "Chengdu",
+      "city_country": "CN",
       "phase": "Chengdu I",
       "hotel": "Waldorf Astoria Chengdu",
       "theme": "Arrival",
@@ -51,6 +50,7 @@
     {
       "date": "2025-06-09",
       "city": "Chongqing",
+      "city_country": "CN",
       "phase": "Chongqing",
       "hotel": "Regent Chongqing",
       "theme": "City Centre",

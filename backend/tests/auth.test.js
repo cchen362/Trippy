@@ -11,10 +11,10 @@ import authRoutes from '../src/routes/auth.js';
 
 let tmpDir;
 
-beforeAll(() => {
+beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-auth-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
 });
 
 afterAll(() => {

@@ -12,10 +12,10 @@ import { addAttachment, deleteAttachment, getAttachmentFile, listAttachments } f
 let tmpDir;
 let owner;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-attachments-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
   owner = authService.setup('owner', 'password123', 'Trip Owner').user;
 });
 

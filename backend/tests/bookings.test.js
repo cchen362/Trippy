@@ -51,10 +51,10 @@ function flightBooking(overrides = {}) {
 let tmpDir;
 let owner;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-bookings-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
   vi.clearAllMocks();
   owner = authService.setup('owner', 'password123', 'Trip Owner').user;
 });

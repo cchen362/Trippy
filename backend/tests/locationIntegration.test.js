@@ -15,10 +15,10 @@ let user;
 let trip;
 let dayId;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-location-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
   vi.restoreAllMocks();
 
   user = authService.setup('owner', 'password123', 'Trip Owner').user;

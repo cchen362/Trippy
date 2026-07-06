@@ -48,10 +48,10 @@ const FAKE_CATEGORIES = [
   { category: 'food', items: [] },
 ];
 
-beforeAll(() => {
+beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-discovery-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
 
   const result = authService.setup('admin', 'password123', 'Admin');
   userId = result.user.id;

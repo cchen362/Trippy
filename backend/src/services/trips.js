@@ -23,13 +23,13 @@ function computeTripStatus(startDate, endDate, today = toIsoDate(new Date())) {
   return 'active';
 }
 
-function mapTrip(row, today) {
+function mapTrip(row, today, destinations = [], destinationCountries = []) {
   return {
     id: row.id,
     title: row.title,
     ownerId: row.owner_id,
-    destinations: parseJson(row.destinations, []),
-    destinationCountries: parseJson(row.destination_countries, []),
+    destinations,
+    destinationCountries,
     startDate: row.start_date,
     endDate: row.end_date,
     travellers: row.travellers,
@@ -223,6 +223,38 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo) {
   };
 }
 
+// Derives the legacy trips.destinations/destinationCountries response shape from a list of
+// {city, cityCountry} pairs, unique by city, first-seen-in-day-order; a country is paired
+// with its city's first occurrence and dropped (not nulled) if absent, matching the prior
+// stored-column shape (Plan 6 Wave 4).
+//
+// Callers MUST pass each day's override-aware RESOLVED geo (resolvedCity/resolvedCountry —
+// same precedence deriveDayGeo/listDaysForTrip already compute), not the raw seed
+// days.city/days.city_country: a real production trip's multi-city identity can come
+// entirely from an active hotel booking (layer 2), with every day's raw seed sharing one
+// city — a seed-only derivation would silently collapse such a trip to one destination.
+// This is a read-time fallback used only when no explicit edit is in flight
+// (createTrip/updateTrip echo the caller's own input instead — see below).
+export function deriveTripDestinationPairsFromDays(days) {
+  const seen = new Set();
+  const pairs = [];
+  for (const day of days) {
+    const city = day.city;
+    if (!city || seen.has(city)) continue;
+    seen.add(city);
+    pairs.push({ city, countryCode: day.cityCountry || null });
+  }
+  return pairs;
+}
+
+export function deriveTripDestinationsFromDays(days) {
+  const pairs = deriveTripDestinationPairsFromDays(days);
+  return {
+    destinations: pairs.map((p) => p.city),
+    destinationCountries: pairs.map((p) => p.countryCode).filter(Boolean),
+  };
+}
+
 export function assertTripAccess(userId, tripId) {
   const db = getDb();
   const trip = db.prepare(`
@@ -244,7 +276,7 @@ export function assertTripAccess(userId, tripId) {
 export function assertDayAccess(userId, dayId) {
   const db = getDb();
   const row = db.prepare(`
-    SELECT d.*, t.owner_id, t.destination_countries
+    SELECT d.*, t.owner_id
     FROM days d
     JOIN trips t ON t.id = d.trip_id
     LEFT JOIN trip_collaborators tc ON tc.trip_id = t.id
@@ -309,7 +341,14 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
     ORDER BY t.start_date ASC, t.created_at ASC
   `).all(userId, userId);
 
-  return rows.map((row) => mapTrip(row, today));
+  return rows.map((row) => {
+    const bookings = listBookingsForTrip(row.id);
+    const days = listDaysForTrip(row.id, userId, bookings);
+    const { destinations, destinationCountries } = deriveTripDestinationsFromDays(
+      days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
+    );
+    return mapTrip(row, today, destinations, destinationCountries);
+  });
 }
 
 export function createTrip(userId, input) {
@@ -344,16 +383,14 @@ export function createTrip(userId, input) {
   const create = db.transaction(() => {
     const trip = db.prepare(`
       INSERT INTO trips (
-        title, owner_id, destinations, destination_countries, start_date, end_date,
+        title, owner_id, start_date, end_date,
         travellers, interest_tags, pace, status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'upcoming')
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'upcoming')
       RETURNING id
     `).get(
       title,
       userId,
-      JSON.stringify(destinations),
-      JSON.stringify(destinationCountries),
       startDate,
       endDate,
       input.travellers || 'couple',
@@ -383,7 +420,7 @@ export function createTrip(userId, input) {
   });
 
   const tripId = create();
-  return getTripDetail(tripId, userId);
+  return getTripDetail(tripId, userId, { destinationsOverride: { destinations, destinationCountries } });
 }
 
 export function updateTrip(userId, tripId, input) {
@@ -404,16 +441,20 @@ export function updateTrip(userId, tripId, input) {
   // only rewritten when the pair at its "slot" actually changed identity (rename/removal).
   // This is deliberately positional/conservative, not a smart re-diff — it corrects wrong
   // or renamed city identity, it does not re-plan which days belong to which destination.
-  let destinations;
-  let destinationCountries;
+  // destinationsOverride, when set, is echoed straight through to the response (bypassing
+  // days-derivation) — matching the pre-Wave-4 behavior where an explicit edit's response
+  // reflected exactly what was submitted. When destinations isn't part of this input, no
+  // override is set and getTripDetail below derives fresh from (possibly date-extended)
+  // days instead, since there's no explicit edit to echo.
+  let destinationsOverride;
   if (input.destinations !== undefined) {
-    const oldPairs = normalizeDestinationPairs(parseJson(existingRow.destinations, [])
-      .map((city, i) => ({ city, countryCode: parseJson(existingRow.destination_countries, [])[i] || null })));
+    const oldDayRows = db.prepare('SELECT city, city_country AS cityCountry FROM days WHERE trip_id = ? ORDER BY date ASC').all(tripId);
+    const oldPairs = deriveTripDestinationPairsFromDays(oldDayRows);
     const newPairs = normalizeDestinationPairs(input.destinations);
 
-    destinations = newPairs.map((pair) => pair.city);
-    const pairCountries = newPairs.map((pair) => pair.countryCode).filter(Boolean);
-    destinationCountries = pairCountries;
+    const destinations = newPairs.map((pair) => pair.city);
+    const destinationCountries = newPairs.map((pair) => pair.countryCode).filter(Boolean);
+    destinationsOverride = { destinations, destinationCountries };
 
     // Build a rename/removal map: for each old city that no longer appears (by exact
     // city string) anywhere in the new list, if there's a new pair at the same index,
@@ -436,9 +477,6 @@ export function updateTrip(userId, tripId, input) {
         );
       }
     });
-  } else {
-    destinations = parseJson(existingRow.destinations, []);
-    destinationCountries = parseJson(existingRow.destination_countries, []);
   }
 
   let newEndDate = existingRow.end_date;
@@ -467,7 +505,7 @@ export function updateTrip(userId, tripId, input) {
       // not the trip's first destination (that day's city may have been overridden
       // or derived from a later booking and no longer matches destinations[0]).
       const firstDay = db.prepare('SELECT city, city_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, existingRow.start_date);
-      const seedCity = firstDay?.city || parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const seedCity = firstDay?.city || existingRow.title;
       const seedCountry = firstDay?.city_country || null;
       const beforeCurrent = new Date(`${existingRow.start_date}T00:00:00Z`);
       beforeCurrent.setUTCDate(beforeCurrent.getUTCDate() - 1);
@@ -503,7 +541,7 @@ export function updateTrip(userId, tripId, input) {
       // defect of seeding from destinations[0], which is wrong once the trip's real
       // last-day city has diverged from its first destination, e.g. a multi-city trip).
       const lastDay = db.prepare('SELECT city, city_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, existingRow.end_date);
-      const seedCity = lastDay?.city || parseJson(existingRow.destinations, [])[0] || existingRow.title;
+      const seedCity = lastDay?.city || existingRow.title;
       const seedCountry = lastDay?.city_country || null;
       const afterCurrent = new Date(`${existingRow.end_date}T00:00:00Z`);
       afterCurrent.setUTCDate(afterCurrent.getUTCDate() + 1);
@@ -517,15 +555,13 @@ export function updateTrip(userId, tripId, input) {
   }
 
   db.prepare(`
-    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?,
-      destinations = ?, destination_countries = ?
+    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?
     WHERE id = ?
   `).run(
-    title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate,
-    JSON.stringify(destinations), JSON.stringify(destinationCountries), tripId,
+    title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, tripId,
   );
 
-  return getTripDetail(tripId, userId);
+  return getTripDetail(tripId, userId, { destinationsOverride });
 }
 
 export function listBookingsForTrip(tripId) {
@@ -603,15 +639,18 @@ export function getDayGeo(dayId) {
   return geo;
 }
 
-export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } = {}) {
+export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()), destinationsOverride } = {}) {
   const tripRow = assertTripAccess(userId, tripId);
-  const trip = mapTrip(tripRow, today);
   const db = getDb();
 
   // Load bookings first so deriveDayGeo can use them when building days
   const bookings = listBookingsForTrip(tripId);
 
   const days = listDaysForTrip(tripId, userId, bookings);
+
+  const { destinations, destinationCountries } = destinationsOverride
+    ?? deriveTripDestinationsFromDays(days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })));
+  const trip = mapTrip(tripRow, today, destinations, destinationCountries);
 
   const stops = db.prepare(`
     SELECT *

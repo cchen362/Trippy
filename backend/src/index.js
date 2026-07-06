@@ -60,9 +60,9 @@ if (config.isProd) {
 
 app.use(errorHandler);
 
-function start() {
+async function start() {
   initDb(config.dbPath);
-  runMigrations();
+  await runMigrations();
 
   if (config.nodeEnv === 'development') {
     const adminUser = getDb().prepare('SELECT id FROM users WHERE is_admin = 1').get();
@@ -74,4 +74,7 @@ function start() {
   });
 }
 
-start();
+start().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

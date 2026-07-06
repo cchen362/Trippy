@@ -14,13 +14,13 @@ export function seedIfEmpty(adminUserId) {
   const { trip, days } = JSON.parse(raw);
 
   const insertTrip = db.prepare(`
-    INSERT INTO trips (title, owner_id, destinations, destination_countries, start_date, end_date, travellers, interest_tags, pace, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'upcoming')
+    INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'upcoming')
     RETURNING id
   `);
 
   const insertDay = db.prepare(`
-    INSERT INTO days (trip_id, date, city, phase, hotel, theme, color_code) VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO days (trip_id, date, city, phase, hotel, theme, color_code, city_country) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING id
   `);
 
@@ -33,8 +33,6 @@ export function seedIfEmpty(adminUserId) {
     const { id: tripId } = insertTrip.get(
       trip.title,
       adminUserId,
-      JSON.stringify(trip.destinations),
-      JSON.stringify(trip.destination_countries),
       trip.start_date,
       trip.end_date,
       trip.travellers,
@@ -43,7 +41,7 @@ export function seedIfEmpty(adminUserId) {
     );
 
     for (const day of days) {
-      const { id: dayId } = insertDay.get(tripId, day.date, day.city, day.phase, day.hotel, day.theme, day.color_code);
+      const { id: dayId } = insertDay.get(tripId, day.date, day.city, day.phase, day.hotel, day.theme, day.color_code, day.city_country);
       for (const stop of day.stops) {
         insertStop.run(
           dayId, stop.time, stop.title, stop.type, stop.note ?? null,

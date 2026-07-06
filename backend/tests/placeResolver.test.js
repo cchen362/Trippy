@@ -10,10 +10,10 @@ import { __resetPlaceResolverForTests, buildPlaceQueryKey, resolvePlace } from '
 let tmpDir;
 let originalGooglePlacesKey;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-resolver-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
   __resetPlaceResolverForTests();
   vi.restoreAllMocks();
   // Default to no Google key so Nominatim-only behavior is deterministic. Tests that

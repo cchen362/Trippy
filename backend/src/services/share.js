@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getDb } from '../db/database.js';
-import { assertTripAccess, deriveDayGeo, listBookingsForTrip } from './trips.js';
+import { assertTripAccess, deriveDayGeo, listBookingsForTrip, deriveTripDestinationsFromDays } from './trips.js';
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -11,12 +11,12 @@ function parseJson(value, fallback) {
   }
 }
 
-function mapTrip(row) {
+function mapTrip(row, destinations = [], destinationCountries = []) {
   return {
     id: row.id,
     title: row.title,
-    destinations: parseJson(row.destinations, []),
-    destinationCountries: parseJson(row.destination_countries, []),
+    destinations,
+    destinationCountries,
     startDate: row.start_date,
     endDate: row.end_date,
     travellers: row.travellers,
@@ -111,8 +111,15 @@ function buildPublicTripDetail(tripId) {
     stopsByDay.get(stop.dayId).push(stop);
   }
 
+  // Use each day's resolved (override/booking-aware) geo, not the raw seed columns — a
+  // real trip's multi-city identity can come entirely from an active hotel booking
+  // (deriveDayGeo layer 2), with every day's raw seed sharing one city.
+  const { destinations, destinationCountries } = deriveTripDestinationsFromDays(
+    days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
+  );
+
   return {
-    trip: mapTrip(tripRow),
+    trip: mapTrip(tripRow, destinations, destinationCountries),
     days: days.map((day) => ({
       ...day,
       stops: stopsByDay.get(day.id) || [],

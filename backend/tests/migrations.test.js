@@ -7,10 +7,10 @@ import { tmpdir } from 'os';
 
 let tmpDir;
 
-beforeAll(() => {
+beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-test-'));
   initDb(join(tmpDir, 'test.db'));
-  runMigrations();
+  await runMigrations();
 });
 
 afterAll(() => {
@@ -81,11 +81,24 @@ describe('migrations', () => {
     expect(cacheColumns).toContain('resolved_country');
   });
 
-  it('tracks migration versions to avoid re-running', () => {
+  it('tracks migration versions to avoid re-running', async () => {
     const db = getDb();
     // Running again should not throw (idempotent — already-applied files are skipped)
-    expect(() => runMigrations()).not.toThrow();
+    await expect(runMigrations()).resolves.not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(13);
+    expect(count.c).toBe(15);
+  });
+
+  it('retires the legacy trip destination array columns', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(trips)').all().map((r) => r.name);
+
+    expect(columns).not.toContain('destinations');
+    expect(columns).not.toContain('destination_countries');
+  });
+
+  it('runs the 014 backfill without error against a fresh, trip-free DB', () => {
+    const db = getDb();
+    expect(db.prepare('SELECT COUNT(*) c FROM trips').get().c).toBe(0);
   });
 });
