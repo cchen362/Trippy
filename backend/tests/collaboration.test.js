@@ -174,6 +174,55 @@ describe('share service', () => {
     expect(link.token).toBeTruthy();
   });
 
+  // Golden-file coverage for Plan 6 Wave 3 §3.4: for a single-country trip, every existing
+  // field's exact shape/value must be untouched by adding resolvedCity/resolvedCountry —
+  // new fields are additive only, never a replacement for the legacy ones.
+  it('keeps the existing share payload fields byte-identical for a single-country trip, adding resolvedCity/resolvedCountry alongside', async () => {
+    await createStop(owner.id, tripDetail.days[0].id, {
+      title: 'Wide Alley',
+      type: 'explore',
+      time: '09:30',
+    });
+
+    const { token } = createShareLink(owner.id, tripDetail.trip.id);
+    const shared = getSharedTrip(token);
+
+    // Golden shape for the OLD fields — a single-country (Chengdu/CN) trip, so every day
+    // should resolve to exactly the seeded city/country.
+    expect(shared.trip).toEqual({
+      id: tripDetail.trip.id,
+      title: 'Spring Chengdu',
+      destinations: ['Chengdu'],
+      destinationCountries: ['CN'],
+      startDate: '2026-05-01',
+      endDate: '2026-05-02',
+      travellers: 'friends',
+      interestTags: ['tea'],
+      pace: 'moderate',
+    });
+
+    expect(shared.days).toHaveLength(2);
+    shared.days.forEach((day, index) => {
+      expect(day).toMatchObject({
+        tripId: tripDetail.trip.id,
+        city: 'Chengdu',
+        phase: null,
+        hotel: null,
+        theme: null,
+        colorCode: null,
+        dayIndex: index,
+      });
+      expect(day.id).toBeTruthy();
+      expect(typeof day.date).toBe('string');
+      // Additive-only new fields
+      expect(day.resolvedCity).toBe('Chengdu');
+      expect(day.resolvedCountry).toBe('CN');
+    });
+
+    expect(shared.days[0].stops).toHaveLength(1);
+    expect(shared.days[0].stops[0]).toMatchObject({ title: 'Wide Alley', type: 'explore', time: '09:30' });
+  });
+
   it('returns 404-style errors for invalid share tokens', () => {
     expect(() => getSharedTrip('missing-token')).toThrow('Share link not found');
   });

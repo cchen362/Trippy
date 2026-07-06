@@ -244,6 +244,87 @@ describe('deriveDayGeo / listDaysForTrip resolvedCountry (Plan 6 Wave 2)', () =>
   });
 });
 
+describe('updateTrip — destination chip editor semantics (Plan 6 Wave 3 §3.3)', () => {
+  it('renaming a chip updates the seed on matching non-override days only', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Multi-city Trip',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    // All three days seed to 'Chengdu' by default (createTrip seeds every day from the
+    // first pair) — set day 3 to 'Chongqing' to simulate a real multi-city seed, and mark
+    // day 2 as having an override so we can verify it's left untouched.
+    getDb().prepare('UPDATE days SET city = ?, city_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Chongqing', 'CN', tripId, '2026-09-12');
+    getDb().prepare('UPDATE days SET city_override = ?, city_override_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Chengdu Old Town', 'CN', tripId, '2026-09-11');
+
+    // Rename 'Chengdu' -> 'Chengdu Renamed' (same slot/index 0)
+    const updated = updateTrip(owner.id, tripId, {
+      destinations: [{ city: 'Chengdu Renamed', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+    });
+
+    expect(updated.trip.destinations).toEqual(['Chengdu Renamed', 'Chongqing']);
+    // day 09-10 had seed 'Chengdu', no override -> retargeted to the renamed pair
+    const day10 = rawDay(tripId, '2026-09-10');
+    expect(day10.city).toBe('Chengdu Renamed');
+    expect(day10.city_country).toBe('CN');
+    // day 09-11 has an override -> untouched (seed AND override both unchanged)
+    const day11 = getDb().prepare('SELECT city, city_country, city_override, city_override_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, '2026-09-11');
+    expect(day11.city_override).toBe('Chengdu Old Town');
+    expect(day11.city_override_country).toBe('CN');
+    // day 09-12 already seeded to 'Chongqing' (still present in the new list) -> untouched
+    const day12 = rawDay(tripId, '2026-09-12');
+    expect(day12.city).toBe('Chongqing');
+  });
+
+  it('reordering chips alone does not rewrite any day seed', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Multi-city Trip',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-11',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    getDb().prepare('UPDATE days SET city = ?, city_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Chongqing', 'CN', tripId, '2026-09-11');
+
+    const before10 = rawDay(tripId, '2026-09-10');
+    const before11 = rawDay(tripId, '2026-09-11');
+
+    // Same two cities, reversed order — no rename, no removal
+    updateTrip(owner.id, tripId, {
+      destinations: [{ city: 'Chongqing', countryCode: 'CN' }, { city: 'Chengdu', countryCode: 'CN' }],
+    });
+
+    const after10 = rawDay(tripId, '2026-09-10');
+    const after11 = rawDay(tripId, '2026-09-11');
+    expect(after10).toEqual(before10);
+    expect(after11).toEqual(before11);
+  });
+
+  it('removing a chip with no replacement at that slot nulls the seed country and keeps the city (no explicit replacement)', () => {
+    const trip = makeTrip(); // single destination 'Chengdu'/'CN'
+    const tripId = trip.trip.id;
+
+    updateTrip(owner.id, tripId, { destinations: [] });
+
+    const day = rawDay(tripId, '2026-09-10');
+    // No replacement pair at index 0 -> city left as-is, country cleared (per implementation:
+    // replacement?.city ?? day.city, replacement?.countryCode ?? null)
+    expect(day.city).toBe('Chengdu');
+    expect(day.city_country).toBeNull();
+  });
+});
+
 describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
   it('resolves the same pair listDaysForTrip would, for a single dayId', () => {
     const trip = makeTrip();

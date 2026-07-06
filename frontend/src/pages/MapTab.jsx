@@ -54,7 +54,8 @@ export default function MapTab() {
       detailsJson: booking.detailsJson,
     })),
   ]);
-  const { mapConfig, segments, stops: mapStops, loading: configLoading, error: mapError } = useMapData(trip?.id, mapRefreshKey);
+  const { mapConfig, mapConfigByDay, segments, stops: mapStops, loading: configLoading, error: mapError } = useMapData(trip?.id, mapRefreshKey);
+  const activeMapConfig = mapConfigByDay[activeDayId] ?? mapConfig;
 
   const stops = mapStops.filter((stop) => stop.dayId === activeDayId);
   const activeSegments = useMemo(
@@ -101,7 +102,7 @@ export default function MapTab() {
       await updateStop(correctionStop.id, {
         lat: correctionCenter.lat,
         lng: correctionCenter.lng,
-        coordinateSystem: mapConfig.coordinateSystem || 'wgs84',
+        coordinateSystem: activeMapConfig.coordinateSystem || 'wgs84',
         coordinateSource: 'user_pin',
         locationStatus: 'user_confirmed',
         locationConfidence: 1,
@@ -212,7 +213,7 @@ export default function MapTab() {
         {mapConfig && (
           <TripMap
             stops={stops}
-            mapConfig={mapConfig}
+            mapConfig={activeMapConfig}
             focusedSegmentId={focusedSegmentId}
             correctionStop={correctionStop}
             onMapCenterChange={setCorrectionCenter}

@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getDb } from '../db/database.js';
-import { assertTripAccess } from './trips.js';
+import { assertTripAccess, deriveDayGeo, listBookingsForTrip } from './trips.js';
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -40,6 +40,20 @@ function mapDay(row, index) {
   };
 }
 
+// Adds resolvedCity/resolvedCountry (Plan 6 Wave 3 §3.4) alongside the existing raw `city`
+// field — additive only, so single-country trips' existing fields stay byte-identical.
+function withResolvedGeo(day, row, bookings, previousResolvedGeo) {
+  const geoInput = {
+    date: row.date,
+    city: row.city,
+    cityOverride: row.city_override ?? null,
+    cityCountry: row.city_country ?? null,
+    cityOverrideCountry: row.city_override_country ?? null,
+  };
+  const geo = deriveDayGeo(geoInput, bookings, previousResolvedGeo);
+  return { day: { ...day, resolvedCity: geo.city, resolvedCountry: geo.countryCode }, geo };
+}
+
 function mapStop(row) {
   const isBookingLinked = Boolean(row.booking_id);
 
@@ -69,12 +83,20 @@ function buildPublicTripDetail(tripId) {
     throw Object.assign(new Error('Trip not found'), { status: 404 });
   }
 
-  const days = db.prepare(`
+  const dayRows = db.prepare(`
     SELECT *
     FROM days
     WHERE trip_id = ?
     ORDER BY date ASC
-  `).all(tripId).map(mapDay);
+  `).all(tripId);
+
+  const bookings = listBookingsForTrip(tripId);
+  let previousResolvedGeo = null;
+  const days = dayRows.map((row, index) => {
+    const { day, geo } = withResolvedGeo(mapDay(row, index), row, bookings, previousResolvedGeo);
+    previousResolvedGeo = geo;
+    return day;
+  });
 
   const stopsByDay = new Map(days.map((day) => [day.id, []]));
   const stops = db.prepare(`

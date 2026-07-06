@@ -16,6 +16,7 @@ import { useCopilot } from '../hooks/useCopilot.js';
 import { useDiscovery } from '../hooks/useDiscovery.js';
 import { useStops } from '../hooks/useStops.js';
 import { useTrip } from '../hooks/useTrip.js';
+import { bookingsApi } from '../services/bookingsApi.js';
 import { tripsApi } from '../services/tripsApi.js';
 import { tripIsLive } from '../utils/tripStatus.js';
 
@@ -165,12 +166,14 @@ export default function TripPage() {
         {editOpen && (
           <EditTripModal
             trip={tripState.trip}
+            days={tripState.days}
             open={editOpen}
             onClose={() => setEditOpen(false)}
             onSubmit={handleEditSave}
             saving={editSaving}
             onDelete={handleDelete}
             deleting={deleting}
+            lookupCities={bookingsApi.lookupCities}
           />
         )}
       </AnimatePresence>

@@ -114,7 +114,7 @@ export default function ShareViewPage() {
                   Day {dayIndex + 1} / {formatDate(day.date)}
                 </p>
                 <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                  {day.city || day.theme || 'Open day'}
+                  {day.resolvedCity || day.city || day.theme || 'Open day'}
                 </h2>
               </div>
               <div className="grid gap-4">

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
-import { getMapConfigsForTrip } from '../services/mapData.js';
+import { getMapConfigsForTrip, getTripMapData } from '../services/mapData.js';
 import { repairTripStopLocations } from '../services/stops.js';
 
 const router = Router();

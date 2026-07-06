@@ -73,7 +73,12 @@ export async function extractBookings({ files, contextText, tripContext }) {
   if (tripContext) {
     contextBlock += ` Trip date range: ${tripContext.startDate} to ${tripContext.endDate}.`;
     if (tripContext.destinations?.length) {
-      contextBlock += ` Trip destinations: ${tripContext.destinations.join(', ')}.`;
+      // destinations is an array of {city, countryCode} pairs — format as "City (CC)",
+      // omitting the parenthetical for a pair with no resolved country.
+      const formatted = tripContext.destinations
+        .map((d) => (d.countryCode ? `${d.city} (${d.countryCode})` : d.city))
+        .join(', ');
+      contextBlock += ` Trip destinations: ${formatted}.`;
     }
   } else {
     contextBlock += ' No trip context given — infer the nearest future date when year/date is ambiguous.';

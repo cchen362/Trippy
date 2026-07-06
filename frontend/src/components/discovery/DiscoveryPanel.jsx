@@ -325,6 +325,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       note: suggestion.description,
       locationQuery: suggestion.name,
       locationCity: committedDestination.trim(),
+      locationCountry: activeDay?.resolvedCountry ?? null,
       localName: suggestion.localName,
       locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
       duration: suggestion.estimatedDuration,

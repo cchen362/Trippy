@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { getDb } from '../db/database.js';
 import { extractBookings } from './claude.js';
 import { createBooking } from './bookings.js';
-import { assertTripAccess } from './trips.js';
+import { assertTripAccess, listBookingsForTrip, listDaysForTrip } from './trips.js';
 
 const SIZE_CAPS = { text: 100 * 1024, image: 5 * 1024 * 1024, pdf: 10 * 1024 * 1024 };
 const MEDIA_TYPE_WHITELIST = {
@@ -233,12 +233,26 @@ async function runExtraction(userId, artifactId, validatedFiles, tripId) {
 
   let tripContext = null;
   if (tripId) {
-    const trip = db.prepare('SELECT start_date, end_date, destinations FROM trips WHERE id = ?').get(tripId);
+    const trip = db.prepare('SELECT start_date, end_date FROM trips WHERE id = ?').get(tripId);
     if (trip) {
+      // Derive distinct resolved {city, countryCode} pairs across the trip's days (in day
+      // order, de-duped by city) instead of the legacy trips.destinations column — this
+      // reflects city_override corrections and per-day booking-derived geography, giving
+      // Claude the trip's actual current identity rather than the original chip list.
+      const bookings = listBookingsForTrip(tripId);
+      const days = listDaysForTrip(tripId, userId, bookings);
+      const destinations = [];
+      const seen = new Set();
+      for (const day of days) {
+        const city = day.resolvedCity;
+        if (!city || seen.has(city)) continue;
+        seen.add(city);
+        destinations.push({ city, countryCode: day.resolvedCountry || null });
+      }
       tripContext = {
         startDate: trip.start_date,
         endDate: trip.end_date,
-        destinations: JSON.parse(trip.destinations || '[]'),
+        destinations,
       };
     }
   }

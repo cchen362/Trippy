@@ -1,7 +1,32 @@
 import { useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
+import DestinationChipPicker from './DestinationChipPicker';
 
-export default function EditTripModal({ trip, open, onClose, onSubmit, saving, onDelete, deleting }) {
+// Pre-fill source for the destination chips: prefer the per-day resolved pairs (Wave 2's
+// resolvedCity/resolvedCountry on each day), de-duped in day order, since that reflects
+// the trip's *actual* current geography (including any city_override corrections) rather
+// than the legacy trips.destinations/destinationCountries columns, which are independent
+// arrays that can drift out of sync with each other and with what the days actually show.
+// Falls back to zipping destinations/destinationCountries when no days are available yet.
+function deriveInitialChips(trip, days) {
+  if (Array.isArray(days) && days.length > 0) {
+    const chips = [];
+    const seen = new Set();
+    for (const day of days) {
+      const city = day.resolvedCity ?? day.city;
+      if (!city || seen.has(city)) continue;
+      seen.add(city);
+      chips.push({ city, country: day.resolvedCountry ?? null });
+    }
+    if (chips.length > 0) return chips;
+  }
+
+  const destinations = trip.destinations ?? [];
+  const destinationCountries = trip.destinationCountries ?? [];
+  return destinations.map((city, i) => ({ city, country: destinationCountries[i] ?? null }));
+}
+
+export default function EditTripModal({ trip, days, open, onClose, onSubmit, saving, onDelete, deleting, lookupCities }) {
   const [form, setForm] = useState({
     title: trip.title ?? '',
     endDate: trip.endDate ?? '',
@@ -9,6 +34,7 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving, o
     pace: trip.pace ?? 'moderate',
     interestTags: trip.interestTags ?? [],
   });
+  const [destinationChips, setDestinationChips] = useState(() => deriveInitialChips(trip, days));
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -22,8 +48,12 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving, o
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError(null);
+    const payload = {
+      ...form,
+      destinations: destinationChips.map((chip) => ({ city: chip.city, countryCode: chip.country || null })),
+    };
     try {
-      await onSubmit(form);
+      await onSubmit(payload);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -64,6 +94,12 @@ export default function EditTripModal({ trip, open, onClose, onSubmit, saving, o
                 style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
               />
             </label>
+
+            <DestinationChipPicker
+              chips={destinationChips}
+              onChange={setDestinationChips}
+              lookupCities={lookupCities}
+            />
 
             <label className="block">
               <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>

@@ -2,6 +2,7 @@ import { getDb } from '../db/database.js';
 import { cityFromIata, cityFromAirportString, canonicalCity } from '../utils/airports.js';
 import { countryCodeFromName } from '../utils/countries.js';
 import { resolveBookingDocuments } from './documents.js';
+import { resolvePlace } from './placeResolver.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -396,6 +397,50 @@ export function updateTrip(userId, tripId, input) {
     ? normalizeArray(input.interestTags)
     : parseJson(existingRow.interest_tags, []);
 
+  // Destination chip-list edit (§3.3): rewrites the seed layer (days.city/city_country)
+  // only, and only on days that have no city_override. Reordering alone (same set of
+  // {city, countryCode} pairs, any order) must not touch any day's seed — so we diff by
+  // matching each existing pair to a new pair at the same array index; a day's seed is
+  // only rewritten when the pair at its "slot" actually changed identity (rename/removal).
+  // This is deliberately positional/conservative, not a smart re-diff — it corrects wrong
+  // or renamed city identity, it does not re-plan which days belong to which destination.
+  let destinations;
+  let destinationCountries;
+  if (input.destinations !== undefined) {
+    const oldPairs = normalizeDestinationPairs(parseJson(existingRow.destinations, [])
+      .map((city, i) => ({ city, countryCode: parseJson(existingRow.destination_countries, [])[i] || null })));
+    const newPairs = normalizeDestinationPairs(input.destinations);
+
+    destinations = newPairs.map((pair) => pair.city);
+    const pairCountries = newPairs.map((pair) => pair.countryCode).filter(Boolean);
+    destinationCountries = pairCountries;
+
+    // Build a rename/removal map: for each old city that no longer appears (by exact
+    // city string) anywhere in the new list, if there's a new pair at the same index,
+    // treat that as "this slot was renamed" and retarget matching-seed days to it.
+    const newCitySet = new Set(newPairs.map((p) => p.city));
+    oldPairs.forEach((oldPair, index) => {
+      if (newCitySet.has(oldPair.city)) return; // still present elsewhere — not removed/renamed
+      const replacement = newPairs[index]; // may be undefined if the list shrank
+      const days = db.prepare(`
+        SELECT id, city FROM days
+        WHERE trip_id = ? AND city_override IS NULL AND city = ?
+      `).all(tripId, oldPair.city);
+      if (!days.length) return;
+      const updateSeed = db.prepare('UPDATE days SET city = ?, city_country = ? WHERE id = ?');
+      for (const day of days) {
+        updateSeed.run(
+          replacement?.city ?? day.city,
+          replacement?.countryCode ?? null,
+          day.id,
+        );
+      }
+    });
+  } else {
+    destinations = parseJson(existingRow.destinations, []);
+    destinationCountries = parseJson(existingRow.destination_countries, []);
+  }
+
   let newEndDate = existingRow.end_date;
   let newStartDate = existingRow.start_date;
 
@@ -472,9 +517,13 @@ export function updateTrip(userId, tripId, input) {
   }
 
   db.prepare(`
-    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?
+    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?,
+      destinations = ?, destination_countries = ?
     WHERE id = ?
-  `).run(title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, tripId);
+  `).run(
+    title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate,
+    JSON.stringify(destinations), JSON.stringify(destinationCountries), tripId,
+  );
 
   return getTripDetail(tripId, userId);
 }
@@ -597,13 +646,36 @@ export function deleteTrip(userId, tripId) {
   return { deleted: true };
 }
 
-export function updateDayCityOverride(userId, tripId, date, cityOverride) {
+// Resolves the override's country from the typed text: first try a trailing-comma-segment
+// country-name/code match ("Melaka, Malaysia" -> "MY"), else fall back to the same place
+// resolver stops.js uses (cache-first, Nominatim/Google Places network lookup keyed on the
+// city text). Returns null if neither yields a country — acceptable, per Wave 2 §2.3 the
+// precedence chain already tolerates a null-country day.
+async function resolveOverrideCountry(cityOverride) {
+  if (!cityOverride) return null;
+  const fromName = countryCodeFromName(cityOverride);
+  if (fromName) return fromName;
+
+  try {
+    const resolution = await resolvePlace({ queryText: cityOverride, city: cityOverride });
+    return resolution?.countryCode || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateDayCityOverride(userId, tripId, date, cityOverride) {
   assertTripAccess(userId, tripId);
   const db = getDb();
+  const cityOverrideCountry = await resolveOverrideCountry(cityOverride);
   const result = db.prepare(`
-    UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?
-    RETURNING id, date, city_override
-  `).get(cityOverride ?? null, tripId, date);
+    UPDATE days SET city_override = ?, city_override_country = ? WHERE trip_id = ? AND date = ?
+    RETURNING id, date, city_override, city_override_country
+  `).get(cityOverride ?? null, cityOverrideCountry, tripId, date);
   if (!result) throw Object.assign(new Error('Day not found'), { status: 404 });
-  return { date: result.date, cityOverride: result.city_override };
+  return {
+    date: result.date,
+    cityOverride: result.city_override,
+    cityOverrideCountry: result.city_override_country,
+  };
 }

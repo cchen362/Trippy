@@ -1,6 +1,6 @@
 # Implementation Plan 6 — Q2 Geography Model (Gate A)
 
-**Status:** Wave 1 COMPLETE (2026-07-06) — schema, extraction, resolver, and paired-seed changes shipped and tested (backend 204/204, frontend 28/28). Wave 2 COMPLETE (2026-07-06) — `deriveDayGeo`, per-day `mapConfigByDay`, stop-level deep-link override, and derived-geography geocoding bias shipped and tested (backend 219/219, frontend unchanged at 28/28). Wave 3 (frontend consumers and the destination editor) next.
+**Status:** Wave 1 COMPLETE (2026-07-06) — schema, extraction, resolver, and paired-seed changes shipped and tested (backend 204/204, frontend 28/28). Wave 2 COMPLETE (2026-07-06) — `deriveDayGeo`, per-day `mapConfigByDay`, stop-level deep-link override, and derived-geography geocoding bias shipped and tested (backend 219/219, frontend unchanged at 28/28). Wave 3 COMPLETE (2026-07-07) — Map/Today tab per-day consumers, destination editor (`EditTripModal` + conservative seed-layer edit semantics), day-override country resolution, and importer/share/discovery consumers shipped and tested (backend 223/223, frontend 29/29). Also fixed a Wave-2 regression found during browser verification: `routes/map.js` called `getTripMapData` without importing it, so `GET /map-data` 500'd — the Map tab was broken end-to-end until this session's fix. Wave 4 (backfill, relabel, legacy retirement) next.
 **Decision record:** [Gate A CLOSED, owner decisions 2026-07-06](../reviews/2026-07-06-product-architecture-risk-review.md#gate-a-closed--owner-decisions-2026-07-06)
 **Design source:** [Completed Q2 review](../reviews/2026-07-06-q2-trip-geography-and-map-architecture.md) — all §-references below point there unless stated otherwise.
 **Model guidance:** Fable orchestrates and QAs; coding delegated to Sonnet subagents wave by wave.
@@ -220,12 +220,29 @@ its header comment mandates the twin files move together (review §8.6). Its
   `ShareViewPage.jsx:117` prefers it — fixing the share view's seeded-city staleness
   additively.
 
-**Wave 3 tests:** editor semantics (rename chip updates matching non-override seeds only);
-TileLayer remount on provider switch (component test); share payload golden file — old fields
-byte-identical for a single-country trip, new fields additive. **Manual 375px pass:** CN+KR
-fixture — day-switch flips tiles without errors; Today on the Seoul date deep-links to Naver;
-pin correction on the Seoul day stores `wgs84`; Edit Trip corrects a wrong-CN chip and the map
-recovers (S5 end-to-end).
+**Wave 3 tests (as shipped, 2026-07-07):** editor semantics — rename retargets matching
+non-override days only, reorder alone touches nothing, removal-with-no-replacement nulls the
+seed country and keeps the city text (backend `trips.test.js`, 3 new cases); TileLayer remount
+on provider switch (frontend `TripMap.test.jsx`) — asserts on the actual bug reading
+react-leaflet's source surfaced (a stale `subdomains` array gets spliced into the new
+provider's tile URL, e.g. AMap's numeric template getting OSM's `a/b/c` letter), not the
+attribution staleness originally hypothesized, since attribution/url are already reactive in
+react-leaflet regardless of key; share payload golden file — old fields byte-identical for a
+single-country (Chengdu/CN) trip, `resolvedCity`/`resolvedCountry` additive
+(`collaboration.test.js`). Baselines grew as required: backend 219→223, frontend 28→29.
+
+**Manual browser pass (2026-07-07, production repo at `C:\Users\cchen362\Desktop\Trippy` —
+not the stale OneDrive-synced copy):** verified against the real Chengdu–Chongqing trip (CN
+regression anchor; no CN+KR fixture exists in this dev DB, so the mixed-country day-switch
+path is unit-tested but not manually re-verified this session). Map tab loads, day-switch
+(Chengdu → Chongqing) re-centers and re-tiles without console/server errors; Edit Trip opens
+with `CHENGDU`/`CHONG QING` chips pre-filled from resolved per-day geography, and removing a
+chip updates the picker live. Found and fixed in-session: Wave 2 had left `routes/map.js`
+calling `getTripMapData` without importing it, 500-ing `GET /map-data` — the Map tab was
+broken end-to-end on main until this fix (one-line import, `mapData.js` still exported the
+function). Not manually verified: Today tab (trip is in the past relative to today's date, so
+there's no "today" row to exercise), and the CN+KR/S5/S6 fixtures from the review's §9 matrix
+(no such trip exists locally; covered by Wave 2's existing unit tests only).
 
 ---
 

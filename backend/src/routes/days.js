@@ -19,11 +19,11 @@ router.get('/trips/:tripId/days', requireTripAccess, (req, res, next) => {
   }
 });
 
-router.patch('/trips/:tripId/days/:date', requireTripAccess, (req, res, next) => {
+router.patch('/trips/:tripId/days/:date', requireTripAccess, async (req, res, next) => {
   try {
     const { cityOverride } = req.body;
     const normalized = cityOverride == null ? null : String(cityOverride).trim() || null;
-    res.json(updateDayCityOverride(req.user.id, req.params.tripId, req.params.date, normalized));
+    res.json(await updateDayCityOverride(req.user.id, req.params.tripId, req.params.date, normalized));
   } catch (err) {
     next(err);
   }

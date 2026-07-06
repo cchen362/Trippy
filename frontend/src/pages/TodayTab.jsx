@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useTripContext } from './TripPage.jsx';
-import { useMapConfig } from '../hooks/useMapConfig.js';
+import { useMapData } from '../hooks/useMapData.js';
 import { computeToday } from '../utils/todayModel.js';
 import { localIso } from '../utils/date.js';
 import HeroCard from '../components/today/HeroCard.jsx';
@@ -11,7 +11,7 @@ import CollapsedRow from '../components/today/CollapsedRow.jsx';
 
 export default function TodayTab() {
   const { trip, days, bookings, live } = useTripContext();
-  const { mapConfig } = useMapConfig(trip?.id);
+  const { mapConfig, mapConfigByDay } = useMapData(trip?.id);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -25,6 +25,7 @@ export default function TodayTab() {
 
   const todayIso = localIso(now);
   const todayDay = days.find((d) => d.date === todayIso);
+  const todayMapConfig = mapConfigByDay[todayDay?.id] ?? mapConfig;
   const dayIndex = todayDay ? todayDay.dayIndex : null;
   const cityLabel = todayDay?.resolvedCity || todayDay?.city || trip.destinations?.[0] || '';
   const weekday = new Date(`${todayIso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short' });
@@ -46,11 +47,11 @@ export default function TodayTab() {
         )}
       </div>
 
-      <CollapsedRow items={model.collapsed} deepLinkProvider={mapConfig?.deepLinkProvider} mapConfig={mapConfig} />
+      <CollapsedRow items={model.collapsed} deepLinkProvider={todayMapConfig?.deepLinkProvider} mapConfig={todayMapConfig} />
 
       {model.hero ? (
         <div className="mb-5">
-          <HeroCard item={model.hero} deepLinkProvider={mapConfig?.deepLinkProvider} mapConfig={mapConfig} />
+          <HeroCard item={model.hero} deepLinkProvider={todayMapConfig?.deepLinkProvider} mapConfig={todayMapConfig} />
         </div>
       ) : (
         <p className="font-body italic text-lg mb-5" style={{ color: 'var(--cream-dim)' }}>
@@ -61,7 +62,7 @@ export default function TodayTab() {
       {model.upcoming.length > 0 && (
         <div className="mb-5">
           {model.upcoming.map((item) => (
-            <UpcomingRow key={`${item.kind}-${item.id}`} item={item} deepLinkProvider={mapConfig?.deepLinkProvider} mapConfig={mapConfig} />
+            <UpcomingRow key={`${item.kind}-${item.id}`} item={item} deepLinkProvider={todayMapConfig?.deepLinkProvider} mapConfig={todayMapConfig} />
           ))}
         </div>
       )}
@@ -69,7 +70,7 @@ export default function TodayTab() {
       {/* When the hotel itself is the hero (no other anchors left today), the
           hero card already covers it — avoid rendering the same booking twice. */}
       {model.tonight && model.hero?.kind !== 'hotel' && (
-        <TonightCard booking={model.tonight} stop={tonightStop} deepLinkProvider={mapConfig?.deepLinkProvider} mapConfig={mapConfig} />
+        <TonightCard booking={model.tonight} stop={tonightStop} deepLinkProvider={todayMapConfig?.deepLinkProvider} mapConfig={todayMapConfig} />
       )}
 
       {model.tomorrowFirst && (

@@ -28,6 +28,7 @@ export function useMapData(tripId, refreshKey) {
   return {
     mapData,
     mapConfig: mapData?.mapConfig || null,
+    mapConfigByDay: mapData?.mapConfigByDay || {},
     segments: mapData?.segments || [],
     stops: mapData?.stops || [],
     loading,

@@ -153,6 +153,7 @@ export default function TripMap({
       zoomControl={true}
     >
       <TileLayer
+        key={mapConfig.tileProvider}
         url={mapConfig.tileUrl}
         subdomains={mapConfig.tileSubdomains}
         attribution={mapConfig.tileAttribution}
@@ -201,7 +202,7 @@ export default function TripMap({
         <StopMarker
           key={stop.id}
           stop={stop}
-          deepLinkProvider={mapConfig.deepLinkProvider}
+          deepLinkProvider={stop.deepLinkProvider}
           muted={isMuted(stop)}
           onStartCorrection={onStartCorrection}
         />
