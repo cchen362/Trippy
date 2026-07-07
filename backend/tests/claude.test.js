@@ -50,13 +50,24 @@ function ndjsonChunks(categories) {
   return categories.map((cat) => JSON.stringify(cat) + '\n');
 }
 
+// Four categories with at least one item each — the minimum yield
+// discoverDestination now requires (see MIN_CATEGORIES_WITH_ITEMS in
+// src/services/claude.js). Tests that aren't specifically exercising the
+// minimum-yield guard use this fixture so they don't trip it incidentally.
+const FOUR_HEALTHY_CATEGORIES = [
+  { category: 'essentials', items: [{ name: 'Ngurah Rai Airport' }] },
+  { category: 'culture', items: [{ name: 'Kinkakuji', lat: 35.0, lng: 135.7 }] },
+  { category: 'food', items: [{ name: 'Ramen Alley' }] },
+  { category: 'nature', items: [{ name: 'Arashiyama', lat: 35.0, lng: 135.6 }] },
+];
+
 describe('discoverDestination — NDJSON streaming', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('calls messages.stream with haiku model and destination in user message', async () => {
-    const chunks = ndjsonChunks([{ category: 'culture', items: [] }]);
+  it('calls messages.stream with haiku model, 64000 max_tokens, and destination in user message', async () => {
+    const chunks = ndjsonChunks(FOUR_HEALTHY_CATEGORIES);
     mockStream.mockReturnValue(makeMockStream(chunks));
 
     await discoverDestination('kyoto', []);
@@ -64,43 +75,39 @@ describe('discoverDestination — NDJSON streaming', () => {
     expect(mockStream).toHaveBeenCalledOnce();
     const call = mockStream.mock.calls[0][0];
     expect(call.model).toBe('claude-haiku-4-5-20251001');
+    // Haiku 4.5's streaming output ceiling — raised from 16000, which
+    // truncated the tail of every real generation (production incident:
+    // categories systematically missing past the truncation point).
+    expect(call.max_tokens).toBe(64000);
     expect(call.messages[0].content).toContain('kyoto');
   });
 
   it('returns accumulated categories parsed from NDJSON text events', async () => {
-    const cats = [
-      { category: 'culture', items: [{ name: 'Kinkakuji', lat: 35.0, lng: 135.7 }] },
-      { category: 'food', items: [] },
-    ];
-    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
 
     const result = await discoverDestination('kyoto', []);
 
-    expect(result).toHaveLength(2);
-    expect(result[0].category).toBe('culture');
-    expect(result[1].category).toBe('food');
+    expect(result).toHaveLength(4);
+    expect(result.map((c) => c.category)).toEqual(['essentials', 'culture', 'food', 'nature']);
   });
 
   it('calls onCategory callback for each parsed category', async () => {
-    const cats = [
-      { category: 'nature', items: [{ name: 'Arashiyama', lat: 35.0, lng: 135.6 }] },
-      { category: 'nightlife', items: [] },
-    ];
-    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
 
     const received = [];
     await discoverDestination('kyoto', [], (cat) => received.push(cat));
 
-    expect(received).toHaveLength(2);
-    expect(received[0].category).toBe('nature');
-    expect(received[1].category).toBe('nightlife');
+    expect(received).toHaveLength(4);
+    expect(received.map((c) => c.category)).toEqual(['essentials', 'culture', 'food', 'nature']);
   });
 
   it('deduplicates items with the same normalized name across categories', async () => {
     const cats = [
-      { category: 'culture', items: [{ name: 'Dujiangyan Scenic Area' }, { name: 'Fushimi Inari' }] },
-      // 'Dujiangyan & Scenic Area' normalizes to the same key — should be dropped
-      { category: 'hidden_gems', items: [{ name: 'Dujiangyan & Scenic Area' }, { name: 'Nijo Castle' }] },
+      ...FOUR_HEALTHY_CATEGORIES.slice(0, 2),
+      // 'Dujiangyan & Scenic Area' normalizes to the same key as
+      // 'Dujiangyan Scenic Area' below — should be dropped
+      { category: 'hidden_gems', items: [{ name: 'Dujiangyan Scenic Area' }, { name: 'Fushimi Inari' }] },
+      { category: 'nightlife', items: [{ name: 'Dujiangyan & Scenic Area' }, { name: 'Nijo Castle' }] },
     ];
     mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
 
@@ -113,18 +120,129 @@ describe('discoverDestination — NDJSON streaming', () => {
     expect(names).toContain('Nijo Castle');
   });
 
-  it('silently skips invalid NDJSON lines', async () => {
+  it('drops unparseable lines, logs them loudly, and keeps the rest of the stream intact', async () => {
     const chunks = [
       'not valid json\n',
-      JSON.stringify({ category: 'food', items: [{ name: 'Ramen shop' }] }) + '\n',
+      ...ndjsonChunks(FOUR_HEALTHY_CATEGORIES),
       '{"missing_items_key": true}\n',
     ];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockStream.mockReturnValue(makeMockStream(chunks));
 
     const result = await discoverDestination('tokyo', []);
 
-    expect(result).toHaveLength(1);
-    expect(result[0].category).toBe('food');
+    // The garbage line is dropped and logged loudly (never silent).
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[discover] dropped unparseable line (len=%d): %s',
+      expect.any(Number),
+      expect.stringContaining('not valid json'),
+    );
+    // The structurally-valid-but-fieldless line ({"missing_items_key":true})
+    // has no category/items — dropped without a parse-failure log, and the
+    // rest of the categories still come through untouched.
+    expect(result).toHaveLength(4);
+    expect(result.map((c) => c.category)).toEqual(['essentials', 'culture', 'food', 'nature']);
+
+    errorSpy.mockRestore();
+  });
+
+  // Reproduces the production incident: the model wrapped its NDJSON output in
+  // a pretty-printed JSON array, so every line had a trailing comma (invalid
+  // standalone JSON) except the last, and the array's own `[`/`]` lines and
+  // markdown fences appeared as extra lines. Only the final category
+  // ('wellness') survived the old parser — the fix must recover all of them.
+  it('recovers every category from a pretty-printed-JSON-array response with trailing commas', async () => {
+    const cats = [
+      { category: 'essentials', items: [{ name: 'Ngurah Rai Airport' }] },
+      { category: 'culture', items: [{ name: 'Uluwatu Temple' }] },
+      { category: 'food', items: [{ name: 'Warung Babi Guling' }] },
+      { category: 'nature', items: [{ name: 'Tegallalang Rice Terrace' }] },
+      { category: 'nightlife', items: [{ name: 'Potato Head Beach Club' }] },
+      { category: 'hidden_gems', items: [{ name: 'Sidemen Valley' }] },
+      { category: 'architecture', items: [{ name: 'Pura Ulun Danu Bratan' }] },
+      { category: 'wellness', items: [{ name: 'Karsa Spa' }] },
+    ];
+    const chunks = [
+      '```json\n',
+      '[\n',
+      ...cats.slice(0, -1).map((c) => `  ${JSON.stringify(c)},\n`),
+      `  ${JSON.stringify(cats.at(-1))}\n`,
+      ']\n',
+      '```\n',
+    ];
+    mockStream.mockReturnValue(makeMockStream(chunks));
+
+    const result = await discoverDestination('bali, indonesia (id)', []);
+
+    expect(result).toHaveLength(8);
+    expect(result.map((c) => c.category)).toEqual(cats.map((c) => c.category));
+  });
+
+  describe('category name normalization', () => {
+    it('normalizes case/spacing variants onto the canonical category name', async () => {
+      const cats = [
+        { category: 'Hidden Gems', items: [{ name: 'Sidemen Valley' }] },
+        ...FOUR_HEALTHY_CATEGORIES,
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      const result = await discoverDestination('bali', []);
+
+      expect(result.map((c) => c.category)).toContain('hidden_gems');
+      const hiddenGems = result.find((c) => c.items.some((i) => i.name === 'Sidemen Valley'));
+      expect(hiddenGems.category).toBe('hidden_gems');
+    });
+
+    it('drops a category with a name that matches no canonical category, and logs it', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const cats = [
+        { category: 'shopping', items: [{ name: 'Beachwalk Mall' }] },
+        ...FOUR_HEALTHY_CATEGORIES,
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      const result = await discoverDestination('bali', []);
+
+      expect(result.map((c) => c.category)).not.toContain('shopping');
+      expect(result).toHaveLength(4);
+      expect(errorSpy).toHaveBeenCalledWith('[discover] dropped unknown category name: %s', 'shopping');
+
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('minimum-yield guard', () => {
+    it('throws when fewer than 4 categories have at least one item', async () => {
+      // Mirrors the production incident: a single populated category (plus
+      // some empty/dropped ones) must not be treated as a usable generation.
+      const cats = [
+        { category: 'essentials', items: [] },
+        { category: 'wellness', items: [{ name: 'Karsa Spa' }] },
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      await expect(discoverDestination('bali', [])).rejects.toThrow(/insufficient yield/);
+    });
+
+    it('throws with a message reporting categories/items parsed and lines dropped', async () => {
+      const chunks = ['garbage line\n', ...ndjsonChunks([{ category: 'wellness', items: [{ name: 'Karsa Spa' }] }])];
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockStream.mockReturnValue(makeMockStream(chunks));
+
+      await expect(discoverDestination('bali', [])).rejects.toThrow(
+        /1 of 1 parsed categories had items \(1 items total\), 1 lines dropped as unparseable/,
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('succeeds when exactly 4 categories have items (the boundary)', async () => {
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
+
+      const result = await discoverDestination('bali', []);
+
+      expect(result).toHaveLength(4);
+    });
   });
 });
 

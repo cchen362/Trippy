@@ -719,7 +719,9 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
       throw new Error('Claude API unavailable');
     });
 
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { events, error } = await callDiscover({ destination: 'Nagano' });
+    errorSpy.mockRestore();
 
     expect(error).toBeUndefined();
     const errorEvent = events.find((e) => e.type === 'error');
@@ -736,7 +738,9 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
       throw new Error('Claude API unavailable');
     });
 
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { events, error } = await callDiscover({ destination: 'Brand New City' });
+    errorSpy.mockRestore();
 
     expect(error).toBeUndefined();
     const errorEvent = events.find((e) => e.type === 'error');
@@ -744,6 +748,53 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
     expect(errorEvent.message).toMatch(/unavailable/i);
     const doneEvent = events.find((e) => e.type === 'done');
     expect(doneEvent).toBeUndefined();
+  });
+
+  // Production incident (verified root cause): a generation that threw after
+  // parsing too few usable categories (the new minimum-yield guard in
+  // claude.js) must never be treated as a successful generation by the route
+  // — last_generated_at and the daily generation counter must stay exactly as
+  // they were before the attempt, and the request must serve the stored
+  // catalogue rather than committing the thin/failed result as fresh.
+  it('does not update last_generated_at or the daily generation count when generation fails, and re-serves the stored catalogue unchanged', async () => {
+    const expiredTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'balitest', countryCode: 'ID', displayName: 'Bali', lastGeneratedAt: expiredTime, generationCount: 1 });
+    seedPlace(dest.id, { category: 'wellness', name: 'Old Karsa Spa' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 1)`,
+    ).run(dest.id);
+
+    // Mirrors the real discoverDestination throwing on insufficient yield.
+    mockDiscoverDestination.mockImplementation(async () => {
+      throw new Error('[discover] insufficient yield for destination=bali: 1 of 1 parsed categories had items (10 items total), 7 lines dropped as unparseable');
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Balitest', countryCode: 'ID' });
+    errorSpy.mockRestore();
+
+    expect(error).toBeUndefined();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
+    expect(doneEvent?.generationFailed).toBe(true);
+
+    // The pre-existing stored catalogue is served, untouched.
+    const categoryEvent = events.find((e) => e.type === 'category');
+    expect(categoryEvent?.items.map((i) => i.name)).toEqual(['Old Karsa Spa']);
+
+    // Neither the lifetime generation_count/last_generated_at nor the daily
+    // counter were bumped by the failed attempt — the DB is exactly as it
+    // was before the request, apart from the row's identity.
+    const destRow = getDb().prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(dest.id);
+    expect(destRow.last_generated_at).toBe(expiredTime);
+    expect(destRow.generation_count).toBe(1);
+    const dailyRow = getDb().prepare(
+      `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+    ).get(dest.id);
+    expect(dailyRow.count).toBe(1);
+    const places = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(dest.id);
+    expect(places).toHaveLength(1);
   });
 });
 

@@ -185,6 +185,28 @@ Curation rules:
 - Use the most specific, locally-used name for each place. Do not append generic suffixes unless part of the official name.
 - Do not repeat the same place across categories.`;
 
+// Minimum distinct categories (each with at least one item) a generation must
+// yield to be considered usable. Below this, the catalogue committed would be
+// too thin/skewed to trust (see production incident: a truncated/malformed
+// generation stored 10 items in a single category as a fresh 7-day catalogue).
+const MIN_CATEGORIES_WITH_ITEMS = 4;
+
+// Lines that are pure JSON-array/markdown-fence scaffolding rather than a
+// category object — seen when the model wraps its NDJSON output in a
+// pretty-printed JSON array despite being told not to.
+const STRUCTURAL_LINE_RE = /^(\[|\]|```json|```)$/;
+
+// Maps a possibly-mangled category name (wrong case, spaces instead of
+// underscores, stray whitespace) onto one of the canonical DISCOVERY_CATEGORIES
+// names. Returns null when it doesn't match any canonical name — the frontend's
+// tabs and the ranking layer (services/discoveryRank.js) key off these exact
+// strings, so an unrecognized name must never be stored.
+function canonicalizeCategoryName(raw) {
+  if (typeof raw !== 'string') return null;
+  const normalized = raw.trim().toLowerCase().replace(/\s+/g, '_');
+  return DISCOVERY_CATEGORIES.includes(normalized) ? normalized : null;
+}
+
 // Streams discovery results as NDJSON. Calls onCategory({ category, items }) for each
 // completed line as Claude generates it. Returns the full accumulated results array for caching.
 export async function discoverDestination(destination, existingStopTitles = [], onCategory) {
@@ -200,7 +222,12 @@ export async function discoverDestination(destination, existingStopTitles = [], 
 
   const stream = client.messages.stream({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 16000,
+    // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
+    // across 8 categories (~40-50k output tokens) — a smaller budget silently
+    // truncates the tail of the response, which is why production generations
+    // were systematically missing the last 1-2 categories in the prompt's
+    // ordering (architecture, wellness).
+    max_tokens: 64000,
     system: systemPrompt,
     messages: [{
       role: 'user',
@@ -211,17 +238,37 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   const accumulated = [];
   const seen = new Set();
   let buffer = '';
+  let droppedLineCount = 0;
 
   const processLine = (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
+    if (STRUCTURAL_LINE_RE.test(trimmed)) return;
+
+    // Strip a single trailing comma left over when the model wraps its NDJSON
+    // output in a pretty-printed JSON array (e.g. `{...},`) — this was the
+    // root cause of the production incident: every line but the last was
+    // invalid standalone JSON and silently dropped.
+    const candidate = trimmed.endsWith(',') ? trimmed.slice(0, -1) : trimmed;
+
     let obj;
     try {
-      obj = JSON.parse(trimmed);
-    } catch {
+      obj = JSON.parse(candidate);
+    } catch (e) {
+      droppedLineCount += 1;
+      console.error(
+        '[discover] dropped unparseable line (len=%d): %s',
+        line.length, line.slice(0, 120),
+      );
       return;
     }
     if (!obj.category || !Array.isArray(obj.items)) return;
+
+    const canonicalCategory = canonicalizeCategoryName(obj.category);
+    if (!canonicalCategory) {
+      console.error('[discover] dropped unknown category name: %s', obj.category);
+      return;
+    }
 
     // Deduplicate items by normalized name across all categories
     const deduped = obj.items.filter((item) => {
@@ -232,7 +279,7 @@ export async function discoverDestination(destination, existingStopTitles = [], 
       return true;
     });
 
-    const categoryObj = { category: obj.category, items: deduped };
+    const categoryObj = { category: canonicalCategory, items: deduped };
     accumulated.push(categoryObj);
     if (onCategory) onCategory(categoryObj);
   };
@@ -247,6 +294,17 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   await stream.finalMessage();
   // Flush any remaining content in buffer
   if (buffer.trim()) processLine(buffer);
+
+  const categoriesWithItems = accumulated.filter((c) => c.items.length > 0).length;
+  const totalItems = accumulated.reduce((sum, c) => sum + c.items.length, 0);
+
+  if (categoriesWithItems < MIN_CATEGORIES_WITH_ITEMS) {
+    throw new Error(
+      `[discover] insufficient yield for destination=${destination}: ` +
+      `${categoriesWithItems} of ${accumulated.length} parsed categories had items ` +
+      `(${totalItems} items total), ${droppedLineCount} lines dropped as unparseable`,
+    );
+  }
 
   console.log('[discover] ok categories=%o', accumulated.map((c) => c.category));
   return accumulated;

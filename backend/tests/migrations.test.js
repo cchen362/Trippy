@@ -85,7 +85,8 @@ describe('migrations', () => {
     // Running again should not throw (idempotent — already-applied files are skipped)
     await expect(runMigrations()).resolves.not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(18);
+    // 001-018, 019 (fix_google_cn_coordinates), and 020 (reset_bali_catalogue).
+    expect(count.c).toBe(20);
   });
 
   it('retires the legacy trip destination array columns', () => {

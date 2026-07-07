@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -569,5 +569,74 @@ describe('getDailyGenerationCount / incrementDailyGenerationCount', () => {
     ).run(dest.id);
 
     expect(getDailyGenerationCount(db, dest.id)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration 020 — production incident data repair: (bali, ID)'s catalogue was
+// committed as a fresh 7-day catalogue holding 10 garbage wellness-only
+// places after a generation hit the (now-fixed) NDJSON-parsing/max_tokens/
+// commit-on-any-non-throw bugs in services/claude.js + routes/discovery.js.
+// ---------------------------------------------------------------------------
+
+describe('migration 020_reset_bali_catalogue', () => {
+  it('wipes places and daily-generation rows for (bali, ID) and resets last_generated_at/generation_count, leaving other destinations untouched', async () => {
+    const db = getDb();
+    const { up } = await import('../src/db/migrations/020_reset_bali_catalogue.js');
+
+    const bali = getOrCreateDestination(db, { cityKey: 'bali', countryCode: 'ID', displayName: 'Bali' });
+    insertPlaces(db, bali.id, [
+      { category: 'wellness', name: 'Garbage Spa 1', description: 'x' },
+      { category: 'wellness', name: 'Garbage Spa 2', description: 'x' },
+    ], 0);
+    db.prepare(
+      `UPDATE discovery_destinations SET last_generated_at = datetime('now'), generation_count = 1 WHERE id = ?`,
+    ).run(bali.id);
+    db.prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 1)`,
+    ).run(bali.id);
+
+    // A different destination that must not be touched by the migration.
+    const kyoto = getOrCreateDestination(db, { cityKey: 'kyoto', countryCode: 'JP', displayName: 'Kyoto' });
+    insertPlaces(db, kyoto.id, [{ category: 'culture', name: 'Kinkakuji', description: 'x' }], 0);
+    db.prepare(
+      `UPDATE discovery_destinations SET last_generated_at = datetime('now'), generation_count = 1 WHERE id = ?`,
+    ).run(kyoto.id);
+    db.prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 1)`,
+    ).run(kyoto.id);
+
+    up(db);
+
+    const baliRow = db.prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(bali.id);
+    expect(baliRow.last_generated_at).toBeNull();
+    expect(baliRow.generation_count).toBe(0);
+    expect(db.prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(bali.id)).toHaveLength(0);
+    expect(db.prepare('SELECT * FROM discovery_generation_daily WHERE destination_id = ?').all(bali.id)).toHaveLength(0);
+
+    // Kyoto is completely unaffected.
+    const kyotoRow = db.prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(kyoto.id);
+    expect(kyotoRow.last_generated_at).not.toBeNull();
+    expect(kyotoRow.generation_count).toBe(1);
+    expect(db.prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(kyoto.id)).toHaveLength(1);
+    expect(db.prepare('SELECT * FROM discovery_generation_daily WHERE destination_id = ?').all(kyoto.id)).toHaveLength(1);
+  });
+
+  it('is a logged no-op when no (bali, ID) destination row exists', async () => {
+    const db = getDb();
+    const { up } = await import('../src/db/migrations/020_reset_bali_catalogue.js');
+
+    // Ensure a clean slate — no bali/ID row at all.
+    expect(db.prepare(
+      `SELECT * FROM discovery_destinations WHERE city_key = 'bali' AND country_code = 'ID'`,
+    ).get()).toBeUndefined();
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(() => up(db)).not.toThrow();
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('no destination row'),
+      'bali', 'ID',
+    );
+    logSpy.mockRestore();
   });
 });
