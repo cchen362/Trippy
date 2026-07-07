@@ -39,17 +39,19 @@ this plan alone). Status after the 2026-07-08 investigation/fix session:**
   tolerates array-wrapping and logs drops, category names validated against the canonical 8,
   `max_tokens` → 64000 (owner-approved), generations under 4 categories-with-items throw and
   are never committed. Migration 020 resets the corrupted Bali catalogue.
-- **#3 DEFERRED** (needs product discussion): two separate surfaces of the "destinations are
-  cities" model. (a) The destination autocomplete requests only
+- **#3 DEFERRED** (needs product discussion — tracked in
+  [2026-07-08 region-destinations review](../reviews/2026-07-08-region-destinations-and-day-city-extraction.md)):
+  two separate surfaces of the "destinations are cities" model. (a) The destination autocomplete requests only
   `locality`/`administrative_area_level_2` types, so provinces like Bali never match.
   (b) "Kabupaten Badung" on day headers came from the W Bali **hotel add**, not the picker:
   hotel city extraction falls back locality→AAL2→AAL1 and Seminyak addresses have no
   locality; the day-geo resolver's hotel layer then stamps the regency on every night of the
   stay (confirmed: day city priority is override → active hotel → same-day transit arrival →
   previous day → seed). Fixing the picker alone won't fix the header.
-- **#1 OPEN** (cosmetic): cards sit inside a `motion.div` grid-item wrapper; the wrapper
-  stretches to row height but the inner `.discovery-card` doesn't (`height:100%`/flex fix in
-  `SuggestionGrid`, DiscoveryPanel.jsx).
+- **#1 FIXED** (`0be6022`): cards sat inside a `motion.div` grid-item wrapper that stretched
+  to row height while the inner card sized to its own content; wrapper is now flex and the
+  card fills it. Frontend 36/36; visual equal-height check pending the deploy session's
+  manual pass (not verifiable locally — Discover sits behind auth + seeded data).
 1. **Suggestion card heights are inconsistent** in the Discover grid (`SuggestionCard.jsx`/
    `DiscoveryPanel.jsx`) — cards size to their own content (name length, notes, hours badge)
    rather than stretching to a common row height. Cosmetic only.
