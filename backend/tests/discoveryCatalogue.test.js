@@ -428,7 +428,14 @@ describe('enforceCategoryCap', () => {
     expect(active).toBe(45);
   });
 
-  it('archives surplus unverified rows (oldest batch first) once a category exceeds the cap', () => {
+  it('archives surplus unverified rows (worst score first, i.e. highest batch) once a category exceeds the cap', () => {
+    // Wave 3: enforceCategoryCap now ranks victims with the real score()
+    // formula (neutral prefs) instead of the old neutral SQL ordering. The
+    // formula penalizes LATER batches (`− 0.75 · batch`, "later show more
+    // batches rank lower"), so with no other differentiating signal (no
+    // rating, no category/pace match under neutral prefs) the worst-scoring
+    // — and therefore first-archived — rows are now the HIGHEST batch
+    // numbers, the opposite of the pre-Wave-3 interim ordering.
     const db = getDb();
     const dest = getOrCreateDestination(db, { cityKey: 'capcity2', countryCode: 'JP', displayName: 'Capcity2' });
     for (let i = 0; i < 50; i++) {
@@ -442,8 +449,10 @@ describe('enforceCategoryCap', () => {
 
     expect(active).toHaveLength(45);
     expect(archived).toHaveLength(5);
-    // The 5 archived rows must be the oldest batches (0-4) — newer batches are kept.
-    expect(archived.map((r) => r.name)).toEqual(['Spot 0', 'Spot 1', 'Spot 2', 'Spot 3', 'Spot 4']);
+    // The 5 archived rows must be the highest (most recent) batches — under
+    // the real scorer, later batches are penalized, so batches 45-49 score
+    // worst and are archived first, keeping the oldest batches (0-44) active.
+    expect(archived.map((r) => r.name)).toEqual(['Spot 45', 'Spot 46', 'Spot 47', 'Spot 48', 'Spot 49']);
   });
 
   it('never archives a verified row while an unverified row in the same category is still active', () => {
@@ -469,7 +478,7 @@ describe('enforceCategoryCap', () => {
     expect(remainingUnverified).toBe(5);
   });
 
-  it('spills into verified rows only once the unverified pool is exhausted, taking oldest batch first', () => {
+  it('spills into verified rows only once the unverified pool is exhausted, taking the worst-scoring (highest batch) first', () => {
     const db = getDb();
     const dest = getOrCreateDestination(db, { cityKey: 'capcity4', countryCode: 'JP', displayName: 'Capcity4' });
     // 3 unverified (all victims) + 47 verified (2 must still be archived: 47-2=45 kept after unverified removed)
@@ -479,7 +488,10 @@ describe('enforceCategoryCap', () => {
     for (let i = 0; i < 47; i++) {
       seedActivePlace(db, dest.id, { category: 'nightlife', name: `Verified ${i}`, provenance: 'verified', batch: i });
     }
-    // total = 50, cap = 45, surplus = 5: 3 unverified fully consumed, 2 oldest verified also archived
+    // total = 50, cap = 45, surplus = 5: 3 unverified fully consumed, then 2 more
+    // from verified — under Wave 3's real scorer, later batches score worst
+    // (`− 0.75 · batch`), so the two HIGHEST verified batch numbers (45, 46)
+    // are the ones archived, not the oldest (the pre-Wave-3 interim behavior).
 
     enforceCategoryCap(db, dest.id, 45);
 
@@ -487,9 +499,9 @@ describe('enforceCategoryCap', () => {
     expect(archived).toHaveLength(5);
     expect(archived.filter((r) => r.provenance === 'unverified')).toHaveLength(3);
     expect(archived.filter((r) => r.provenance === 'verified')).toHaveLength(2);
-    // The 2 archived verified rows must be the two oldest batches.
+    // The 2 archived verified rows must be the two highest (most recent) batches.
     expect(archived.filter((r) => r.provenance === 'verified').map((r) => r.name).sort())
-      .toEqual(['Verified 0', 'Verified 1']);
+      .toEqual(['Verified 45', 'Verified 46']);
   });
 });
 

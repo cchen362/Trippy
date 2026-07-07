@@ -12,6 +12,7 @@
 // written to either table — this catalogue is destination-scoped only.
 
 import { normalizeName } from '../services/claude.js';
+import { score } from '../services/discoveryRank.js';
 
 // Gets the destination row for (cityKey, countryCode), creating it if it
 // doesn't exist yet. countryCode defaults to '' (unknown-country bucket) so
@@ -128,14 +129,31 @@ export function listExclusionNames(db, destinationId, cap = 400) {
   return rows.map((row) => row.name);
 }
 
+// Neutral prefs used to rank archival candidates: no interest/pace/travellers
+// weighting, since this is a shared, preference-free bounds check — it must
+// never favor one trip's preferences over another's.
+const NEUTRAL_PREFS = { interestTags: [], pace: 'moderate', travellers: undefined };
+
+// Ranks rows worst-first (ascending score) using the Wave 3 scorer with
+// NEUTRAL_PREFS. Ties preserve the input order (rows are queried in
+// generation order, i.e. ORDER BY id ASC) — same "ties keep generation
+// order" rule rankPlaces follows, just applied in the opposite direction.
+function rankAscendingByScore(rows) {
+  return rows
+    .map((row) => ({ row, s: score(row, NEUTRAL_PREFS) }))
+    .sort((a, b) => a.s - b.s)
+    .map((entry) => entry.row);
+}
+
 // Bounds enforcement (Plan 7 Wave 2, decision 4): keeps each category's active
 // row count at or under `cap` (default 45) by archiving surplus. Victims are
-// chosen worst-first: unverified/pending rows before verified ones (a verified
-// row is never archived while an unverified row in the same category could be
-// archived instead), then — within the same provenance tier — the oldest batch
-// first (newer "show more" batches are kept over older ones). Wave 3's real
-// scorer doesn't exist yet; this ordering is a neutral interim stand-in, not a
-// ranking function.
+// chosen worst-first using the Wave 3 rankPlaces scorer (score()) with neutral
+// prefs, applied within two tiers to preserve the invariant that a verified
+// row is never archived while an unverified row in the same category is still
+// active: the unverified/pending tier is ranked worst-first and consumed
+// completely before the verified tier is touched at all. Within each tier,
+// "worst" now reflects the real scoring formula (verified boost, batch
+// penalty, category/pace fit, quality), not the old neutral SQL ordering.
 export function enforceCategoryCap(db, destinationId, cap = 45) {
   const categories = db.prepare(
     `SELECT DISTINCT category FROM discovery_places WHERE destination_id = ? AND status = 'active'`,
@@ -144,11 +162,10 @@ export function enforceCategoryCap(db, destinationId, cap = 45) {
   const countStmt = db.prepare(
     `SELECT COUNT(*) AS c FROM discovery_places WHERE destination_id = ? AND category = ? AND status = 'active'`,
   );
-  const victimsStmt = db.prepare(`
-    SELECT id, name, provenance FROM discovery_places
+  const rowsStmt = db.prepare(`
+    SELECT * FROM discovery_places
     WHERE destination_id = ? AND category = ? AND status = 'active'
-    ORDER BY CASE WHEN provenance = 'verified' THEN 1 ELSE 0 END ASC, batch ASC, id ASC
-    LIMIT ?
+    ORDER BY id ASC
   `);
   const archiveStmt = db.prepare(`UPDATE discovery_places SET status = 'archived' WHERE id = ?`);
 
@@ -157,7 +174,19 @@ export function enforceCategoryCap(db, destinationId, cap = 45) {
     const surplus = activeCount - cap;
     if (surplus <= 0) continue;
 
-    const victims = victimsStmt.all(destinationId, category, surplus);
+    const rows = rowsStmt.all(destinationId, category);
+    const unverifiedTier = rows.filter((row) => row.provenance !== 'verified');
+    const verifiedTier = rows.filter((row) => row.provenance === 'verified');
+
+    const rankedUnverified = rankAscendingByScore(unverifiedTier);
+    const victims = rankedUnverified.slice(0, surplus);
+
+    const remaining = surplus - victims.length;
+    if (remaining > 0) {
+      const rankedVerified = rankAscendingByScore(verifiedTier);
+      victims.push(...rankedVerified.slice(0, remaining));
+    }
+
     for (const victim of victims) {
       archiveStmt.run(victim.id);
       console.error(

@@ -15,6 +15,7 @@ import {
   getDailyGenerationCount,
   incrementDailyGenerationCount,
 } from '../db/discoveryCatalogue.js';
+import { rankPlaces, orderCategories, parseDurationHours, TAG_TO_CATEGORY } from '../services/discoveryRank.js';
 
 const router = Router();
 
@@ -38,11 +39,55 @@ function cacheTimestampToEpochMs(value) {
   return Number.isFinite(epoch) ? epoch : null;
 }
 
+// Formats a parsed duration-in-hours figure for the fitLine, e.g. 2 -> "2",
+// 1.5 -> "1.5". Only ever called once parseDurationHours has already
+// succeeded and the pace-fit check has already passed.
+function formatFitHours(hours) {
+  const rounded = Math.round(hours * 10) / 10;
+  return String(rounded);
+}
+
+// Composes the deterministic, honesty-gated trip-fit line (Wave 3, review
+// doc §2.4/§6.3): "Matches food · ~2h · verified place". Each clause is only
+// included when it's actually true of this trip's declared preferences —
+// never claims an interest/pace the trip didn't declare. Empty string when
+// nothing honest applies.
+function buildFitLine(row, prefs) {
+  const parts = [];
+
+  const interestTags = prefs.interestTags || [];
+  if (interestTags.length > 0) {
+    const mapped = new Set(
+      interestTags.map((tag) => TAG_TO_CATEGORY[String(tag).toLowerCase()]).filter(Boolean),
+    );
+    if (mapped.has(row.category)) {
+      parts.push(`Matches ${row.category}`);
+    }
+  }
+
+  if (prefs.pace === 'fast' || prefs.pace === 'relaxed') {
+    const hours = parseDurationHours(row.estimated_duration);
+    if (hours !== null) {
+      const fits = prefs.pace === 'fast' ? hours <= 2 : hours >= 3;
+      if (fits) {
+        parts.push(`~${formatFitHours(hours)}h`);
+      }
+    }
+  }
+
+  if (row.provenance === 'verified') {
+    parts.push('verified place');
+  }
+
+  return parts.join(' · ');
+}
+
 // Serializes a stored discovery_places row back into the wire item shape old
-// and new clients both understand. lat/lng are forced null at serialize time
-// even though insertPlaces already never stores a non-null value — belt and
-// suspenders per the spec's "model coords are never shown" rule.
-function serializePlaceRow(row) {
+// and new clients both understand, plus the new Wave 3 additive fields.
+// lat/lng are only surfaced for verified rows (real resolver coordinates) —
+// unverified/pending rows still get null/null, replacing the previous
+// blanket-null behavior that predated verification.
+function serializePlaceRow(row, prefs) {
   return {
     name: row.name,
     description: row.description,
@@ -51,26 +96,39 @@ function serializePlaceRow(row) {
     openingHours: row.opening_hours,
     localName: row.local_name,
     aliases: JSON.parse(row.aliases_json || '[]'),
-    lat: null,
-    lng: null,
+    lat: row.provenance === 'verified' ? row.lat : null,
+    lng: row.provenance === 'verified' ? row.lng : null,
     generatedAt: row.generated_at,
+    whyGo: row.why_go,
+    provenance: row.provenance,
+    batch: row.batch,
+    placeRef: row.provider_place_id,
+    fitLine: buildFitLine(row, prefs),
   };
 }
 
 // Groups active place rows (already ordered by category, id from
-// listActivePlaces) into the {category, items} wire shape the SSE contract
-// expects, preserving category order of first appearance.
-function groupPlaceRowsByCategory(rows) {
-  const order = [];
+// listActivePlaces — i.e. generation order) into the {category, items} wire
+// shape the SSE contract expects. Category order comes from orderCategories
+// (essentials, then interest-tag order, then the rest, family demotes
+// nightlife) and items within each category are ranked by score(item, prefs)
+// via rankPlaces before serialization.
+function groupPlaceRowsByCategory(rows, prefs) {
+  const categoriesPresent = [];
   const byCategory = new Map();
   for (const row of rows) {
     if (!byCategory.has(row.category)) {
       byCategory.set(row.category, []);
-      order.push(row.category);
+      categoriesPresent.push(row.category);
     }
-    byCategory.get(row.category).push(serializePlaceRow(row));
+    byCategory.get(row.category).push(row);
   }
-  return order.map((category) => ({ category, items: byCategory.get(category) }));
+
+  const orderedCategories = orderCategories(categoriesPresent, prefs);
+  return orderedCategories.map((category) => ({
+    category,
+    items: rankPlaces(byCategory.get(category), prefs).map((row) => serializePlaceRow(row, prefs)),
+  }));
 }
 
 router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
@@ -85,6 +143,16 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       throw Object.assign(new Error('countryCode must be a 2-letter uppercase code'), { status: 400 });
     }
     const normalizedCountryCode = countryCode ?? '';
+
+    // Trip-fit preferences (Wave 3): computed once per request from the
+    // access-checked trip row (req.trip, set by requireTripAccess). Never
+    // written back to the shared catalogue — the global catalogue owns
+    // place facts, the trip owns fit (review doc §5).
+    const prefs = {
+      interestTags: JSON.parse(req.trip.interest_tags || '[]'),
+      pace: req.trip.pace,
+      travellers: req.trip.travellers,
+    };
 
     // claudeDestination: human-readable, sent to Claude ("cheng du", "xi'an")
     // cacheKey: maximally normalized for DB matching ("chengdu", "xian") — this
@@ -137,7 +205,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       : false;
 
     if (!more && hasActivePlaces && cacheIsFresh) {
-      for (const cat of groupPlaceRowsByCategory(activeRows)) {
+      for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
         write({ type: 'category', category: cat.category, items: cat.items });
       }
       write({ type: 'done', cached: true });
@@ -192,7 +260,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     // (they'd clobber the stored categories), and stream the full merged set
     // (re-read from the DB) once generation completes.
     if (isStaleRefresh) {
-      for (const cat of groupPlaceRowsByCategory(activeRows)) {
+      for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
         write({ type: 'category', category: cat.category, items: cat.items });
       }
     }
@@ -215,6 +283,14 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
           // will end up skipping as duplicates, which would desync what the
           // client displays from what's actually stored. Only a true cache-miss
           // (neither merge path) streams live as categories complete.
+          //
+          // Wave 3 note: this callback intentionally is NOT run through
+          // rankPlaces/serializePlaceRow. These are raw Claude items that
+          // haven't been inserted into discovery_places yet — they have no
+          // DB-assigned id, provenance, or batch, so there is nothing for
+          // the scorer to rank on. They stream in Claude's own editorial
+          // order, which becomes the "generation order" ranking ties fall
+          // back to once these same items are re-read from the DB later.
           if (isMerge) return;
           write({
             type: 'category',
@@ -264,7 +340,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         // Re-read the full (now-merged) active set and stream it so the
         // client's replace-per-category protocol ends up showing the union.
         const mergedRows = listActivePlaces(db, destinationRow.id);
-        for (const cat of groupPlaceRowsByCategory(mergedRows)) {
+        for (const cat of groupPlaceRowsByCategory(mergedRows, prefs)) {
           write({ type: 'category', category: cat.category, items: cat.items });
         }
       } else if (isAppend) {
@@ -278,7 +354,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
               ORDER BY category, id
             `).all(destinationRow.id, ...insertedIds)
           : [];
-        for (const cat of groupPlaceRowsByCategory(stillActiveInserted)) {
+        for (const cat of groupPlaceRowsByCategory(stillActiveInserted, prefs)) {
           write({ type: 'category', category: cat.category, items: cat.items, append: true });
         }
       }
@@ -300,7 +376,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         if (!isStaleRefresh) {
           // Stale-refresh already streamed the stored breadth up front; a
           // true cache-miss/append path has not streamed anything yet.
-          for (const cat of groupPlaceRowsByCategory(fallbackRows)) {
+          for (const cat of groupPlaceRowsByCategory(fallbackRows, prefs)) {
             write({ type: 'category', category: cat.category, items: cat.items });
           }
         }

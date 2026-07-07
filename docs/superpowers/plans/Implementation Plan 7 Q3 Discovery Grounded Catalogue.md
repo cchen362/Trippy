@@ -265,6 +265,40 @@ different prefs → global tables byte-identical after both browse.
 
 ## Wave 3 — Trip ranking layer (deterministic, zero model calls)
 
+**Status: COMPLETE (2026-07-07).** New `backend/src/services/discoveryRank.js`: pure
+`score(item, prefs)` (verified boost, batch penalty, category-interest boost, pace/duration
+fit via a new `parseDurationHours` free-text parser, optional quality term gated on `rating`
+presence), `rankPlaces` (stable sort, descending score, ties keep generation order),
+`orderCategories` (essentials first, then interest-tag order, then the rest, family demotes
+nightlife last). Server-side `TAG_TO_CATEGORY` copied verbatim from `DiscoveryPanel.jsx`
+(frontend untouched — Wave 4 consumes). `routes/discovery.js` builds `prefs` once per request
+from `req.trip` (raw row: `interest_tags` JSON-parsed, `pace`, `travellers`) and threads it
+through all DB-row-shape streaming paths (fresh-cache-hit, stale-refresh pre-stream and
+post-merge stream, append/show-more stream, and the generation-failure fallback path — a
+fourth call site not named in the original brief but sharing the same row shape, caught and
+included during implementation); the live mid-generation `onCategory` callback is deliberately
+left in raw Claude order (documented inline) since those items predate DB insertion and have no
+provenance/batch to rank on yet. `serializePlaceRow` gains additive fields only: `whyGo`
+(dual-keyed with `whyItFits`), `provenance`, `batch`, `placeRef` (`provider_place_id`), verified-
+only `lat`/`lng` (unverified/pending stay null — no `sanitizeDiscoveryCategory` function existed
+to retire; already gone), and a deterministic, honesty-gated `fitLine` (only claims an interest,
+pace fit, or verified status the trip actually declared/matches; empty string otherwise).
+`enforceCategoryCap` (`discoveryCatalogue.js`) now archives surplus using `rankPlaces`'s
+`score()` with neutral prefs, tier-partitioned (unverified/pending ranked worst-first and fully
+consumed before the verified tier is touched at all) — the verified-never-archived-before-
+unverified invariant is unchanged and re-tested; two existing archival-ordering tests were
+updated (not weakened) since the real scorer's `−0.75·batch` term flips which batches score
+worst versus the old neutral SQL ordering (highest batch now archived first, not lowest).
+Tests: backend 277 → **313/313 green** (19 files); new `discoveryRank.test.js` (34 tests,
+every scoring term isolated, duration parsing, category ordering, rank stability); extended
+`discovery.test.js` with the required scenario-1 test (same catalogue, solo/fast/food vs.
+family/relaxed/no-interests → different category order, different item order via pace-fit,
+identical underlying row set) and an explicit fitLine-honesty test (a trip declaring only
+`history` never gets a "Matches food" claim even browsing a strong food item); golden-fixture
+parity test extended with the new additive fields rather than replaced. Delegated to a Sonnet
+subagent; orchestrator reviewed every changed/added file line-by-line against the plan and
+review doc before commit — no additional fixes needed beyond the subagent's own work.
+
 **Goal:** preferences finally do something. Pure functions, computed per request in the route.
 
 ### 3.1 `backend/src/services/discoveryRank.js`

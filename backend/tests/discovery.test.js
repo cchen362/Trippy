@@ -169,13 +169,13 @@ function seedDestination({ cityKey, countryCode = '', displayName, lastGenerated
   return db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code = ?').get(cityKey, countryCode);
 }
 
-function seedPlace(destinationId, { category, name, generatedAt = new Date().toISOString(), batch = 0 }) {
+function seedPlace(destinationId, { category, name, generatedAt = new Date().toISOString(), batch = 0, estimatedDuration = null }) {
   const db = getDb();
   db.prepare(`
     INSERT INTO discovery_places (
-      destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at
-    ) VALUES (?, ?, ?, ?, ?, 'unverified', 'active', ?, ?)
-  `).run(destinationId, category, name, normalizeName(name), `${name} description`, batch, generatedAt);
+      destination_id, category, name, normalized_name, description, estimated_duration, provenance, status, batch, generated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'unverified', 'active', ?, ?)
+  `).run(destinationId, category, name, normalizeName(name), `${name} description`, estimatedDuration, batch, generatedAt);
 }
 
 function nowSql() {
@@ -681,6 +681,24 @@ describe('POST /trips/:tripId/discover — golden fixture parity', () => {
     expect(streamedItem.lat).toBeNull();
     expect(streamedItem.lng).toBeNull();
     expect(streamedItem.generatedAt).toBe(goldenBlobCategories[0].items[0].generatedAt);
+
+    // Wave 3 additive fields — old fields above stay byte-identical; these
+    // are new, never a replacement for anything an old client reads.
+    expect(streamedItem.whyGo).toBe(goldenBlobCategories[0].items[0].whyItFits);
+    // Never verified in this test (the mocked resolver always returns
+    // 'unresolved' — see beforeEach), so provenance stays at insertPlaces's
+    // default and lat/lng confirm the "unverified stays null" rule even
+    // though the row's actual lat/lng columns are always null anyway.
+    expect(streamedItem.provenance).toBe('unverified');
+    expect(typeof streamedItem.batch).toBe('number');
+    // insertPlaces never sets provider_place_id — no resolver has run.
+    expect(streamedItem.placeRef).toBeNull();
+    // The seeded trip (see beforeAll) has interestTags: ['culture', 'food'],
+    // pace: 'relaxed'. This item is category 'culture' (an honestly declared
+    // interest) with estimatedDuration '1.5 hours' — under 3h, so it does
+    // NOT satisfy the 'relaxed' pace-fit rule, and it is not verified. So
+    // fitLine may honestly claim the category match and nothing else.
+    expect(streamedItem.fitLine).toBe('Matches culture');
   });
 });
 
@@ -1006,5 +1024,132 @@ describe('pollution invariant', () => {
     expect(orderAB.destinations).toHaveLength(1);
     expect(orderBA.destinations).toEqual(orderAB.destinations);
     expect(orderBA.places).toEqual(orderAB.places);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave 3 scenario 1 (plan §Wave 3, review doc §3 row 1): solo fast-paced food
+// trip vs. slow-paced family trip browsing the SAME catalogue must get
+// different category order, different item order, and different fitLines —
+// but the identical underlying set of rows.
+// ---------------------------------------------------------------------------
+
+describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
+  async function callDiscoverAsTrip(tripRow, body) {
+    const { default: handler } = await import('../src/routes/discovery.js');
+    const req = { params: { tripId: tripRow.id }, body, user: { id: userId }, trip: tripRow };
+    const { res, events } = makeSseRes();
+    let nextErr;
+    const next = (err) => { nextErr = err; };
+    const layer = handler.stack.find(
+      (l) => l.route?.path === '/:tripId/discover' && l.route.methods.post,
+    );
+    await layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+    return { events, error: nextErr };
+  }
+
+  it('same global rows, different category order, different item order, different fit lines', async () => {
+    // Categories chosen so alphabetical DB order (culture, essentials, food,
+    // nightlife, wellness) is NOT already "nightlife last" — otherwise the
+    // family-demotes-nightlife rule would be a no-op and prove nothing.
+    const dest = seedDestination({ cityKey: 'scenario1city', displayName: 'Scenario1City', lastGeneratedAt: nowSql() });
+
+    seedPlace(dest.id, { category: 'essentials', name: 'Essential Spot' });
+    seedPlace(dest.id, { category: 'culture', name: 'Culture Spot' });
+    seedPlace(dest.id, { category: 'nightlife', name: 'Night Owl' });
+    seedPlace(dest.id, { category: 'wellness', name: 'Spa Retreat' });
+    // Two food items with different durations — pace-fit is the only thing
+    // that differentiates them (same category, same provenance, same batch).
+    seedPlace(dest.id, { category: 'food', name: 'Quick Bite', estimatedDuration: '1 hour' });
+    seedPlace(dest.id, { category: 'food', name: 'Long Feast', estimatedDuration: '4 hours' });
+
+    const tripADto = tripService.createTrip(userId, {
+      title: 'Scenario1 A', startDate: '2026-06-01', endDate: '2026-06-05',
+      destinations: ['Scenario1City'], destinationCountries: ['JP'],
+      interestTags: ['food & drink'], pace: 'fast', travellers: 'solo',
+    }).trip;
+    const tripBDto = tripService.createTrip(userId, {
+      title: 'Scenario1 B', startDate: '2026-06-01', endDate: '2026-06-05',
+      destinations: ['Scenario1City'], destinationCountries: ['JP'],
+      interestTags: [], pace: 'relaxed', travellers: 'family',
+    }).trip;
+    // req.trip in production is the RAW SQL row (set by requireTripAccess),
+    // not tripService's camelCase DTO — re-fetch raw rows so interest_tags
+    // (snake_case, JSON-string column) is actually readable by the route,
+    // matching real middleware behavior exactly.
+    const tripA = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripADto.id);
+    const tripB = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripBDto.id);
+
+    const { events: eventsA, error: errorA } = await callDiscoverAsTrip(tripA, { destination: 'Scenario1City' });
+    const { events: eventsB, error: errorB } = await callDiscoverAsTrip(tripB, { destination: 'Scenario1City' });
+
+    expect(errorA).toBeUndefined();
+    expect(errorB).toBeUndefined();
+
+    const categoryEventsA = eventsA.filter((e) => e.type === 'category');
+    const categoryEventsB = eventsB.filter((e) => e.type === 'category');
+
+    const categoryOrderA = categoryEventsA.map((e) => e.category);
+    const categoryOrderB = categoryEventsB.map((e) => e.category);
+
+    // Profile A: solo, fast pace, interested in food & drink -> 'food' is
+    // interest-mapped and moves up right after essentials; nightlife has no
+    // reason to move since travellers isn't 'family'.
+    expect(categoryOrderA).toEqual(['essentials', 'food', 'culture', 'nightlife', 'wellness']);
+    // Profile B: family, relaxed pace, no declared interests -> categories
+    // stay in their natural (alphabetical) order EXCEPT nightlife, which is
+    // demoted all the way to the end because travellers === 'family'.
+    expect(categoryOrderB).toEqual(['essentials', 'culture', 'food', 'wellness', 'nightlife']);
+    expect(categoryOrderA).not.toEqual(categoryOrderB);
+
+    // Item order within 'food' (present in both) must differ: A's fast pace
+    // favors the short item, B's relaxed pace favors the long one.
+    const foodItemsA = categoryEventsA.find((e) => e.category === 'food').items.map((i) => i.name);
+    const foodItemsB = categoryEventsB.find((e) => e.category === 'food').items.map((i) => i.name);
+    expect(foodItemsA).toEqual(['Quick Bite', 'Long Feast']);
+    expect(foodItemsB).toEqual(['Long Feast', 'Quick Bite']);
+
+    // Fit lines reflect each trip's own honestly-declared prefs.
+    const quickBiteA = categoryEventsA.find((e) => e.category === 'food').items.find((i) => i.name === 'Quick Bite');
+    const longFeastB = categoryEventsB.find((e) => e.category === 'food').items.find((i) => i.name === 'Long Feast');
+    expect(quickBiteA.fitLine).toBe('Matches food · ~1h');
+    expect(longFeastB.fitLine).toBe('~4h');
+
+    // Same underlying set of rows for both — only order/fitLines differ.
+    const allNamesA = categoryEventsA.flatMap((e) => e.items.map((i) => i.name)).sort();
+    const allNamesB = categoryEventsB.flatMap((e) => e.items.map((i) => i.name)).sort();
+    expect(new Set(allNamesA)).toEqual(new Set(allNamesB));
+    expect(allNamesA).toEqual(['Culture Spot', 'Essential Spot', 'Long Feast', 'Night Owl', 'Quick Bite', 'Spa Retreat']);
+  });
+
+  it('never claims an interest the trip did not declare (fitLine honesty gate)', async () => {
+    // A trip that only declared 'history' (maps to 'culture') browsing a
+    // destination with a strong food item must never say "Matches food" —
+    // even though the item objectively fits the food category.
+    const dest = seedDestination({ cityKey: 'honestycity', displayName: 'HonestyCity', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'food', name: 'Tempting Ramen Stall', estimatedDuration: '1 hour' });
+    seedPlace(dest.id, { category: 'culture', name: 'History Museum', estimatedDuration: '2 hours' });
+
+    const tripDto = tripService.createTrip(userId, {
+      title: 'Honesty Trip', startDate: '2026-06-01', endDate: '2026-06-05',
+      destinations: ['HonestyCity'], destinationCountries: ['JP'],
+      interestTags: ['history'], pace: 'moderate', travellers: 'couple',
+    }).trip;
+    const trip = getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripDto.id);
+
+    const { events, error } = await callDiscoverAsTrip(trip, { destination: 'HonestyCity' });
+    expect(error).toBeUndefined();
+
+    const foodEvent = events.find((e) => e.type === 'category' && e.category === 'food');
+    const ramen = foodEvent.items.find((i) => i.name === 'Tempting Ramen Stall');
+    expect(ramen.fitLine).not.toContain('Matches food');
+    // Moderate pace is neutral, so no duration claim either; unverified, so
+    // no "verified place" claim. Nothing honest applies -> empty fitLine.
+    expect(ramen.fitLine).toBe('');
+
+    // The declared interest (history -> culture) DOES get an honest claim.
+    const cultureEvent = events.find((e) => e.type === 'category' && e.category === 'culture');
+    const museum = cultureEvent.items.find((i) => i.name === 'History Museum');
+    expect(museum.fitLine).toBe('Matches culture');
   });
 });
