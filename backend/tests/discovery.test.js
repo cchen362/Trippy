@@ -693,6 +693,9 @@ describe('POST /trips/:tripId/discover — golden fixture parity', () => {
     expect(typeof streamedItem.batch).toBe('number');
     // insertPlaces never sets provider_place_id — no resolver has run.
     expect(streamedItem.placeRef).toBeNull();
+    // Wave 4 additive field: the real discovery_places.id, needed by the
+    // client to call the report/suppress endpoint (POST .../places/:id/report).
+    expect(typeof streamedItem.id).toBe('number');
     // The seeded trip (see beforeAll) has interestTags: ['culture', 'food'],
     // pace: 'relaxed'. This item is category 'culture' (an honestly declared
     // interest) with estimatedDuration '1.5 hours' — under 3h, so it does

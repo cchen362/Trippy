@@ -321,6 +321,16 @@ describe('016 migration — idempotence and backfill parity', () => {
       },
     ];
 
+    // global_discovery_cache was dropped by migration 018 (Plan 7 Wave 4) —
+    // it has no ongoing reader. This test only exercises migration 016's
+    // one-time backfill mapping logic, so it recreates the retired table's
+    // original 007 shape ad hoc rather than depending on it still existing
+    // in the live schema.
+    db.exec(`CREATE TABLE IF NOT EXISTS global_discovery_cache (
+      destination TEXT PRIMARY KEY,
+      result_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
     db.prepare(
       `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, datetime('now'))`,
     ).run('backfilltestcity', JSON.stringify(blobCategories));
@@ -367,6 +377,14 @@ describe('016 migration — idempotence and backfill parity', () => {
     const db = getDb();
     const { up } = await import('../src/db/migrations/016_discovery_catalogue.js');
 
+    // See the note above — global_discovery_cache no longer exists on the
+    // live schema post-018; recreate its original shape ad hoc so 016's
+    // backfill (tested here in isolation) has something to read.
+    db.exec(`CREATE TABLE IF NOT EXISTS global_discovery_cache (
+      destination TEXT PRIMARY KEY,
+      result_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
     db.prepare(
       `INSERT INTO global_discovery_cache (destination, result_json, fetched_at) VALUES (?, ?, ?)`,
     ).run('freshnesstestcity', JSON.stringify([

@@ -35,7 +35,6 @@ describe('migrations', () => {
     expect(tables).toContain('stops');
     expect(tables).toContain('bookings');
     expect(tables).toContain('discovery_cache');
-    expect(tables).toContain('global_discovery_cache');
     expect(tables).toContain('place_resolution_cache');
     expect(tables).toContain('copilot_messages');
   });
@@ -86,7 +85,7 @@ describe('migrations', () => {
     // Running again should not throw (idempotent — already-applied files are skipped)
     await expect(runMigrations()).resolves.not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(17);
+    expect(count.c).toBe(18);
   });
 
   it('retires the legacy trip destination array columns', () => {
@@ -100,5 +99,17 @@ describe('migrations', () => {
   it('runs the 014 backfill without error against a fresh, trip-free DB', () => {
     const db = getDb();
     expect(db.prepare('SELECT COUNT(*) c FROM trips').get().c).toBe(0);
+  });
+
+  it('retires the single-blob global_discovery_cache table (Plan 7 Wave 4)', () => {
+    const db = getDb();
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all().map(r => r.name);
+
+    expect(tables).not.toContain('global_discovery_cache');
+    // The normalized catalogue tables that replaced it stay present.
+    expect(tables).toContain('discovery_destinations');
+    expect(tables).toContain('discovery_places');
   });
 });

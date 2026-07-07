@@ -31,9 +31,17 @@ export function useDiscovery(tripId) {
       .replace(/[\s'‘’\-\.]/g, '')             // strip spaces, apostrophes, hyphens, periods
     ?? '';
 
-  const discover = useCallback(async (destination) => {
+  // Pair-keyed cache (Plan 7 Wave 4 §4.1): the key is `norm(city)|CC` so two
+  // different countries' same-named cities (e.g. two Georgetowns) never
+  // collide in the client cache the way they used to before country context
+  // existed. CC is an empty string when the country isn't known — the
+  // resulting trailing `|` (e.g. "chengdu|") is intentional, not a bug: it
+  // still yields a stable, distinct key from the pair-keyed form.
+  const cacheKey = (destination, countryCode) => `${norm(destination)}|${countryCode || ''}`;
+
+  const discover = useCallback(async (destination, countryCode) => {
     if (!destination?.trim()) return;
-    const key = norm(destination);
+    const key = cacheKey(destination, countryCode);
     const current = cacheRef.current[key];
 
     // Skip if already loading or already has results for this destination
@@ -48,7 +56,7 @@ export function useDiscovery(tripId) {
     forceRender();
 
     try {
-      await discoveryApi.discover(tripId, destination.trim(), [], (chunk) => {
+      await discoveryApi.discover(tripId, destination.trim(), countryCode, [], (chunk) => {
         if (chunk.type === 'category') {
           const entry = cacheRef.current[key];
           cacheRef.current[key] = {
@@ -80,9 +88,9 @@ export function useDiscovery(tripId) {
   // Appends fresh picks that exclude everything already shown for this destination.
   // Sets loading on the existing entry WITHOUT clearing partialResults, so the grid
   // stays populated while new items stream in and merge alongside the old ones.
-  const showMore = useCallback(async (destination) => {
+  const showMore = useCallback(async (destination, countryCode) => {
     if (!destination?.trim()) return;
-    const key = norm(destination);
+    const key = cacheKey(destination, countryCode);
     const current = cacheRef.current[key];
     if (current?.loading) return;
 
@@ -94,7 +102,7 @@ export function useDiscovery(tripId) {
     forceRender();
 
     try {
-      await discoveryApi.discover(tripId, destination.trim(), [], (chunk) => {
+      await discoveryApi.discover(tripId, destination.trim(), countryCode, [], (chunk) => {
         if (chunk.type === 'category') {
           const entry = cacheRef.current[key];
           const existingItems = entry.partialResults[chunk.category] ?? [];
@@ -134,8 +142,8 @@ export function useDiscovery(tripId) {
   }, [tripId]);
 
   // Returns the discovery state for a specific destination (or an empty entry if not yet fetched)
-  const getDestination = useCallback((destination) => {
-    return cacheRef.current[norm(destination)] ?? EMPTY_ENTRY;
+  const getDestination = useCallback((destination, countryCode) => {
+    return cacheRef.current[cacheKey(destination, countryCode)] ?? EMPTY_ENTRY;
   }, []);
 
   // True if any destination is currently loading — used for the pulsing dot in PlanTab

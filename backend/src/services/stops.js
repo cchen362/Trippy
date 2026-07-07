@@ -392,6 +392,17 @@ export async function createStop(userId, dayId, input) {
     location.countryCode,
   );
 
+  if (input.source === 'discovery') {
+    // Keep-vs-browse metric (Plan 7 Wave 4, review §9) — informational, not
+    // an error, so this follows discoveryCatalogue.js's console.log
+    // convention for non-error structured logs rather than console.error
+    // (which this codebase reserves for actual failures/loud errors).
+    console.log(
+      '[discovery] add trip=%s place=%s provenance=%s',
+      day.trip_id, title, input.provenance || 'unknown',
+    );
+  }
+
   return formatStop(row);
 }
 

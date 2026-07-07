@@ -330,6 +330,37 @@ describe('resolver-aware stops', () => {
   });
 });
 
+describe('discovery-sourced stop metrics (Plan 7 Wave 4)', () => {
+  it('logs a keep-vs-browse metric when a stop is added with source: discovery', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Raffles City Chongqing',
+      type: 'experience',
+      unsplashPhotoUrl: null,
+      source: 'discovery',
+      provenance: 'verified',
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[discovery] add trip=%s place=%s provenance=%s',
+      trip.trip.id, 'Raffles City Chongqing', 'verified',
+    );
+  });
+
+  it('does not log the discovery metric for a non-discovery add', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await createStop(user.id, dayId, {
+      title: 'Raffles City Chongqing',
+      type: 'experience',
+      unsplashPhotoUrl: null,
+    });
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('map data endpoint service', () => {
   it('returns display coordinates and route numbers in timeline order', async () => {
     await createStop(user.id, dayId, { title: 'Jiefangbei', time: '11:00', type: 'experience', unsplashPhotoUrl: null });

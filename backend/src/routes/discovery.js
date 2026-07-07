@@ -89,6 +89,7 @@ function buildFitLine(row, prefs) {
 // blanket-null behavior that predated verification.
 function serializePlaceRow(row, prefs) {
   return {
+    id: row.id,
     name: row.name,
     description: row.description,
     whyItFits: row.why_go,

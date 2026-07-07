@@ -63,7 +63,11 @@ export default function TripPage() {
       tripState.days[0]?.city ??
       tripState.trip.destinations?.[0];
     if (!destination) return;
-    discovery.discover(destination);
+    const countryCode =
+      tripState.days[0]?.resolvedCountry ??
+      tripState.trip.destinationCountries?.[0] ??
+      null;
+    discovery.discover(destination, countryCode);
   }, [tripState.trip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async () => {

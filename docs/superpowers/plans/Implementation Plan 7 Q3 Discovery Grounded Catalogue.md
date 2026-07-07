@@ -1,10 +1,14 @@
 # Implementation Plan 7 — Q3 Discovery Grounded Catalogue and Trip Ranking (Gate C)
 
-**Status:** APPROVED — Gate C CLOSED 2026-07-06; owner accepted all five decisions as this
+**Status: COMPLETE (2026-07-07).** All four waves shipped and merged to local `main`; exit
+criteria (below) all met. Gate C CLOSED 2026-07-06; owner accepted all five decisions as this
 plan's written defaults
 ([decision record](../reviews/2026-07-06-product-architecture-risk-review.md#gate-c-closed--owner-decisions-2026-07-06)).
-Implementation gated on **Plan 6 Wave 3** landing (frontend day-pair wiring); this plan's
-Wave 4 additionally requires Plan 6 Wave 4. Session handoff prompts at the end of this doc.
+Implementation was gated on **Plan 6 Wave 3** landing (frontend day-pair wiring); Wave 4
+additionally required Plan 6 Wave 4 — both preconditions were verified met before Wave 4
+started. Session handoff prompts at the end of this doc (Wave 4's has now been run).
+**Not yet done:** production deploy (this plan's rollout is local-`main`-only per the Trust
+criteria's deploy-order note; migrations 016–018 have not been run against production).
 **Design source:** [Completed Q3 review](../reviews/2026-07-06-q3-discovery-personalization-and-shared-cache.md) — all §-references below point there unless stated otherwise.
 **Model guidance:** Fable orchestrates and QAs; coding delegated to Sonnet subagents wave by wave.
 
@@ -334,6 +338,65 @@ golden file (old client fields untouched).
 ---
 
 ## Wave 4 — Frontend: honest UI, pair-keyed cache, trusted adds
+
+**Status: COMPLETE (2026-07-07).** `useDiscovery.js` cache is now pair-keyed
+(`norm(city)|CC`); `discover`/`showMore`/`getDestination` take `(destination, countryCode)`;
+`discoveryApi.discover` sends `countryCode` when known and the manual "Go" search
+deliberately clears it (free-text search shouldn't force a country match).
+`DiscoveryPanel.jsx` derives the default city+country from the active day's
+`resolvedCity`/`resolvedCountry`, falling back through `days[0]` to the trip's derived
+`destinations`/`destinationCountries` (same field names, Plan 6 Wave 4 — no frontend
+change needed there beyond wiring country through). `buildTabs` now returns a terminal
+**"More"** tab grouping every streamed category not otherwise tabbed, rendered as labeled
+sub-sections; hero `totalCount` is summed structurally across the tab list (not
+independently, so the Q3-04 invariant holds by construction). "Show more" swaps its label
+to `Finding more places…` with an animated ellipsis (reusing the existing `pulse` keyframe)
+while a show-more is in flight, reverting the instant `done` lands. `SuggestionCard` gained
+a `VERIFIED`/`UNVERIFIED` DM Mono tag (cream, low emphasis — gold stays reserved for the
+duration/"In trip" badges) and renders the honesty-gated `fitLine` in muted Cormorant
+italic. `handleAddToDay` takes the trusted `coordinateSource:'places'` fast path (same shape
+`handleAddPlaceResult` already used) for verified items with coordinates, skipping a
+redundant geocode; both branches tag `source:'discovery'`/`provenance`, and `createStop`
+logs `[discovery] add trip=… place=… provenance=…` on those adds (the keep-vs-browse
+metric). `serializePlaceRow` gained one additive field, `id`, needed by the client to call
+the report endpoint. Migration numbered **018**, not 017 as originally drafted — 017 was
+already taken by Wave 2's `017_discovery_generation_daily.sql` by the time this wave
+landed; grep confirmed the only reference to `global_discovery_cache` left was migration
+016's one-time historical backfill, so `018_retire_global_discovery_cache.sql` drops it
+clean. Tests: backend 313 → **316/316** (19 files); frontend 29 → **36/36** (5 files,
+new `DiscoveryPanel.test.jsx`). Delegated to a Sonnet subagent; orchestrator reviewed every
+changed file line-by-line and made one fix directly — the report-failure handler in
+`SuggestionCard.jsx` silently swallowed errors on a failed report, which the subagent's own
+brief should have caught given the project's no-silent-failure rule; added a `console.error`.
+
+**Report UX iteration (same session, post-implementation):** the literal `"Report — not
+real / closed?"` sentence button specified in §4.3 below shipped first, then was replaced
+after live review — a full sentence repeated on every card across every tab read as
+visual noise, not a deliberate design choice. Redesigned to a bare `Flag` icon (lucide-react,
+matching the icon set used everywhere else in the app) at low emphasis in the bottom-right
+of the card's action row; tapping it reveals a two-choice confirm (`Not real` / `Closed`,
+both calling the same suppress endpoint — decision 3 has no reason taxonomy, the choice
+exists to make the tap deliberate) plus a cancel, dismissed by either choice or an
+outside click (same pattern `DayPicker` already used). This is a deliberate, reviewed
+deviation from the literal wording in §4.3, not a miss — the plan's *intent* (a low-friction,
+reversible way to flag a bad place) is what shipped; the exact copy in §4.3 is superseded.
+Frontend tests: 35 → **36/36** (added a two-step-not-one-tap assertion).
+
+**Manual 375px pass, live against the real dev DB and a real trip (Chengdu-Chongqing):**
+verified pair-keying (country-aware destination row created distinct from the old
+country-less backfilled row), honest hero count (5→4 after a live report, tab counts
+matched), the report round-trip (card animated out, DB row flipped to `suppressed`),
+the trusted-add fast path (added a real verified place — stop landed with the exact
+seeded `lat`/`lng`, `coordinate_source='places'`, `location_status='resolved'`, no resolver
+call fired), and the keep-vs-browse log line. The dev Claude API key was invalid all
+session (401 on every generation attempt) — this incidentally proved Wave 1 scenario 8's
+graceful-degrade path for real: every request against a destination with existing places
+served/fell back silently, only a genuinely empty destination surfaced an error. All
+seeded test rows and the one real stop created during live testing were cleaned up
+afterward; the trip's real data was left exactly as found. **Not separately verified:** the
+Map tab's visual pin rendering for a trusted-coordinate add (the DB row's lat/lng/status
+fields were confirmed correct via direct query, which is what drives the pin, but the Map
+tab itself wasn't opened and screenshotted in this session).
 
 ### 4.1 Pair-keyed discovery (builds on Plan 6 Wave 3)
 

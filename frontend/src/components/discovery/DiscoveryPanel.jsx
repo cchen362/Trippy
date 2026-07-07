@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SuggestionCard from './SuggestionCard.jsx';
 import DayPicker from './DayPicker.jsx';
 import { bookingsApi } from '../../services/bookingsApi.js';
+import { discoveryApi } from '../../services/discoveryApi.js';
 
 const TAG_TO_CATEGORY = {
   'food & drink': 'food',
@@ -28,7 +29,10 @@ const CATEGORY_LABELS = {
   hidden_gems: 'Hidden Gems',
   architecture: 'Architecture',
   wellness: 'Wellness',
+  _more: 'More',
 };
+
+const MORE_TAB_KEY = '_more';
 
 function normalizeName(str) {
   return (str ?? '')
@@ -39,7 +43,13 @@ function normalizeName(str) {
     .trim();
 }
 
-function buildTabs(interestTags) {
+// Builds the reachable tab list plus, separately, the set of categories that
+// only surface under the terminal "More" tab (Wave 4 §4.2/Q3-04). Every
+// category actually present in partialResults ends up reachable through
+// exactly one of: a named tab, or "More" — so a hero count derived by
+// summing across `tabs` (with moreCategories folded in for the "_more" key)
+// is correct by construction rather than by coincidence.
+function buildTabs(interestTags, partialResults) {
   const categories = ['essentials'];
   const seen = new Set(['essentials']);
   for (const tag of (interestTags ?? [])) {
@@ -51,13 +61,27 @@ function buildTabs(interestTags) {
   }
   if (categories.length === 1) {
     for (const cat of Object.keys(CATEGORY_LABELS)) {
-      if (!seen.has(cat)) {
+      if (cat !== MORE_TAB_KEY && !seen.has(cat)) {
         categories.push(cat);
         seen.add(cat);
       }
     }
   }
-  return categories;
+
+  const moreCategories = Object.keys(partialResults ?? {}).filter((cat) => !seen.has(cat));
+  if (moreCategories.length > 0) {
+    categories.push(MORE_TAB_KEY);
+  }
+
+  return { tabs: categories, moreCategories };
+}
+
+// Returns the list of underlying result categories a tab key actually
+// covers — a single category for a normal tab, or every "More"-only
+// category for the terminal tab. Used to derive counts/loaded-state/items
+// for both kinds of tab from one code path.
+function categoriesForTabKey(key, moreCategories) {
+  return key === MORE_TAB_KEY ? moreCategories : [key];
 }
 
 function pickSurprise(partialResults, days) {
@@ -83,6 +107,38 @@ function suggestionMatchesQuery(suggestion, query) {
     suggestion?.description,
   ];
   return haystacks.some((h) => typeof h === 'string' && h.toLowerCase().includes(q));
+}
+
+// Shared card grid: wraps each SuggestionCard in a motion.div inside
+// AnimatePresence so a successful report animates the card out (Wave 4
+// §4.3) instead of it just vanishing on the next render.
+function SuggestionGrid({ items, days, destination, onAddToDay, onReport }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
+      gap: 16,
+    }}>
+      <AnimatePresence>
+        {items.map((suggestion, idx) => (
+          <motion.div
+            key={suggestion.id ?? suggestion.name ?? idx}
+            layout
+            exit={{ opacity: 0, scale: 0.92 }}
+            transition={{ duration: 0.2 }}
+          >
+            <SuggestionCard
+              suggestion={suggestion}
+              days={days}
+              destination={destination}
+              onAddToDay={onAddToDay}
+              onReport={onReport}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 function TabSkeleton() {
@@ -246,18 +302,22 @@ function PlaceResultRow({ prediction, days, onAdd }) {
 
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
+  const defaultCountry = activeDay?.resolvedCountry ?? days[0]?.resolvedCountry ?? trip.destinationCountries?.[0] ?? null;
 
   // `destination` is the live input draft (updates every keystroke).
   // `committedDestination` is the lookup/search key — it only changes when the
   // user explicitly commits (submit, or the default recomputes on open/day change).
   // Keeping these separate means typing never blanks the results view mid-keystroke,
   // since `getDestination(partialText)` would otherwise look up an empty cache entry.
+  // `committedCountry` follows the same rule and pairs with it (Wave 4 §4.1) — the
+  // manual "Go" search box has no country field, so a manually committed search
+  // always clears it (free-text search shouldn't force a country match).
   const [destination, setDestination] = useState(defaultDestination);
   const [committedDestination, setCommittedDestination] = useState(defaultDestination);
+  const [committedCountry, setCommittedCountry] = useState(defaultCountry);
   const [inputFocused, setInputFocused] = useState(false);
-  const tabs = buildTabs(trip.interestTags);
-  const [activeCategory, setActiveCategory] = useState(tabs[0]);
   const [surprisePick, setSurprisePick] = useState(null);
+  const [reportedIds, setReportedIds] = useState(() => new Set());
 
   // Search-inside-Discover state
   const [searchQuery, setSearchQuery] = useState('');
@@ -266,7 +326,25 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const sessionTokenRef = useRef(null);
 
   const { discover, showMore, getDestination } = discovery;
-  const { partialResults, completedCategories, loading, error } = getDestination(committedDestination);
+  const { partialResults: rawPartialResults, completedCategories, loading, error } = getDestination(committedDestination, committedCountry);
+
+  // Reported places are filtered out at render time rather than mutated into
+  // the shared useDiscovery cache — the cache is keyed per-destination and
+  // shared across every consumer of that hook instance, while "reported" is
+  // this panel session's local view of what to keep showing.
+  const partialResults = reportedIds.size === 0
+    ? rawPartialResults
+    : Object.fromEntries(
+        Object.entries(rawPartialResults).map(([cat, items]) => [cat, items.filter((it) => !reportedIds.has(it.id))]),
+      );
+
+  const { tabs, moreCategories } = buildTabs(trip.interestTags, partialResults);
+  const [activeCategory, setActiveCategory] = useState(tabs[0]);
+
+  const handleReportPlace = async (placeId) => {
+    await discoveryApi.reportPlace(placeId, trip.id);
+    setReportedIds((prev) => new Set(prev).add(placeId));
+  };
 
   // Recompute the default destination whenever the active day changes (the
   // panel itself is only ever mounted while open, so mounting already covers
@@ -276,9 +354,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     if (!defaultDestination) return;
     setDestination(defaultDestination);
     setCommittedDestination(defaultDestination);
-    discover(defaultDestination);
+    setCommittedCountry(defaultCountry);
+    discover(defaultDestination, defaultCountry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultDestination]);
+  }, [defaultDestination, defaultCountry]);
 
   const surprisePendingRef = useRef(false);
   useEffect(() => {
@@ -310,15 +389,51 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     return () => clearTimeout(timer);
   }, [searchQuery, committedDestination]);
 
+  // Manual "Go" search is free-text: it has no country field, so it always
+  // clears the committed country rather than reusing whatever the active
+  // day happened to have — forcing a country match onto a typed destination
+  // the user may be deliberately searching outside the trip's own geography
+  // would be dishonest (Wave 4 §4.1).
   const handleDiscover = () => {
     if (destination.trim()) {
       setCommittedDestination(destination.trim());
-      discover(destination.trim());
+      setCommittedCountry(null);
+      discover(destination.trim(), null);
       setActiveCategory(tabs[0]);
     }
   };
 
   const handleAddToDay = async (dayId, suggestion) => {
+    const isVerifiedWithCoordinates = suggestion.provenance === 'verified'
+      && Number.isFinite(suggestion.lat) && Number.isFinite(suggestion.lng);
+
+    if (isVerifiedWithCoordinates) {
+      // Trusted fast path (Wave 4 §4.4) — same shape handleAddPlaceResult
+      // uses for a resolved Google Places pick, skipping a redundant
+      // server-side geocode for a place the verification pipeline already
+      // confirmed real coordinates for.
+      await onAddStop(dayId, {
+        title: suggestion.name,
+        type: 'experience',
+        note: suggestion.description,
+        lat: suggestion.lat,
+        lng: suggestion.lng,
+        coordinateSystem: 'wgs84',
+        coordinateSource: 'places',
+        locationStatus: 'resolved',
+        providerId: suggestion.placeRef,
+        locationQuery: suggestion.name,
+        locationCity: committedDestination.trim(),
+        locationCountry: activeDay?.resolvedCountry ?? null,
+        localName: suggestion.localName,
+        locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
+        duration: suggestion.estimatedDuration,
+        source: 'discovery',
+        provenance: suggestion.provenance,
+      });
+      return;
+    }
+
     await onAddStop(dayId, {
       title: suggestion.name,
       type: 'experience',
@@ -329,6 +444,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       localName: suggestion.localName,
       locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
       duration: suggestion.estimatedDuration,
+      source: 'discovery',
+      provenance: suggestion.provenance,
     });
   };
 
@@ -378,20 +495,28 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     const hasResults = Object.keys(partialResults).length > 0;
     if (!hasResults && committedDestination.trim()) {
       surprisePendingRef.current = true;
-      discover(committedDestination.trim());
+      discover(committedDestination.trim(), committedCountry);
       return;
     }
     setSurprisePick(pickSurprise(partialResults, days));
   };
 
   const handleShowMore = () => {
-    if (committedDestination.trim()) showMore(committedDestination.trim());
+    if (committedDestination.trim()) showMore(committedDestination.trim(), committedCountry);
   };
 
-  const activeItems = partialResults[activeCategory] ?? [];
-  const categoryLoaded = completedCategories.has(activeCategory);
+  const activeTabCategories = categoriesForTabKey(activeCategory, moreCategories);
+  const activeItems = activeTabCategories.flatMap((cat) => partialResults[cat] ?? []);
+  const categoryLoaded = activeTabCategories.length > 0 && activeTabCategories.every((cat) => completedCategories.has(cat));
   const anyResults = Object.keys(partialResults).length > 0;
-  const totalCount = Object.values(partialResults).flat().length;
+  // Sum of item counts across every reachable tab (Wave 4 §4.2/Q3-04) — with
+  // "More" folded in, every category streamed for this destination is
+  // reachable through exactly one tab, so this is structurally the full
+  // count, not an independently-maintained figure that could drift from it.
+  const totalCount = tabs.reduce(
+    (sum, key) => sum + categoriesForTabKey(key, moreCategories).reduce((s, cat) => s + (partialResults[cat]?.length ?? 0), 0),
+    0,
+  );
 
   const isSearching = searchQuery.trim().length >= 2;
   const searchMatches = isSearching
@@ -510,10 +635,11 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         gap: 0,
       }}>
         {tabs.map((key) => {
+          const tabCategories = categoriesForTabKey(key, moreCategories);
           const isActive = activeCategory === key;
-          const isLoaded = completedCategories.has(key);
+          const isLoaded = tabCategories.length > 0 && tabCategories.every((cat) => completedCategories.has(cat));
           const isLoading = loading && !isLoaded;
-          const count = partialResults[key]?.length ?? 0;
+          const count = tabCategories.reduce((sum, cat) => sum + (partialResults[cat]?.length ?? 0), 0);
           return (
             <button
               key={key}
@@ -598,11 +724,12 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               }}>
                 {searchMatches.map((suggestion, idx) => (
                   <SuggestionCard
-                    key={suggestion.name ?? idx}
+                    key={suggestion.id ?? suggestion.name ?? idx}
                     suggestion={suggestion}
                     days={days}
                     destination={committedDestination}
                     onAddToDay={handleAddToDay}
+                    onReport={handleReportPlace}
                   />
                 ))}
               </div>
@@ -663,21 +790,43 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
-        {!error && !isSearching && activeItems.length > 0 && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
-            gap: 16,
-          }}>
-            {activeItems.map((suggestion, idx) => (
-              <SuggestionCard
-                key={suggestion.name ?? idx}
-                suggestion={suggestion}
-                days={days}
-                destination={committedDestination}
-                onAddToDay={handleAddToDay}
-              />
-            ))}
+        {!error && !isSearching && activeItems.length > 0 && activeCategory !== MORE_TAB_KEY && (
+          <SuggestionGrid
+            items={activeItems}
+            days={days}
+            destination={committedDestination}
+            onAddToDay={handleAddToDay}
+            onReport={handleReportPlace}
+          />
+        )}
+
+        {/* "More" tab (Wave 4 §4.2): every returned category not already
+            tabbed, grouped into labeled sub-sections rather than one
+            undifferentiated grid. */}
+        {!error && !isSearching && activeCategory === MORE_TAB_KEY && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            {moreCategories.map((cat) => {
+              const items = partialResults[cat] ?? [];
+              if (items.length === 0) return null;
+              return (
+                <div key={cat}>
+                  <div style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 10, letterSpacing: '0.22em', textTransform: 'uppercase',
+                    color: '#504438', marginBottom: 12,
+                  }}>
+                    {CATEGORY_LABELS[cat] ?? cat}
+                  </div>
+                  <SuggestionGrid
+                    items={items}
+                    days={days}
+                    destination={committedDestination}
+                    onAddToDay={handleAddToDay}
+                    onReport={handleReportPlace}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -726,6 +875,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                   destination={committedDestination}
                   onAddToDay={async (dayId, suggestion) => {
                     await handleAddToDay(dayId, suggestion);
+                    setSurprisePick(null);
+                  }}
+                  onReport={async (placeId) => {
+                    await handleReportPlace(placeId);
                     setSurprisePick(null);
                   }}
                 />
@@ -792,9 +945,32 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               cursor: loading ? 'default' : 'pointer',
               transition: 'all 200ms',
               pointerEvents: 'auto',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
           >
-            Show more
+            {/* Wave 4 §4.3: while a show-more is in flight (loading with results
+                already on screen — the initial load never reaches this button,
+                since it only renders once anyResults is true), swap to a
+                "still working" label. Un-dims the instant `done` lands and
+                loading flips back to false. */}
+            {loading ? (
+              <>
+                Finding more places
+                <span style={{ display: 'inline-flex', gap: 3 }}>
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: 3, height: 3, borderRadius: '50%',
+                        background: 'currentColor', display: 'inline-block',
+                        animation: 'pulse 1.2s ease-in-out infinite',
+                        animationDelay: `${i * 0.2}s`,
+                      }}
+                    />
+                  ))}
+                </span>
+              </>
+            ) : 'Show more'}
           </button>
         )}
         <button

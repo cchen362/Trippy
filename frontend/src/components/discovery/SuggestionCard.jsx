@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { Flag, X } from 'lucide-react';
 import DayPicker from './DayPicker.jsx';
 
 // Parses a 'YYYY-MM-DD' calendar date string as local (device) midnight rather
@@ -18,9 +19,50 @@ function normalizeName(str) {
     .trim();
 }
 
-export default function SuggestionCard({ suggestion, days, onAddToDay, destination }) {
-  const { name, localName, description, whyItFits, whyItMatches, estimatedDuration, openingHours } = suggestion;
+export default function SuggestionCard({ suggestion, days, onAddToDay, destination, onReport }) {
+  const { id, name, localName, description, whyItFits, whyItMatches, estimatedDuration, openingHours, provenance, fitLine } = suggestion;
   const whyText = whyItFits ?? whyItMatches;
+  const isVerified = provenance === 'verified';
+  // Two-step report (icon → reason choice) rather than a single tap, so a
+  // stray touch on a dense card grid can't silently suppress a real place.
+  // Both reasons call the same suppress endpoint (the backend has no reason
+  // taxonomy — decision 3 is a plain boolean suppress) — the choice exists
+  // to make the user's tap deliberate, not to change what gets stored.
+  const [reportStage, setReportStage] = useState('idle'); // 'idle' | 'confirming'
+  const [reporting, setReporting] = useState(false);
+  const reportRef = useRef(null);
+
+  useEffect(() => {
+    if (reportStage !== 'confirming') return;
+    function onOutsideInteraction(e) {
+      if (reportRef.current && !reportRef.current.contains(e.target)) {
+        setReportStage('idle');
+      }
+    }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setReportStage('idle');
+    }
+    document.addEventListener('mousedown', onOutsideInteraction);
+    document.addEventListener('touchstart', onOutsideInteraction);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onOutsideInteraction);
+      document.removeEventListener('touchstart', onOutsideInteraction);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [reportStage]);
+
+  const handleReport = async () => {
+    if (reporting || id == null) return;
+    setReporting(true);
+    try {
+      await onReport(id);
+    } catch (err) {
+      console.error('[discovery] report failed:', err);
+      setReporting(false);
+      setReportStage('idle');
+    }
+  };
   const showLocalName = localName && normalizeName(localName) !== normalizeName(name);
   const displayName = showLocalName ? `${name} (${localName})` : name;
 
@@ -115,6 +157,23 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
         </p>
       )}
 
+      {/* Fit line (Wave 4, honesty-gated) — always visible, distinct from the
+          hover-revealed Local insight quote below: shorter, structural, and
+          never claims an interest/pace the trip didn't declare. */}
+      {fitLine && (
+        <p style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontStyle: 'italic',
+          fontSize: 14,
+          lineHeight: 1.5,
+          color: '#6e5e50',
+          letterSpacing: '0.01em',
+          margin: '-6px 0 0',
+        }}>
+          {fitLine}
+        </p>
+      )}
+
       {/* Local insight — hidden by default, revealed on card hover via CSS */}
       {whyText && (
         <div
@@ -146,7 +205,18 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
       )}
 
       {/* Meta badges */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Provenance tag — gold is already spent on duration/"In trip" above,
+            so this uses low-emphasis cream rather than competing for the accent. */}
+        <span style={{
+          fontFamily: "'DM Mono', monospace",
+          fontSize: 9,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: isVerified ? 'rgba(240,235,227,0.5)' : 'rgba(240,235,227,0.32)',
+        }}>
+          {isVerified ? 'VERIFIED' : 'UNVERIFIED'}
+        </span>
         {estimatedDuration && (
           <span style={{
             fontFamily: "'DM Mono', monospace",
@@ -181,42 +251,117 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
         )}
       </div>
 
-      {/* Add to Day */}
-      {days && days.length > 0 && (
-        <div style={{ position: 'relative' }}>
-          <button
-            ref={btnRef}
-            onClick={() => !isInTrip && setPickerOpen(v => !v)}
-            disabled={isInTrip}
-            style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 10,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              cursor: isInTrip ? 'default' : 'pointer',
-              borderRadius: 3,
-              padding: '12px 16px',
-              background: isInTrip ? 'rgba(201,160,80,0.1)' : 'transparent',
-              color: isInTrip ? '#c9a050' : '#504438',
-              border: `1px solid ${isInTrip ? 'rgba(201,160,80,0.35)' : 'rgba(201,160,80,0.12)'}`,
-              transition: 'all 150ms',
-            }}
-          >
-            {isInTrip ? '✓ Added' : 'Add to day'}
-          </button>
+      {/* Add to Day + Report */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        {days && days.length > 0 && (
+          <div style={{ position: 'relative' }}>
+            <button
+              ref={btnRef}
+              onClick={() => !isInTrip && setPickerOpen(v => !v)}
+              disabled={isInTrip}
+              style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                cursor: isInTrip ? 'default' : 'pointer',
+                borderRadius: 3,
+                padding: '12px 16px',
+                background: isInTrip ? 'rgba(201,160,80,0.1)' : 'transparent',
+                color: isInTrip ? '#c9a050' : '#504438',
+                border: `1px solid ${isInTrip ? 'rgba(201,160,80,0.35)' : 'rgba(201,160,80,0.12)'}`,
+                transition: 'all 150ms',
+              }}
+            >
+              {isInTrip ? '✓ Added' : 'Add to day'}
+            </button>
 
-          {!isInTrip && pickerOpen && days.length > 0 && (
-            <DayPicker
-              addedDayIds={addedToDayIds}
-              days={days}
-              suggestion={suggestion}
-              onAddToDay={onAddToDay}
-              onClose={() => setPickerOpen(false)}
-              anchorRef={btnRef}
-            />
-          )}
-        </div>
-      )}
+            {!isInTrip && pickerOpen && days.length > 0 && (
+              <DayPicker
+                addedDayIds={addedToDayIds}
+                days={days}
+                suggestion={suggestion}
+                onAddToDay={onAddToDay}
+                onClose={() => setPickerOpen(false)}
+                anchorRef={btnRef}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Report — only meaningful once the place has a real catalogue id
+            (freshly-streamed, not-yet-inserted generation items don't have
+            one yet, so there is nothing honest to report against). Icon-only
+            by default (bottom-right of the row) so it doesn't compete with
+            "Add to day" or read as a warning on every card in the grid;
+            expands to an explicit two-choice confirm on tap. */}
+        {id != null && onReport && (
+          <div ref={reportRef} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+            {reportStage === 'idle' ? (
+              <button
+                onClick={() => setReportStage('confirming')}
+                aria-label="Report this place"
+                title="Report this place"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'none', border: 'none', padding: 6,
+                  color: 'rgba(240,235,227,0.28)', cursor: 'pointer',
+                }}
+              >
+                <Flag size={13} />
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleReport}
+                  disabled={reporting}
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: reporting ? 'rgba(224,90,90,0.3)' : 'rgba(224,90,90,0.7)',
+                    background: 'rgba(224,90,90,0.08)',
+                    border: '1px solid rgba(224,90,90,0.25)',
+                    borderRadius: 3, padding: '5px 9px',
+                    cursor: reporting ? 'default' : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Not real
+                </button>
+                <button
+                  onClick={handleReport}
+                  disabled={reporting}
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: reporting ? 'rgba(224,90,90,0.3)' : 'rgba(224,90,90,0.7)',
+                    background: 'rgba(224,90,90,0.08)',
+                    border: '1px solid rgba(224,90,90,0.25)',
+                    borderRadius: 3, padding: '5px 9px',
+                    cursor: reporting ? 'default' : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Closed
+                </button>
+                <button
+                  onClick={() => setReportStage('idle')}
+                  disabled={reporting}
+                  aria-label="Cancel report"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'none', border: 'none', padding: 4,
+                    color: 'rgba(240,235,227,0.28)',
+                    cursor: reporting ? 'default' : 'pointer',
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Persistent day badges */}
       {isInTrip && (
