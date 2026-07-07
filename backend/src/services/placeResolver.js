@@ -1,5 +1,6 @@
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
+import { gcj02ToWgs84 } from './coordinates.js';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const NOMINATIM_INTERVAL_MS = 1000;
@@ -527,14 +528,25 @@ async function searchGooglePlaces({ queryText, city, country, includeRatingField
   const place = Array.isArray(payload.places) ? payload.places[0] : null;
   if (!place) return { result: null, rawJson: payload };
 
-  const lat = place.location?.latitude;
-  const lng = place.location?.longitude;
+  let lat = place.location?.latitude;
+  let lng = place.location?.longitude;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return { result: null, rawJson: payload };
   }
 
   const countryComponent = (place.addressComponents || [])
     .find((component) => Array.isArray(component.types) && component.types.includes('country'));
+  const countryShortCode = countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null;
+
+  // Google Places returns GCJ-02 ("Mars") coordinates for mainland-China results, but
+  // reports true WGS-84 for Hong Kong/Macau/Taiwan. Gate strictly on the country
+  // component (not a bounding-box check like isInChina) so HK/MO/TW — which fall inside
+  // that box geographically — are never double-converted.
+  if (countryShortCode === 'CN') {
+    const converted = gcj02ToWgs84(lat, lng);
+    lat = converted.lat;
+    lng = converted.lng;
+  }
 
   return {
     result: formatResolution({
@@ -548,7 +560,7 @@ async function searchGooglePlaces({ queryText, city, country, includeRatingField
       resolvedAddress: place.formattedAddress || null,
       providerId: place.id ? `google:${place.id}` : null,
       provider: 'google_places',
-      countryCode: countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null,
+      countryCode: countryShortCode,
       businessStatus: place.businessStatus ?? null,
       rating: includeRatingFields ? (place.rating ?? null) : null,
       ratingCount: includeRatingFields ? (place.userRatingCount ?? null) : null,

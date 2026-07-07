@@ -6,6 +6,7 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { config } from '../src/config.js';
 import { __resetPlaceResolverForTests, buildPlaceQueryKey, resolvePlace } from '../src/services/placeResolver.js';
+import { gcj02ToWgs84 } from '../src/services/coordinates.js';
 
 let tmpDir;
 let originalGooglePlacesKey;
@@ -355,6 +356,87 @@ describe('resolvePlace', () => {
     expect(cached.provider).toBe('google_places');
     expect(cached.provider_id).toBe('google:ChIJ_test_place');
     expect(cached.resolved_country).toBe('MY');
+  });
+
+  it('converts GCJ-02 coordinates to WGS-84 for Google Places results in mainland China', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    // GCJ-02 ("Mars") coordinates as Google would report them for a mainland-China place.
+    const gcjLat = 29.5630;
+    const gcjLng = 106.5507;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return { ok: true, json: async () => [] };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_cn_test_place',
+            displayName: { text: 'Great Hall of the People' },
+            formattedAddress: 'Chongqing, China',
+            location: { latitude: gcjLat, longitude: gcjLng },
+            addressComponents: [
+              { longText: 'Chongqing', shortText: 'Chongqing', types: ['administrative_area_level_1'] },
+              { longText: 'China', shortText: 'CN', types: ['country', 'political'] },
+            ],
+          }],
+        }),
+      };
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Great Hall of the People',
+      city: 'Chongqing',
+      country: 'CN',
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+    const expected = gcj02ToWgs84(gcjLat, gcjLng);
+    expect(result.lat).toBeCloseTo(expected.lat, 9);
+    expect(result.lng).toBeCloseTo(expected.lng, 9);
+    // Sanity check the shift is in the expected ~0.001-0.006 degree GCJ-02/WGS-84 range,
+    // not a no-op (which would indicate the conversion wasn't actually applied).
+    expect(Math.abs(result.lat - gcjLat)).toBeGreaterThan(0.0005);
+    expect(Math.abs(result.lat - gcjLat)).toBeLessThan(0.01);
+    expect(result.coordinateSystem).toBe('wgs84');
+    expect(result.countryCode).toBe('CN');
+  });
+
+  it('does not convert coordinates for Google Places results outside mainland China (Hong Kong)', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const hkLat = 22.3193;
+    const hkLng = 114.1694;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return { ok: true, json: async () => [] };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_hk_test_place',
+            displayName: { text: 'Victoria Peak' },
+            formattedAddress: 'Hong Kong',
+            location: { latitude: hkLat, longitude: hkLng },
+            addressComponents: [
+              { longText: 'Hong Kong', shortText: 'HK', types: ['country', 'political'] },
+            ],
+          }],
+        }),
+      };
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Victoria Peak',
+      city: 'Hong Kong',
+      country: 'HK',
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.lat).toBe(hkLat);
+    expect(result.lng).toBe(hkLng);
+    expect(result.coordinateSystem).toBe('wgs84');
+    expect(result.countryCode).toBe('HK');
   });
 
   it('retries stale unresolved cache rows over the network but keeps fresh ones short-circuited', async () => {

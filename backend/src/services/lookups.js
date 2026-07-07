@@ -1,6 +1,7 @@
 import { find as tzFind } from 'geo-tz';
 import { config } from '../config.js';
 import { searchPhotos } from './unsplash.js';
+import { gcj02ToWgs84 } from './coordinates.js';
 
 export async function lookupHotelPredictions(input, sessionToken) {
   const query = input?.trim();
@@ -132,17 +133,31 @@ export async function lookupHotelDetails(placeId, sessionToken) {
 
   const place = await response.json();
   const hasLocation = place.location?.latitude != null && place.location?.longitude != null;
-  const tz = hasLocation
-    ? tzFind(place.location.latitude, place.location.longitude)[0] || null
-    : null;
+  let lat = hasLocation ? place.location.latitude : null;
+  let lng = hasLocation ? place.location.longitude : null;
+
+  // Google Places returns GCJ-02 ("Mars") coordinates for mainland-China results, but
+  // reports true WGS-84 for Hong Kong/Macau/Taiwan. Gate strictly on the country
+  // component (not a bounding-box check) so HK/MO/TW — which fall inside the China
+  // bbox geographically — are never double-converted. This function backs hotel
+  // bookings, the manual place-search add, and the Map tab search, so fixing here
+  // covers all three callers.
+  const countryCode = extractCountryCodeFromAddressComponents(place.addressComponents);
+  if (hasLocation && countryCode === 'CN') {
+    const converted = gcj02ToWgs84(lat, lng);
+    lat = converted.lat;
+    lng = converted.lng;
+  }
+
+  const tz = hasLocation ? tzFind(lat, lng)[0] || null : null;
   return {
     placeId: place.id || normalizedPlaceId,
     name: place.displayName?.text || '',
     address: place.formattedAddress || '',
     city: extractCityFromAddressComponents(place.addressComponents),
     tz,
-    lat: hasLocation ? place.location.latitude : null,
-    lng: hasLocation ? place.location.longitude : null,
+    lat,
+    lng,
   };
 }
 
@@ -155,6 +170,16 @@ function extractCityFromAddressComponents(components) {
   if (!Array.isArray(components)) return null;
   const find = (type) => components.find((c) => c.types?.includes(type))?.longText ?? null;
   return find('locality') || find('administrative_area_level_2') || find('administrative_area_level_1') || null;
+}
+
+/**
+ * Extracts the ISO alpha-2 country short code from a Google Places addressComponents
+ * array (mirrors the country-component lookup in placeResolver.js's searchGooglePlaces).
+ */
+function extractCountryCodeFromAddressComponents(components) {
+  if (!Array.isArray(components)) return null;
+  const countryComponent = components.find((c) => c.types?.includes('country'));
+  return countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null;
 }
 
 export async function lookupCityPredictions(input) {
