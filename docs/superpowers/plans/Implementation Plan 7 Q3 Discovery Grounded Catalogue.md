@@ -24,6 +24,31 @@ going into this deploy), add-to-day, the report-flag icon, and the 375px mobile 
 **Findings from the production verification pass (real bugs, not fixed the deploy session —
 owner decided to close Plan 7 and track these separately, since none are clearly scoped to
 this plan alone). Status after the 2026-07-08 investigation/fix session:**
+
+**2026-07-08 deploy + verification:** fixes for #1, #2, #4 deployed to production following
+the deploy skill exactly (pre-flight: backend 329/329, frontend 36/36, build clean, secret-scan
+clean; pushed `5a8f985`; fresh pre-migration backup `~/backups/trippy-pre-plan7-fixes-20260708.db`;
+`git pull` server was at `0cfce27`; `docker compose up -d --build`; migrations 019/020 applied
+cleanly — 019 converted 140/140/3/0 rows across `discovery_places`/`place_resolution_cache`/
+`stops`/hotel bookings matching the dry-run exactly, 020 reset `destination_id=10` (bali/ID),
+deleting 10 places + 1 daily-generation row; container clean, zero errors). DB spot-check: the
+Great Hall stop's coordinates now read `lat 29.564423924926757, lng 106.54995437316894`,
+matching the expected post-fix value exactly. Owner then manually verified in production
+(375px viewport): **#2 confirmed** — added further stops to the Chengdu-Chongqing trip, pin
+placement correct. **#4 confirmed** — Bali Discover panel regenerated from scratch with
+suggestions spread across the named category tabs (not funneled into "More"). Regression
+sweep (Plan/Map/Today, cached destination, add-to-day, share link) clean. **#1 partially
+confirmed** — cards in the same grid row now share one height (the `0be6022` fix works), but
+the owner flagged a secondary, previously-undetected issue: within each equal-height card, the
+metadata footer (VERIFIED badge, hours, "Add to day" button) is not anchored to the card's
+bottom edge — it sits directly after the variable-length description/fit-line/local-insight
+content, so footers land at different vertical positions across cards in the same row,
+producing a messy, unaligned look along the bottom of the grid. Root cause (read from
+`SuggestionCard.jsx:94-111`): the card is `display:flex; flexDirection:'column'` with `flex:1`
+to fill row height, but no element pushes the footer group to the bottom (no `marginTop:'auto'`
+on the last child, no `justifyContent:'space-between'` on the card). This is a new, narrower
+finding — not a regression of `0be6022`, which only ever claimed to equalize outer card height
+— tracked here for a follow-up fix, not implemented in this OPS deploy session.
 - **#2 FIXED** (`99e3455`, migration 019): root cause was NOT a lost fix — `searchGooglePlaces`
   had always labeled Google's mainland-China GCJ-02 coordinates as `wgs84`; Plan 7's
   verification pipeline (Google-heavy) + Wave 4 trusted-add path were the first to persist
