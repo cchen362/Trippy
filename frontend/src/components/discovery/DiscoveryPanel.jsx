@@ -126,6 +126,10 @@ function SuggestionGrid({ items, days, destination, onAddToDay, onReport }) {
             layout
             exit={{ opacity: 0, scale: 0.92 }}
             transition={{ duration: 0.2 }}
+            // The grid stretches this wrapper to the row height, but the card
+            // inside would otherwise size to its own content — flex makes the
+            // card fill the wrapper so all cards in a row share one height.
+            style={{ display: 'flex' }}
           >
             <SuggestionCard
               suggestion={suggestion}

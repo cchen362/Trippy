@@ -104,6 +104,9 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
         flexDirection: 'column',
         gap: 16,
         marginBottom: 0,
+        // Fill the grid/flex parent so cards in the same row share one height
+        // (no-op in non-flex contexts like the surprise-pick block).
+        flex: 1,
       }}
     >
       {/* Name + IN TRIP badge + separator */}
