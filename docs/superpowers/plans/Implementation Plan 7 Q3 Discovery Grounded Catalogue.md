@@ -21,9 +21,35 @@ catalogue) and a brand-new destination (Bali/Denpasar — confirmed production's
 `ANTHROPIC_API_KEY` is valid and live generation succeeds, closing the one risk flagged
 going into this deploy), add-to-day, the report-flag icon, and the 375px mobile viewport.
 
-**Findings from the production verification pass (real bugs, not fixed this session — owner
-decided to close Plan 7 and track these separately, since none are clearly scoped to this
-plan alone):**
+**Findings from the production verification pass (real bugs, not fixed the deploy session —
+owner decided to close Plan 7 and track these separately, since none are clearly scoped to
+this plan alone). Status after the 2026-07-08 investigation/fix session:**
+- **#2 FIXED** (`99e3455`, migration 019): root cause was NOT a lost fix — `searchGooglePlaces`
+  had always labeled Google's mainland-China GCJ-02 coordinates as `wgs84`; Plan 7's
+  verification pipeline (Google-heavy) + Wave 4 trusted-add path were the first to persist
+  them into stops, where the map's wgs84→gcj02 display conversion double-shifted the pin
+  ~450 m. Fixed at both ingest points (resolver + `lookupHotelDetails`), gated on address
+  country component `=== 'CN'` (HK/MO/TW report true WGS84). Migration 019 repairs stored
+  rows — production dry-run: 140 discovery_places, 140 place_resolution_cache, 3 stops.
+- **#4 FIXED** (`6daf588`, migration 020): the "Bali" generation returned only the last
+  category (`wellness`, 10 items) because the model wrapped its NDJSON in a pretty-printed
+  array — every trailing-comma line failed `JSON.parse` and was silently dropped; the
+  remnant was committed as a fresh 7-day catalogue. Also: `max_tokens` 16000 truncated every
+  generation's tail (healthy generations only returned 6–7 of 8 categories). Fixed: parser
+  tolerates array-wrapping and logs drops, category names validated against the canonical 8,
+  `max_tokens` → 64000 (owner-approved), generations under 4 categories-with-items throw and
+  are never committed. Migration 020 resets the corrupted Bali catalogue.
+- **#3 DEFERRED** (needs product discussion): two separate surfaces of the "destinations are
+  cities" model. (a) The destination autocomplete requests only
+  `locality`/`administrative_area_level_2` types, so provinces like Bali never match.
+  (b) "Kabupaten Badung" on day headers came from the W Bali **hotel add**, not the picker:
+  hotel city extraction falls back locality→AAL2→AAL1 and Seminyak addresses have no
+  locality; the day-geo resolver's hotel layer then stamps the regency on every night of the
+  stay (confirmed: day city priority is override → active hotel → same-day transit arrival →
+  previous day → seed). Fixing the picker alone won't fix the header.
+- **#1 OPEN** (cosmetic): cards sit inside a `motion.div` grid-item wrapper; the wrapper
+  stretches to row height but the inner `.discovery-card` doesn't (`height:100%`/flex fix in
+  `SuggestionGrid`, DiscoveryPanel.jsx).
 1. **Suggestion card heights are inconsistent** in the Discover grid (`SuggestionCard.jsx`/
    `DiscoveryPanel.jsx`) — cards size to their own content (name length, notes, hours badge)
    rather than stretching to a common row height. Cosmetic only.
