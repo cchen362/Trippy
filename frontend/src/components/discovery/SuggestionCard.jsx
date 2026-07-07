@@ -143,6 +143,30 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
             </span>
           )}
         </div>
+        {/* Day badges live here, not in the footer — the footer's bottom-anchor
+            (marginTop:'auto' on the meta badges below) only holds a constant-height
+            group flush; a variable-height trailing block would push that group up
+            on in-trip cards, misaligning it against cards without one. */}
+        {isInTrip && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {days.filter(d => addedToDayIds.has(d.id)).map(day => (
+              <span key={day.id} style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 10,
+                letterSpacing: '0.1em',
+                color: '#c9a050',
+                background: 'rgba(201,160,80,0.08)',
+                border: '1px solid rgba(201,160,80,0.28)',
+                borderRadius: 2,
+                padding: '3px 10px',
+              }}>
+                {day.date
+                  ? `Day ${(day.dayIndex ?? 0) + 1} · ${parseLocalDateParts(day.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+                  : `Day ${(day.dayIndex ?? 0) + 1}`}
+              </span>
+            ))}
+          </div>
+        )}
         <div style={{ width: 28, height: 1, background: 'rgba(201,160,80,0.35)' }} />
       </div>
 
@@ -207,8 +231,11 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
         </div>
       )}
 
-      {/* Meta badges */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      {/* Meta badges — marginTop:'auto' pins this and everything after it
+          (Add to Day, persistent day badges) to the card's bottom edge, so
+          footers align across a row regardless of how much description/
+          fit-line/local-insight text precedes them. */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 'auto' }}>
         {/* Provenance tag — gold is already spent on duration/"In trip" above,
             so this uses low-emphasis cream rather than competing for the accent. */}
         <span style={{
@@ -365,28 +392,6 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
           </div>
         )}
       </div>
-
-      {/* Persistent day badges */}
-      {isInTrip && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: -8 }}>
-          {days.filter(d => addedToDayIds.has(d.id)).map(day => (
-            <span key={day.id} style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 10,
-              letterSpacing: '0.1em',
-              color: '#c9a050',
-              background: 'rgba(201,160,80,0.08)',
-              border: '1px solid rgba(201,160,80,0.28)',
-              borderRadius: 2,
-              padding: '3px 10px',
-            }}>
-              {day.date
-                ? `Day ${(day.dayIndex ?? 0) + 1} · ${parseLocalDateParts(day.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
-                : `Day ${(day.dayIndex ?? 0) + 1}`}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
