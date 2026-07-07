@@ -86,7 +86,7 @@ describe('migrations', () => {
     // Running again should not throw (idempotent — already-applied files are skipped)
     await expect(runMigrations()).resolves.not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    expect(count.c).toBe(16);
+    expect(count.c).toBe(17);
   });
 
   it('retires the legacy trip destination array columns', () => {

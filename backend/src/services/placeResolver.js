@@ -172,6 +172,12 @@ function formatResolution({
   providerId = null,
   provider = null,
   countryCode = null,
+  // businessStatus/rating/ratingCount are only ever populated by the Google Places
+  // path (Plan 7 Wave 2) — null everywhere else (curated, Nominatim, cache reads of
+  // non-Google rows, unresolved).
+  businessStatus = null,
+  rating = null,
+  ratingCount = null,
 }) {
   return {
     lat,
@@ -185,6 +191,9 @@ function formatResolution({
     providerId,
     provider,
     countryCode,
+    businessStatus,
+    rating,
+    ratingCount,
   };
 }
 
@@ -460,7 +469,13 @@ async function searchNominatim({ queryText, city, country, aliases = [] }) {
 
 // Google Places Text Search fallback — only used when Nominatim (OSM) produces no result.
 // Text Search is a single billed request per query and does not use session tokens.
-async function searchGooglePlaces({ queryText, city, country }) {
+//
+// includeRatingFields is an explicit per-call opt-in (set only by discoveryVerify.js,
+// itself gated on config.discoveryRatingEnrichment) — the flag must apply to discovery
+// verification calls only, not booking/stop resolution (Plan 7 Wave 2 §2.2), and
+// resolvePlace is shared by both, so the decision can't live on the global config flag
+// alone or every resolvePlace caller would start paying for the pricier field-mask tier.
+async function searchGooglePlaces({ queryText, city, country, includeRatingFields = false }) {
   if (!config.googlePlacesKey) return null;
 
   const canonicalCity = canonicalizeCity(city);
@@ -475,12 +490,28 @@ async function searchGooglePlaces({ queryText, city, country }) {
     body.regionCode = countryCode;
   }
 
+  // businessStatus (catches CLOSED_PERMANENTLY at discovery-verification ingest,
+  // Plan 7 Wave 2 §2.2) is requested unconditionally — it's free on the base tier.
+  // rating/userRatingCount sit in a pricier field-mask tier, requested only when
+  // the caller opts in (discovery verification, under DISCOVERY_RATING_ENRICHMENT).
+  const fieldMaskParts = [
+    'places.id',
+    'places.displayName',
+    'places.formattedAddress',
+    'places.location',
+    'places.addressComponents',
+    'places.businessStatus',
+  ];
+  if (includeRatingFields) {
+    fieldMaskParts.push('places.rating', 'places.userRatingCount');
+  }
+
   const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': config.googlePlacesKey,
-      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents',
+      'X-Goog-FieldMask': fieldMaskParts.join(','),
     },
     body: JSON.stringify(body),
   });
@@ -518,6 +549,9 @@ async function searchGooglePlaces({ queryText, city, country }) {
       providerId: place.id ? `google:${place.id}` : null,
       provider: 'google_places',
       countryCode: countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null,
+      businessStatus: place.businessStatus ?? null,
+      rating: includeRatingFields ? (place.rating ?? null) : null,
+      ratingCount: includeRatingFields ? (place.userRatingCount ?? null) : null,
     }),
     rawJson: payload,
   };
@@ -533,7 +567,7 @@ function unresolved() {
   });
 }
 
-export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false } = {}) {
+export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
@@ -590,7 +624,7 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
   // Nominatim produced no result (or threw) — try Google Places Text Search.
   if (config.googlePlacesKey) {
     try {
-      const google = await searchGooglePlaces({ queryText: query, city, country });
+      const google = await searchGooglePlaces({ queryText: query, city, country, includeRatingFields });
       if (google?.result) {
         writeCache({
           queryKey,

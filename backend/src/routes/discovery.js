@@ -4,14 +4,21 @@ import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
 import { discoverDestination } from '../services/claude.js';
 import { countryNameFromCode } from '../utils/countries.js';
+import { assertTripAccess } from '../services/trips.js';
+import { enqueueForVerification } from '../services/discoveryVerify.js';
 import {
   getOrCreateDestination,
   listActivePlaces,
   insertPlaces,
   listExclusionNames,
+  enforceCategoryCap,
+  getDailyGenerationCount,
+  incrementDailyGenerationCount,
 } from '../db/discoveryCatalogue.js';
 
 const router = Router();
+
+const MAX_GENERATIONS_PER_DESTINATION_PER_DAY = 3;
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -137,6 +144,24 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       return res.end();
     }
 
+    // Generation limit (Trust criteria, decision 4): every path past the fresh-cache
+    // check below is about to trigger a Claude generation. generation_count is a
+    // lifetime counter, not a daily one (see discoveryCatalogue.js), so the per-UTC-day
+    // count is tracked separately and checked before any generation is attempted.
+    const dailyGenerationCount = getDailyGenerationCount(db, destinationRow.id);
+    if (dailyGenerationCount >= MAX_GENERATIONS_PER_DESTINATION_PER_DAY) {
+      console.error(
+        '[discover] generation_limit destination=%s dailyCount=%d',
+        destinationRow.id, dailyGenerationCount,
+      );
+      write({
+        type: 'error',
+        code: 'generation_limit',
+        message: 'This destination has already been refreshed the maximum number of times today. Try again tomorrow.',
+      });
+      return res.end();
+    }
+
     // "Show more" against an existing catalogue: build the exclusion list from
     // everything already stored (this destination's own places), then stream
     // ONLY the newly generated items back, inserting them into the catalogue.
@@ -214,12 +239,26 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         (cat.items || []).map((item) => ({ ...item, category: cat.category, generatedAt })),
       );
       const inserted = insertPlaces(db, destinationRow.id, flatItems, batch);
+      const insertedIds = inserted.map((row) => row.id);
+
+      // Bounds enforcement (decision 4): archive category surplus immediately
+      // after insert, using only provenance/batch (Wave 3's real scorer is out of
+      // scope here) — verified rows are never archived while an unverified row in
+      // the same category could be archived instead, so this is correct regardless
+      // of whether the async verification worker below has run yet.
+      enforceCategoryCap(db, destinationRow.id);
+
+      // Verification is fire-and-forget: enqueue and move on. It must never block
+      // or fail this SSE response — the queue drains after this request completes,
+      // isolated from serving (see services/discoveryVerify.js).
+      enqueueForVerification(db, destinationRow.id, insertedIds);
 
       db.prepare(`
         UPDATE discovery_destinations
         SET last_generated_at = datetime('now'), generation_count = generation_count + 1
         WHERE id = ?
       `).run(destinationRow.id);
+      incrementDailyGenerationCount(db, destinationRow.id);
 
       if (isStaleRefresh) {
         // Re-read the full (now-merged) active set and stream it so the
@@ -229,8 +268,17 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
           write({ type: 'category', category: cat.category, items: cat.items });
         }
       } else if (isAppend) {
-        // Stream only the newly inserted items, grouped by category.
-        for (const cat of groupPlaceRowsByCategory(inserted)) {
+        // Stream only the newly inserted items still active — enforceCategoryCap
+        // above may have already archived one of them as category surplus, so
+        // re-check status rather than trusting insertPlaces's return snapshot.
+        const stillActiveInserted = insertedIds.length
+          ? db.prepare(`
+              SELECT * FROM discovery_places
+              WHERE destination_id = ? AND status = 'active' AND id IN (${insertedIds.map(() => '?').join(',')})
+              ORDER BY category, id
+            `).all(destinationRow.id, ...insertedIds)
+          : [];
+        for (const cat of groupPlaceRowsByCategory(stillActiveInserted)) {
           write({ type: 'category', category: cat.category, items: cat.items, append: true });
         }
       }
@@ -269,6 +317,47 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       res.write(`data: ${JSON.stringify({ type: 'error', message: err.message || 'Discovery failed' })}\n\n`);
       return res.end();
     }
+    next(err);
+  }
+});
+
+// Report/suppress endpoint (Plan 7 Wave 2, decision 3): report ⇒ immediate global
+// suppression + audit log. Mounted separately (at /api/discovery, not /api/trips)
+// since the trip identity for the access check arrives in the body, not the URL —
+// requireTripAccess (middleware/tripAccess.js) expects req.params.tripId, so the
+// access check is done inline here with the same assertTripAccess it wraps.
+export const discoveryPlacesRouter = Router();
+discoveryPlacesRouter.use(requireAuth);
+
+discoveryPlacesRouter.post('/places/:placeId/report', (req, res, next) => {
+  try {
+    const { tripId } = req.body || {};
+    if (!tripId) {
+      throw Object.assign(new Error('tripId is required'), { status: 400 });
+    }
+    // Throws 404 if the trip doesn't exist or this user has no access to it.
+    assertTripAccess(req.user.id, tripId);
+
+    const placeId = Number(req.params.placeId);
+    if (!Number.isInteger(placeId)) {
+      throw Object.assign(new Error('placeId must be an integer'), { status: 400 });
+    }
+
+    const db = getDb();
+    const place = db.prepare('SELECT * FROM discovery_places WHERE id = ?').get(placeId);
+    if (!place) {
+      throw Object.assign(new Error('Place not found'), { status: 404 });
+    }
+
+    db.prepare(`UPDATE discovery_places SET status = 'suppressed' WHERE id = ?`).run(placeId);
+
+    console.error(
+      '[discovery] suppressed place=%s name=%s by user=%s trip=%s',
+      placeId, place.name, req.user.id, tripId,
+    );
+
+    res.json({ suppressed: true });
+  } catch (err) {
     next(err);
   }
 });

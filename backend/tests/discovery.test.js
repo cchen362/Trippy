@@ -31,13 +31,43 @@ vi.mock('../src/config.js', () => ({
     nodeEnv: 'test',
     port: 3001,
     dbPath: ':memory:',
+    googlePlacesKey: '',
+    discoveryRatingEnrichment: false,
+    discoveryResolverDailyBudget: 500,
   },
+}));
+
+// --- Mock the place resolver so the fire-and-forget verification worker
+// (enqueued by routes/discovery.js after every insert) never makes a real
+// network call during these route-level tests. Route tests care about the SSE
+// contract and catalogue writes, not verification outcomes — a default
+// "unresolved" response keeps provenance at its unverified default regardless
+// of the worker's (unawaited, racy-by-construction) timing relative to
+// assertions. Tests that specifically exercise verification behavior override
+// this per-test and await discoveryVerify's drain explicitly.
+//
+// vi.hoisted is required here (not a plain top-level const) because vi.mock
+// factories run before any of this file's own import statements execute (ES
+// module imports are hoisted ahead of other top-level code) — trips.js
+// transitively imports placeResolver.js, so the factory below can run before
+// a plain const would have been initialized.
+const { mockResolvePlace } = vi.hoisted(() => ({
+  mockResolvePlace: vi.fn(async () => ({
+    lat: null, lng: null, coordinateSystem: 'unknown', coordinateSource: null,
+    locationStatus: 'unresolved', confidence: 0, resolvedName: null, resolvedAddress: null,
+    providerId: null, provider: 'unresolved', countryCode: null,
+    businessStatus: null, rating: null, ratingCount: null,
+  })),
+}));
+vi.mock('../src/services/placeResolver.js', () => ({
+  resolvePlace: mockResolvePlace,
 }));
 
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import * as tripService from '../src/services/trips.js';
+import { __resetDiscoveryVerifyForTests, waitForVerificationDrain } from '../src/services/discoveryVerify.js';
 
 let tmpDir;
 let userId;
@@ -76,8 +106,16 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolvePlace.mockImplementation(async () => ({
+    lat: null, lng: null, coordinateSystem: 'unknown', coordinateSource: null,
+    locationStatus: 'unresolved', confidence: 0, resolvedName: null, resolvedAddress: null,
+    providerId: null, provider: 'unresolved', countryCode: null,
+    businessStatus: null, rating: null, ratingCount: null,
+  }));
+  __resetDiscoveryVerifyForTests();
   getDb().prepare('DELETE FROM discovery_places').run();
   getDb().prepare('DELETE FROM discovery_destinations').run();
+  getDb().prepare('DELETE FROM discovery_generation_daily').run();
   getDb().prepare('DELETE FROM days WHERE trip_id = ?').run(tripId);
 });
 
@@ -685,5 +723,288 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
     expect(errorEvent.message).toMatch(/unavailable/i);
     const doneEvent = events.find((e) => e.type === 'done');
     expect(doneEvent).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Generation limit (Plan 7 Wave 2, decision 4 — max 3 generations/destination/day)
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/discover — generation limit', () => {
+  it('blocks a 4th generation for the same destination on the same UTC day with an SSE generation_limit error', async () => {
+    const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'limitcity', displayName: 'Limitcity', lastGeneratedAt: staleTime });
+    seedPlace(dest.id, { category: 'culture', name: 'Existing Spot' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Limitcity' });
+    errorSpy.mockRestore();
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent?.code).toBe('generation_limit');
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent).toBeUndefined();
+  });
+
+  it('allows generation on a new UTC day even though the destination has 3+ generations from a previous day', async () => {
+    const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'limitcity2', displayName: 'Limitcity2', lastGeneratedAt: staleTime, generationCount: 5 });
+    seedPlace(dest.id, { category: 'culture', name: 'Old Spot' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, '2020-01-01', 3)`,
+    ).run(dest.id);
+
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Limitcity2' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+
+    const dailyRow = getDb().prepare(
+      `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+    ).get(dest.id);
+    expect(dailyRow.count).toBe(1);
+  });
+
+  it('increments the daily counter on each successful generation and blocks the 4th attempt within one test-driven day', async () => {
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      const cats = [{ category: 'culture', items: [{ name: `Spot ${Math.random()}`, description: 'd' }] }];
+      cats.forEach((cat) => onCategory(cat));
+      return cats;
+    });
+
+    // Generation 1: brand new destination (cache miss).
+    await callDiscover({ destination: 'Repeatcity' });
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('repeatcity');
+
+    // Force subsequent calls to also be treated as generations by making the
+    // catalogue look stale each time (this test only cares about the counter).
+    const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const forceStale = () => getDb().prepare(
+      'UPDATE discovery_destinations SET last_generated_at = ? WHERE id = ?',
+    ).run(staleTime, dest.id);
+
+    forceStale();
+    await callDiscover({ destination: 'Repeatcity' }); // generation 2
+    forceStale();
+    await callDiscover({ destination: 'Repeatcity' }); // generation 3
+    forceStale();
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events } = await callDiscover({ destination: 'Repeatcity' }); // 4th — blocked
+    errorSpy.mockRestore();
+
+    expect(mockDiscoverDestination).toHaveBeenCalledTimes(3);
+    expect(events.find((e) => e.type === 'error')?.code).toBe('generation_limit');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Report/suppress endpoint
+// ---------------------------------------------------------------------------
+
+async function callReport(placeId, body, requestingUserId) {
+  const { discoveryPlacesRouter } = await import('../src/routes/discovery.js');
+  const req = {
+    params: { placeId: String(placeId) },
+    body,
+    user: { id: requestingUserId ?? userId },
+  };
+  const res = {
+    jsonBody: null,
+    json(payload) { this.jsonBody = payload; },
+  };
+  let nextErr;
+  const next = (err) => { nextErr = err; };
+
+  const layer = discoveryPlacesRouter.stack.find(
+    (l) => l.route?.path === '/places/:placeId/report' && l.route.methods.post,
+  );
+  if (!layer) throw new Error('report route not found');
+  await layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+
+  return { res, error: nextErr };
+}
+
+describe('POST /api/discovery/places/:placeId/report', () => {
+  it('suppresses the place, logs, and excludes it from listActivePlaces and future exclusion names', async () => {
+    const dest = seedDestination({ cityKey: 'reportcity', displayName: 'Reportcity', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'food', name: 'Bad Ramen' });
+    const place = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').get(dest.id);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { res, error } = await callReport(place.id, { tripId });
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[discovery] suppressed'),
+      place.id, place.name, userId, tripId,
+    );
+    errorSpy.mockRestore();
+
+    expect(error).toBeUndefined();
+    expect(res.jsonBody).toEqual({ suppressed: true });
+
+    const updated = getDb().prepare('SELECT * FROM discovery_places WHERE id = ?').get(place.id);
+    expect(updated.status).toBe('suppressed');
+
+    const { listActivePlaces, listExclusionNames } = await import('../src/db/discoveryCatalogue.js');
+    expect(listActivePlaces(getDb(), dest.id)).toHaveLength(0);
+    expect(listExclusionNames(getDb(), dest.id)).toContain('Bad Ramen');
+  });
+
+  it('rejects with 400 when tripId is missing from the body', async () => {
+    const dest = seedDestination({ cityKey: 'reportcity2', displayName: 'Reportcity2', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'food', name: 'Some Spot' });
+    const place = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').get(dest.id);
+
+    const { error } = await callReport(place.id, {});
+    expect(error).toBeDefined();
+    expect(error.status).toBe(400);
+  });
+
+  it('rejects with 404 when the requesting user has no access to the given trip', async () => {
+    const dest = seedDestination({ cityKey: 'reportcity3', displayName: 'Reportcity3', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'food', name: 'Some Spot' });
+    const place = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').get(dest.id);
+
+    const { error } = await callReport(place.id, { tripId: 'nonexistent-trip-id' });
+    expect(error).toBeDefined();
+    expect(error.status).toBe(404);
+  });
+
+  it('rejects with 404 when the place does not exist', async () => {
+    const { error } = await callReport(999999, { tripId });
+    expect(error).toBeDefined();
+    expect(error.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Verification worker failure isolation (route-level, using the SSE harness)
+// ---------------------------------------------------------------------------
+
+describe('verification worker — failure isolation', () => {
+  it('a resolvePlace throw for one item leaves that item unverified without affecting others or the SSE response', async () => {
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      const cats = [{
+        category: 'culture',
+        items: [
+          { name: 'Good Place', description: 'd1' },
+          { name: 'Bad Place', description: 'd2' },
+        ],
+      }];
+      cats.forEach((cat) => onCategory(cat));
+      return cats;
+    });
+
+    mockResolvePlace.mockImplementation(async ({ queryText }) => {
+      if (queryText === 'Bad Place') throw new Error('lookup exploded');
+      return {
+        lat: 1, lng: 2, coordinateSystem: 'wgs84', coordinateSource: 'manual_lookup',
+        locationStatus: 'resolved', confidence: 0.9, resolvedName: queryText, resolvedAddress: 'addr',
+        providerId: 'osm:node/1', provider: 'nominatim', countryCode: null,
+        businessStatus: null, rating: null, ratingCount: null,
+      };
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Failtown' });
+
+    expect(error).toBeUndefined();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent).toBeDefined();
+
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('failtown');
+    await waitForVerificationDrain(dest.id);
+    errorSpy.mockRestore();
+
+    const rows = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ? ORDER BY name').all(dest.id);
+    const bad = rows.find((r) => r.name === 'Bad Place');
+    const good = rows.find((r) => r.name === 'Good Place');
+    expect(bad.provenance).toBe('unverified');
+    expect(good.provenance).toBe('verified');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pollution invariant: two trips with different prefs browsing the same
+// destination must leave the global tables identical regardless of order.
+// ---------------------------------------------------------------------------
+
+describe('pollution invariant', () => {
+  async function callDiscoverAsTrip(tripRow, body) {
+    const { default: handler } = await import('../src/routes/discovery.js');
+    const req = { params: { tripId: tripRow.id }, body, user: { id: userId }, trip: tripRow };
+    const { res, events } = makeSseRes();
+    let nextErr;
+    const next = (err) => { nextErr = err; };
+    const layer = handler.stack.find(
+      (l) => l.route?.path === '/:tripId/discover' && l.route.methods.post,
+    );
+    await layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+    return { events, error: nextErr };
+  }
+
+  function snapshotDestination(cityKey) {
+    const db = getDb();
+    const destRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all(cityKey);
+    const placeRows = db.prepare(`
+      SELECT category, name, description, provenance, status, batch
+      FROM discovery_places WHERE destination_id IN (SELECT id FROM discovery_destinations WHERE city_key = ?)
+      ORDER BY category, name
+    `).all(cityKey);
+    return {
+      destinations: destRows.map((r) => ({ country_code: r.country_code, display_name: r.display_name })),
+      places: placeRows,
+    };
+  }
+
+  it('leaves discovery_destinations/discovery_places identical whichever of two differently-prefed trips generates first', async () => {
+    const tripA = tripService.createTrip(userId, {
+      title: 'Pollution A', startDate: '2026-06-01', endDate: '2026-06-05',
+      destinations: ['Pollutionville'], destinationCountries: ['JP'],
+      interestTags: ['food'], pace: 'fast', travellers: 1,
+    }).trip;
+    const tripB = tripService.createTrip(userId, {
+      title: 'Pollution B', startDate: '2026-06-01', endDate: '2026-06-05',
+      destinations: ['Pollutionville'], destinationCountries: ['JP'],
+      interestTags: ['nightlife'], pace: 'relaxed', travellers: 4,
+    }).trip;
+
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville' });
+    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville' });
+    const orderAB = snapshotDestination('pollutionville');
+
+    getDb().prepare('DELETE FROM discovery_places').run();
+    getDb().prepare('DELETE FROM discovery_destinations').run();
+    getDb().prepare('DELETE FROM discovery_generation_daily').run();
+    mockDiscoverDestination.mockClear();
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville' });
+    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville' });
+    const orderBA = snapshotDestination('pollutionville');
+
+    expect(orderAB.destinations).toHaveLength(1);
+    expect(orderBA.destinations).toEqual(orderAB.destinations);
+    expect(orderBA.places).toEqual(orderAB.places);
   });
 });

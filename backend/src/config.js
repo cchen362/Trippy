@@ -45,5 +45,13 @@ export const config = {
   aerodataboxApiKey: process.env.AERODATABOX_API_KEY || '',
   aerodataboxApiHost: process.env.AERODATABOX_API_HOST || 'aerodatabox.p.rapidapi.com',
   nominatimUserAgent: process.env.NOMINATIM_USER_AGENT || 'Trippy travel planner local development (contact: local@example.invalid)',
+  // Plan 7 Wave 2 (Q3 discovery grounded catalogue): rating/rating_count enrichment
+  // costs a pricier Google Places field-mask tier, so it stays flag-guarded and off
+  // by default (decision 2, Gate C). Applies to discovery verification calls only.
+  discoveryRatingEnrichment: process.env.DISCOVERY_RATING_ENRICHMENT === '1',
+  // Daily cap on resolver-call lookups triggered by discovery verification (Trust
+  // criteria) — guards cost, not a rate limiter (Nominatim's 1 req/s pacing is
+  // separate, enforced inside placeResolver.js).
+  discoveryResolverDailyBudget: parseInt(process.env.DISCOVERY_RESOLVER_DAILY_BUDGET || '500', 10),
   isProd: process.env.NODE_ENV === 'production',
 };

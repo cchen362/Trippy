@@ -10,6 +10,9 @@ import {
   listActivePlaces,
   insertPlaces,
   listExclusionNames,
+  enforceCategoryCap,
+  getDailyGenerationCount,
+  incrementDailyGenerationCount,
 } from '../src/db/discoveryCatalogue.js';
 
 let tmpDir;
@@ -29,6 +32,7 @@ beforeEach(() => {
   const db = getDb();
   db.prepare('DELETE FROM discovery_places').run();
   db.prepare('DELETE FROM discovery_destinations').run();
+  db.prepare('DELETE FROM discovery_generation_daily').run();
 });
 
 describe('getOrCreateDestination', () => {
@@ -377,5 +381,163 @@ describe('016 migration — idempotence and backfill parity', () => {
 
     expect(dest.last_generated_at).toBe('2026-07-06 12:00:00');
     expect(dest.generation_count).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listExclusionNames — suppressed rows must also be excluded from regeneration
+// ---------------------------------------------------------------------------
+
+describe('listExclusionNames — suppressed rows', () => {
+  it('includes suppressed rows alongside active/archived ones so a reported place is never re-suggested', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'suppresstest', countryCode: 'JP', displayName: 'Suppresstest' });
+    insertPlaces(db, dest.id, [{ category: 'food', name: 'Active Spot', description: 'x' }], 0);
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, status, generated_at)
+      VALUES (?, 'food', 'Reported Spot', 'reported spot', 'x', 'suppressed', datetime('now'))
+    `).run(dest.id);
+
+    const names = listExclusionNames(db, dest.id, 400);
+    expect(names).toEqual(expect.arrayContaining(['Active Spot', 'Reported Spot']));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enforceCategoryCap — bounds enforcement (decision 4, 45 active/category)
+// ---------------------------------------------------------------------------
+
+describe('enforceCategoryCap', () => {
+  function seedActivePlace(db, destId, { category, name, provenance = 'unverified', batch = 0 }) {
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', ?, 'active', ?, datetime('now'))
+    `).run(destId, category, name, name.toLowerCase(), provenance, batch);
+  }
+
+  it('leaves a category untouched when at or below the cap', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity1', countryCode: 'JP', displayName: 'Capcity1' });
+    for (let i = 0; i < 45; i++) {
+      seedActivePlace(db, dest.id, { category: 'food', name: `Spot ${i}` });
+    }
+
+    enforceCategoryCap(db, dest.id, 45);
+
+    const active = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='food' AND status='active'`).get(dest.id).c;
+    expect(active).toBe(45);
+  });
+
+  it('archives surplus unverified rows (oldest batch first) once a category exceeds the cap', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity2', countryCode: 'JP', displayName: 'Capcity2' });
+    for (let i = 0; i < 50; i++) {
+      seedActivePlace(db, dest.id, { category: 'food', name: `Spot ${i}`, provenance: 'unverified', batch: i });
+    }
+
+    enforceCategoryCap(db, dest.id, 45);
+
+    const active = db.prepare(`SELECT name FROM discovery_places WHERE destination_id=? AND category='food' AND status='active' ORDER BY batch`).all(dest.id);
+    const archived = db.prepare(`SELECT name FROM discovery_places WHERE destination_id=? AND category='food' AND status='archived' ORDER BY batch`).all(dest.id);
+
+    expect(active).toHaveLength(45);
+    expect(archived).toHaveLength(5);
+    // The 5 archived rows must be the oldest batches (0-4) — newer batches are kept.
+    expect(archived.map((r) => r.name)).toEqual(['Spot 0', 'Spot 1', 'Spot 2', 'Spot 3', 'Spot 4']);
+  });
+
+  it('never archives a verified row while an unverified row in the same category is still active', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity3', countryCode: 'JP', displayName: 'Capcity3' });
+    // 40 verified rows (should never be touched) + 10 unverified rows (surplus victims).
+    for (let i = 0; i < 40; i++) {
+      seedActivePlace(db, dest.id, { category: 'culture', name: `Verified ${i}`, provenance: 'verified', batch: i });
+    }
+    for (let i = 0; i < 10; i++) {
+      seedActivePlace(db, dest.id, { category: 'culture', name: `Unverified ${i}`, provenance: 'unverified', batch: i });
+    }
+
+    enforceCategoryCap(db, dest.id, 45);
+
+    const stillActiveVerified = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND provenance='verified' AND status='active'`).get(dest.id).c;
+    expect(stillActiveVerified).toBe(40);
+
+    const archivedUnverified = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND provenance='unverified' AND status='archived'`).get(dest.id).c;
+    expect(archivedUnverified).toBe(5); // 50 total - 45 cap = 5 surplus, all from the unverified pool
+
+    const remainingUnverified = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND provenance='unverified' AND status='active'`).get(dest.id).c;
+    expect(remainingUnverified).toBe(5);
+  });
+
+  it('spills into verified rows only once the unverified pool is exhausted, taking oldest batch first', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity4', countryCode: 'JP', displayName: 'Capcity4' });
+    // 3 unverified (all victims) + 47 verified (2 must still be archived: 47-2=45 kept after unverified removed)
+    for (let i = 0; i < 3; i++) {
+      seedActivePlace(db, dest.id, { category: 'nightlife', name: `Unverified ${i}`, provenance: 'unverified', batch: i });
+    }
+    for (let i = 0; i < 47; i++) {
+      seedActivePlace(db, dest.id, { category: 'nightlife', name: `Verified ${i}`, provenance: 'verified', batch: i });
+    }
+    // total = 50, cap = 45, surplus = 5: 3 unverified fully consumed, 2 oldest verified also archived
+
+    enforceCategoryCap(db, dest.id, 45);
+
+    const archived = db.prepare(`SELECT name, provenance FROM discovery_places WHERE destination_id=? AND status='archived' ORDER BY name`).all(dest.id);
+    expect(archived).toHaveLength(5);
+    expect(archived.filter((r) => r.provenance === 'unverified')).toHaveLength(3);
+    expect(archived.filter((r) => r.provenance === 'verified')).toHaveLength(2);
+    // The 2 archived verified rows must be the two oldest batches.
+    expect(archived.filter((r) => r.provenance === 'verified').map((r) => r.name).sort())
+      .toEqual(['Verified 0', 'Verified 1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Daily generation counter (decision 4 — max 3 generations/destination/day)
+// ---------------------------------------------------------------------------
+
+describe('getDailyGenerationCount / incrementDailyGenerationCount', () => {
+  it('starts at 0 for a destination with no recorded generations today', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'dailycity1', countryCode: 'JP', displayName: 'Dailycity1' });
+    expect(getDailyGenerationCount(db, dest.id)).toBe(0);
+  });
+
+  it('increments across calls and is independent of the lifetime generation_count column', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'dailycity2', countryCode: 'JP', displayName: 'Dailycity2' });
+    // Simulate a backfilled destination whose lifetime counter is already 1.
+    db.prepare('UPDATE discovery_destinations SET generation_count = 1 WHERE id = ?').run(dest.id);
+
+    expect(getDailyGenerationCount(db, dest.id)).toBe(0);
+    incrementDailyGenerationCount(db, dest.id);
+    expect(getDailyGenerationCount(db, dest.id)).toBe(1);
+    incrementDailyGenerationCount(db, dest.id);
+    incrementDailyGenerationCount(db, dest.id);
+    expect(getDailyGenerationCount(db, dest.id)).toBe(3);
+  });
+
+  it('tracks separate destinations independently', () => {
+    const db = getDb();
+    const destA = getOrCreateDestination(db, { cityKey: 'dailycity3', countryCode: 'JP', displayName: 'Dailycity3' });
+    const destB = getOrCreateDestination(db, { cityKey: 'dailycity4', countryCode: 'JP', displayName: 'Dailycity4' });
+
+    incrementDailyGenerationCount(db, destA.id);
+    incrementDailyGenerationCount(db, destA.id);
+    incrementDailyGenerationCount(db, destB.id);
+
+    expect(getDailyGenerationCount(db, destA.id)).toBe(2);
+    expect(getDailyGenerationCount(db, destB.id)).toBe(1);
+  });
+
+  it('does not count a previous UTC day toward today\'s total', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'dailycity5', countryCode: 'JP', displayName: 'Dailycity5' });
+    db.prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, '2020-01-01', 3)`,
+    ).run(dest.id);
+
+    expect(getDailyGenerationCount(db, dest.id)).toBe(0);
   });
 });

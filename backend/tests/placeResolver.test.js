@@ -330,7 +330,7 @@ describe('resolvePlace', () => {
     expect(googleCall).toBeTruthy();
     expect(String(googleCall[0])).toBe('https://places.googleapis.com/v1/places:searchText');
     expect(googleCall[1].method).toBe('POST');
-    expect(googleCall[1].headers['X-Goog-FieldMask']).toBe('places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents');
+    expect(googleCall[1].headers['X-Goog-FieldMask']).toBe('places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents,places.businessStatus');
     const body = JSON.parse(googleCall[1].body);
     expect(body).toMatchObject({
       textQuery: 'Test Coffee Roasters, Kuala Lumpur',

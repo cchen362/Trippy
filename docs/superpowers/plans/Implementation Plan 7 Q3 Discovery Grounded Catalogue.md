@@ -172,6 +172,41 @@ Baselines: backend ≥ 219, frontend ≥ 28.
 
 ## Wave 2 — Verification pipeline, provenance, bounds, suppression
 
+**Status: COMPLETE (2026-07-07).** New `backend/src/services/discoveryVerify.js`: an
+in-process, serial per-destination queue, enqueued fire-and-forget from the route right
+after `insertPlaces`/`enforceCategoryCap` — never awaited, so a stuck or throwing lookup
+can never block or fail the SSE response. Confident hit = resolver `locationStatus ===
+'resolved'` with matching country when both known → `provenance='verified'` +
+`provider_place_id`/`lat`/`lng`/`verified_at`; `businessStatus === 'CLOSED_PERMANENTLY'`
+(new unconditional field-mask addition in `placeResolver.js`) → additionally
+`status='suppressed'`, logged loudly. No confident hit → `provenance='unverified'`
+(terminal). Place-id dedup archives the newcomer and union-merges aliases into the
+earlier row. Nominatim's existing 1 req/s throttle (already in `placeResolver.js`) is
+reused as-is, not duplicated. Daily resolver-call budget (`DISCOVERY_RESOLVER_DAILY_BUDGET`,
+default 500, in-memory UTC-day counter): once exhausted, remaining queued items are marked
+`provenance='pending'` and retried the next time anyone browses that destination (pending
+rows are folded back into the queue on the next `enqueueForVerification` call — no separate
+startup scan). `DISCOVERY_RATING_ENRICHMENT` gains a per-call opt-in (`includeRatingFields`
+threaded through `resolvePlace`/`searchGooglePlaces`, set only by `discoveryVerify.js`) so
+the pricier rating field-mask tier is requested for discovery verification only, never for
+booking/stop resolution even when the flag is globally on — a gap in the first-pass
+implementation caught and fixed during orchestrator review. Bounds: `enforceCategoryCap`
+(new, `discoveryCatalogue.js`) archives category surplus over 45, unverified/pending before
+verified, oldest batch first within a tier; generation limit is a new durable per-UTC-day
+counter (`discovery_generation_daily` table, migration `017_discovery_generation_daily.sql`
+— `generation_count` is lifetime, not daily, per the Wave 1 handoff) capped at 3/day/
+destination, surfaced as SSE `{type:'error', code:'generation_limit'}`; `listExclusionNames`
+now also excludes `suppressed` rows. New `POST /api/discovery/places/:placeId/report`
+(mounted separately since `tripId` arrives in the body, not the URL) suppresses + logs.
+Tests: backend 248 → **277/277 green** (18 files); new `discoveryVerify.test.js` plus
+extensions to `discovery.test.js`/`discoveryCatalogue.test.js` covering the pipeline
+fixtures, category-cap archival ordering, generation-limit across UTC-day boundaries, the
+report endpoint, worker failure isolation, the resolver budget cap, and the mandatory
+two-trips-same-city pollution invariant (global tables byte-identical regardless of
+generation order). Delegated to a Sonnet subagent; orchestrator reviewed every changed file
+against the plan and fixed the rating-flag scoping gap directly rather than a further agent
+round.
+
 **Goal:** the catalogue becomes trustworthy and bounded. Everything here is backend-only.
 
 ### 2.1 Verification worker `backend/src/services/discoveryVerify.js`

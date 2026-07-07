@@ -121,9 +121,69 @@ export function insertPlaces(db, destinationId, items, batch) {
 export function listExclusionNames(db, destinationId, cap = 400) {
   const rows = db.prepare(
     `SELECT name FROM discovery_places
-     WHERE destination_id = ? AND status IN ('active', 'archived')
+     WHERE destination_id = ? AND status IN ('active', 'archived', 'suppressed')
      ORDER BY id DESC LIMIT ?`,
   ).all(destinationId, cap);
 
   return rows.map((row) => row.name);
+}
+
+// Bounds enforcement (Plan 7 Wave 2, decision 4): keeps each category's active
+// row count at or under `cap` (default 45) by archiving surplus. Victims are
+// chosen worst-first: unverified/pending rows before verified ones (a verified
+// row is never archived while an unverified row in the same category could be
+// archived instead), then — within the same provenance tier — the oldest batch
+// first (newer "show more" batches are kept over older ones). Wave 3's real
+// scorer doesn't exist yet; this ordering is a neutral interim stand-in, not a
+// ranking function.
+export function enforceCategoryCap(db, destinationId, cap = 45) {
+  const categories = db.prepare(
+    `SELECT DISTINCT category FROM discovery_places WHERE destination_id = ? AND status = 'active'`,
+  ).all(destinationId).map((row) => row.category);
+
+  const countStmt = db.prepare(
+    `SELECT COUNT(*) AS c FROM discovery_places WHERE destination_id = ? AND category = ? AND status = 'active'`,
+  );
+  const victimsStmt = db.prepare(`
+    SELECT id, name, provenance FROM discovery_places
+    WHERE destination_id = ? AND category = ? AND status = 'active'
+    ORDER BY CASE WHEN provenance = 'verified' THEN 1 ELSE 0 END ASC, batch ASC, id ASC
+    LIMIT ?
+  `);
+  const archiveStmt = db.prepare(`UPDATE discovery_places SET status = 'archived' WHERE id = ?`);
+
+  for (const category of categories) {
+    const activeCount = countStmt.get(destinationId, category).c;
+    const surplus = activeCount - cap;
+    if (surplus <= 0) continue;
+
+    const victims = victimsStmt.all(destinationId, category, surplus);
+    for (const victim of victims) {
+      archiveStmt.run(victim.id);
+      console.error(
+        '[discoveryCatalogue] archived place=%s name=%s category=%s reason=category_cap provenance=%s',
+        victim.id, victim.name, category, victim.provenance,
+      );
+    }
+  }
+}
+
+// Per-UTC-day generation counter (Plan 7 Wave 2, decision 4: max 3 generations
+// per destination per day). generation_count on discovery_destinations is a
+// LIFETIME counter (backfilled destinations start at 1, not 0 — Wave 1 handoff),
+// so it cannot answer "how many generations happened today." This table is the
+// durable (restart-surviving) per-day counter instead.
+export function getDailyGenerationCount(db, destinationId) {
+  const row = db.prepare(
+    `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d', 'now')`,
+  ).get(destinationId);
+  return row ? row.count : 0;
+}
+
+export function incrementDailyGenerationCount(db, destinationId) {
+  db.prepare(`
+    INSERT INTO discovery_generation_daily (destination_id, utc_date, count)
+    VALUES (?, strftime('%Y-%m-%d', 'now'), 1)
+    ON CONFLICT(destination_id, utc_date) DO UPDATE SET count = count + 1
+  `).run(destinationId);
 }
