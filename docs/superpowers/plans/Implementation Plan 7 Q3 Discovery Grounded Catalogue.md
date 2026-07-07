@@ -1,14 +1,50 @@
 # Implementation Plan 7 — Q3 Discovery Grounded Catalogue and Trip Ranking (Gate C)
 
-**Status: COMPLETE (2026-07-07).** All four waves shipped and merged to local `main`; exit
-criteria (below) all met. Gate C CLOSED 2026-07-06; owner accepted all five decisions as this
-plan's written defaults
+**Status: DEPLOYED TO PRODUCTION (2026-07-07, commit `0cfce27`).** All four waves shipped,
+merged to local `main`, and now live. Gate C CLOSED 2026-07-06; owner accepted all five
+decisions as this plan's written defaults
 ([decision record](../reviews/2026-07-06-product-architecture-risk-review.md#gate-c-closed--owner-decisions-2026-07-06)).
 Implementation was gated on **Plan 6 Wave 3** landing (frontend day-pair wiring); Wave 4
 additionally required Plan 6 Wave 4 — both preconditions were verified met before Wave 4
-started. Session handoff prompts at the end of this doc (Wave 4's has now been run).
-**Not yet done:** production deploy (this plan's rollout is local-`main`-only per the Trust
-criteria's deploy-order note; migrations 016–018 have not been run against production).
+started. Production deploy followed the deploy skill exactly: pre-flight (backend 316/316,
+frontend 36/36, build clean, working tree clean, secret-scan clean), pushed `0cfce27` to
+origin/main, a fresh pre-migration backup taken on the server via `sqlite3 .backup`
+(`~/backups/trippy-pre-plan7-20260707-1210.db`, 942 KB, WAL-consistent — supplements the
+existing nightly cron backup), `git pull` (server was 4 commits behind at `ce92734`),
+`docker-compose up -d --build`, migrations 016/017/018 applied cleanly and fully logged
+(016's backfill ran per-destination: chongqing 76, chengdu 183, kualalumpur 93, 北京 70,
+南疆 92 items — matching the design's per-destination `last_generated_at` preservation),
+container came up clean (`Trippy backend running on :3001 [production]`, zero errors in
+startup logs). Owner did a manual production pass covering Plan/Map/Today tabs, the Discover
+panel on both a cached destination (Kuala Lumpur — served instantly from the stored
+catalogue) and a brand-new destination (Bali/Denpasar — confirmed production's
+`ANTHROPIC_API_KEY` is valid and live generation succeeds, closing the one risk flagged
+going into this deploy), add-to-day, the report-flag icon, and the 375px mobile viewport.
+
+**Findings from the production verification pass (real bugs, not fixed this session — owner
+decided to close Plan 7 and track these separately, since none are clearly scoped to this
+plan alone):**
+1. **Suggestion card heights are inconsistent** in the Discover grid (`SuggestionCard.jsx`/
+   `DiscoveryPanel.jsx`) — cards size to their own content (name length, notes, hours badge)
+   rather than stretching to a common row height. Cosmetic only.
+2. **China map pin placement regression.** A Chengdu trip's day-3 stop ("Great Hall of the
+   People") rendered several hundred meters from its correct location on the Map tab — classic
+   symptom of a WGS84/GCJ-02 ("Mars Coordinates") datum mismatch between the resolved
+   coordinate and the map tile layer. Owner confirms this was previously fixed and has now
+   reappeared — likely a regression somewhere in the geography/coordinate-resolution chain
+   (Plan 6 and/or this plan's Wave 4 trusted-coordinate add path are candidates), not a fresh
+   bug — needs a deep dive to find where the earlier fix was lost.
+3. **Destination autocomplete doesn't resolve informal region names.** Searching "Bali" in
+   the new-trip destination picker returns no match — only formally-named subdivisions
+   (Denpasar, Balikpapan, etc.). The owner had to select "Denpasar" as a workaround, and the
+   trip's day-level location then displayed as "Kabupaten Badung" (the regency) rather than
+   "Bali," requiring a manual per-day correction — impractical for longer trips.
+4. **New-destination generation under-produced and mis-categorized results.** Generating
+   Bali/Denpasar from scratch (no existing catalogue rows) returned only 10 places total, all
+   landing in the "More" tab with Essentials/Nature/Culture/Food/Hidden Gems all showing zero
+   — confirmed as the fully-settled final state, not a mid-stream snapshot. This exercises
+   this plan's own Wave 2 verification pipeline and Wave 3 category-ordering logic directly,
+   so it's the finding most likely to be a Plan 7 regression specifically.
 **Design source:** [Completed Q3 review](../reviews/2026-07-06-q3-discovery-personalization-and-shared-cache.md) — all §-references below point there unless stated otherwise.
 **Model guidance:** Fable orchestrates and QAs; coding delegated to Sonnet subagents wave by wave.
 
