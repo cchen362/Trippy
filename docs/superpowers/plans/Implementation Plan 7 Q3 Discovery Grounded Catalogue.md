@@ -49,6 +49,19 @@ to fill row height, but no element pushes the footer group to the bottom (no `ma
 on the last child, no `justifyContent:'space-between'` on the card). This is a new, narrower
 finding — not a regression of `0be6022`, which only ever claimed to equalize outer card height
 — tracked here for a follow-up fix, not implemented in this OPS deploy session.
+
+**#1 fully FIXED** (`e241001`, same-session follow-up): added `marginTop:'auto'` to the meta
+badges div in `SuggestionCard.jsx` to bottom-anchor the footer group. First attempt still
+misaligned in owner verification — the "Day X · date" pill (rendered only for in-trip cards)
+lived *inside* that bottom-anchored group, so its presence/absence changed the group's own
+height and pushed the badge/button row above it to a different position per card. Fix: moved
+the day pill out of the footer and up next to the "In trip" tag near the title, so the footer
+group is now constant-height on every card. Verified in local dev preview (destination Ipoh,
+seeded catalogue, desktop-width grid): "Add to day" button top-position identical (`1005.25px`)
+across all 4 cards in a row regardless of trip status. Frontend 36/36, build clean. Redeployed
+to production same session — pushed `e241001`, server pulled, rebuilt, restarted (no migrations
+involved), container clean, HTTP 200. Not re-verified visually in production browser (owner
+deferred that to their own pass); local verification is the basis for calling this fixed.
 - **#2 FIXED** (`99e3455`, migration 019): root cause was NOT a lost fix — `searchGooglePlaces`
   had always labeled Google's mainland-China GCJ-02 coordinates as `wgs84`; Plan 7's
   verification pipeline (Google-heavy) + Wave 4 trusted-add path were the first to persist
