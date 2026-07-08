@@ -1,6 +1,9 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: DRAFT (2026-07-08) — awaiting owner approval. No implementation started.**
+**Status: DRAFT v2 (2026-07-08) — awaiting owner approval. No implementation started.**
+Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
+log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
+for plan completion** — W6's gate is sequencing only, not a maybe.
 
 **Origin:**
 [Destination Scope and Hotel Geography Review](../reviews/2026-07-08-destination-scope-and-hotel-geography-review.md)
@@ -18,7 +21,8 @@ model.
 
 ## 0. Verified facts this plan is built on (2026-07-08 code audit)
 
-These were confirmed directly in source this session; later waves must not re-derive them.
+These were confirmed directly in source this session; implementation sessions must not
+re-derive them.
 
 1. **Trip destinations are derived, not stored.** `trips.destinations`/`destination_countries`
    columns were dropped in migration 015. `getTripDetail`/`listTripsForUser`/`share.js` compute
@@ -43,8 +47,8 @@ These were confirmed directly in source this session; later waves must not re-de
    returns **display strings only** — no place ID, no ISO code (`lookups.js:217-220`). Bali
    (AAL1) can never appear. Trip chips then submit `countryCode: c.country`, where `country`
    is Google's secondaryText — a country **name**, not a code
-   (`frontend/src/components/trips/DestinationChipPicker.jsx:11`,
-   `NewTripModal.jsx:166`). Latent name-vs-code inconsistency, fixed in Wave 4.
+   (`frontend/src/components/trips/DestinationChipPicker.jsx:11`, `NewTripModal.jsx:166`).
+   Latent name-vs-code inconsistency, fixed in Wave 4.
 6. **City-string canonicalization exists in four uncoordinated copies:** `CITY_ALIASES`
    (`backend/src/utils/airports.js:177-180`), `canonicalizeCity` — chengdu/chongqing only
    (`backend/src/services/placeResolver.js:427-433`), `normalizeText` twice
@@ -72,6 +76,14 @@ These were confirmed directly in source this session; later waves must not re-de
    `MapTab.jsx:35` redundantly prepends `cityOverride`).
 10. **The IATA→city map** (`airports.js:4`, "extend freely") already maps `DPS: 'Bali'` and
     covers Chongqing/Chengdu/Taipei; it lacks `KHH: 'Kaohsiung'`.
+11. **`discovery.reset()` does not exist.** `TripPage.jsx:93` calls it after every
+    trip-settings save, but `useDiscovery` exports only
+    `{discover, showMore, getDestination, isAnyLoading}` (`useDiscovery.js:152`). The
+    TypeError is thrown inside the try block, so **every settings save shows a false
+    "Could not save trip settings." error** even though the PATCH succeeded. Fixed in W1.
+12. **Migration 014 imports `deriveDayGeo`.** Its signature change must be
+    backward-compatible (optional trailing param) — migrations are never edited (CLAUDE.md),
+    and 014 must still run correctly on a fresh database.
 
 ---
 
@@ -103,25 +115,36 @@ scope-grade. Ladder, evaluated at read time against the trip's own scopes:
 
 1. **Trip match** — the hotel's city/scope evidence canonically matches one of the trip's
    destination scopes (distinct day seeds + overrides), after suffix folding ("Kaohsiung City"
-   ≡ "Kaohsiung"). → promote to that scope. *Covers Bali (AAL1 "Bali" matches the trip chip)
-   and Kaohsiung (trip chip matches even though the hotel says "Sinsing District" — no match,
-   see rule 4) and Chengdu-Chongqing (Chongqing is a trip chip).*
-2. **Locality** — the evidence is a Google `locality` (a real city). → promote, creating the
-   scope on the trip if new. *Preserves auto-movement to cities not yet on the trip.*
+   ≡ "Kaohsiung"). → promote to that scope's label. *Covers Bali (AAL1 "Bali" matches the trip
+   chip) and Chengdu-Chongqing (Chongqing is a trip chip).*
+2. **Locality** — the evidence is a Google `locality` (a real city). → promote. *Preserves
+   auto-movement to cities not yet on the trip.*
 3. **Known city** — no locality, but the AAL2/AAL1 value matches the curated known-city set
    (values of `IATA_CITY` + `CITY_ALIASES`). → promote. *Preserves China behavior (Chongqing
    via AAL2) even when the city isn't a trip chip.*
 4. **Otherwise** — contribute **no display city**; the day falls through to transit/previous/
    seed layers (which hold the trip scope). The fragment is emitted as the day's
-   **resolution anchor** instead. *`Kabupaten Badung` and `Sinsing District` land here.*
+   **resolution anchor** instead, and the demotion is **logged loudly** (see 2.3) so real
+   frequency is measured in production, not guessed. *`Kabupaten Badung` and
+   `Sinsing District` land here.*
 
 The hotel layer **always** contributes its `countryCode` when present (fact 2's independent
 per-field selection is preserved), and **always** emits its locality evidence as the anchor —
 promotion and anchor are not mutually exclusive.
 
-Legacy bookings (only `detailsJson.city`, no components) run the same ladder using that string:
-a polluted value fails rules 1–3 and demotes to anchor — **existing Bali/Kaohsiung trips heal
-with no data rewrite**.
+Legacy bookings (only `detailsJson.city`, no components) run the same ladder using that string
+(rule 2 unavailable — no component types): a polluted value fails rules 1/3 and demotes to
+anchor — **existing Bali/Kaohsiung trips heal with no data rewrite**.
+
+**Why the exposed surface is small** (owner asked; reasoned 2026-07-08): losing auto-movement
+requires simultaneously (a) no same-day transit booking — flights/trains stamp the city via
+layer 3 regardless of the hotel; (b) no Google `locality` on the hotel — true mainly for
+Indonesian regencies, some Chinese prefecture addresses, rural/resort areas; (c) city not a
+trip chip; (d) city not in the known-city set. The surviving profile is an overland,
+unplanned side-trip to an un-chipped, no-airport city in a no-locality geography. Failure
+mode: day keeps the previous scope until one manual override — versus today's failure mode of
+a raw fragment polluting five surfaces. The W2 demotion log turns this from estimate into
+measurement.
 
 ### Day response contract (additive)
 
@@ -149,157 +172,398 @@ Both `GET /api/trips/:id/detail` and `GET /api/share/:token` carry it. Trip-leve
   //                      formattedAddress, city, tz, lat, lng
   countryCode,                 // NEW — ISO alpha-2 from address components (fixes fact 4)
   locality,                    // NEW — Google locality longText, or null
-  sublocality,                 // NEW — most specific sublocality/district, or null
-  adminAreas: { aal1, aal2 },  // NEW — for the promotion ladder + anchor
+  sublocality,                 // NEW — most specific sublocality/district longText, or null
+  adminAreas: { aal1, aal2 },  // NEW — longText values, for the ladder + anchor
 }
 ```
 
 `detailsJson.city` keeps being written (same extraction) for backward compatibility; the
 derivation prefers the structured fields when present.
 
-### Canonical identity
-
-One backend module, `backend/src/utils/geoIdentity.js`:
-
-- `canonicalGeoKey(label)` — extraction of the Discovery route's folding (fact 6), hardened to
-  strip **all** non-alphanumeric characters (Unicode-aware: CJK preserved). Folds `ChengDu`,
-  `Cheng Du`, `Cheng du` → `chengdu`. Used by the Discovery route, scope matching, and the
-  frontend mirror.
-- `scopesMatch(a, b)` — canonical-key equality after folding a conservative suffix list:
-  `city`, `municipality`, `special municipality`, `metropolitan city`, `prefecture`. Nothing
-  fuzzier (no substring matching — "Bali" must not match "Balikpapan").
-- `knownCityLabel(label)` — membership in the set built from `IATA_CITY` values +
-  `CITY_ALIASES` values. Extend the map with `KHH: 'Kaohsiung'` (and any other gaps found in
-  testing) as part of Wave 1.
-- Absorbs `placeResolver.canonicalizeCity` (its chengdu/chongqing special case becomes a
-  trivial consequence of `canonicalGeoKey`).
-
-The frontend keeps its mirrored `norm()` (`useDiscovery.js`) updated to the identical folding,
-with a lockstep unit test on both sides sharing the same fixture list (no shared package
-exists; mirrored fixtures are the honest minimum).
+### Canonical identity — `backend/src/utils/geoIdentity.js` (specified fully in 1.1 below)
 
 ---
 
-## 2. Phased sequence
+## 2. Orchestration model (how this plan is executed)
 
-Ordered so **new pollution stops in the first shipped wave**; everything after is enrichment.
+Per global working rules: **Fable/Opus orchestrates; Sonnet implements.**
 
-| Wave | Contents | Ships alone? |
-|---|---|---|
-| **W1** | `geoIdentity.js` + IATA map extension + Discovery-route/`useDiscovery` folding swap | Yes (pure refactor + tests) |
-| **W2** | Guarded promotion + `resolutionAnchor` in `deriveDayGeo`; propagate through detail/share/importer/mapData; ferry fix | Yes — **this is the pollution stopper and retroactive healer** |
-| **W3** | Booking write path: hotel details return `countryCode` + components; clean hotel display names; "City" field → "Area / locality" | Yes |
-| **W4** | Destination-scope picker (Bali selectable) + ISO-code chips | Yes |
-| **W5** | Consumer alignment: stop-lookup anchor bias, Discovery add-stop country fix, shared frontend `dayDisplayLabel`, photo-query resolved city | Yes |
-| **W6** | **Gated on separate owner decision:** polluted-data cleanup migration + dead-table drop + CLAUDE.md correction | After W1–W2 verified in production |
+- The orchestrator (Fable or Opus) runs each wave via `/implement-milestone`: reads this plan,
+  writes precise task prompts, delegates to **Sonnet subagents**, reviews every diff, runs the
+  browser QA itself, updates this plan's status lines, and commits. **Never spawn a Fable
+  subagent.**
+- **Max 2 Sonnet agents in flight**, always split so they cannot collide on files. The split
+  per wave is prescribed in each wave's *Delegation* line below (typically backend-only vs
+  frontend-only).
+- Sonnet agents get: the wave's section of this plan verbatim, the §0 facts, and the fixture
+  table. They do not re-derive design decisions; ambiguity comes back to the orchestrator,
+  not into code.
+- The orchestrator personally verifies in a real browser at 375 px before any wave is called
+  done (repo rule: subagent self-reports and green tests do not count as verified).
+- One commit per wave minimum; commit before the session ends, always.
 
-W1→W2 is the mandatory order (W2 consumes the helpers). W3–W5 are independent of each other
-and can be re-sequenced; W4 is the most user-visible and closes the original "can't pick Bali"
-symptom.
-
----
-
-## 3. Backend changes by module
-
-### `backend/src/utils/geoIdentity.js` (new) + `utils/airports.js` — W1
-As specified in §1. `airports.js` gains `KHH: 'Kaohsiung'`; `canonicalCity` stays (alias
-resolution is a different job from key folding) but its output feeds `scopesMatch`.
-
-### `backend/src/routes/discovery.js` — W1
-Replace the inline `cacheKey` computation (lines 162-166) with `canonicalGeoKey`. Behavior
-identical for clean keys; polluted comma-bearing inputs now fold differently, which is fine
-because W2 stops them from arriving at all (and W6 reconciles old rows).
-
-### `backend/src/services/trips.js` — W2 (core)
-- `extractGeoFromBooking` hotel branch: run the promotion ladder (§1). Needs the trip's scope
-  labels — extend the signature to accept a precomputed `tripScopes` array (distinct seed
-  cities + overrides, canonical-keyed). Callers `listDaysForTrip`, `getDayGeo`, and `share.js`
-  build it once per trip. Also: add `ferry` to the transit branch (fact 9).
-- `deriveDayGeo`: unchanged precedence; returns `{city, countryCode, resolutionAnchor}`.
-  Anchor comes from the active hotel's `sublocality || locality || detailsJson.city` evidence
-  (whichever is narrower than the promoted scope, else null).
-- `listDaysForTrip` (line 607): stamp `resolutionAnchor` alongside `resolvedCity`.
-- `deriveTripDestinationPairsFromDays` / `deriveTripDestinationsFromDays`: **no changes** —
-  they consume healed resolved values.
-
-### `backend/src/services/share.js` — W2
-Same stamping as `listDaysForTrip` (it recomputes `deriveDayGeo` itself, lines 43-55).
-
-### `backend/src/services/mapData.js` — W2
-Segment labels (line 49) switch from `city_override || city` to the resolved geography that
-`computeDayGeographies` (lines 131-148) already computes in the same file.
-
-### `backend/src/services/importer.js` — no change needed
-It already builds trip context from `resolvedCity`/`resolvedCountry` (lines 242-256), so W2
-heals importer context automatically. Verify with a fixture, don't touch.
-
-### `backend/src/services/lookups.js` — W3 + W4
-- W3 `lookupHotelDetails`: request `addressComponents` classification and return
-  `countryCode`, `locality`, `sublocality`, `adminAreas` alongside the existing fields.
-  `extractCityFromAddressComponents` stays for the legacy `city` field.
-- W4 new `lookupDestinationPredictions(input)`: two parallel Autocomplete calls — the existing
-  city types, plus `['administrative_area_level_1']` (Google rejects mixing its special
-  collections with other types, so two requests is the deliberate design, not a workaround).
-  Merge: dedupe by `canonicalGeoKey`, rank exact/prefix label matches first, cities above
-  regions at equal rank. Return `{label, countryCode, kind: 'city'|'region'}` with
-  `countryCode` parsed from secondaryText via the existing `countryCodeFromName`
-  (`utils/countries.js:66`). New route `GET /api/lookups/destinations`; keep `/cities`
-  untouched until the frontend migrates, then retire it in the same wave.
-
-### `backend/src/services/stops.js` — W5
-`resolveLocationForStop` bias ladder becomes: explicit caller value → **day
-`resolutionAnchor.label`** → `dayGeo.city` → seed (lines 162-166). Photo queries (lines
-355/426/776) switch from raw `day.city` to resolved city. Resolver cache keys change for
-anchor-biased lookups → old rows orphan and re-resolve; acceptable, bounded cost.
-
-### `backend/src/services/bookings.js` — W3
-No structural change; `normalizeDetailsJson` already passes new fields through verbatim.
-Confirm with a test that the W3 fields round-trip.
+Wave order: **W1 → W2 are strictly sequential** (W2 consumes W1's helpers, and W2 is the
+pollution stopper). W3, W4, W5 are mutually independent and may ship in any order after W2.
+W6 runs last, after W1–W2 are verified in production.
 
 ---
 
-## 4. Frontend changes by surface
+## Wave 1 — Canonical identity + Discovery folding + `useDiscovery.reset` (NOT STARTED)
 
-### Add Booking modal — W3
-(`components/logistics/AddBookingModal.jsx`, `bookingForm.js`)
-- `handleHotelSuggestionSelect`: store the new detailsJson fields; **display name** prefers
-  the Places details `place.name` (official property name) and only falls back to suggestion
-  text when details are missing. Delete the append-city heuristic and its hardcoded city
-  regex (`AddBookingModal.jsx:64`). Conservative suffix strip: remove a trailing token from
-  the display name only when that token exactly matches a stored address component
-  (`Xinyi District`, `Badung Regency`) — never otherwise, so brand names survive.
-- The visible **"City"** field is relabeled **"Area / locality"** (DM Mono label, per design
-  spec) and keeps writing `hotelCity`/`detailsJson.city` — it is now honest about being
-  anchor evidence. Day movement is governed by the derivation, not this field.
+**Goal:** one shared definition of "same place, same key" on both backend and frontend, and
+the false-error bug on trip-settings save fixed. Pure refactor + additive helpers; no behavior
+change for clean inputs.
 
-### Destination picker — W4
-(`components/logistics/CityInput.jsx`, `components/trips/DestinationChipPicker.jsx`,
-`NewTripModal.jsx`, `EditTripModal.jsx`)
-- Point at `/api/lookups/destinations`; render the `kind` as a small mono badge on region
-  rows (`REGION`) so Bali-the-island is distinguishable from a city with the same name.
-- Chips store `{label, countryCode, kind}`; submit payload keeps the `{city, countryCode}`
-  wire shape but `countryCode` becomes a genuine ISO code (fixes fact 5's name-vs-code drift).
-  `EditTripModal.deriveInitialChips` unchanged (already zips from resolved values).
+### 1.1 `backend/src/utils/geoIdentity.js` (new)
 
-### Day headers and geography readers — W5
-- New `frontend/src/utils/dayGeo.js` with `dayDisplayLabel(day)` (`resolvedCity ?? city`) —
-  adopted by `DayHeader.jsx:17`, `TodayTab.jsx:30`, `ShareViewPage.jsx:117`, `MapTab.jsx:35`
-  (dropping its redundant `cityOverride` prefix — resolvedCity already reflects overrides),
-  and `AddPlaceModal.jsx:32/178` (fixing the reversed chain at 178).
-- Manual override UI unchanged (single field). The backend keeps auto-resolving the override's
-  country; canonical matching makes casing/spacing variants converge downstream.
+```js
+canonicalGeoKey(label)   // → string key
+scopesMatch(a, b)        // → boolean
+knownCityLabel(label)    // → boolean
+```
 
-### Discovery — W2 (free) + W5
-- Default destination heals automatically in W2 (it reads `resolvedCity`).
-- W5: `handleAddToDay` uses `committedCountry` when the committed destination differs from the
-  active day's scope (today it stamps `activeDay.resolvedCountry` onto stops added from a
-  free-text search of a different city — `DiscoveryPanel.jsx:431,447`).
-- `useDiscovery.norm` updated in lockstep with `canonicalGeoKey` (W1, mirrored fixtures).
-- `SuggestionCard.jsx:80` "In trip" matching switches to the mirrored folding.
+- `canonicalGeoKey`: trim → lowercase → `normalize('NFD')` + strip combining marks (same as
+  `discovery.js:163-165` today) → **strip all characters not `\p{L}`/`\p{N}`** (Unicode
+  property escapes, `u` flag — CJK letters are `\p{L}` and survive; commas, parens, and all
+  punctuation now fold, closing the `"kabupaten badung, bali"` gap). Folds `ChengDu`,
+  `Cheng Du`, `Cheng du` → `chengdu`.
+- `scopesMatch(a, b)`: true when `canonicalGeoKey` values are equal **after** removing one
+  trailing suffix from this exact list (applied to each side independently, once):
+  `city`, `municipality`, `special municipality`, `metropolitan city`, `prefecture`, `shi`.
+  Suffix removal operates on the whitespace-tokenized label *before* folding (so
+  "Kaohsiung City" → "Kaohsiung", but "Ho Chi Minh City" → **also folds to "Ho Chi Minh"** —
+  acceptable: both sides fold identically, so matching still works; the suffix-stripped form
+  is never displayed). **No substring or prefix matching** — "Bali" must not match
+  "Balikpapan".
+- `knownCityLabel(label)`: `canonicalGeoKey(label)` membership in a Set built at module load
+  from `Object.values(IATA_CITY)` + `Object.values(CITY_ALIASES)` (import from
+  `utils/airports.js`).
+- Unit-test file carries the **shared fixture list** (F8 in §6) that the frontend mirror test
+  (1.5) duplicates verbatim — the two lists are kept in lockstep by convention and code
+  review; a comment in each points at the other.
 
-### Importer/capture UI — no change
-Sends no geography today (verified); prefill derives from booking details and benefits from
-W3's cleaner fields automatically.
+### 1.2 `backend/src/utils/airports.js`
+
+Add `KHH: 'Kaohsiung'`. Sonnet task: sweep the owner's production trips' cities (ask the
+orchestrator for the list — do not guess) and propose any other missing majors; additions are
+one-line map entries.
+
+### 1.3 `backend/src/routes/discovery.js`
+
+Replace the inline `cacheKey` computation (lines 162-166) with `canonicalGeoKey(destination)`.
+`claudeDestinationBase`/`claudeDestination` composition unchanged. Identical output for clean
+keys; comma-bearing polluted inputs now fold differently — W2 stops them arriving, W6
+reconciles old rows.
+
+### 1.4 `backend/src/services/placeResolver.js`
+
+Delete `canonicalizeCity` (lines 427-433); its two call sites (400-401, 482-483) keep passing
+the raw `city` into the query text — the chengdu/chongqing spacing fix is display-cosmetic
+for geocoder queries and both spellings geocode identically (verify with the existing resolver
+tests). If any test proves spacing matters to Nominatim hit-rate, keep a thin wrapper that
+title-cases `canonicalGeoKey` output instead — decide from test evidence, not preference.
+
+### 1.5 `frontend/src/hooks/useDiscovery.js` — folding mirror
+
+Update `norm` (lines 28-32) to the exact 1.1 algorithm (Unicode property escapes are supported
+in the Vite/browser baseline). Add the mirrored fixture test to the frontend suite.
+
+### 1.6 `frontend/src/hooks/useDiscovery.js` — implement `reset()` (fact 11)
+
+New `reset` callback: abort every in-flight controller in `abortRefs.current` (and clear the
+map), clear `cacheRef.current` to `{}`, bump the existing re-render reducer. Export it in the
+return object. `TripPage.jsx:93`'s existing call then works as intended (clear stale
+category tabs after interest-tag edits). Test: saving trip settings no longer surfaces
+"Could not save trip settings." and Discovery refetches with new tags.
+
+**Wave 1 tests:** F8 fixture list both sides; discovery route key parity for clean inputs
+(snapshot of `cacheKey` for a dozen real destinations, before vs after — must be identical);
+`reset()` unit test (in-flight abort + cache clear).
+
+**Delegation:** two Sonnet agents — backend (1.1–1.4) and frontend (1.5–1.6). No shared files.
+
+**Verification (orchestrator):** run the app, save trip settings (no false error), open
+Discovery on an existing destination (cache hit still instant — key unchanged).
+
+---
+
+## Wave 2 — Guarded promotion + resolution anchors (NOT STARTED)
+
+**Goal:** the pollution stopper and retroactive healer. Backend-only. After this wave, no
+provider fragment can become a day header, trip summary entry, Discovery default, or importer
+context — and existing polluted trips heal at read time.
+
+### 2.1 Trip scopes input
+
+`deriveDayGeo` gains an optional 4th param: `deriveDayGeo(day, bookings, previousResolvedGeo,
+tripScopes = [])` — optional so migration 014's existing import stays valid (fact 12).
+`tripScopes` is an array of `{label, canonicalKey}` built once per trip from the distinct
+day seeds (`days.city`) + overrides (`days.city_override`), keyed via `canonicalGeoKey`.
+Build it in a small exported helper `buildTripScopes(days)` in `trips.js`, called by:
+
+- `listDaysForTrip` (`trips.js:576-609`) — already loads all days first.
+- `getDayGeo` (`trips.js:617-640`) — loads the trip's days for the replay; add scope build.
+- `share.js` (`buildPublicTripDetail`, lines 43-55).
+- `mapData.js` `computeDayGeographies` (lines 131-148).
+
+### 2.2 `extractGeoFromBooking` hotel branch (`trips.js:150-152`)
+
+Evidence selection: prefer structured fields when present —
+`d.locality ?? d.adminAreas?.aal2 ?? d.adminAreas?.aal1`, tagging which type matched; legacy
+fallback is `d.city` with type `unknown`. Then the ladder:
+
+```
+if evidence matches a tripScope (scopesMatch)        → city = that scope's label   (rule 1)
+else if evidence type is 'locality'                  → city = evidence             (rule 2)
+else if knownCityLabel(evidence)                     → city = canonicalCity(evidence) (rule 3)
+else                                                 → city = null; log demotion   (rule 4)
+```
+
+Always: `countryCode = d.countryCode || null` (unchanged). Always: emit
+`anchor = { label: d.sublocality ?? d.locality ?? d.city, countryCode }` when that label
+exists **and** differs (by `canonicalGeoKey`) from the promoted city; else `anchor = null`.
+
+Also in this function: add `ferry` to the train/bus branch (fact 9) — `destinationCity` +
+`destinationCountryCode`, identical handling.
+
+### 2.3 Demotion log (risk #1 measurement)
+
+On rule 4: `console.warn('[geo] hotel city demoted to anchor', { tripId, bookingId,
+demoted: evidence, tripScopes: labels })`. Production logs are the impact dataset for the
+known-city map extension decision. (Fail loudly in dev, gracefully in prod — a warn, never a
+throw.)
+
+### 2.4 `deriveDayGeo` + stamping
+
+Return `{ city, countryCode, resolutionAnchor }`. Layer precedence and per-field independence
+untouched (fact 2) — the anchor comes only from the active-hotel layer regardless of which
+layer wins the city. `listDaysForTrip` (line 607) and `share.js` (lines 43-55) stamp
+`resolutionAnchor` next to `resolvedCity`/`resolvedCountry`. `getDayGeo` returns it for
+stops.js (consumed in W5; additive until then).
+
+### 2.5 `mapData.js` segment labels
+
+`buildSegments`' `currentCity` (line 49) switches from `city_override || city` to the resolved
+geography `computeDayGeographies` already produces in the same file (fact 9).
+
+### 2.6 Explicitly not touched
+
+`deriveTripDestinationPairsFromDays` / `deriveTripDestinationsFromDays` (they consume healed
+resolved values — verify with F10, don't edit); `importer.js` (already reads resolved geo,
+lines 242-256); Claude extraction prompt.
+
+**Wave 2 tests:** fixtures F1–F8, F10 (§6). Plus: demotion warn fires on F4/F5; anchor is
+null when it equals the promoted scope; ferry fixture F7.
+
+**Delegation:** **one** backend Sonnet agent (this wave's files interlock; splitting invites
+collisions). The orchestrator reviews the ladder implementation line-by-line — this is the
+single riskiest diff in the plan.
+
+**Verification (orchestrator):** local DB seeded with production-shaped Bali + Kaohsiung +
+Chengdu-Chongqing trips: headers read `Bali`/`Kaohsiung`/`Chongqing` with zero data edits;
+trip cards and share links show healed summaries; importer context string says `Bali (ID)`;
+demotion warn appears exactly for the fragment bookings. 375 px pass on Plan/Today/Share.
+
+---
+
+## Wave 3 — Booking write path: components, country, clean hotel names (NOT STARTED)
+
+**Goal:** new hotel bookings store scope-grade evidence (fixing fact 4's missing country),
+and hotel display names stop absorbing district/regency text.
+
+### 3.1 `backend/src/services/lookups.js` — `lookupHotelDetails`
+
+Field mask already includes `addressComponents` (line 123). Extend the return object:
+`countryCode` (reuse `extractCountryCodeFromAddressComponents`, line 179), `locality`
+(longText of `locality` component), `sublocality` (most specific of
+`sublocality_level_1` → `sublocality` → `neighborhood`, first present), `adminAreas:
+{aal1, aal2}` (longText). Keep the legacy `city` field and its extractor untouched.
+
+### 3.2 `frontend/src/components/logistics/AddBookingModal.jsx`
+
+- `handleHotelSuggestionSelect` (lines 229-285): write the new `detailsJson` fields
+  (`countryCode`, `locality`, `sublocality`, `adminAreas`) from the details response.
+- **Display name rule:** `displayName = place.name` (official property name) whenever details
+  succeed; suggestion text only as fallback when details are missing. **Delete**
+  `hotelSuggestionName`'s append-city behavior and the hardcoded city regex (lines 62-70,
+  incl. line 64) and the `isGenericHotelName` prefix heuristic (lines 72-77) — `place.name`
+  makes both obsolete.
+- **Conservative suffix strip** (only for the fallback path where suggestion text is used):
+  if the name's trailing tokens exactly equal (case-insensitive) the longText of any stored
+  address component (`Xinyi District`, `Badung Regency`), strip that one suffix; otherwise
+  leave the name alone. Never strip on partial matches.
+- Relabel the visible **"City"** field (lines 377-389) to **"Area / locality"** (DM Mono
+  label per design spec — this is a label string change, no new styling). It keeps writing
+  `hotelCity` + `detailsJson.city` in tandem; it is now honest about being anchor evidence.
+
+### 3.3 `frontend/src/components/logistics/bookingForm.js`
+
+`normalizeForm` hotel branch (lines 82-94) and `hydrateFormFromBooking` (lines 187-195): carry
+`countryCode`/`locality`/`sublocality`/`adminAreas` through `detailsJson` untouched (spread
+already does; add a test proving round-trip). No backend `bookings.js` change needed —
+`normalizeDetailsJson` passes fields verbatim (verified); add the round-trip test anyway.
+
+**Wave 3 tests:** details lookup returns the new fields (mocked Places payload incl. an
+Indonesian no-locality address); modal stores them; display name = `place.name` for the
+W Taipei / W Bali / Regent Canggu trio (review table); suffix strip fires only on exact
+component match; round-trip through create → hydrate.
+
+**Delegation:** two Sonnet agents — backend (3.1) and frontend (3.2–3.3). No shared files.
+
+**Verification (orchestrator):** add W Bali – Seminyak and Hotel Indigo Kaohsiung via the real
+modal (375 px): names read `W Bali - Seminyak` / `Hotel Indigo Kaohsiung...` clean, Area/
+locality field shows the fragment, day headers unaffected (W2 guards), `details_json` in the
+DB contains `countryCode` + components.
+
+---
+
+## Wave 4 — Destination-scope picker (NOT STARTED)
+
+**Goal:** "Bali" is selectable at trip creation; chips carry real ISO codes.
+
+### 4.1 `backend/src/services/lookups.js` — `lookupDestinationPredictions(input)`
+
+Two parallel Autocomplete calls (Google rejects mixing its special collections with other
+types — two requests is the design, not a workaround):
+
+- Call A: existing `['locality', 'administrative_area_level_2']`.
+- Call B: `['administrative_area_level_1']`.
+
+Merge: dedupe by `canonicalGeoKey(label)` (call-A winner on tie); rank exact/prefix matches
+on the query first, then call-A results above call-B at equal rank; cap at 8. Each result:
+`{ label: mainText, countryCode, kind: 'city' | 'region' }` where `countryCode` is parsed
+from secondaryText via the existing `countryCodeFromName` (`utils/countries.js:66`), null
+when unparseable. Reuse one session-token pair per keystroke session if the current
+autocomplete plumbing supports it (API cost rule) — check how hotel autocomplete does it and
+match.
+
+### 4.2 Route
+
+`GET /api/lookups/destinations?q=` beside `/cities`. The frontend migrates in this same wave,
+then **delete `/cities` and `lookupCityPredictions`** (clean build — no orphan endpoint).
+Check for other `/cities` consumers first: audit found only `CityInput`, which is also used
+for transit from/to fields — those move to `/destinations` too (city-kind results rank first,
+so transit UX is unchanged).
+
+### 4.3 Frontend picker
+
+- `CityInput.jsx`: consume `{label, countryCode, kind}`; render `kind === 'region'` with a
+  small `REGION` tag — DM Mono, cream at reduced opacity, **not gold** (gold stays reserved
+  per accent discipline).
+- `DestinationChipPicker.jsx:11`: store `{label, countryCode, kind}`;
+- `NewTripModal.jsx:166` / `EditTripModal.jsx:53`: submit `{city: label, countryCode}` — same
+  wire shape, `countryCode` now a genuine ISO code (fixes fact 5). Verify `createTrip`'s
+  input normalization (`trips.js:372-380`) accepts it cleanly; if production `city_country`
+  rows currently hold country *names* from the old path, note the finding in this plan for
+  W6's inventory rather than patching ad hoc.
+
+**Wave 4 tests:** merge/rank/dedupe unit tests (mocked Google payloads: "Bali" query returns
+region-kind Bali ID; "Chengdu" returns city-kind; homonyms dedupe); chip submit shape; picker
+renders REGION tag.
+
+**Delegation:** two Sonnet agents — backend (4.1–4.2) and frontend (4.3). Coordinate the
+response shape from this doc, not from each other's code.
+
+**Verification (orchestrator):** at 375 px, create a trip typing "Bali" — selectable with
+REGION tag, chip stores `ID`; create "Kaohsiung" — city result; transit from/to fields still
+autocomplete cities normally.
+
+---
+
+## Wave 5 — Consumer alignment (NOT STARTED)
+
+**Goal:** every consumer reads the role it should: anchors bias lookup, scopes drive
+Discovery and display, and the frontend has one fallback chain instead of nine.
+
+### 5.1 `backend/src/services/stops.js`
+
+- `resolveLocationForStop` (lines 157-166): bias ladder becomes explicit caller value →
+  **`dayGeo.resolutionAnchor.label`** → `dayGeo.city` → seed `day.city`; country similarly
+  (caller → anchor country → `dayGeo.countryCode`). `getDayGeo` already returns the anchor
+  (W2).
+- Photo queries (lines 355, 426, 776 + backfill 610): switch raw `day.city` → resolved city
+  (the anchor is deliberately *not* used for photos — broad scope imagery is wanted).
+- Resolver-cache orphaning from changed bias keys: accepted, re-resolves once (fact 8).
+
+### 5.2 `frontend/src/components/discovery/DiscoveryPanel.jsx`
+
+`handleAddToDay` (lines 410-454): stop stamping `activeDay?.resolvedCountry` unconditionally
+(lines 431, 447). Rule: if `committedDestination` differs (by mirrored folding) from the
+active day's scope, use `committedCountry`; else keep `activeDay.resolvedCountry`. Fixes the
+audit's cross-city country-mismatch flag.
+
+### 5.3 `frontend/src/utils/dayGeo.js` (new) — `dayDisplayLabel(day)`
+
+`day.resolvedCity ?? day.city ?? ''`. Adopt in: `DayHeader.jsx:17`, `TodayTab.jsx:30`,
+`ShareViewPage.jsx:117`, `MapTab.jsx:35` (drop the redundant `cityOverride` prefix —
+`resolvedCity` already reflects overrides), `AddPlaceModal.jsx:32` and `:178` (fixing the
+reversed chain), `EditTripModal.jsx:16`. Keep each surface's own *empty-state* suffix
+(`'Open day'`, `theme`, etc.) local — the helper standardizes the geo part only.
+
+### 5.4 `frontend/src/components/discovery/SuggestionCard.jsx:80`
+
+"In trip" matching uses the mirrored folding from 1.5 instead of its local normalization.
+
+**Wave 5 tests:** stop-resolution fixture F9 (anchor reaches the resolver); add-to-day country
+matrix (same-city vs searched-other-city); `dayDisplayLabel` unit tests incl. the two fixed
+quirks; SuggestionCard match on casing variants.
+
+**Delegation:** two Sonnet agents — backend (5.1) and frontend (5.2–5.4). No shared files.
+
+**Verification (orchestrator):** on the Kaohsiung trip, add a stop on a hotel night and
+confirm the logged resolver params include `Sinsing District`; Discovery a different city via
+free-text and add a stop — country follows the searched city; Plan/Today/Share/Map headers
+consistent at 375 px.
+
+---
+
+## Wave 6 — Data cleanup + doc debt (NOT STARTED — runs last, after W1–W2 verified in production)
+
+**Mandatory for plan completion.** Gate is sequencing (cleanup before prevention would
+re-pollute) plus one owner touchpoint: reviewing the inventory before destructive changes.
+
+### 6.1 Inventory first (read-only, this session's output shown to owner)
+
+Script (not a migration): dump `discovery_destinations` with place counts, flagging rows
+where `city_key !== canonicalGeoKey(display_name)` (raw 016-backfill keys), fragment-shaped
+keys (`kabupatenbadung|ID` etc.), and empty-country twins of resolved-country rows. Also
+sample `days.city_country` for country *names* (W4 finding). Owner reviews the dump; the
+default disposition below applies unless owner overrides per row.
+
+### 6.2 Migration `021_canonicalize_discovery_keys.js` (modeled on 020)
+
+Default dispositions:
+
+- **Fragment-keyed rows** (hotel-address pollution): **delete** destination + cascading
+  places/daily rows. The catalogue regenerates on demand for pennies; merging fragments into
+  the proper scope would import unverified fragment-context places into a clean catalogue.
+- **Raw un-normalized keys** (016 backfill): re-key to `canonicalGeoKey(display_name)`. On
+  collision with an existing row: merge — re-point `discovery_places.destination_id` honoring
+  the `(destination_id, normalized_name)` unique index (skip duplicates, keeping the
+  lower-id row, same semantics as `insertPlaces`); sum `discovery_generation_daily` counters
+  on PK collision; keep `MAX(last_generated_at)`; sum `generation_count`; delete the emptied
+  row.
+- **Empty-country twins**: merge into the resolved-country row, same merge rules.
+
+### 6.3 Migration `022_drop_dead_discovery_cache.sql`
+
+`DROP TABLE discovery_cache;` (005 legacy, zero readers — fact 7).
+
+### 6.4 Docs
+
+Correct CLAUDE.md's "cache discovery results in `discovery_cache` table (48h TTL)" to describe
+`discovery_destinations`/`discovery_places` with the 7-day TTL. Update this plan and the
+origin review's status lines to CLOSED.
+
+**Wave 6 tests:** migration unit-tested against a fixture DB seeded with all three pollution
+shapes + a collision case; idempotence (re-run is a no-op).
+
+**Delegation:** one backend Sonnet agent for 6.1's script + 6.2/6.3 after the owner reviews
+the inventory. Orchestrator runs the production deploy per the deploy skill, **with a fresh
+pre-migration backup** (W6 is this plan's only destructive-migration deploy).
+
+**Verification:** post-deploy `discovery_destinations` contains only canonical keys; Bali and
+Kaohsiung catalogues serve; Discovery on a previously-merged destination is a cache hit.
 
 ---
 
@@ -307,7 +571,8 @@ W3's cleaner fields automatically.
 
 **Waves 1–5 require zero schema migrations.** All new booking fields live in `details_json`
 (schemaless); all new day fields are derived response fields. Existing bookings heal at read
-time via the legacy branch of the promotion ladder.
+time via the legacy branch of the promotion ladder. W6 carries the plan's only migrations
+(021/022), both cleanup-only.
 
 **Legacy response fields — preserved exactly:**
 - Trip `destinations` (string[]) and `destinationCountries` (string[]) keep their shapes,
@@ -318,18 +583,7 @@ time via the legacy branch of the promotion ladder.
 - Day `resolvedCity`/`resolvedCountry` keep their names; `resolutionAnchor` is additive and
   nullable. Share endpoint mirrors both.
 - `POST /trips/:id/discover` request shape unchanged (`{destination, countryCode, more}`).
-
-**W6 — data cleanup (separate gate, modeled on migration 020):**
-- Merge/delete polluted `discovery_destinations`: the `kabupatenbadung|ID`-style hotel-fragment
-  rows, raw un-normalized keys from the 016 backfill, and empty-country twins of resolved-country
-  rows. Merging re-points `discovery_places.destination_id` and `discovery_generation_daily`,
-  honoring the `(destination_id, normalized_name)` unique index (skip-dup, like `insertPlaces`)
-  and summing daily counters on PK collision.
-- Drop the dead `discovery_cache` table (005 legacy, zero references).
-- Correct CLAUDE.md's "discovery_cache table (48h TTL)" line to describe the real catalogue
-  (7-day TTL, `discovery_destinations`/`discovery_places`).
-- Run only after W1–W2 have been verified in production (pollution stopped) — a cleanup before
-  that would re-pollute.
+- `deriveDayGeo`'s new `tripScopes` param is optional (fact 12 — migration 014 compatibility).
 
 **Deploy sequencing:** standard `/deploy` flow per wave; pre-migration DB backup only needed
 for W6. W2 changes production-visible day headers on existing trips — that is the *point*, but
@@ -346,68 +600,87 @@ Baseline: backend 329 tests / frontend 36 tests, all green before each wave.
 | # | Fixture | Expected |
 |---|---|---|
 | F1 | Chengdu-Chongqing trip (both chips), Chongqing hotel 9–13 Jun, `detailsJson.city: "Chongqing"` | Nights display `Chongqing` (rule 1); Discovery key `chongqing\|CN` |
-| F2 | Chengdu-only trip, Chongqing hotel, no locality component (AAL2 only) | Nights display `Chongqing` (rule 3, known-city); scope auto-added |
+| F2 | Chengdu-only trip, Chongqing hotel, no locality component (AAL2 only) | Nights display `Chongqing` (rule 3, known-city) |
 | F3 | Bali trip (chip `Bali\|ID`), W Bali – Seminyak: no locality, AAL2 `Kabupaten Badung`, AAL1 `Bali` | Display `Bali` (rule 1); anchor `{Kabupaten Badung, ID}`; Discovery `bali\|ID` |
-| F4 | Kaohsiung trip, Hotel Indigo: evidence `Sinsing District` only | Display `Kaohsiung` (fall-through to seed); anchor `{Sinsing District, TW}` |
-| F5 | **Legacy booking** — only `detailsJson.city: "Kabupaten Badung"`, no components, trip seeded `Denpasar` | Display `Denpasar` (heals); anchor `Kabupaten Badung` |
+| F4 | Kaohsiung trip, Hotel Indigo: evidence `Sinsing District` only | Display `Kaohsiung` (fall-through to seed); anchor `{Sinsing District, TW}`; demotion warn fired |
+| F5 | **Legacy booking** — only `detailsJson.city: "Kabupaten Badung"`, no components, trip seeded `Denpasar` | Display `Denpasar` (heals); anchor `Kabupaten Badung`; warn fired |
 | F6 | Override city `Melaka` (no country) + hotel country `MY` | `{Melaka, MY}` — independent per-field selection preserved |
 | F7 | Ferry with `destinationCity` | Contributes transit geo (new) |
-| F8 | `ChengDu` / `Cheng Du` / `Cheng du` / `chengdu` | One `canonicalGeoKey`; `scopesMatch("Kaohsiung City","Kaohsiung")` true; `scopesMatch("Bali","Balikpapan")` false |
-| F9 | Stop resolution on an F4 day | Resolver receives anchor `Sinsing District`, country `TW`; Discovery still keyed `kaohsiung\|TW` |
+| F8 | `ChengDu` / `Cheng Du` / `Cheng du` / `chengdu` | One `canonicalGeoKey`; `scopesMatch("Kaohsiung City","Kaohsiung")` true; `scopesMatch("Bali","Balikpapan")` false; `"kabupaten badung, bali"` folds comma-free |
+| F9 | Stop resolution on an F4 day (W5) | Resolver receives anchor `Sinsing District`, country `TW`; Discovery still keyed `kaohsiung\|TW` |
 | F10 | Importer context on the F3 trip | `Bali (ID)`, not `Kabupaten Badung (ID)` |
 
 ### Frontend tests
-Plan/Today/Share headers render `dayDisplayLabel`; Discovery default = broad scope; add-stop
-country follows committed destination; Add Booking shows clean hotel name with placeId intact;
-picker shows Bali with a `REGION` badge and stores ISO code; folding fixtures mirrored with
-backend.
+Per-wave lists above; headline set: `dayDisplayLabel` adoption, Discovery default = broad
+scope, add-stop country matrix, clean hotel names (review's three-name table), picker returns
+Bali with REGION tag + ISO code, mirrored folding fixtures, `reset()` behavior.
 
-### Manual browser verification (per repo rule: tests ≠ done)
-At 375 px, on real production-shaped data: create a trip typing "Bali" (picker returns it),
-add W Bali – Seminyak (headers stay Bali, hotel name clean, Discovery generates for
-`bali|ID`), open the Kaohsiung trip (headers healed to Kaohsiung with **no data edit**),
-regression-walk the Chengdu-Chongqing trip (movement intact), add a stop on a Kaohsiung day
-and confirm the logged resolver params include the anchor, exercise a share link, and spot-check
-`discovery_destinations` after each session for any new fragment-shaped key.
+### Manual browser verification (per repo rule: tests ≠ done; orchestrator runs this)
+At 375 px, on real production-shaped data: create a trip typing "Bali"; add W Bali – Seminyak
+(headers stay Bali, hotel name clean, Discovery generates for `bali|ID`); open the Kaohsiung
+trip (headers healed with **no data edit**); regression-walk Chengdu-Chongqing (movement
+intact); add a stop on a Kaohsiung day and confirm resolver params include the anchor;
+exercise a share link; save trip settings (no false error); check backend logs for demotion
+warns matching expectations; spot-check `discovery_destinations` after each session for any
+new fragment-shaped key.
 
 ---
 
-## 7. Risks and open decisions (recommended defaults)
+## 7. Risks and decisions
 
-1. **Behavioral trade-off (the one real regression risk):** an AAL2-only hotel city that is
-   neither a trip chip nor in the known-city set will no longer move the day (it becomes
-   anchor-only). Today it moves. **Recommend: accept.** The failure mode changes from "wrong
-   label pollutes five surfaces" to "day keeps the trip scope, one manual override fixes it";
-   the known-city set is trivially extendable when a real case appears. — *Decision: accept
-   default unless owner objects.*
-2. **Auto-create scopes from hotel evidence** (review decision #1): **yes**, via rules 2–3
-   only — locality or known-city, never raw admin fragments.
-3. **Hotel-name cleanup aggressiveness** (review decision #2): **conservative** — prefer
-   Places `place.name`; strip a trailing token only on exact address-component match.
-4. **Local/near-hotel Discovery** (review decision #3): **defer.** Anchors are plumbed but
-   never drive Discovery in this plan.
-5. **Override UX** (review decision #4): **keep the single day-header field**; canonicalize
-   underneath. No "show as / resolve near" split until real usage demands it.
-6. **Clean existing polluted data now?** (review decision #5): **flag now, W6 later.** Known
-   set: `kabupatenbadung|ID` catalogue, `Sinsing District` day headers (heal via W2), raw 016
-   backfill keys, empty-country twin rows, hotel names with admin suffixes (heal on next edit
-   or W6 sweep).
+1. **Guarded demotion trade-off — ACCEPTED by owner 2026-07-08, with measurement.** An
+   AAL2-only hotel city that is neither a trip chip nor a known city no longer moves the day.
+   Exposure analysis (§1) says this needs an overland, unplanned side-trip to an un-chipped
+   no-airport city in a no-locality geography — rare. The W2 demotion log measures real
+   frequency; if production shows legitimate demotions, extend the IATA/known-city map
+   (one-line entries), which is the intended tuning knob.
+2. **Auto-create scopes from hotel evidence**: yes, via rules 2–3 only — locality or
+   known-city, never raw admin fragments.
+3. **Hotel-name cleanup aggressiveness**: conservative — prefer Places `place.name`; strip a
+   trailing token only on exact address-component match.
+4. **Local/near-hotel Discovery**: deferred. Anchors are plumbed but never drive Discovery in
+   this plan.
+5. **Override UX**: keep the single day-header field; canonicalize underneath.
+6. **W6 cleanup**: mandatory, last, with one owner touchpoint (inventory review). Default
+   dispositions specified in 6.2 so the decision is confirm/override, not open-ended.
 7. **Key-folding change** hardens `canonicalGeoKey` to strip all punctuation — only
    pollution-shaped existing keys fold differently; W6 reconciles. Frontend/backend drift is
    guarded by mirrored fixture tests (no shared package — accepted duplication).
-8. **Places API cost:** the scope picker doubles autocomplete calls per keystroke (two type
-   filters). Mitigate with the existing debounce + session tokens (CLAUDE.md cost rule).
-   Estimated impact is small (picker is used at trip creation only).
-9. **Resolver-cache orphaning** when bias switches to anchors: harmless re-resolutions,
-   one-time cost per stop, self-healing.
+8. **Places API cost:** the scope picker doubles autocomplete calls per keystroke. Mitigate
+   with the existing debounce + session tokens; picker is used at trip creation/edit only.
+9. **Resolver-cache orphaning** when bias switches to anchors: harmless one-time
+   re-resolutions, self-healing.
+
+---
+
+## Audit debt ledger — every defect found in the 2026-07-08 audits, and where it's fixed
+
+| Defect (evidence) | Wave |
+|---|---|
+| `discovery.reset()` undefined → false error on every settings save (`TripPage.jsx:93`, `useDiscovery.js:152`) | W1 (1.6) |
+| Four uncoordinated city normalizers (fact 6) | W1 (1.1–1.4) |
+| Hotel picker stores no `countryCode` — hotel layer contributes no country (fact 4) | W3 (3.1–3.2) |
+| Hardcoded city-name regex in hotel naming (`AddBookingModal.jsx:64`) | W3 (3.2) |
+| Hotel names absorb district/regency text | W3 (3.2) |
+| Picker can't return Bali; chips carry country *names* in `countryCode` (fact 5) | W4 |
+| `mapData.js:49` segment labels bypass derivation | W2 (2.5) |
+| Ferry never contributes day geo (`extractGeoFromBooking`) | W2 (2.2) |
+| Discovery add-stop stamps wrong country after cross-city search (`DiscoveryPanel.jsx:431,447`) | W5 (5.2) |
+| `AddPlaceModal.jsx:178` reversed fallback; `MapTab.jsx:35` redundant `cityOverride` | W5 (5.3) |
+| Photo queries use raw seed `day.city` (`stops.js:355,426,776`) | W5 (5.1) |
+| Polluted catalogue rows: fragments, raw 016 keys, empty-country twins (fact 7) | W6 (6.2) |
+| Dead `discovery_cache` table (005) | W6 (6.3) |
+| CLAUDE.md stale "discovery_cache 48h TTL" claim | W6 (6.4) |
+| Possible country *names* stored in `days.city_country` (W4 finding, unconfirmed) | W6 (6.1 inventory) |
+| `destinations`/`destinationCountries` positional misalignment (`trips.js:254`) | **Deliberately preserved** (§5) — future contract version |
 
 ---
 
 ## Wave status
 
-- W1 canonical identity: **not started**
-- W2 guarded promotion + anchors: **not started**
+- W1 canonical identity + folding + `reset()`: **not started**
+- W2 guarded promotion + anchors + demotion log: **not started**
 - W3 booking write path + hotel names: **not started**
 - W4 destination-scope picker: **not started**
 - W5 consumer alignment: **not started**
-- W6 data cleanup (gated): **not started — requires separate owner go-ahead after W1–W2 verify**
+- W6 data cleanup + doc debt (mandatory, runs last): **not started**
