@@ -16,6 +16,7 @@ import {
   incrementDailyGenerationCount,
 } from '../db/discoveryCatalogue.js';
 import { rankPlaces, orderCategories, parseDurationHours, TAG_TO_CATEGORY } from '../services/discoveryRank.js';
+import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const router = Router();
 
@@ -156,13 +157,12 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     };
 
     // claudeDestination: human-readable, sent to Claude ("cheng du", "xi'an")
-    // cacheKey: maximally normalized for DB matching ("chengdu", "xian") — this
-    // stays uncomposed with country even when countryCode is known, so the DB
-    // key (and therefore the destination row identity) never changes shape.
+    // cacheKey: maximally normalized for DB matching ("chengdu", "xian") via the
+    // shared canonicalGeoKey util (Plan 8, utils/geoIdentity.js) — this stays
+    // uncomposed with country even when countryCode is known, so the DB key
+    // (and therefore the destination row identity) never changes shape.
     const claudeDestinationBase = destination.trim().toLowerCase();
-    const cacheKey = claudeDestinationBase
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .replace(/[\s'''\-\.]/g, '');
+    const cacheKey = canonicalGeoKey(destination);
 
     // When the country is known, disambiguate homonym cities (e.g. Chengdu,
     // multiple Georgetowns) by composing it into the STRING sent to Claude

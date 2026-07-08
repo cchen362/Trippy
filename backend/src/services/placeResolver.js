@@ -397,8 +397,7 @@ function resolverQueryTexts(queryText, aliases = []) {
 
 async function fetchNominatimPayload({ queryText, city, country }) {
   await waitForNominatimSlot();
-  const canonicalCity = canonicalizeCity(city);
-  const q = [queryText, canonicalCity].filter(Boolean).join(', ');
+  const q = [queryText, city].filter(Boolean).join(', ');
   const params = new URLSearchParams({
     q,
     format: 'jsonv2',
@@ -422,14 +421,6 @@ async function fetchNominatimPayload({ queryText, city, country }) {
   }
 
   return response.json();
-}
-
-function canonicalizeCity(city) {
-  const normalized = normalizeText(city);
-  const noSpace = normalized.replace(/\s+/g, '');
-  if (noSpace === 'chongqing') return 'Chongqing';
-  if (noSpace === 'chengdu') return 'Chengdu';
-  return city;
 }
 
 async function searchNominatim({ queryText, city, country, aliases = [] }) {
@@ -479,8 +470,7 @@ async function searchNominatim({ queryText, city, country, aliases = [] }) {
 async function searchGooglePlaces({ queryText, city, country, includeRatingFields = false }) {
   if (!config.googlePlacesKey) return null;
 
-  const canonicalCity = canonicalizeCity(city);
-  const textQuery = [queryText, canonicalCity].filter(Boolean).join(', ');
+  const textQuery = [queryText, city].filter(Boolean).join(', ');
   const countryCode = String(country || '').trim().toUpperCase();
   const body = {
     textQuery,

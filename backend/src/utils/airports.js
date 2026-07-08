@@ -1,7 +1,9 @@
 // IATA airport code → city name for major hubs.
 // Used to derive a day's city from a flight booking without heuristic string parsing.
 // Extend freely — entries here take priority over the formatted airport string.
-const IATA_CITY = {
+// Exported (alongside CITY_ALIASES below) so utils/geoIdentity.js can build its
+// known-city vocabulary from the same data without duplicating it.
+export const IATA_CITY = {
   // China
   PEK: 'Beijing', PKX: 'Beijing',
   PVG: 'Shanghai', SHA: 'Shanghai',
@@ -37,6 +39,7 @@ const IATA_CITY = {
   DAD: 'Da Nang', HUI: 'Hue', CXR: 'Nha Trang', VCA: 'Can Tho',
   // Taiwan
   TPE: 'Taipei', TSA: 'Taipei',
+  KHH: 'Kaohsiung',
   // Indonesia (additional)
   DPS: 'Bali', SUB: 'Surabaya', UPG: 'Makassar',
   // Philippines
@@ -123,7 +126,7 @@ const IATA_CITY = {
 
 // Case-insensitive city alias map. Keys are uppercase. Covers common abbreviations
 // and alternate names users type in free-text fields that autocomplete may not catch.
-const CITY_ALIASES = {
+export const CITY_ALIASES = {
   KL:           'Kuala Lumpur',
   HK:           'Hong Kong',
   HCM:          'Ho Chi Minh City',

@@ -1,6 +1,6 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: DRAFT v2 (2026-07-08) — awaiting owner approval. No implementation started.**
+**Status: IN PROGRESS (2026-07-08) — W1 complete; W2 next.**
 Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
 log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
 for plan completion** — W6's gate is sequencing only, not a maybe.
@@ -208,7 +208,22 @@ W6 runs last, after W1–W2 are verified in production.
 
 ---
 
-## Wave 1 — Canonical identity + Discovery folding + `useDiscovery.reset` (NOT STARTED)
+## Wave 1 — Canonical identity + Discovery folding + `useDiscovery.reset` (DONE 2026-07-08)
+
+> **Completion notes (2026-07-08):** All four backend tasks + both frontend tasks shipped.
+> Backend 329→352 tests, frontend 36→43, all green; build clean. Browser-verified at 375 px:
+> settings save shows no false error and Discovery auto-refetches via `reset()`; a
+> `POST /discover` for the spelling variant "Cheng Du" served a full catalogue cache hit
+> (`cached: true`, 164 places) under the new folding. Deviations: (a) `knownCityLabel`'s set
+> also includes `CITY_ALIASES` *keys* (e.g. "Saigon", "HCMC") — required so alias labels
+> count as known cities; coherent with W2 rule 3, which displays `canonicalCity(evidence)`
+> and resolves those same keys. (b) 1.2's production-city sweep is pending — production DB
+> access wasn't available this session; only `KHH: 'Kaohsiung'` added (local dev cities
+> Chengdu/Ipoh already covered). Run the sweep before or during W2.
+> W6 inventory lead: local dev `discovery_destinations` shows the 016 backfill also left
+> `last_generated_at = NULL` on all backfilled rows, and place rows hang off the
+> empty-country twins (e.g. `chengdu|""` holds 164 places, `chengdu|CN` holds 0) — expect
+> the same shape in production for 6.1.
 
 **Goal:** one shared definition of "same place, same key" on both backend and frontend, and
 the false-error bug on trip-settings save fixed. Pure refactor + additive helpers; no behavior
@@ -678,7 +693,7 @@ new fragment-shaped key.
 
 ## Wave status
 
-- W1 canonical identity + folding + `reset()`: **not started**
+- W1 canonical identity + folding + `reset()`: **DONE 2026-07-08** (352/43 tests green, browser-verified; see Wave 1 completion notes for two documented deviations)
 - W2 guarded promotion + anchors + demotion log: **not started**
 - W3 booking write path + hotel names: **not started**
 - W4 destination-scope picker: **not started**

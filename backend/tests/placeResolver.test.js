@@ -161,7 +161,7 @@ describe('resolvePlace', () => {
     expect(cached.resolved_country).toBe('MY');
   });
 
-  it('canonicalizes spaced China city names for Nominatim queries', async () => {
+  it('passes the raw city string through to Nominatim queries unmodified (Plan 8: canonicalization moved to cache-key folding only)', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => [{
@@ -182,7 +182,7 @@ describe('resolvePlace', () => {
     });
 
     const url = new URL(fetchMock.mock.calls[0][0]);
-    expect(url.searchParams.get('q')).toBe("People's Liberation Monument, Chongqing");
+    expect(url.searchParams.get('q')).toBe("People's Liberation Monument, Chong Qing");
     expect(url.searchParams.get('countrycodes')).toBe('cn');
   });
 

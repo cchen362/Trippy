@@ -1,5 +1,6 @@
 import { useCallback, useReducer, useRef } from 'react';
 import { discoveryApi } from '../services/discoveryApi.js';
+import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loading: false, error: null, cached: false };
 
@@ -23,21 +24,13 @@ export function useDiscovery(tripId) {
   // forceRender triggers re-renders when cacheRef mutates.
   const [, forceRender] = useReducer((n) => n + 1, 0);
 
-  // Normalizes a city name into a stable cache key, collapsing spelling variants
-  // ("Cheng Du" and "Chengdu" → "chengdu"; "Xi'an" → "xian"; "São Paulo" → "saopaulo").
-  const norm = (d) =>
-    d?.trim().toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip combining diacritics
-      .replace(/[\s'‘’\-\.]/g, '')             // strip spaces, apostrophes, hyphens, periods
-    ?? '';
-
-  // Pair-keyed cache (Plan 7 Wave 4 §4.1): the key is `norm(city)|CC` so two
-  // different countries' same-named cities (e.g. two Georgetowns) never
+  // Pair-keyed cache (Plan 7 Wave 4 §4.1): the key is `canonicalGeoKey(city)|CC`
+  // so two different countries' same-named cities (e.g. two Georgetowns) never
   // collide in the client cache the way they used to before country context
   // existed. CC is an empty string when the country isn't known — the
   // resulting trailing `|` (e.g. "chengdu|") is intentional, not a bug: it
   // still yields a stable, distinct key from the pair-keyed form.
-  const cacheKey = (destination, countryCode) => `${norm(destination)}|${countryCode || ''}`;
+  const cacheKey = (destination, countryCode) => `${canonicalGeoKey(destination)}|${countryCode || ''}`;
 
   const discover = useCallback(async (destination, countryCode) => {
     if (!destination?.trim()) return;
@@ -149,5 +142,15 @@ export function useDiscovery(tripId) {
   // True if any destination is currently loading — used for the pulsing dot in PlanTab
   const isAnyLoading = Object.values(cacheRef.current).some((e) => e.loading);
 
-  return { discover, showMore, getDestination, isAnyLoading };
+  // Aborts every in-flight request and wipes the cache — used when trip-level
+  // context (e.g. interest tags) changes and stale discovery results would
+  // otherwise linger under keys that no longer reflect the trip's settings.
+  const reset = useCallback(() => {
+    Object.values(abortRefs.current).forEach((controller) => controller?.abort());
+    abortRefs.current = {};
+    cacheRef.current = {};
+    forceRender();
+  }, []);
+
+  return { discover, showMore, getDestination, isAnyLoading, reset };
 }
