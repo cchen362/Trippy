@@ -43,38 +43,11 @@ function TzSelect({ label, value, onChange }) {
   );
 }
 import CityInput from './CityInput.jsx';
+import { stripComponentSuffix } from './hotelName.js';
 
 // train/bus/ferry share one form (route + station + departure/arrival + seat/class);
 // this just relabels the section for whichever type is active.
 const TRANSIT_LABEL = { train: 'Train', bus: 'Bus', ferry: 'Ferry' };
-
-function cityFromSecondaryText(value) {
-  if (!value) return '';
-  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
-  if (parts.length <= 1) return parts[0] || '';
-  const country = parts.at(-1);
-  const stateOrRegion = parts.at(-2);
-  const city = parts.at(-3);
-  if (country === 'USA') return stateOrRegion || city || '';
-  return city || stateOrRegion || '';
-}
-
-function hotelSuggestionName(suggestion) {
-  const main = suggestion.mainText || suggestion.text || '';
-  if (!main || /\b(?:beach|dc|resort|hotel|chengdu|bangkok|new york|shanghai|tokyo|singapore)\b/i.test(main)) {
-    return main;
-  }
-  const city = cityFromSecondaryText(suggestion.secondaryText);
-  if (!city || main.toLowerCase().includes(city.toLowerCase())) return main;
-  return `${main} ${city}`;
-}
-
-function isGenericHotelName(name, fallbackName) {
-  if (!name || !fallbackName) return false;
-  const normalizedName = name.trim().toLowerCase();
-  const normalizedFallback = fallbackName.trim().toLowerCase();
-  return normalizedFallback.startsWith(`${normalizedName} `);
-}
 
 export default function AddBookingModal({
   open,
@@ -227,7 +200,7 @@ export default function AddBookingModal({
   };
 
   const handleHotelSuggestionSelect = async (suggestion) => {
-    const fallbackTitle = hotelSuggestionName(suggestion);
+    const fallbackTitle = suggestion.mainText || suggestion.text || '';
     setSelectedHotelText(fallbackTitle);
     setSuggestions([]);
     setSearchingHotels(true);
@@ -243,9 +216,14 @@ export default function AddBookingModal({
       // Session complete — details call closed it. Next search needs a fresh token.
       setHotelSessionToken(null);
       const place = response?.place;
-      const cleanTitle = place?.name && !isGenericHotelName(place.name, fallbackTitle)
+      // Prefer Places' official name; only fall back to the (conservatively
+      // suffix-stripped) suggestion text when the details call didn't return one.
+      const cleanTitle = place?.name
         ? place.name
-        : fallbackTitle;
+        : stripComponentSuffix(
+            fallbackTitle,
+            [place?.sublocality, place?.locality, place?.adminAreas?.aal1, place?.adminAreas?.aal2].filter(Boolean),
+          );
       setSelectedHotelText(cleanTitle);
       setForm((current) => ({
         ...current,
@@ -266,6 +244,10 @@ export default function AddBookingModal({
           tz: place?.tz || current.detailsJson?.tz || null,
           lat: Number.isFinite(place?.lat) ? place.lat : current.detailsJson?.lat ?? null,
           lng: Number.isFinite(place?.lng) ? place.lng : current.detailsJson?.lng ?? null,
+          countryCode: place?.countryCode ?? current.detailsJson?.countryCode ?? null,
+          locality: place?.locality ?? null,
+          sublocality: place?.sublocality ?? null,
+          adminAreas: place?.adminAreas ?? null,
         },
       }));
     } catch {
@@ -353,7 +335,7 @@ export default function AddBookingModal({
                         style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
                       >
                         <span className="font-mono text-xs block" style={{ color: 'var(--cream)' }}>
-                          {hotelSuggestionName(suggestion)}
+                          {suggestion.mainText || suggestion.text}
                         </span>
                         {suggestion.secondaryText && (
                           <span className="font-body text-base">{suggestion.secondaryText}</span>
@@ -375,7 +357,7 @@ export default function AddBookingModal({
               </label>
 
               <label className="block sm:col-span-2">
-                <span className="modal-label">City</span>
+                <span className="modal-label">Area / locality</span>
                 <input
                   value={form.detailsJson?.city || form.hotelCity}
                   onChange={(e) => setForm((c) => ({

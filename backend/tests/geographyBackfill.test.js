@@ -124,6 +124,10 @@ describe.skipIf(!existsSync(REAL_DB_PATH))('Wave 4 backfill — real DB snapshot
     for (const link of liveShareLinks) {
       const liveTrip = liveTrips.find((t) => t.id === link.trip_id);
       const fact = PRE_MIGRATION_FACTS.trips.find((t) => t.title === liveTrip.title);
+      // Share links can exist for trips outside the 2026-07-07 pre-migration snapshot
+      // (e.g. trips seeded into the dev DB for later-wave browser verification) — there
+      // are no captured facts to compare those against, so they're out of this test's scope.
+      if (!fact) continue;
       const shared = getSharedTrip(link.token);
       const derivedCities = new Set(shared.trip.destinations.map(normalizeCityForComparison));
       for (const city of fact.destinations.map(normalizeCityForComparison)) expect(derivedCities.has(city)).toBe(true);

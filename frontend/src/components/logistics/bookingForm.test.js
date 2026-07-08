@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FORM, normalizeForm, draftFormForType, resolveBookingMode } from './bookingForm.js';
+import { DEFAULT_FORM, normalizeForm, draftFormForType, resolveBookingMode, hydrateFormFromBooking } from './bookingForm.js';
 import { toBookingConfirmPayload } from '../../services/bookingPayload.js';
 
 describe('draftFormForType', () => {
@@ -164,5 +164,56 @@ describe('resolveBookingMode', () => {
 
   it('defaults to create when there is no booking and no mode is set', () => {
     expect(resolveBookingMode(undefined, null)).toBe('create');
+  });
+});
+
+describe('hotel detailsJson geo fields round-trip', () => {
+  const geoDetailsJson = {
+    countryCode: 'ID',
+    locality: null,
+    sublocality: 'Seminyak',
+    adminAreas: { aal1: 'Bali', aal2: 'Kabupaten Badung' },
+    city: 'Kabupaten Badung',
+    placeId: 'x',
+  };
+
+  it('normalizeForm retains the new geo fields on the hotel branch', () => {
+    const hotelForm = {
+      ...DEFAULT_FORM,
+      type: 'hotel',
+      hotelName: 'W Bali - Seminyak',
+      hotelAddress: 'Jl. Petitenget, Seminyak',
+      hotelCity: 'Kabupaten Badung',
+      detailsJson: geoDetailsJson,
+    };
+
+    const normalized = normalizeForm(hotelForm);
+
+    expect(normalized.detailsJson).toMatchObject(geoDetailsJson);
+  });
+
+  it('hydrateFormFromBooking restores the geo fields and hydrates hotelCity from detailsJson.city', () => {
+    const normalized = normalizeForm({
+      ...DEFAULT_FORM,
+      type: 'hotel',
+      hotelName: 'W Bali - Seminyak',
+      hotelAddress: 'Jl. Petitenget, Seminyak',
+      hotelCity: 'Kabupaten Badung',
+      detailsJson: geoDetailsJson,
+    });
+
+    const booking = {
+      type: 'hotel',
+      title: normalized.title,
+      destination: normalized.destination,
+      startDatetime: normalized.startDatetime,
+      endDatetime: normalized.endDatetime,
+      detailsJson: normalized.detailsJson,
+    };
+
+    const hydrated = hydrateFormFromBooking(booking);
+
+    expect(hydrated.detailsJson).toMatchObject(geoDetailsJson);
+    expect(hydrated.hotelCity).toBe('Kabupaten Badung');
   });
 });

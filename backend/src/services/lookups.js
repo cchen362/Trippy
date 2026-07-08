@@ -158,6 +158,10 @@ export async function lookupHotelDetails(placeId, sessionToken) {
     tz,
     lat,
     lng,
+    countryCode,
+    locality: extractLocalityFromAddressComponents(place.addressComponents),
+    sublocality: extractSublocalityFromAddressComponents(place.addressComponents),
+    adminAreas: extractAdminAreasFromAddressComponents(place.addressComponents),
   };
 }
 
@@ -180,6 +184,34 @@ function extractCountryCodeFromAddressComponents(components) {
   if (!Array.isArray(components)) return null;
   const countryComponent = components.find((c) => c.types?.includes('country'));
   return countryComponent?.shortText ? countryComponent.shortText.toUpperCase() : null;
+}
+
+/**
+ * Extracts the locality component's longText, or null when absent.
+ */
+function extractLocalityFromAddressComponents(components) {
+  if (!Array.isArray(components)) return null;
+  return components.find((c) => c.types?.includes('locality'))?.longText ?? null;
+}
+
+/**
+ * Extracts the most specific sublocality component's longText, trying
+ * sublocality_level_1, then sublocality, then neighborhood.
+ */
+function extractSublocalityFromAddressComponents(components) {
+  if (!Array.isArray(components)) return null;
+  const find = (type) => components.find((c) => c.types?.includes(type))?.longText ?? null;
+  return find('sublocality_level_1') || find('sublocality') || find('neighborhood') || null;
+}
+
+/**
+ * Extracts the administrative_area_level_1 and administrative_area_level_2
+ * component longTexts, each null when absent.
+ */
+function extractAdminAreasFromAddressComponents(components) {
+  if (!Array.isArray(components)) return { aal1: null, aal2: null };
+  const find = (type) => components.find((c) => c.types?.includes(type))?.longText ?? null;
+  return { aal1: find('administrative_area_level_1'), aal2: find('administrative_area_level_2') };
 }
 
 export async function lookupCityPredictions(input) {

@@ -52,7 +52,60 @@ describe('lookupHotelDetails', () => {
       tz: null,
       lat: null,
       lng: null,
+      countryCode: null,
+      locality: null,
+      sublocality: null,
+      adminAreas: { aal1: null, aal2: null },
     });
+  });
+
+  it('extracts geo identity fields for a Taiwan hotel with no locality component present alongside sublocality_level_1', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'place-tw-1',
+        displayName: { text: 'Hotel Indigo Kaohsiung' },
+        formattedAddress: '77 Wufu 3rd Road, Sinsing District, Kaohsiung City, Taiwan 800',
+        addressComponents: [
+          { types: ['country', 'political'], longText: 'Taiwan', shortText: 'TW' },
+          { types: ['administrative_area_level_1', 'political'], longText: 'Kaohsiung City', shortText: 'Kaohsiung City' },
+          { types: ['sublocality_level_1', 'sublocality', 'political'], longText: 'Sinsing District', shortText: 'Sinsing District' },
+        ],
+      }),
+    });
+
+    const place = await lookupHotelDetails('place-tw-1');
+
+    expect(place.city).toBe('Kaohsiung City');
+    expect(place.countryCode).toBe('TW');
+    expect(place.locality).toBeNull();
+    expect(place.sublocality).toBe('Sinsing District');
+    expect(place.adminAreas).toEqual({ aal1: 'Kaohsiung City', aal2: null });
+  });
+
+  it('extracts geo identity fields for an Indonesian hotel with no locality component', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'place-id-1',
+        displayName: { text: 'W Bali - Seminyak' },
+        formattedAddress: 'Jl. Petitenget, Seminyak, Kabupaten Badung, Bali, Indonesia',
+        addressComponents: [
+          { types: ['country', 'political'], longText: 'Indonesia', shortText: 'ID' },
+          { types: ['administrative_area_level_1', 'political'], longText: 'Bali', shortText: 'Bali' },
+          { types: ['administrative_area_level_2', 'political'], longText: 'Kabupaten Badung', shortText: 'Kabupaten Badung' },
+          { types: ['sublocality', 'political'], longText: 'Seminyak', shortText: 'Seminyak' },
+        ],
+      }),
+    });
+
+    const place = await lookupHotelDetails('place-id-1');
+
+    expect(place.city).toBe('Kabupaten Badung');
+    expect(place.countryCode).toBe('ID');
+    expect(place.locality).toBeNull();
+    expect(place.sublocality).toBe('Seminyak');
+    expect(place.adminAreas).toEqual({ aal1: 'Bali', aal2: 'Kabupaten Badung' });
   });
 });
 

@@ -1,6 +1,6 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: IN PROGRESS (2026-07-09) — W1 + W2 complete; W3/W4/W5 may ship in any order next.**
+**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 complete; W4/W5 may ship in any order next.**
 Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
 log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
 for plan completion** — W6's gate is sequencing only, not a maybe.
@@ -411,7 +411,34 @@ demotion warn appears exactly for the fragment bookings. 375 px pass on Plan/Tod
 
 ---
 
-## Wave 3 — Booking write path: components, country, clean hotel names (NOT STARTED)
+## Wave 3 — Booking write path: components, country, clean hotel names (DONE 2026-07-09)
+
+> **Completion notes (2026-07-09):** All of 3.1–3.3 shipped. Backend 368→370 tests, frontend
+> 43→51, all green; build clean. Browser-verified at 375 px with **live Google Places calls**:
+> added W Bali – Seminyak and Hotel Indigo Kaohsiung via the real modal — titles stored as
+> the clean `place.name` (`W Bali - Seminyak`, `Hotel Indigo Kaohsiung Central Park by IHG`),
+> Area / locality field shows the fragment (`Kabupaten Badung` / `Sinsing District`),
+> `details_json` carries `countryCode` + `locality`/`sublocality`/`adminAreas`, and Bali day
+> headers stayed `Bali` throughout (W2 guards). Ladder exercised end-to-end with structured
+> evidence by isolating each new booking on a solo night: the W Bali booking **promoted via
+> rule 1** (AAL1 `Bali` ≈ trip scope) and its anchor finally carries `countryCode: "ID"`
+> (fact 4 fixed); the Kaohsiung booking **demoted with the warn** on the Taipei-seeded trip,
+> day falling through correctly. Deviations/observations:
+> (a) The conservative suffix strip lives in a new pure module
+> `frontend/src/components/logistics/hotelName.js` (unit-testable; modal imports it).
+> (b) **Demotion-log lead from live data:** Google's structured Taiwan evidence surfaces
+> AAL1 `"Kaohsiung City"` (suffixed), which fails rule 3's exact `knownCityLabel` membership
+> even though legacy string evidence `"Kaohsiung"` passed — so a new un-chipped Kaohsiung
+> hotel demotes where a legacy one promoted. Rule 1 covers it whenever the city is a
+> seed/chip (scopesMatch strips the suffix). Left to the risk-#1 demotion-log measurement
+> per plan; candidate one-line tuning if production confirms: fold `stripAdminSuffix` into
+> `knownCityLabel`.
+> (c) Live W Bali data has **no sublocality component** (the F3-style mocks assumed
+> "Seminyak"); the anchor label falls back to `detailsJson.city` as designed.
+> (d) `geographyBackfill.test.js` hardened: its share-link loop now skips trips outside its
+> 2026-07-07 snapshot facts — the W2-seeded Bali trip's share link was crashing the suite.
+> (e) The two verification bookings remain in the dev DB (dates shifted onto solo nights
+> during ladder verification).
 
 **Goal:** new hotel bookings store scope-grade evidence (fixing fact 4's missing country),
 and hotel display names stop absorbing district/regency text.
@@ -725,7 +752,7 @@ new fragment-shaped key.
 
 - W1 canonical identity + folding + `reset()`: **DONE 2026-07-08** (352/43 tests green, browser-verified; see Wave 1 completion notes for two documented deviations)
 - W2 guarded promotion + anchors + demotion log: **DONE 2026-07-09** (368/43 tests green, browser-verified against production-shaped Bali + Taipei-Kaohsiung trips; see Wave 2 completion notes for five documented deviations/decisions; Task 1.2 production sweep also closed this session)
-- W3 booking write path + hotel names: **not started**
+- W3 booking write path + hotel names: **DONE 2026-07-09** (370/51 tests green, browser-verified with live Places calls on the seeded Bali + Taipei-Kaohsiung trips; see Wave 3 completion notes for five documented deviations/observations)
 - W4 destination-scope picker: **not started**
 - W5 consumer alignment: **not started**
 - W6 data cleanup + doc debt (mandatory, runs last): **not started**
