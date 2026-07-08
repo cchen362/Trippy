@@ -426,7 +426,16 @@ describe('map data endpoint service', () => {
       type: segment.type,
       stopCount: segment.stopIds.length,
     }))).toEqual([
-      { label: 'Chongqing AM', type: 'local', stopCount: 1 },
+      // Plan 8 Wave 2 (Task 2.5): the pre-transit local segment now labels with the day's
+      // *resolved* city (geoByDayId), not the raw seed/override. For a day with no
+      // override/active-hotel evidence, deriveDayGeo's layer 3 (same-day transit arrival)
+      // folds the whole day to the transit's destination — so a same-day transit-only day
+      // (no other evidence) now resolves and labels as the destination city throughout,
+      // matching what the trip/day-level geo already reports for this day elsewhere
+      // (resolvedCity/resolvedCountry, map config, chip carry-forward). This is a direct,
+      // intentional consequence of using the shared resolved geography instead of a
+      // second, independent raw-seed calculation that could disagree with it.
+      { label: 'Chengdu AM', type: 'local', stopCount: 1 },
       { label: 'Transit', type: 'transit', stopCount: 1 },
       { label: 'Chengdu PM', type: 'local', stopCount: 1 },
     ]);
@@ -474,6 +483,34 @@ describe('map data endpoint service', () => {
     expect(mapData.stops.filter((stop) => stop.dayId === secondDay).map((stop) => [stop.title, stop.routeNumber])).toEqual([
       ['Morning Stop', 1],
     ]);
+  });
+
+  it('labels local segments with the hotel-resolved city, not the raw seed (Plan 8 Wave 2 — Task 2.5)', async () => {
+    const multiCityTrip = createTrip(user.id, {
+      title: 'Chengdu Chongqing Hotel',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-06-09',
+      endDate: '2026-06-09',
+      travellers: 'couple',
+      interestTags: ['food'],
+      pace: 'moderate',
+    });
+    const tripId = multiCityTrip.trip.id;
+    const day = multiCityTrip.days[0];
+    // Seed says "Chengdu" (createTrip seeds every day from the first destination pair),
+    // but a Chongqing hotel is active that night -- the day's real identity is Chongqing.
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Chongqing Hotel', '2026-06-09T15:00', '2026-06-10T11:00', ?)
+    `).run(tripId, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
+
+    await createStop(user.id, day.id, {
+      title: 'Jiefangbei', time: '09:00', type: 'experience', unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, tripId);
+    expect(mapData.segments[0].label).toBe('Chongqing AM');
+    expect(mapData.segments[0].city).toBe('Chongqing');
   });
 
   it('does not render unknown non-estimated coordinates', async () => {

@@ -1,11 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
-import { createTrip, updateTrip, listDaysForTrip, getDayGeo } from '../src/services/trips.js';
+import {
+  createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
+} from '../src/services/trips.js';
+import { createShareLink, getSharedTrip } from '../src/services/share.js';
+import { canonicalGeoKey } from '../src/utils/geoIdentity.js';
 
 let tmpDir;
 let owner;
@@ -45,6 +49,13 @@ function addStopOnDate(tripId, date) {
   getDb().prepare(`
     INSERT INTO stops (day_id, title, type) VALUES (?, 'Test Stop', 'explore')
   `).run(dayId);
+}
+
+function insertHotelBooking(tripId, { checkIn, checkOut, detailsJson, title = 'Hotel' }) {
+  getDb().prepare(`
+    INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+    VALUES (?, 'hotel', ?, ?, ?, ?)
+  `).run(tripId, title, checkIn, checkOut, JSON.stringify(detailsJson));
 }
 
 describe('updateTrip — end-date extend/shorten (existing behavior, parity coverage)', () => {
@@ -330,7 +341,7 @@ describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
     const trip = makeTrip();
     const dayId = dayIdFor(trip.trip.id, '2026-09-10');
     const geo = getDayGeo(dayId);
-    expect(geo).toEqual({ city: 'Chengdu', countryCode: 'CN' });
+    expect(geo).toEqual({ city: 'Chengdu', countryCode: 'CN', resolutionAnchor: null });
   });
 
   it('carries the previous day pair forward when walking to the target day', () => {
@@ -341,6 +352,314 @@ describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
     `).run(trip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
     const dayId = dayIdFor(trip.trip.id, '2026-09-12');
     const geo = getDayGeo(dayId);
-    expect(geo).toEqual({ city: 'Chongqing', countryCode: 'CN' });
+    expect(geo).toEqual({ city: 'Chongqing', countryCode: 'CN', resolutionAnchor: null });
+  });
+});
+
+describe('buildTripScopes (Plan 8 Wave 2 — Task 2.1)', () => {
+  it('collects distinct seed and override cities, deduped by canonical key (first label wins)', () => {
+    const days = [
+      { city: 'Chengdu', cityOverride: null },
+      { city: 'chengdu', cityOverride: null }, // same canonical key, different case -> dropped
+      { city: 'Chongqing', cityOverride: 'Chongqing' }, // override folds to the same key as the seed
+    ];
+    const scopes = buildTripScopes(days);
+    expect(scopes).toEqual([
+      { label: 'Chengdu', canonicalKey: canonicalGeoKey('Chengdu') },
+      { label: 'Chongqing', canonicalKey: canonicalGeoKey('Chongqing') },
+    ]);
+  });
+
+  it('accepts raw snake_case day rows (city_override) as well as mapped camelCase (cityOverride)', () => {
+    const scopes = buildTripScopes([{ city: 'Bali', city_override: 'Ubud' }]);
+    expect(scopes.map((s) => s.label)).toEqual(['Bali', 'Ubud']);
+  });
+
+  it('skips blank/missing cities and tolerates an empty/undefined days array', () => {
+    expect(buildTripScopes([{ city: '', cityOverride: null }, { city: null }])).toEqual([]);
+    expect(buildTripScopes([])).toEqual([]);
+    expect(buildTripScopes(undefined)).toEqual([]);
+  });
+});
+
+describe('hotel city promotion ladder (Plan 8 Wave 2 — Task 2.2, audit finding #1)', () => {
+  let warnSpy;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('F1: legacy city evidence matching a second trip scope promotes via rule 1 (scope match)', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Sichuan Multi-city',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    // Simulate a real multi-city seed: day 3 seeded to the second destination.
+    getDb().prepare('UPDATE days SET city = ?, city_country = ? WHERE trip_id = ? AND date = ?')
+      .run('Chongqing', 'CN', tripId, '2026-09-12');
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-11T15:00',
+      checkOut: '2026-09-12T11:00',
+      detailsJson: { city: 'Chongqing', countryCode: 'CN' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day11 = days.find((d) => d.date === '2026-09-11');
+    expect(day11.resolvedCity).toBe('Chongqing');
+    expect(day11.resolutionAnchor).toBeNull(); // evidence equals the promoted label -> no anchor
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F2: structured AAL2 evidence with no locality resolves via rule 3 (known city)', () => {
+    const trip = makeTrip(); // Chengdu-only
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-10T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: { adminAreas: { aal2: 'Chongqing' }, countryCode: 'CN' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day10 = days.find((d) => d.date === '2026-09-10');
+    expect(day10.resolvedCity).toBe('Chongqing');
+    expect(day10.resolvedCountry).toBe('CN');
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F3: AAL2 evidence fails scope match but AAL1 matches the trip chip — rule 1 retried across every candidate', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Bali Trip',
+      destinations: [{ city: 'Bali', countryCode: 'ID' }],
+      startDate: '2026-11-01',
+      endDate: '2026-11-01',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'relaxed',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-10-31T15:00',
+      checkOut: '2026-11-02T11:00',
+      detailsJson: {
+        adminAreas: { aal2: 'Kabupaten Badung', aal1: 'Bali' },
+        city: 'Kabupaten Badung',
+        countryCode: 'ID',
+      },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day = days[0];
+    expect(day.resolvedCity).toBe('Bali');
+    expect(day.resolvedCountry).toBe('ID');
+    expect(day.resolutionAnchor).toEqual({ label: 'Kabupaten Badung', countryCode: 'ID', source: 'hotel' });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F4: legacy city evidence matching no scope and no known city demotes to null and warns; country still wins', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Kaohsiung Trip',
+      destinations: [{ city: 'Kaohsiung', countryCode: 'TW' }],
+      startDate: '2026-05-01',
+      endDate: '2026-05-01',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-04-30T15:00',
+      checkOut: '2026-05-02T11:00',
+      detailsJson: { city: 'Sinsing District', countryCode: 'TW' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day = days[0];
+    expect(day.resolvedCity).toBe('Kaohsiung'); // hotel contributes no city -> falls through to the seed
+    expect(day.resolvedCountry).toBe('TW'); // hotel still contributes country despite the demotion
+    expect(day.resolutionAnchor).toEqual({ label: 'Sinsing District', countryCode: 'TW', source: 'hotel' });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[geo] hotel city demoted to anchor',
+      expect.objectContaining({ demoted: 'Sinsing District' }),
+    );
+  });
+
+  it('F5: legacy city-only evidence unrelated to any scope demotes; seed wins the display city', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Denpasar Trip',
+      destinations: [{ city: 'Denpasar', countryCode: 'ID' }],
+      startDate: '2026-11-10',
+      endDate: '2026-11-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-11-09T15:00',
+      checkOut: '2026-11-11T11:00',
+      detailsJson: { city: 'Kabupaten Badung', countryCode: 'ID' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day = days[0];
+    expect(day.resolvedCity).toBe('Denpasar');
+    expect(day.resolutionAnchor).toEqual({ label: 'Kabupaten Badung', countryCode: 'ID', source: 'hotel' });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('F6: per-field independence — override wins the city even when the hotel\'s own evidence demotes', () => {
+    const trip = makeTrip(); // Chengdu-only
+    const tripId = trip.trip.id;
+    getDb().prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('Melaka', tripId, '2026-09-10');
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-10T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: { city: 'Melaka Old Town District', countryCode: 'MY' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day10 = days.find((d) => d.date === '2026-09-10');
+    expect(day10.resolvedCity).toBe('Melaka'); // override (layer 1) beats the hotel (layer 2)
+    expect(day10.resolvedCountry).toBe('MY'); // hotel still contributes country
+  });
+
+  it('F7: ferry same-day transit contributes destination geo (audit fact 9 fix)', () => {
+    const trip = makeTrip(); // Chengdu-only
+    const tripId = trip.trip.id;
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'ferry', 'Ferry to Zhoushan', '2026-09-10T09:00', '2026-09-10T12:00', ?)
+    `).run(tripId, JSON.stringify({ destinationCity: 'Zhoushan', destinationCountryCode: 'CN' }));
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day10 = days.find((d) => d.date === '2026-09-10');
+    expect(day10.resolvedCity).toBe('Zhoushan');
+    expect(day10.resolvedCountry).toBe('CN');
+  });
+
+  it('anchor suppression: hotel evidence label equal to the promoted city yields no anchor', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Kaohsiung Trip 2',
+      destinations: [{ city: 'Kaohsiung', countryCode: 'TW' }],
+      startDate: '2026-05-05',
+      endDate: '2026-05-05',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-05-04T15:00',
+      checkOut: '2026-05-06T11:00',
+      detailsJson: { locality: 'Kaohsiung', city: 'Kaohsiung', countryCode: 'TW' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    expect(days[0].resolvedCity).toBe('Kaohsiung');
+    expect(days[0].resolutionAnchor).toBeNull();
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('no-evidence hotel (empty detailsJson) contributes no city and fires no demotion warn', () => {
+    const trip = makeTrip(); // Chengdu-only
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-10T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: {},
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day10 = days.find((d) => d.date === '2026-09-10');
+    expect(day10.resolvedCity).toBe('Chengdu'); // falls through to the seed
+    expect(day10.resolutionAnchor).toBeNull();
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('a clean trip with no hotel bookings never fires the demotion warn', () => {
+    const trip = makeTrip();
+    listDaysForTrip(trip.trip.id, owner.id, []);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F10: importer-context parity — distinct resolved pairs use the promoted display city, not raw evidence', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Bali Trip 2',
+      destinations: [{ city: 'Bali', countryCode: 'ID' }],
+      startDate: '2026-11-05',
+      endDate: '2026-11-05',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'relaxed',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-11-04T15:00',
+      checkOut: '2026-11-06T11:00',
+      detailsJson: {
+        adminAreas: { aal2: 'Kabupaten Badung', aal1: 'Bali' },
+        city: 'Kabupaten Badung',
+        countryCode: 'ID',
+      },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const seen = new Set();
+    const pairs = [];
+    for (const day of days) {
+      if (!day.resolvedCity || seen.has(day.resolvedCity)) continue;
+      seen.add(day.resolvedCity);
+      pairs.push({ city: day.resolvedCity, countryCode: day.resolvedCountry });
+    }
+    expect(pairs).toEqual([{ city: 'Bali', countryCode: 'ID' }]);
+  });
+});
+
+describe('getSharedTrip — resolutionAnchor stamped on shared days (Plan 8 Wave 2 — Task 2.4)', () => {
+  it('shared days carry resolutionAnchor and a healed resolvedCity from a hotel promotion', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Kaohsiung Share Trip',
+      destinations: [{ city: 'Kaohsiung', countryCode: 'TW' }],
+      startDate: '2026-05-10',
+      endDate: '2026-05-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-05-09T15:00',
+      checkOut: '2026-05-11T11:00',
+      detailsJson: { city: 'Sinsing District', countryCode: 'TW' },
+    });
+
+    const { token } = createShareLink(owner.id, tripId);
+    const shared = getSharedTrip(token);
+    const day = shared.days[0];
+    expect(day.resolvedCity).toBe('Kaohsiung');
+    expect(day.resolvedCountry).toBe('TW');
+    expect(day.resolutionAnchor).toEqual({ label: 'Sinsing District', countryCode: 'TW', source: 'hotel' });
   });
 });

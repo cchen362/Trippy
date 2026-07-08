@@ -138,6 +138,9 @@ export const CITY_ALIASES = {
   DC:           'Washington',
   SUVARNABHUMI: 'Bangkok',
   'DON MUEANG': 'Bangkok',
+  // Spaced pinyin variants found in real production hotel bookings (Plan 8 Task 1.2 sweep)
+  'CHENG DU':   'Chengdu',
+  'CHONG QING': 'Chongqing',
 };
 
 /**

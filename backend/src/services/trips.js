@@ -3,6 +3,7 @@ import { cityFromIata, cityFromAirportString, canonicalCity } from '../utils/air
 import { countryCodeFromName } from '../utils/countries.js';
 import { resolveBookingDocuments } from './documents.js';
 import { resolvePlace } from './placeResolver.js';
+import { canonicalGeoKey, scopesMatch, knownCityLabel } from '../utils/geoIdentity.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -137,20 +138,111 @@ function normalizeDestinationPairs(value) {
 }
 
 /**
- * Extracts a clean {city, countryCode} pair from a booking's structured detailsJson.
- * City follows the existing per-type rules; countryCode rides along from whichever
- * extraction field matches that type (destinationCountryCode for transit, countryCode
- * for hotel/other). Either half may be null — never guessed.
+ * Builds a trip's destination scopes once from its days' seed and override cities —
+ * these are the "chips" a hotel's raw city evidence is allowed to promote to (Task 2.1,
+ * Plan 8 Wave 2). Callers pass either mapped camelCase days ({city, cityOverride}) or raw
+ * snake_case rows ({city, city_override}) — both shapes are supported. Deduped by
+ * canonicalGeoKey, first label seen wins; blanks are skipped.
+ * @param {Array<object>} days
+ * @returns {Array<{label: string, canonicalKey: string}>}
  */
-function extractGeoFromBooking(booking) {
+export function buildTripScopes(days) {
+  const scopes = [];
+  const seenKeys = new Set();
+  const addLabel = (label) => {
+    const trimmed = typeof label === 'string' ? label.trim() : '';
+    if (!trimmed) return;
+    const key = canonicalGeoKey(trimmed);
+    if (!key || seenKeys.has(key)) return;
+    seenKeys.add(key);
+    scopes.push({ label: trimmed, canonicalKey: key });
+  };
+
+  for (const day of days || []) {
+    addLabel(day.city);
+    addLabel(day.cityOverride ?? day.city_override);
+  }
+
+  return scopes;
+}
+
+/**
+ * Extracts a clean {city, countryCode, anchor} triple from a booking's structured
+ * detailsJson. countryCode rides along from whichever extraction field matches that type
+ * (destinationCountryCode for transit, countryCode for hotel/other) and is ALWAYS
+ * contributed independently of whether the city resolves — per-field independence is
+ * the point (Task 2.4/2.2).
+ *
+ * Hotel/other bookings run their raw city evidence through a promotion ladder (Task 2.2,
+ * Plan 8 Wave 2, audit finding #1) instead of trusting it verbatim: structured fields
+ * (locality/adminAreas.aal2/adminAreas.aal1, in that preference order) are tried first;
+ * a legacy `d.city` string is the fallback only when none of those exist. The ordered
+ * candidate list is evaluated in three passes — (1) does ANY candidate canonically match
+ * one of the trip's destination scopes (a region-level admin area can still promote via
+ * its trip chip, e.g. Bali's AAL1 matching a "Bali" chip even though the AAL2 evidence
+ * doesn't); (2) does the locality candidate specifically look like a real city; (3) is
+ * ANY candidate a known city name. If none of those fire, the city evidence is demoted to
+ * null (never a raw, unrecognised fragment) and surfaces only via `anchor`; a console.warn
+ * records the demotion for production measurement — never a throw.
+ */
+function extractGeoFromBooking(booking, tripScopes = []) {
   const d = booking.detailsJson || {};
   let city = null;
   let countryCode = null;
+  let anchor = null;
 
   if (booking.type === 'hotel' || booking.type === 'other') {
-    city = canonicalCity(d.city) || null;
+    const structuredCandidates = [];
+    if (d.locality) structuredCandidates.push({ value: d.locality, type: 'locality' });
+    if (d.adminAreas?.aal2) structuredCandidates.push({ value: d.adminAreas.aal2, type: 'aal2' });
+    if (d.adminAreas?.aal1) structuredCandidates.push({ value: d.adminAreas.aal1, type: 'aal1' });
+
+    const candidates = structuredCandidates.length > 0
+      ? structuredCandidates
+      : (d.city ? [{ value: d.city, type: 'unknown' }] : []);
+
+    if (candidates.length > 0) {
+      // Rule 1: scope match, tried against every candidate in order.
+      const scopeMatchCandidate = candidates.find(
+        (c) => tripScopes.some((scope) => scopesMatch(c.value, scope.label)),
+      );
+
+      if (scopeMatchCandidate) {
+        const matchedScope = tripScopes.find((scope) => scopesMatch(scopeMatchCandidate.value, scope.label));
+        city = matchedScope.label;
+      } else {
+        // Rule 2: locality candidate only.
+        const localityCandidate = candidates.find((c) => c.type === 'locality');
+        if (localityCandidate) {
+          city = localityCandidate.value;
+        } else {
+          // Rule 3: known-city, tried against every candidate in order.
+          const knownCandidate = candidates.find((c) => knownCityLabel(c.value));
+          if (knownCandidate) {
+            city = canonicalCity(knownCandidate.value);
+          } else {
+            // Rule 4: demote — this is the production measurement instrument for plan risk #1.
+            const demoted = candidates[0].value;
+            console.warn('[geo] hotel city demoted to anchor', {
+              tripId: booking.tripId,
+              bookingId: booking.id,
+              demoted,
+              tripScopes: tripScopes.map((s) => s.label),
+            });
+            city = null;
+          }
+        }
+      }
+    }
+
+    // The hotel always contributes its country, even when its city demotes.
     countryCode = d.countryCode || null;
-  } else if (booking.type === 'train' || booking.type === 'bus') {
+
+    const anchorLabel = d.sublocality ?? d.locality ?? d.city;
+    if (anchorLabel && canonicalGeoKey(anchorLabel) !== canonicalGeoKey(city)) {
+      anchor = { label: anchorLabel, countryCode: countryCode ? String(countryCode).toUpperCase() : null };
+    }
+  } else if (booking.type === 'train' || booking.type === 'bus' || booking.type === 'ferry') {
     city = canonicalCity(d.destinationCity) || null;
     countryCode = d.destinationCountryCode || null;
   } else if (booking.type === 'flight') {
@@ -164,16 +256,21 @@ function extractGeoFromBooking(booking) {
     countryCode = d.destinationCountryCode || null;
   }
 
-  return { city, countryCode: countryCode ? String(countryCode).toUpperCase() : null };
+  return {
+    city,
+    countryCode: countryCode ? String(countryCode).toUpperCase() : null,
+    anchor,
+  };
 }
 
 /**
- * Derives {city, countryCode} for a single day given the full bookings list.
+ * Derives {city, countryCode, resolutionAnchor} for a single day given the full bookings
+ * list and the trip's destination scopes (buildTripScopes — Task 2.1/2.4, Plan 8 Wave 2).
  *
  * Priority (unchanged from the original deriveDayCity):
  * 1. Manual city_override (+ city_override_country) on the day row
  * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date)
- * 3. Last same-day transit arrival (flight/train/bus departing that day)
+ * 3. Last same-day transit arrival (flight/train/bus/ferry departing that day)
  * 4. Previous day's resolved pair
  * 5. Seeded day.city (+ day.city_country)
  *
@@ -181,8 +278,15 @@ function extractGeoFromBooking(booking) {
  * that has a non-null value — so they may come from different layers. E.g. an override
  * of "Melaka" with no country attached still wins the city; if the active hotel that
  * night reports countryCode "MY", the day resolves to { city: "Melaka", countryCode: "MY" }.
+ *
+ * `resolutionAnchor` is separate from the city/country ladder: it carries the active
+ * hotel's raw evidence (locality/district/legacy city string) whenever that evidence is
+ * more granular than — or was demoted in favour of — the resolved city, tagged
+ * `{ label, countryCode, source: 'hotel' }`. It comes ONLY from the active-hotel layer,
+ * regardless of which layer actually won the city, and is NEVER carried forward from
+ * `previousResolvedGeo` — anchors are per-day evidence, not carried state.
  */
-export function deriveDayGeo(day, bookings, previousResolvedGeo) {
+export function deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes = []) {
   const overrideGeo = day.cityOverride
     ? { city: day.cityOverride, countryCode: day.cityOverrideCountry || null }
     : { city: null, countryCode: null };
@@ -194,19 +298,22 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo) {
     const checkOut = b.endDatetime?.slice(0, 10);
     return checkIn && checkOut && checkIn <= day.date && day.date < checkOut;
   });
-  const hotelGeo = activeHotel ? extractGeoFromBooking(activeHotel) : { city: null, countryCode: null };
+  const hotelExtract = activeHotel
+    ? extractGeoFromBooking(activeHotel, tripScopes)
+    : { city: null, countryCode: null, anchor: null };
+  const hotelGeo = { city: hotelExtract.city, countryCode: hotelExtract.countryCode };
 
   // Last same-day transit arrival
   const sameDayTransit = bookings
     .filter((b) => {
       const type = b.type;
-      if (type !== 'flight' && type !== 'train' && type !== 'bus') return false;
+      if (type !== 'flight' && type !== 'train' && type !== 'bus' && type !== 'ferry') return false;
       return b.startDatetime?.slice(0, 10) === day.date;
     })
     .sort((a, b) => (a.startDatetime || '').localeCompare(b.startDatetime || ''));
   let transitGeo = { city: null, countryCode: null };
   for (let i = sameDayTransit.length - 1; i >= 0; i--) {
-    const geo = extractGeoFromBooking(sameDayTransit[i]);
+    const geo = extractGeoFromBooking(sameDayTransit[i], tripScopes);
     if (geo.city) {
       transitGeo = geo;
       break;
@@ -220,6 +327,7 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo) {
   return {
     city: layers.map((l) => l.city).find(Boolean) ?? null,
     countryCode: layers.map((l) => l.countryCode).find(Boolean) ?? null,
+    resolutionAnchor: hotelExtract.anchor ? { ...hotelExtract.anchor, source: 'hotel' } : null,
   };
 }
 
@@ -585,6 +693,8 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
     ORDER BY d.date ASC
   `).all(tripId);
 
+  const tripScopes = buildTripScopes(rows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
+
   let previousResolvedGeo = null;
   return rows.map((row, index) => {
     const day = {
@@ -602,9 +712,14 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
       stopCount: row.stop_count,
       dayIndex: index,
     };
-    const geo = deriveDayGeo(day, bookings, previousResolvedGeo);
+    const geo = deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes);
     previousResolvedGeo = geo;
-    return { ...day, resolvedCity: geo.city, resolvedCountry: geo.countryCode };
+    return {
+      ...day,
+      resolvedCity: geo.city,
+      resolvedCountry: geo.countryCode,
+      resolutionAnchor: geo.resolutionAnchor,
+    };
   });
 }
 
@@ -617,14 +732,19 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
 export function getDayGeo(dayId) {
   const db = getDb();
   const targetDay = db.prepare('SELECT * FROM days WHERE id = ?').get(dayId);
-  if (!targetDay) return { city: null, countryCode: null };
+  if (!targetDay) return { city: null, countryCode: null, resolutionAnchor: null };
 
   const bookings = listBookingsForTrip(targetDay.trip_id);
-  const rows = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date <= ? ORDER BY date ASC')
-    .all(targetDay.trip_id, targetDay.date);
+  // Scopes are built from ALL of the trip's days (not just the ones up to the target
+  // date) — a hotel evidence match should still be able to promote via a scope defined
+  // by a later day — but the fold itself only replays days up to and including the
+  // target date, so layer 4 (previous-day carry) stays correct.
+  const allRows = db.prepare('SELECT * FROM days WHERE trip_id = ? ORDER BY date ASC').all(targetDay.trip_id);
+  const tripScopes = buildTripScopes(allRows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
+  const rows = allRows.filter((row) => row.date <= targetDay.date);
 
   let previousResolvedGeo = null;
-  let geo = { city: null, countryCode: null };
+  let geo = { city: null, countryCode: null, resolutionAnchor: null };
   for (const row of rows) {
     const day = {
       date: row.date,
@@ -633,7 +753,7 @@ export function getDayGeo(dayId) {
       cityCountry: row.city_country ?? null,
       cityOverrideCountry: row.city_override_country ?? null,
     };
-    geo = deriveDayGeo(day, bookings, previousResolvedGeo);
+    geo = deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes);
     previousResolvedGeo = geo;
   }
   return geo;

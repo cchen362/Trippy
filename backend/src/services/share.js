@@ -1,6 +1,8 @@
 import { randomBytes } from 'crypto';
 import { getDb } from '../db/database.js';
-import { assertTripAccess, deriveDayGeo, listBookingsForTrip, deriveTripDestinationsFromDays } from './trips.js';
+import {
+  assertTripAccess, deriveDayGeo, listBookingsForTrip, deriveTripDestinationsFromDays, buildTripScopes,
+} from './trips.js';
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -42,7 +44,7 @@ function mapDay(row, index) {
 
 // Adds resolvedCity/resolvedCountry (Plan 6 Wave 3 §3.4) alongside the existing raw `city`
 // field — additive only, so single-country trips' existing fields stay byte-identical.
-function withResolvedGeo(day, row, bookings, previousResolvedGeo) {
+function withResolvedGeo(day, row, bookings, previousResolvedGeo, tripScopes) {
   const geoInput = {
     date: row.date,
     city: row.city,
@@ -50,8 +52,11 @@ function withResolvedGeo(day, row, bookings, previousResolvedGeo) {
     cityCountry: row.city_country ?? null,
     cityOverrideCountry: row.city_override_country ?? null,
   };
-  const geo = deriveDayGeo(geoInput, bookings, previousResolvedGeo);
-  return { day: { ...day, resolvedCity: geo.city, resolvedCountry: geo.countryCode }, geo };
+  const geo = deriveDayGeo(geoInput, bookings, previousResolvedGeo, tripScopes);
+  return {
+    day: { ...day, resolvedCity: geo.city, resolvedCountry: geo.countryCode, resolutionAnchor: geo.resolutionAnchor },
+    geo,
+  };
 }
 
 function mapStop(row) {
@@ -91,9 +96,10 @@ function buildPublicTripDetail(tripId) {
   `).all(tripId);
 
   const bookings = listBookingsForTrip(tripId);
+  const tripScopes = buildTripScopes(dayRows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
   let previousResolvedGeo = null;
   const days = dayRows.map((row, index) => {
-    const { day, geo } = withResolvedGeo(mapDay(row, index), row, bookings, previousResolvedGeo);
+    const { day, geo } = withResolvedGeo(mapDay(row, index), row, bookings, previousResolvedGeo, tripScopes);
     previousResolvedGeo = geo;
     return day;
   });

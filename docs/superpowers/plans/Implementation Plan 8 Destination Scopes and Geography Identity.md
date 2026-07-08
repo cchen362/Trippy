@@ -1,6 +1,6 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: IN PROGRESS (2026-07-08) — W1 complete; W2 next.**
+**Status: IN PROGRESS (2026-07-09) — W1 + W2 complete; W3/W4/W5 may ship in any order next.**
 Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
 log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
 for plan completion** — W6's gate is sequencing only, not a maybe.
@@ -217,9 +217,9 @@ W6 runs last, after W1–W2 are verified in production.
 > (`cached: true`, 164 places) under the new folding. Deviations: (a) `knownCityLabel`'s set
 > also includes `CITY_ALIASES` *keys* (e.g. "Saigon", "HCMC") — required so alias labels
 > count as known cities; coherent with W2 rule 3, which displays `canonicalCity(evidence)`
-> and resolves those same keys. (b) 1.2's production-city sweep is pending — production DB
-> access wasn't available this session; only `KHH: 'Kaohsiung'` added (local dev cities
-> Chengdu/Ipoh already covered). Run the sweep before or during W2.
+> and resolves those same keys. (b) 1.2's production-city sweep was pending after this
+> session (production DB access unavailable); only `KHH: 'Kaohsiung'` added. **Closed during
+> W2 (2026-07-09)** — see Wave 2 completion notes item (d).
 > W6 inventory lead: local dev `discovery_destinations` shows the 016 backfill also left
 > `last_generated_at = NULL` on all backfilled rows, and place rows hang off the
 > empty-country twins (e.g. `chengdu|""` holds 164 places, `chengdu|CN` holds 0) — expect
@@ -302,7 +302,37 @@ Discovery on an existing destination (cache hit still instant — key unchanged)
 
 ---
 
-## Wave 2 — Guarded promotion + resolution anchors (NOT STARTED)
+## Wave 2 — Guarded promotion + resolution anchors (DONE 2026-07-09)
+
+> **Completion notes (2026-07-09):** All of 2.1–2.5 shipped. Backend 352→368 tests, frontend
+> 43, all green; build clean. Browser-verified at 375 px against verbatim copies of the
+> production Bali and Taipei-Kaohsiung trips seeded locally: Plan/Today/Share headers read
+> `Bali` / `Kaohsiung` with **zero data edits** (Bali's days still seed `Denpasar` with
+> hotel fragments `Kabupaten Badung`; Taiwan's days all seed `Taipei` with the Kaohsiung
+> nights healed by rule 3); Chengdu-Chongqing movement regression intact; demotion warns
+> fired exactly and only for the two Bali fragment bookings. Deviations/decisions:
+> (a) **Rule 1 is evaluated against every structured candidate in order**
+> (locality → AAL2 → AAL1), not just the preferred one — required by F3, where AAL1 `Bali`
+> is the scope match while AAL2 `Kabupaten Badung` fails; follows §1's "the hotel's
+> city/scope evidence matches" wording. Rules 2 (locality only) and 3 (every candidate)
+> follow; rule 4 logs the *preferred* candidate as `demoted`.
+> (b) **Ferry was added to `deriveDayGeo`'s same-day-transit filter too**, not just the
+> `extractGeoFromBooking` branch — both were needed for F7 to actually move a day.
+> (c) **mapData segment labels:** the pre-transit local segment of a mixed-city transit day
+> now labels with the day's *resolved* city (the transit destination via layer 3) instead of
+> the raw seed — a direct consequence of 2.5's "use the resolved geography". One existing
+> test's expectation updated and documented in-place; if pre-transit segments should ever
+> show the departure city again, that needs a "pre-transit geo" variant (future contract,
+> out of W2 scope).
+> (d) **Task 1.2's production sweep is now DONE** (server was reachable this session):
+> production cities are Chengdu, Chongqing, Denpasar, Bali, Kuala Lumpur, Taipei, Kaohsiung —
+> all covered by the known-city vocabulary except Denpasar, which only occurs as a trip's own
+> day seed (rule 1 covers it); left to demotion-log measurement rather than adding a
+> speculative alias. Added `CHENG DU`/`CHONG QING` → proper-spelling aliases (real spellings
+> found in production hotel bookings), which also fixes the Chengdu trip's summary rendering
+> "Chong Qing".
+> (e) Demotion-warn volume: the warn fires once per hotel-night per derivation request —
+> when measuring production frequency, count distinct `bookingId`s, not log lines.
 
 **Goal:** the pollution stopper and retroactive healer. Backend-only. After this wave, no
 provider fragment can become a day header, trip summary entry, Discovery default, or importer
@@ -694,7 +724,7 @@ new fragment-shaped key.
 ## Wave status
 
 - W1 canonical identity + folding + `reset()`: **DONE 2026-07-08** (352/43 tests green, browser-verified; see Wave 1 completion notes for two documented deviations)
-- W2 guarded promotion + anchors + demotion log: **not started**
+- W2 guarded promotion + anchors + demotion log: **DONE 2026-07-09** (368/43 tests green, browser-verified against production-shaped Bali + Taipei-Kaohsiung trips; see Wave 2 completion notes for five documented deviations/decisions; Task 1.2 production sweep also closed this session)
 - W3 booking write path + hotel names: **not started**
 - W4 destination-scope picker: **not started**
 - W5 consumer alignment: **not started**
