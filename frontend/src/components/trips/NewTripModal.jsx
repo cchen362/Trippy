@@ -163,7 +163,7 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
     setError(null);
     const payload = {
       ...form,
-      destinations: destinationChips.map((chip) => ({ city: chip.city, countryCode: chip.country || null })),
+      destinations: destinationChips.map((chip) => ({ city: chip.label, countryCode: chip.countryCode || null })),
     };
     if (captureResult) {
       payload.captureArtifactId = captureResult.artifactId;

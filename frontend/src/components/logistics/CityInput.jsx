@@ -28,7 +28,7 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
   }, [value, lookupCities, selectedText]);
 
   const handleSelect = (suggestion) => {
-    setSelectedText(suggestion.city);
+    setSelectedText(suggestion.label);
     setSuggestions([]);
     onCitySelect(suggestion);
   };
@@ -49,7 +49,7 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
         <div className="mt-2 rounded-xl border overflow-hidden" style={{ borderColor: 'var(--ink-border)' }}>
           {suggestions.slice(0, 5).map((s) => (
             <button
-              key={`${s.city}-${s.country}`}
+              key={`${s.label}-${s.countryCode}`}
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelect(s)}
@@ -57,10 +57,18 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
               style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
             >
               <span className="font-mono text-xs block" style={{ color: 'var(--cream)' }}>
-                {s.city}
+                {s.label}
+                {s.kind === 'region' && (
+                  <span
+                    className="font-mono uppercase text-[11px] tracking-[0.22em] ml-2"
+                    style={{ color: 'var(--cream-dim)' }}
+                  >
+                    REGION
+                  </span>
+                )}
               </span>
-              {s.country && (
-                <span className="font-body text-base">{s.country}</span>
+              {s.countryCode && (
+                <span className="font-body text-base">{s.countryCode}</span>
               )}
             </button>
           ))}

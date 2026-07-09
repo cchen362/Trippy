@@ -11,7 +11,13 @@ vi.mock('../src/config.js', () => ({
   config: mockConfig,
 }));
 
-const { lookupFlightDetails, lookupHotelDetails, normalizeFlightQuery } = await import('../src/services/lookups.js');
+const {
+  lookupFlightDetails,
+  lookupHotelDetails,
+  normalizeFlightQuery,
+  mergeDestinationPredictions,
+  lookupDestinationPredictions,
+} = await import('../src/services/lookups.js');
 
 beforeEach(() => {
   mockConfig.flightDataProvider = '';
@@ -106,6 +112,104 @@ describe('lookupHotelDetails', () => {
     expect(place.locality).toBeNull();
     expect(place.sublocality).toBe('Seminyak');
     expect(place.adminAreas).toEqual({ aal1: 'Bali', aal2: 'Kabupaten Badung' });
+  });
+});
+
+describe('mergeDestinationPredictions', () => {
+  it('ranks an exact-match region above a non-matching city for the same query', () => {
+    const cityResults = [{ label: 'Kabupaten Badung', countryCode: 'ID', kind: 'city' }];
+    const regionResults = [{ label: 'Bali', countryCode: 'ID', kind: 'region' }];
+
+    const merged = mergeDestinationPredictions('Bali', cityResults, regionResults);
+
+    const bali = merged.find((entry) => entry.label === 'Bali' && entry.kind === 'region');
+    expect(bali).toBeDefined();
+    if (merged.some((entry) => entry.label === 'Kabupaten Badung')) {
+      expect(merged[0]).toEqual(bali);
+    }
+  });
+
+  it('returns the city-kind entry for an exact city match with no region results', () => {
+    const cityResults = [{ label: 'Chengdu', countryCode: 'CN', kind: 'city' }];
+
+    const merged = mergeDestinationPredictions('Chengdu', cityResults, []);
+
+    expect(merged).toEqual([{ label: 'Chengdu', countryCode: 'CN', kind: 'city' }]);
+  });
+
+  it('dedupes homonyms across city and region results, keeping the city-kind entry', () => {
+    const cityResults = [{ label: 'Georgetown', countryCode: 'MY', kind: 'city' }];
+    const regionResults = [{ label: 'Georgetown', countryCode: 'GY', kind: 'region' }];
+
+    const merged = mergeDestinationPredictions('Georgetown', cityResults, regionResults);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual({ label: 'Georgetown', countryCode: 'MY', kind: 'city' });
+  });
+
+  it('caps the merged result at 8 entries', () => {
+    const cityResults = Array.from({ length: 10 }, (_, i) => ({
+      label: `City ${i}`,
+      countryCode: 'US',
+      kind: 'city',
+    }));
+
+    const merged = mergeDestinationPredictions('City', cityResults, []);
+
+    expect(merged).toHaveLength(8);
+  });
+});
+
+describe('lookupDestinationPredictions', () => {
+  it('makes two typed autocomplete calls without a session token and returns ranked, shaped results', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.includedPrimaryTypes.includes('locality')) {
+        return {
+          ok: true,
+          json: async () => ({
+            suggestions: [
+              {
+                placePrediction: {
+                  structuredFormat: {
+                    mainText: { text: 'Kabupaten Badung' },
+                    secondaryText: { text: 'Indonesia' },
+                  },
+                },
+              },
+            ],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          suggestions: [
+            {
+              placePrediction: {
+                structuredFormat: {
+                  mainText: { text: 'Bali' },
+                  secondaryText: { text: 'Indonesia' },
+                },
+              },
+            },
+          ],
+        }),
+      };
+    });
+
+    const suggestions = await lookupDestinationPredictions('Bali');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse(call[1].body);
+      expect(body).not.toHaveProperty('sessionToken');
+    }
+
+    expect(suggestions).toEqual([
+      { label: 'Bali', countryCode: 'ID', kind: 'region' },
+      { label: 'Kabupaten Badung', countryCode: 'ID', kind: 'city' },
+    ]);
   });
 });
 

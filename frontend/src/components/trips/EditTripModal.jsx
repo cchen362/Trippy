@@ -16,14 +16,14 @@ function deriveInitialChips(trip, days) {
       const city = day.resolvedCity ?? day.city;
       if (!city || seen.has(city)) continue;
       seen.add(city);
-      chips.push({ city, country: day.resolvedCountry ?? null });
+      chips.push({ label: city, countryCode: day.resolvedCountry ?? null, kind: null });
     }
     if (chips.length > 0) return chips;
   }
 
   const destinations = trip.destinations ?? [];
   const destinationCountries = trip.destinationCountries ?? [];
-  return destinations.map((city, i) => ({ city, country: destinationCountries[i] ?? null }));
+  return destinations.map((city, i) => ({ label: city, countryCode: destinationCountries[i] ?? null, kind: null }));
 }
 
 export default function EditTripModal({ trip, days, open, onClose, onSubmit, saving, onDelete, deleting, lookupCities }) {
@@ -50,7 +50,7 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
     setError(null);
     const payload = {
       ...form,
-      destinations: destinationChips.map((chip) => ({ city: chip.city, countryCode: chip.country || null })),
+      destinations: destinationChips.map((chip) => ({ city: chip.label, countryCode: chip.countryCode || null })),
     };
     try {
       await onSubmit(payload);

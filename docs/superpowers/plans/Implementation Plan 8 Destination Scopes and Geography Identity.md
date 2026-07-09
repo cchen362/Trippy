@@ -1,6 +1,6 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 complete; W4/W5 may ship in any order next.**
+**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 + W4 complete; W5 may ship next.**
 Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
 log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
 for plan completion** — W6's gate is sequencing only, not a maybe.
@@ -489,7 +489,33 @@ DB contains `countryCode` + components.
 
 ---
 
-## Wave 4 — Destination-scope picker (NOT STARTED)
+## Wave 4 — Destination-scope picker (DONE 2026-07-09)
+
+> **Completion notes (2026-07-09):** All of 4.1–4.3 shipped. Backend 370→375 tests, frontend
+> 51→57, all green; build clean. Browser-verified at 375 px with **live Google Places calls**:
+> typing "Bali" in the New Trip destinations field returns region-kind `Bali` (ID) ranked
+> first above city-kind `Balikpapan`/`Balingen`/`Balice`/`Baliya`, with a `REGION` tag
+> (DM Mono, `var(--cream-dim)`, not gold); selecting it stores a chip labelled `Bali` and
+> creating the trip persisted `destinationCountries: ["ID"]` — a genuine ISO code, not the
+> country name, fixing fact 5 (verified via the actual `POST /api/trips` payload, then the
+> test trip was deleted). Typing "Kaohsiung" returns city-kind `Kaohsiung` (TW) ranked first
+> (region-kind `Kaohsiung City` ranks second). `GET /api/lookups/cities` now 404s (route
+> deleted) and no code references `lookupCityPredictions`. The Taipei-Kaohsiung trip's
+> transit From/To city fields (train booking form) still autocomplete against the new
+> `/destinations` endpoint and commit the selected city label correctly. Deviations/decisions:
+> (a) **No session token on destination predictions** (orchestrator decision, not a silent
+> copy of the hotel pattern): the picker never makes a follow-up Place Details call, so a
+> session would never complete — Google's billing discount requires a completed
+> autocomplete→details pair. Sending a token that's never closed earns no discount, so
+> `lookupDestinationPredictions`/`GET /destinations` accept no `sessionToken` param at all.
+> (b) **Internal chip shape migrated** from `{city, country}` to `{label, countryCode, kind}`
+> throughout `DestinationChipPicker.jsx`, `NewTripModal.jsx`, and `EditTripModal.jsx`
+> (including `deriveInitialChips`) to carry `kind` end-to-end from the picker selection; the
+> wire shape submitted to the backend (`{city, countryCode}`) is unchanged. (c) The
+> `lookupCities` prop/export name was kept as-is in `bookingsApi.js` and every consumer
+> (`useBookings.js`, `LogisticsTab.jsx`, `TripPage.jsx`, `TripsHomePage.jsx`,
+> `CaptureFlow.jsx`) — only the URL it calls changed, avoiding an unnecessary rename ripple
+> across six files for a same-shape wire contract change.
 
 **Goal:** "Bali" is selectable at trip creation; chips carry real ISO codes.
 
@@ -753,6 +779,6 @@ new fragment-shaped key.
 - W1 canonical identity + folding + `reset()`: **DONE 2026-07-08** (352/43 tests green, browser-verified; see Wave 1 completion notes for two documented deviations)
 - W2 guarded promotion + anchors + demotion log: **DONE 2026-07-09** (368/43 tests green, browser-verified against production-shaped Bali + Taipei-Kaohsiung trips; see Wave 2 completion notes for five documented deviations/decisions; Task 1.2 production sweep also closed this session)
 - W3 booking write path + hotel names: **DONE 2026-07-09** (370/51 tests green, browser-verified with live Places calls on the seeded Bali + Taipei-Kaohsiung trips; see Wave 3 completion notes for five documented deviations/observations)
-- W4 destination-scope picker: **not started**
+- W4 destination-scope picker: **DONE 2026-07-09** (375/57 tests green, browser-verified with live Places calls: Bali→REGION/ID, Kaohsiung→city-kind, transit fields unaffected, `/cities` route removed; see Wave 4 completion notes for the no-session-token decision and two other deviations)
 - W5 consumer alignment: **not started**
 - W6 data cleanup + doc debt (mandatory, runs last): **not started**

@@ -5,14 +5,14 @@ export default function DestinationChipPicker({ chips, onChange, lookupCities })
   const [query, setQuery] = useState('');
 
   const addChip = (suggestion) => {
-    const city = suggestion.city?.trim();
+    const city = suggestion.label?.trim();
     setQuery('');
-    if (!city || chips.some((chip) => chip.city.toLowerCase() === city.toLowerCase())) return;
-    onChange([...chips, { city, country: suggestion.country || null }]);
+    if (!city || chips.some((chip) => chip.label.toLowerCase() === city.toLowerCase())) return;
+    onChange([...chips, { label: city, countryCode: suggestion.countryCode || null, kind: suggestion.kind || null }]);
   };
 
-  const removeChip = (city) => {
-    onChange(chips.filter((chip) => chip.city !== city));
+  const removeChip = (label) => {
+    onChange(chips.filter((chip) => chip.label !== label));
   };
 
   return (
@@ -29,13 +29,13 @@ export default function DestinationChipPicker({ chips, onChange, lookupCities })
         <div className="flex flex-wrap gap-2 mt-3">
           {chips.map((chip) => (
             <button
-              key={chip.city}
+              key={chip.label}
               type="button"
-              onClick={() => removeChip(chip.city)}
+              onClick={() => removeChip(chip.label)}
               className="px-3 py-1.5 rounded-full font-mono text-[11px] tracking-[0.22em] uppercase transition-colors flex items-center gap-2"
               style={{ background: 'var(--ink-mid)', border: '1px solid var(--gold)', color: 'var(--gold)' }}
             >
-              {chip.city}
+              {chip.label}
               <span aria-hidden="true">×</span>
             </button>
           ))}

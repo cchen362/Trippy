@@ -27,7 +27,7 @@ export const bookingsApi = {
     if (near) params.set('near', near);
     return request(`/api/lookups/places/search?${params}`);
   },
-  lookupCities: (query) => request(`/api/lookups/cities?q=${encodeURIComponent(query)}`),
+  lookupCities: (query) => request(`/api/lookups/destinations?q=${encodeURIComponent(query)}`),
   lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
     const params = new URLSearchParams({ departureDate });
     if (flightQuery) {

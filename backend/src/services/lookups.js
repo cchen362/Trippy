@@ -2,6 +2,8 @@ import { find as tzFind } from 'geo-tz';
 import { config } from '../config.js';
 import { searchPhotos } from './unsplash.js';
 import { gcj02ToWgs84 } from './coordinates.js';
+import { canonicalGeoKey } from '../utils/geoIdentity.js';
+import { countryCodeFromName } from '../utils/countries.js';
 
 export async function lookupHotelPredictions(input, sessionToken) {
   const query = input?.trim();
@@ -214,16 +216,7 @@ function extractAdminAreasFromAddressComponents(components) {
   return { aal1: find('administrative_area_level_1'), aal2: find('administrative_area_level_2') };
 }
 
-export async function lookupCityPredictions(input) {
-  const query = input?.trim();
-  if (!query || query.length < 2) {
-    throw Object.assign(new Error('City query must be at least 2 characters'), { status: 400 });
-  }
-
-  if (!config.googlePlacesKey) {
-    throw Object.assign(new Error('Google Places API key is not configured'), { status: 503 });
-  }
-
+async function fetchDestinationAutocomplete(query, includedPrimaryTypes) {
   const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
     method: 'POST',
     headers: {
@@ -232,14 +225,14 @@ export async function lookupCityPredictions(input) {
     },
     body: JSON.stringify({
       input: query,
-      includedPrimaryTypes: ['locality', 'administrative_area_level_2'],
+      includedPrimaryTypes,
       languageCode: 'en',
     }),
   });
 
   if (!response.ok) {
     const body = await response.text();
-    throw Object.assign(new Error(body || 'Google Places city lookup failed'), { status: 502 });
+    throw Object.assign(new Error(body || 'Google Places destination lookup failed'), { status: 502 });
   }
 
   const payload = await response.json();
@@ -247,9 +240,66 @@ export async function lookupCityPredictions(input) {
     .map((s) => s.placePrediction)
     .filter(Boolean)
     .map((p) => ({
-      city: p.structuredFormat?.mainText?.text || p.text?.text || '',
-      country: p.structuredFormat?.secondaryText?.text || '',
-    }));
+      label: p.structuredFormat?.mainText?.text || p.text?.text || '',
+      countryCode: countryCodeFromName(p.structuredFormat?.secondaryText?.text || ''),
+    }))
+    .filter((entry) => entry.label);
+}
+
+/**
+ * Merges, ranks, and dedupes city + region destination predictions for a query.
+ * Exported standalone so it can be unit-tested without mocking fetch.
+ * @param {string} query
+ * @param {Array<{label: string, countryCode: string|null, kind: string}>} cityResults
+ * @param {Array<{label: string, countryCode: string|null, kind: string}>} regionResults
+ * @returns {Array<{label: string, countryCode: string|null, kind: string}>}
+ */
+export function mergeDestinationPredictions(query, cityResults, regionResults) {
+  const seen = new Set();
+  const deduped = [];
+  for (const entry of [...cityResults, ...regionResults]) {
+    const key = canonicalGeoKey(entry.label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(entry);
+  }
+
+  const queryKey = canonicalGeoKey(query);
+  const tierOf = (entry) => {
+    const entryKey = canonicalGeoKey(entry.label);
+    if (entryKey === queryKey) return 0;
+    if (entryKey.startsWith(queryKey)) return 1;
+    return 2;
+  };
+
+  return deduped
+    .map((entry) => ({ entry, tier: tierOf(entry) }))
+    .sort((a, b) => a.tier - b.tier)
+    .slice(0, 8)
+    .map(({ entry }) => entry);
+}
+
+// No session token: there is no follow-up Place Details call to close the session (billing discount requires a completed autocomplete→details pair).
+export async function lookupDestinationPredictions(input) {
+  const query = input?.trim();
+  if (!query || query.length < 2) {
+    throw Object.assign(new Error('Destination query must be at least 2 characters'), { status: 400 });
+  }
+
+  if (!config.googlePlacesKey) {
+    throw Object.assign(new Error('Google Places API key is not configured'), { status: 503 });
+  }
+
+  const [cityResults, regionResults] = await Promise.all([
+    fetchDestinationAutocomplete(query, ['locality', 'administrative_area_level_2']),
+    fetchDestinationAutocomplete(query, ['administrative_area_level_1']),
+  ]);
+
+  return mergeDestinationPredictions(
+    query,
+    cityResults.map((entry) => ({ ...entry, kind: 'city' })),
+    regionResults.map((entry) => ({ ...entry, kind: 'region' })),
+  );
 }
 
 export async function lookupPhotos(query) {
