@@ -195,6 +195,35 @@ revisit now that a real consumer exists), or (b) seed days across destinations
 *any* chip of a multi-city trip. Includes UX for "trip shows only city #1 until bookings
 exist".
 
+**W2 addendum (2026-07-10 follow-up session):**
+
+- **New defect — "Edit Trip → add a city" is a silent no-op.** `updateTrip`'s destination
+  handling (`trips.js:545-588`) is rename/removal-only, keyed on raw day seeds: adding a
+  chip rewrites no day, echoes once in the response via `destinationsOverride`, and
+  disappears on the next reload. It also cannot rename a hotel-derived label (e.g.
+  `杭州市`), because no raw seed matches it. Fold the fix into W2 — chip semantics and
+  scope persistence must be designed together. Owner-leaning direction: chips widen the
+  scope *vocabulary* only; days move via bookings/overrides (matches the evidence-driven
+  model; avoids the positional rename heuristic pretending to re-plan days).
+- **Ways-to-add-a-city comparison (Suzhou scenario, verified in code):** Edit Trip chip =
+  no-op (above); day-header override = display + all derived surfaces + scope, but the
+  resolution anchor still comes from whatever hotel is active those nights (stop geocoding
+  bias can point at the wrong city's district); hotel booking = the intended path (moves
+  days, contributes country + genuine anchor) but hits the CJK bug until W1 ships.
+
+**W2 language-model addendum — three planes, not one string (owner discussion 2026-07-10):**
+The 南疆/"Nanjiang" example decomposes into: (1) *input* — Google autocomplete accepts CJK
+and returns `en` labels, so `languageCode=en` costs nothing on input; but 南疆 (informal
+macro-region) and 南江县 (county/AAL3) are outside the picker's entity-type whitelist —
+no language setting makes them selectable; needs **free-text chips** (type-and-enter,
+tagged free-form, no country/kind) as first-class scopes. (2) *identity* — romanization is
+lossy (南江/南疆 both "Nanjiang"); cross-script equality is unsolvable by string folding;
+the durable fix is carrying the **picker prediction's place ID** into stored scopes now
+(free at selection time) so geometry/containment matching can ship later without
+re-picking. (3) *display* — the user's own words always win (ladder rule 1 + overrides
+already embody this); a trip labeled 南疆 shows 南疆 regardless of evidence script.
+W1's `languageCode=en` normalizes the matching plane only and remains correct as-is.
+
 **W3 — Frontend refresh sequencing (issue 3).**
 Monotonic request-id (or AbortController) guard in `useTrip.refresh` so only the newest
 in-flight `GET /detail` response is applied; disable add/move affordances while their own
