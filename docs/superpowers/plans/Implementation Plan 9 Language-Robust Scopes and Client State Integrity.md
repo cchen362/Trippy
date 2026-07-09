@@ -507,7 +507,18 @@ and the manual browser pass defined in Wave 6.
 
 ## Wave status
 
-- W1 English evidence + photo honesty: **NOT STARTED**
+- W1 English evidence + photo honesty: **COMPLETE** (2026-07-10) — `lookupHotelDetails`
+  now sends `languageCode=en` on the Place Details call (joined with `sessionToken` when
+  present); audited all other Google Places call sites (`lookups.js` autocomplete ×3,
+  `placeResolver.js` Text Search) — already sending `languageCode: 'en'`, no other
+  patches needed; `resolvePhotoUrl` now `console.warn`s on Unsplash throw
+  (`[photo] unsplash lookup failed`) and empty result (`[photo] no unsplash result`),
+  still returns `null` either way. Backend 391/391 green (387 baseline + 4 new fixture
+  tests: F1 languageCode assertion + session-token pairing, CJK-payload English
+  extraction, photo-warn-on-empty, photo-warn-on-throw). Not yet verified against live
+  Google Places/Unsplash (requires a real mainland-China hotel add + API keys) —
+  orchestrator/owner should do a live smoke test before Wave 5's re-fetch script
+  depends on this.
 - W2 persisted scopes + honest chip editing: **NOT STARTED**
 - W3 containment matching + overlap policy (after W2): **NOT STARTED**
 - W4 client state integrity (independent): **NOT STARTED**

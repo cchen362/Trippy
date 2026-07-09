@@ -319,15 +319,21 @@ async function resolvePhotoUrl({ title, type, city, dayIndex, existingUrl }) {
   if (existingUrl !== undefined) return existingUrl;
   if (!isPhotoEligible(type)) return null;
 
+  const query = buildPhotoQuery(title, type, city);
   try {
     const photo = await pickPhoto({
-      query: buildPhotoQuery(title, type, city),
+      query,
       fallbackQuery: buildFallbackQuery(type, city, title),
       dayIndex,
       stopSeed: titleHash(title),
     });
-    return photo?.url || null;
-  } catch {
+    if (!photo?.url) {
+      console.warn('[photo] no unsplash result', { query });
+      return null;
+    }
+    return photo.url;
+  } catch (err) {
+    console.warn('[photo] unsplash lookup failed', { title, city, error: err?.message });
     return null;
   }
 }

@@ -936,4 +936,33 @@ describe('resolutionAnchor consumption (Plan 8 Wave 5 — Task 5.1)', () => {
     expect(query).not.toContain('Chengdu');
     expect(fallbackQuery).toContain('Chongqing');
   });
+
+  it('warns and returns null when Unsplash yields no result, without throwing', async () => {
+    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(null);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Some Untraveled Alley',
+      type: 'experience',
+    });
+
+    expect(stop.unsplashPhotoUrl).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith('[photo] no unsplash result', expect.objectContaining({ query: expect.any(String) }));
+  });
+
+  it('warns and returns null when the Unsplash lookup throws, without propagating the error', async () => {
+    vi.spyOn(unsplashService, 'pickPhoto').mockRejectedValue(new Error('Unsplash lookup failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Another Untraveled Alley',
+      type: 'experience',
+    });
+
+    expect(stop.unsplashPhotoUrl).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith('[photo] unsplash lookup failed', expect.objectContaining({
+      title: 'Another Untraveled Alley',
+      error: 'Unsplash lookup failed',
+    }));
+  });
 });

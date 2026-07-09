@@ -41,7 +41,7 @@ describe('lookupHotelDetails', () => {
     const place = await lookupHotelDetails('place-123');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://places.googleapis.com/v1/places/place-123',
+      'https://places.googleapis.com/v1/places/place-123?languageCode=en',
       {
         headers: {
           'Content-Type': 'application/json',
@@ -112,6 +112,50 @@ describe('lookupHotelDetails', () => {
     expect(place.locality).toBeNull();
     expect(place.sublocality).toBe('Seminyak');
     expect(place.adminAreas).toEqual({ aal1: 'Bali', aal2: 'Kabupaten Badung' });
+  });
+
+  it('requests languageCode=en on the details call and joins sessionToken when present', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'place-session-1', displayName: { text: 'Park Hyatt Hangzhou' } }),
+    });
+
+    await lookupHotelDetails('place-session-1', 'session-abc');
+
+    const [url] = fetchMock.mock.calls[0];
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('languageCode')).toBe('en');
+    expect(parsed.searchParams.get('sessionToken')).toBe('session-abc');
+  });
+
+  it('extracts English structured fields for a mainland-China hotel now that languageCode=en is requested', async () => {
+    // Regression fixture for the Plan 9 §0 fact 1 bug: production stored CJK structured
+    // fields (locality: 杭州市) because this call sent no languageCode. The mock here
+    // simulates the post-fix response — Google now returns English longText — and this
+    // test asserts extraction lands the same way it does for any other locale.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'place-cn-1',
+        displayName: { text: 'Park Hyatt Hangzhou' },
+        formattedAddress: 'No. 366 Beishan Street, Gongshu District, Hangzhou, Zhejiang, China',
+        addressComponents: [
+          { types: ['country', 'political'], longText: 'China', shortText: 'CN' },
+          { types: ['administrative_area_level_1', 'political'], longText: 'Zhejiang Province', shortText: 'Zhejiang Province' },
+          { types: ['locality', 'political'], longText: 'Hangzhou', shortText: 'Hangzhou' },
+          { types: ['sublocality_level_1', 'sublocality', 'political'], longText: 'Gongshu District', shortText: 'Gongshu District' },
+        ],
+        location: { latitude: 30.2836, longitude: 120.1551 },
+      }),
+    });
+
+    const place = await lookupHotelDetails('place-cn-1');
+
+    expect(place.city).toBe('Hangzhou');
+    expect(place.countryCode).toBe('CN');
+    expect(place.locality).toBe('Hangzhou');
+    expect(place.sublocality).toBe('Gongshu District');
+    expect(place.adminAreas).toEqual({ aal1: 'Zhejiang Province', aal2: null });
   });
 });
 

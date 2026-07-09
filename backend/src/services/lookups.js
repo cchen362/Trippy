@@ -115,9 +115,11 @@ export async function lookupHotelDetails(placeId, sessionToken) {
   }
 
   // sessionToken on the details call signals Google this completes the session — billing discount applied.
-  const detailsUrl = sessionToken
-    ? `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}?sessionToken=${encodeURIComponent(sessionToken)}`
-    : `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`;
+  // languageCode=en keeps structured address evidence in English (the matching plane) regardless of
+  // Google's per-place default language — see Plan 9 §0 fact 1 (CJK/romanized evidence bug).
+  const detailsParams = new URLSearchParams({ languageCode: 'en' });
+  if (sessionToken) detailsParams.set('sessionToken', sessionToken);
+  const detailsUrl = `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}?${detailsParams.toString()}`;
   const response = await fetch(detailsUrl, {
     headers: {
       'Content-Type': 'application/json',
