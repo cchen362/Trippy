@@ -1,6 +1,7 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
-**Status: NOT STARTED — approved for implementation 2026-07-10; owner implements separately.**
+**Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
+W2–W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -143,6 +144,9 @@ Per global working rules: **Fable/Opus orchestrates; Sonnet implements.**
 
 ## Wave 1 — English evidence + photo pipeline honesty
 
+**Status: COMPLETE (2026-07-10).** See §Wave status for the full result summary and the
+outstanding live-verification callout.
+
 **Goal:** structured place evidence is always English (the matching plane), and photo
 failures are visible. Small, backend-only, independently shippable.
 
@@ -159,6 +163,12 @@ Add `languageCode=en` as a query parameter to the Place Details request
 verify each sends `languageCode: 'en'` (or add it). Sonnet task: enumerate call sites,
 report, patch the misses. (Nominatim calls are out of scope — different provider,
 `accept-language` handled separately if ever needed.)
+
+**Audit result:** 5 Google Places call sites total — `lookups.js`'s 3 autocomplete calls
+(`lookupHotelPredictions`, `lookupPlacePredictions`, `fetchDestinationAutocomplete`) and
+`placeResolver.js`'s `searchGooglePlaces` Text Search already sent `languageCode: 'en'`.
+Only `lookupHotelDetails` (1.1's target) was missing it — confirms §0 fact 1's framing
+that the Place Details call was the sole gap. No further patches needed.
 
 ### 1.3 `backend/src/services/stops.js` — photo failure logging
 
