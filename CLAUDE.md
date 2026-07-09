@@ -66,7 +66,7 @@ Every component is designed for 375px width first. Desktop is a wider layout of 
 ---
 
 ## API Cost Discipline
-- Claude API: cache discovery results in `discovery_cache` table (48h TTL). Never call Claude for data already in cache.
+- Claude API: discovery results live in the `discovery_destinations` / `discovery_places` catalogue (7-day TTL, keyed by `canonicalGeoKey` + country code). Never call Claude for a destination whose catalogue is still fresh.
 - Unsplash: store fetched photo URLs on the stop/trip record. Never re-fetch what's already in DB.
 - Google Places: use session tokens for autocomplete to minimise billing.
 

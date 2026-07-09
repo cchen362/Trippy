@@ -34,7 +34,6 @@ describe('migrations', () => {
     expect(tables).toContain('days');
     expect(tables).toContain('stops');
     expect(tables).toContain('bookings');
-    expect(tables).toContain('discovery_cache');
     expect(tables).toContain('place_resolution_cache');
     expect(tables).toContain('copilot_messages');
   });
@@ -85,8 +84,9 @@ describe('migrations', () => {
     // Running again should not throw (idempotent — already-applied files are skipped)
     await expect(runMigrations()).resolves.not.toThrow();
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
-    // 001-018, 019 (fix_google_cn_coordinates), and 020 (reset_bali_catalogue).
-    expect(count.c).toBe(20);
+    // 001-018, 019 (fix_google_cn_coordinates), 020 (reset_bali_catalogue),
+    // 021 (canonicalize_discovery_keys), and 022 (drop_dead_discovery_cache).
+    expect(count.c).toBe(22);
   });
 
   it('retires the legacy trip destination array columns', () => {
@@ -109,6 +109,18 @@ describe('migrations', () => {
     ).all().map(r => r.name);
 
     expect(tables).not.toContain('global_discovery_cache');
+    // The normalized catalogue tables that replaced it stay present.
+    expect(tables).toContain('discovery_destinations');
+    expect(tables).toContain('discovery_places');
+  });
+
+  it('drops the dead discovery_cache table (Plan 8 Wave 6)', () => {
+    const db = getDb();
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all().map(r => r.name);
+
+    expect(tables).not.toContain('discovery_cache');
     // The normalized catalogue tables that replaced it stay present.
     expect(tables).toContain('discovery_destinations');
     expect(tables).toContain('discovery_places');

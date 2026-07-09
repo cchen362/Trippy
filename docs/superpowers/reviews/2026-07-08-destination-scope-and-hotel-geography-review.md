@@ -1,6 +1,6 @@
 # Destination Scope and Hotel Geography Review
 
-**Status: OPEN - recommendation ready; implementation not started.**
+**Status: CLOSED (2026-07-09) — implemented and deployed via [Implementation Plan 8](../plans/Implementation%20Plan%208%20Destination%20Scopes%20and%20Geography%20Identity.md) (all six waves, incl. W6 catalogue cleanup migrations 021/022).**
 
 **Parent / prior context:**
 [Region Destinations and Day-City Extraction](2026-07-08-region-destinations-and-day-city-extraction.md),
