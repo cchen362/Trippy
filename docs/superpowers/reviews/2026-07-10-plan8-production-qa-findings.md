@@ -241,6 +241,42 @@ regenerates as `hangzhou|CN` for pennies); repair the Park Hyatt booking's CJK
 `details_json` fields (or owner re-picks the hotel after W1). Guard: Discovery route
 falls back to trip-level country when day country is null, so twins can't regenerate.
 
+**Design decisions for Plan 9 (scenario-hardened 2026-07-10, owner review pending on D2–D5):**
+
+- **D1 (settled by owner): chips are scope vocabulary, never day allocation.** Adding a
+  chip stores a scope (fixing the Edit-Trip no-op); removing one shrinks the vocabulary
+  and touches no day; the trip card derives from vocabulary ∪ resolved-day cities, so a
+  two-chip trip reads "Shanghai · Hangzhou" from creation even while all headers seed
+  Shanghai. Days move only via bookings and overrides.
+- **D2: scopes must be persisted** (`{label, countryCode, kind, placeId, bounds, source}`)
+  — reverses Plan 8 §1's "no new tables" for scopes, now justified by three consumers
+  (chip persistence, rule-1 promotion targets, containment matching). Backfill existing
+  trips from day seeds + overrides ONLY — never from hotel-derived labels (`杭州市` must
+  not become a stored scope). The picker's `placePrediction.placeId` is currently dropped
+  at `lookups.js:242-245`; keep it at selection time.
+- **D3: containment matching (rule 1.5), upgraded from "later" to Plan 9.** Scenario S4
+  proved renaming a chip can never heal cross-script hotel-derived headers (杭州市 vs
+  "Hangzhou" strings are unrelatable) — without containment, the only remedies are
+  per-day overrides forever or per-booking data surgery. With bounds captured once at
+  chip selection, hotel lat/lng point-in-bounds promotes to the chip label; the existing
+  Shanghai–Hangzhou trip heals read-time the moment a "Hangzhou" chip is added. Ties:
+  string match first, then smallest containing bounds. Free-text chips have no bounds →
+  no containment (rules 2/3 unchanged). Residual known limitation: pinyin homographs
+  (苏州/宿州 both "Suzhou") under pure string rules; containment disambiguates when
+  bounds exist.
+- **D4: creation seeding stays all-days = chip #1.** Even-split rejected: it guesses the
+  allocation wrong, and wrong seeds are sticky. The "why is everything Shanghai" oddity
+  is addressed by D1's trip-card change plus hotel-driven movement.
+- **D5: overlapping hotels — latest check-in should win the night.** Today
+  `listBookingsForTrip` orders by start ASC and `deriveDayGeo` takes the FIRST active
+  hotel (`trips.js:295,680`), so the earlier hotel silently wins overlapping nights: a
+  Suzhou hotel added inside a longer Hangzhou stay moves nothing, with no signal. Latest
+  check-in matches where the traveler actually sleeps. Needs a fixture + regression test.
+- **D6: Discovery empty-country guard.** When a request carries no country and exactly one
+  country-coded catalogue row exists for the same city key, reuse it instead of creating
+  the `''` twin (`getOrCreateDestination` is exact-match today, `discoveryCatalogue.js:24`).
+  Deliberate CJK free-text keys (北京, 南疆) stay valid. Pairs with W5's day-country stamp.
+
 **W6 — Production verification.**
 Re-run this session's checks: derivation replay shows `Hangzhou`; catalogue has no CJK or
 empty-country keys for Latin-scope trips; rapid add/move in Plan produces no state loss at
