@@ -9,6 +9,7 @@ import { createBooking, updateBooking } from '../src/services/bookings.js';
 import { createStop, reorderStops, repairTripStopLocations, updateStop } from '../src/services/stops.js';
 import { createTrip } from '../src/services/trips.js';
 import { getTripMapData } from '../src/services/mapData.js';
+import * as unsplashService from '../src/services/unsplash.js';
 
 let tmpDir;
 let user;
@@ -838,5 +839,101 @@ describe('booking-linked itinerary stops', () => {
       booking_id: booking.id,
       booking_required: 0,
     });
+  });
+});
+
+describe('resolutionAnchor consumption (Plan 8 Wave 5 — Task 5.1)', () => {
+  it('biases geocoding with the active hotel resolutionAnchor label/country instead of the resolved city', async () => {
+    const seoulTrip = createTrip(user.id, {
+      title: 'Seoul Anchor Trip',
+      destinations: [{ city: 'Seoul', countryCode: 'KR' }],
+      startDate: '2026-08-01',
+      endDate: '2026-08-01',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const seoulDay = seoulTrip.days[0].id;
+
+    // Hotel resolves the day's city to "Seoul" (via the locality candidate), but its
+    // sublocality ("Gangnam-gu") is more specific evidence than the resolved city and
+    // is demoted to resolutionAnchor rather than winning the city ladder.
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Gangnam Hotel', '2026-08-01T15:00', '2026-08-02T11:00', ?)
+    `).run(seoulTrip.trip.id, JSON.stringify({
+      locality: 'Seoul',
+      sublocality: 'Gangnam-gu',
+      countryCode: 'KR',
+    }));
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    await createStop(user.id, seoulDay, {
+      title: 'Some Local Cafe',
+      locationQuery: 'Some Local Cafe',
+      unsplashPhotoUrl: null,
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.searchParams.get('q')).toBe('Some Local Cafe, Gangnam-gu');
+    expect(url.searchParams.get('countrycodes')).toBe('kr');
+  });
+
+  it('falls back to the resolved city for geocoding bias when the day has no resolutionAnchor', async () => {
+    const seoulTrip = createTrip(user.id, {
+      title: 'Seoul No Anchor Trip',
+      destinations: [{ city: 'Seoul', countryCode: 'KR' }],
+      startDate: '2026-08-01',
+      endDate: '2026-08-01',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const seoulDay = seoulTrip.days[0].id;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    await createStop(user.id, seoulDay, {
+      title: 'Some Local Cafe',
+      locationQuery: 'Some Local Cafe',
+      unsplashPhotoUrl: null,
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.searchParams.get('q')).toBe('Some Local Cafe, Seoul');
+    expect(url.searchParams.get('countrycodes')).toBe('kr');
+  });
+
+  it('uses the resolved (hotel-promoted) city for photo queries, not the raw seed day city', async () => {
+    const multiCityTrip = createTrip(user.id, {
+      title: 'Chengdu Chongqing Hotel Photo',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
+      startDate: '2026-06-09',
+      endDate: '2026-06-09',
+      travellers: 'couple',
+      interestTags: ['food'],
+      pace: 'moderate',
+    });
+    const day = multiCityTrip.days[0];
+    // Seed says "Chengdu" (createTrip seeds every day from the first destination pair),
+    // but a Chongqing hotel is active that night, so the day's resolved city is Chongqing.
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json)
+      VALUES (?, 'hotel', 'Chongqing Hotel', '2026-06-09T15:00', '2026-06-10T11:00', ?)
+    `).run(multiCityTrip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
+
+    const pickPhotoSpy = vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(null);
+
+    await createStop(user.id, day.id, {
+      title: 'Random New Spot',
+      type: 'experience',
+    });
+
+    expect(pickPhotoSpy).toHaveBeenCalledOnce();
+    const { query, fallbackQuery } = pickPhotoSpy.mock.calls[0][0];
+    expect(query).toContain('Chongqing');
+    expect(query).not.toContain('Chengdu');
+    expect(fallbackQuery).toContain('Chongqing');
   });
 });

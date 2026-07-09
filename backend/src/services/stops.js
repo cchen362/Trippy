@@ -160,10 +160,12 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
   // City/country bias follows the derived day geography (deriveDayGeo via getDayGeo),
   // not the seeded day row — this is the fix for the geocoder ignoring the derivation
   // it sits next to (review §1.3): a day whose resolved city has moved past its seed
-  // now biases geocoding correctly. Explicit caller overrides (discovery) still win.
+  // now biases geocoding correctly. The active hotel's resolutionAnchor, when present,
+  // is more specific evidence than the resolved city and takes priority over it for
+  // bias (Plan 8 Wave 5 §5.1). Explicit caller overrides (discovery) still win first.
   const dayGeo = getDayGeo(day.id);
-  const resolutionCity = input.locationCity ?? input.city ?? dayGeo.city ?? day.city;
-  const resolutionCountry = input.locationCountry ?? input.country ?? dayGeo.countryCode;
+  const resolutionCity = input.locationCity ?? input.city ?? dayGeo.resolutionAnchor?.label ?? dayGeo.city ?? day.city;
+  const resolutionCountry = input.locationCountry ?? input.country ?? dayGeo.resolutionAnchor?.countryCode ?? dayGeo.countryCode;
   const locationAliases = locationAliasesForInput(input);
   const inputHasCoordinates = hasCoordinates(input);
   const trustedCoordinates = inputHasCoordinates && hasTrustedCoordinateMetadata(input);
@@ -346,12 +348,14 @@ export async function createStop(userId, dayId, input) {
   }
 
   const type = input.type || 'explore';
+  const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input });
   const dayIndex = getDayIndex(day.trip_id, day.date);
   const unsplashPhotoUrl = await resolvePhotoUrl({
     title,
     type,
-    city: day.city,
+    // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
+    city: dayGeo.city ?? day.city,
     dayIndex,
     existingUrl: input.unsplashPhotoUrl,
   });
@@ -416,6 +420,7 @@ export async function updateStop(userId, stopId, input) {
 
   const title = (input.title ?? existing.title)?.trim();
   const type = input.type ?? existing.type;
+  const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input, existing });
   const shouldRefreshPhoto = isMoving || input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
   const dayIndex = getDayIndex(day.trip_id, day.date);
@@ -423,7 +428,8 @@ export async function updateStop(userId, stopId, input) {
     ? await resolvePhotoUrl({
       title,
       type,
-      city: day.city,
+      // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
+      city: dayGeo.city ?? day.city,
       dayIndex,
       existingUrl: input.unsplashPhotoUrl,
     })
@@ -598,7 +604,7 @@ export async function backfillTripPhotos(userId, tripId) {
   if (!trip) throw Object.assign(new Error('Not found'), { status: 404 });
 
   const nullStops = db.prepare(`
-    SELECT s.id, s.title, s.type, d.city, d.trip_id, d.date
+    SELECT s.id, s.title, s.type, s.day_id, d.city, d.trip_id, d.date
     FROM stops s
     JOIN days d ON s.day_id = d.id
     WHERE d.trip_id = ? AND s.unsplash_photo_url IS NULL AND s.type != 'transit'
@@ -607,7 +613,9 @@ export async function backfillTripPhotos(userId, tripId) {
   const updated = [];
   for (const s of nullStops) {
     const dayIndex = getDayIndex(s.trip_id, s.date);
-    const url = await resolvePhotoUrl({ title: s.title, type: s.type, city: s.city, dayIndex });
+    // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
+    const dayGeo = getDayGeo(s.day_id);
+    const url = await resolvePhotoUrl({ title: s.title, type: s.type, city: dayGeo.city ?? s.city, dayIndex });
     if (url) {
       db.prepare('UPDATE stops SET unsplash_photo_url = ? WHERE id = ?').run(url, s.id);
       updated.push(s.id);
@@ -770,10 +778,13 @@ export async function syncStopWithBooking(booking) {
   };
 
   const dayIndex = getDayIndex(day.trip_id, day.date);
+  // Photos want broad-scope imagery, so the resolved city wins when present, falling
+  // back to the booking's own city hint then the raw seed — Plan 8 Wave 5 §5.1.
+  const dayGeo = getDayGeo(day.id);
   const unsplashPhotoUrl = await resolvePhotoUrl({
     title: inferred.title,
     type: inferred.type,
-    city: inferred.cityHint || day.city,
+    city: dayGeo.city || inferred.cityHint || day.city,
     dayIndex,
     existingUrl: existingStop?.unsplash_photo_url,
   });

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Flag, X } from 'lucide-react';
 import DayPicker from './DayPicker.jsx';
+import { canonicalGeoKey } from '../../utils/geoIdentity.js';
 
 // Parses a 'YYYY-MM-DD' calendar date string as local (device) midnight rather
 // than UTC midnight. `new Date('YYYY-MM-DD')` parses as UTC, which renders as
@@ -74,10 +75,10 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
   // (suggestions don't carry their own city; they're all fetched per-destination),
   // and it keeps the indicator meaningful: a same-named place added under a
   // different city no longer shadows this one.
-  const normalizedDestination = normalizeName(destination ?? '');
+  const normalizedDestination = canonicalGeoKey(destination ?? '');
   const normalizedName = normalizeName(name ?? '');
   const relevantDays = normalizedDestination
-    ? (days ?? []).filter((d) => normalizeName(d.resolvedCity ?? d.city ?? '') === normalizedDestination)
+    ? (days ?? []).filter((d) => canonicalGeoKey(d.resolvedCity ?? d.city ?? '') === normalizedDestination)
     : (days ?? []);
   const addedToDayIds = new Set(
     relevantDays.flatMap((d) =>

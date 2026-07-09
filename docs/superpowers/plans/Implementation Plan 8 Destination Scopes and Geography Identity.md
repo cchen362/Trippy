@@ -1,6 +1,6 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 + W4 complete; W5 may ship next.**
+**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 + W4 + W5 complete; W6 remains.**
 Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
 log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
 for plan completion** — W6's gate is sequencing only, not a maybe.
@@ -568,7 +568,33 @@ autocomplete cities normally.
 
 ---
 
-## Wave 5 — Consumer alignment (NOT STARTED)
+## Wave 5 — Consumer alignment (DONE 2026-07-09)
+
+> **Completion notes (2026-07-09):** All of 5.1–5.4 shipped. Backend 375→378 tests, frontend
+> 57→66, all green; build clean. Browser-verified at 375 px against the seeded Taipei-Kaohsiung
+> trip: on the anchor-carrying night (Jul 26, `resolutionAnchor: {label: "Sinsing District",
+> countryCode: "TW"}` — confirmed via a direct `getDayGeo` query across all seven days, since
+> the demotion-warn log fires per hotel-night on every `getDayGeo` replay and doesn't by itself
+> identify which specific day carries the anchor), adding a stop with a nonsense title (to force
+> the server-side Nominatim fallback rather than a client-side Places match) wrote a
+> `place_resolution_cache` row keyed `...|sinsing district|tw` — the resolver received the
+> anchor, not the resolved city `"Kaohsiung"`, exactly per 5.1. Cross-checked photo-query
+> behavior via code review (4 call sites now use resolved city, not raw seed) since the
+> anchor/city didn't differ on the available fixture nights. Exercised Discovery cross-city:
+> searched "Chengdu" (cached catalogue, 164 places) while browsing the Kaohsiung trip's Taipei
+> day and added a suggestion — resolved country came back `CN` (correct; the suggestion was
+> `provenance: "unverified"`, which takes the fallback branch and resolves via the real
+> place lookup, so final `countryCode` reflects the true resolved place regardless of bias —
+> the 5.2 fix specifically prevents the wrong day country from being asserted as an input bias
+> when resolution can't determine one itself; covered concretely by the two country-matrix
+> unit tests). Plan/Today/Map headers all read "Taipei" consistently via `dayDisplayLabel` at
+> 375 px; ShareViewPage's equivalent change was verified by code review + its unit test only
+> (no share link existed for this trip and creating one was out of scope for this session).
+> Deviations: none from spec. One correction made mid-session: the first verification attempt
+> added a stop via the client-side Places autocomplete match, which resolves through the
+> `trustedCoordinates` fast path and bypasses the server bias ladder entirely — a nonsense
+> title was needed to force the fallback resolution path that actually exercises 5.1's ladder.
+> All test stops created during verification were deleted afterward.
 
 **Goal:** every consumer reads the role it should: anchors bias lookup, scopes drive
 Discovery and display, and the frontend has one fallback chain instead of nine.
@@ -780,5 +806,5 @@ new fragment-shaped key.
 - W2 guarded promotion + anchors + demotion log: **DONE 2026-07-09** (368/43 tests green, browser-verified against production-shaped Bali + Taipei-Kaohsiung trips; see Wave 2 completion notes for five documented deviations/decisions; Task 1.2 production sweep also closed this session)
 - W3 booking write path + hotel names: **DONE 2026-07-09** (370/51 tests green, browser-verified with live Places calls on the seeded Bali + Taipei-Kaohsiung trips; see Wave 3 completion notes for five documented deviations/observations)
 - W4 destination-scope picker: **DONE 2026-07-09** (375/57 tests green, browser-verified with live Places calls: Bali→REGION/ID, Kaohsiung→city-kind, transit fields unaffected, `/cities` route removed; see Wave 4 completion notes for the no-session-token decision and two other deviations)
-- W5 consumer alignment: **not started**
+- W5 consumer alignment: **DONE 2026-07-09** (375/57 → 378/66 tests green, browser-verified: resolver confirmed to receive the anchor label/country over the resolved city on the Kaohsiung anchor night, cross-city Discovery add stamps the correct resolved country, `dayDisplayLabel` adopted consistently across Plan/Today/Map with MapTab's redundant `cityOverride` prefix and AddPlaceModal's reversed fallback both fixed; see Wave 5 completion notes for the verification-methodology deviation)
 - W6 data cleanup + doc debt (mandatory, runs last): **not started**

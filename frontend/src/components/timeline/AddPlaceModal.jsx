@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { dayDisplayLabel } from '../../utils/dayGeo.js';
 
 const EMPTY_FORM = {
   title: '',
@@ -29,7 +30,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
   // carried through to the Place Details call, then discarded.
   const [sessionToken, setSessionToken] = useState(null);
   const canSubmit = useMemo(() => form.title.trim().length > 0, [form.title]);
-  const near = day?.resolvedCity || day?.city || '';
+  const near = dayDisplayLabel(day);
 
   useEffect(() => {
     if (open) {
@@ -175,7 +176,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
                 Add Place
               </p>
               <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                {day?.city || day?.resolvedCity || 'New stop'}
+                {dayDisplayLabel(day) || 'New stop'}
               </h2>
             </div>
             <button

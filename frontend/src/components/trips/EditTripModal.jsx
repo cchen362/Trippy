@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
 import DestinationChipPicker from './DestinationChipPicker';
+import { dayDisplayLabel } from '../../utils/dayGeo.js';
 
 // Pre-fill source for the destination chips: prefer the per-day resolved pairs (Wave 2's
 // resolvedCity/resolvedCountry on each day), de-duped in day order, since that reflects
@@ -13,7 +14,7 @@ function deriveInitialChips(trip, days) {
     const chips = [];
     const seen = new Set();
     for (const day of days) {
-      const city = day.resolvedCity ?? day.city;
+      const city = dayDisplayLabel(day);
       if (!city || seen.has(city)) continue;
       seen.add(city);
       chips.push({ label: city, countryCode: day.resolvedCountry ?? null, kind: null });

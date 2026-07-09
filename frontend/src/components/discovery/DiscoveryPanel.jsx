@@ -4,6 +4,7 @@ import SuggestionCard from './SuggestionCard.jsx';
 import DayPicker from './DayPicker.jsx';
 import { bookingsApi } from '../../services/bookingsApi.js';
 import { discoveryApi } from '../../services/discoveryApi.js';
+import { canonicalGeoKey } from '../../utils/geoIdentity.js';
 
 const TAG_TO_CATEGORY = {
   'food & drink': 'food',
@@ -411,6 +412,16 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     const isVerifiedWithCoordinates = suggestion.provenance === 'verified'
       && Number.isFinite(suggestion.lat) && Number.isFinite(suggestion.lng);
 
+    // If the user searched a different destination than the active day's own
+    // resolved scope, the searched destination's country is the correct one
+    // to stamp — blindly using activeDay.resolvedCountry would mismatch the
+    // city/country pair when adding a cross-city suggestion to this day.
+    const activeDayCityKey = canonicalGeoKey(activeDay?.resolvedCity ?? activeDay?.city ?? '');
+    const searchedDestinationKey = canonicalGeoKey(committedDestination);
+    const resolvedLocationCountry = searchedDestinationKey && searchedDestinationKey !== activeDayCityKey
+      ? committedCountry
+      : (activeDay?.resolvedCountry ?? null);
+
     if (isVerifiedWithCoordinates) {
       // Trusted fast path (Wave 4 §4.4) — same shape handleAddPlaceResult
       // uses for a resolved Google Places pick, skipping a redundant
@@ -428,7 +439,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         providerId: suggestion.placeRef,
         locationQuery: suggestion.name,
         locationCity: committedDestination.trim(),
-        locationCountry: activeDay?.resolvedCountry ?? null,
+        locationCountry: resolvedLocationCountry,
         localName: suggestion.localName,
         locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
         duration: suggestion.estimatedDuration,
@@ -444,7 +455,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       note: suggestion.description,
       locationQuery: suggestion.name,
       locationCity: committedDestination.trim(),
-      locationCountry: activeDay?.resolvedCountry ?? null,
+      locationCountry: resolvedLocationCountry,
       localName: suggestion.localName,
       locationAliases: [suggestion.localName, ...(Array.isArray(suggestion.aliases) ? suggestion.aliases : [])].filter(Boolean),
       duration: suggestion.estimatedDuration,

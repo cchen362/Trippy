@@ -8,6 +8,7 @@ import HeroCard from '../components/today/HeroCard.jsx';
 import UpcomingRow from '../components/today/UpcomingRow.jsx';
 import TonightCard from '../components/today/TonightCard.jsx';
 import CollapsedRow from '../components/today/CollapsedRow.jsx';
+import { dayDisplayLabel } from '../utils/dayGeo.js';
 
 export default function TodayTab() {
   const { trip, days, bookings, live } = useTripContext();
@@ -27,7 +28,7 @@ export default function TodayTab() {
   const todayDay = days.find((d) => d.date === todayIso);
   const todayMapConfig = mapConfigByDay[todayDay?.id] ?? mapConfig;
   const dayIndex = todayDay ? todayDay.dayIndex : null;
-  const cityLabel = todayDay?.resolvedCity || todayDay?.city || trip.destinations?.[0] || '';
+  const cityLabel = dayDisplayLabel(todayDay) || trip.destinations?.[0] || '';
   const weekday = new Date(`${todayIso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short' });
 
   const tonightStop = model.tonight

@@ -231,6 +231,69 @@ describe('DiscoveryPanel — trusted add-to-trip (Wave 4 §4.4)', () => {
   });
 });
 
+describe('DiscoveryPanel — cross-city country selection (Wave 5 §5.2)', () => {
+  it('uses the active day\'s resolved country when the committed search matches the day\'s own city', async () => {
+    const partialResults = {
+      essentials: [{ id: 10, name: 'Local Spot', description: 'Right here.', estimatedDuration: '1h' }],
+    };
+    const completedCategories = new Set(['essentials']);
+    const onAddStop = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={onAddStop}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({ partialResults, completedCategories })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /add to day/i }));
+    fireEvent.click(screen.getByText('Day 1'));
+
+    await waitFor(() => expect(onAddStop).toHaveBeenCalled());
+    const [, payload] = onAddStop.mock.calls[0];
+    expect(payload.locationCountry).toBe('TV');
+  });
+
+  it('uses the searched destination\'s country (not the active day\'s) when the user has searched a different city', async () => {
+    const partialResults = {
+      essentials: [{ id: 11, name: 'Faraway Spot', description: 'Somewhere else.', estimatedDuration: '1h' }],
+    };
+    const completedCategories = new Set(['essentials']);
+    const onAddStop = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={onAddStop}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({ partialResults, completedCategories })}
+      />,
+    );
+
+    // Manually search a different destination than the active day's own
+    // resolved city ("Testville") — the free-text "Go" search has no country
+    // field, so committedCountry is cleared to null rather than reusing the
+    // active day's country (Wave 4 §4.1). That null must win over
+    // activeDay.resolvedCountry when adding a suggestion.
+    fireEvent.change(screen.getByPlaceholderText('Destination'), { target: { value: 'Othertown' } });
+    fireEvent.click(screen.getByRole('button', { name: /^go$/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /add to day/i }));
+    fireEvent.click(screen.getByText('Day 1'));
+
+    await waitFor(() => expect(onAddStop).toHaveBeenCalled());
+    const [, payload] = onAddStop.mock.calls[0];
+    expect(payload.locationCountry).toBeNull();
+    expect(payload.locationCity).toBe('Othertown');
+  });
+});
+
 describe('DiscoveryPanel — report flow (Wave 4 §4.3)', () => {
   it('is a two-step flow: the flag icon alone does not report', async () => {
     discoveryApi.reportPlace.mockResolvedValue({ suppressed: true });

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
 import { tripsApi } from '../services/tripsApi.js';
+import { dayDisplayLabel } from '../utils/dayGeo.js';
 
 function formatDate(value) {
   return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
@@ -114,7 +115,7 @@ export default function ShareViewPage() {
                   Day {dayIndex + 1} / {formatDate(day.date)}
                 </p>
                 <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                  {day.resolvedCity || day.city || day.theme || 'Open day'}
+                  {dayDisplayLabel(day) || day.theme || 'Open day'}
                 </h2>
               </div>
               <div className="grid gap-4">

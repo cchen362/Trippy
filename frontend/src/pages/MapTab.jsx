@@ -5,6 +5,7 @@ import DayTabs from '../components/timeline/DayTabs.jsx';
 import MapSequencePanel from '../components/map/MapSequencePanel.jsx';
 import TripMap from '../components/map/TripMap.jsx';
 import { bookingsApi } from '../services/bookingsApi.js';
+import { dayDisplayLabel } from '../utils/dayGeo.js';
 
 // TopBar ~56px + BottomNav ~64px + DayTabs ~52px + main vertical padding ~48px = ~220px
 const MAP_HEIGHT = 'calc(100vh - 220px)';
@@ -32,7 +33,7 @@ export default function MapTab() {
   const [sessionToken, setSessionToken] = useState(null);
 
   const activeDay = days.find((day) => day.id === activeDayId);
-  const nearCity = activeDay?.cityOverride || activeDay?.resolvedCity || activeDay?.city || '';
+  const nearCity = dayDisplayLabel(activeDay) || '';
   const mapRefreshKey = JSON.stringify([
     ...days.map((day) => ({
       id: day.id,

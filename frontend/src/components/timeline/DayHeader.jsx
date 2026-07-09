@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 import GoldRule from '../common/GoldRule.jsx';
+import { dayDisplayLabel } from '../../utils/dayGeo.js';
 
 export default function DayHeader({ day, dayNumber, onCityOverride }) {
   const [editing, setEditing] = useState(false);
@@ -14,7 +15,7 @@ export default function DayHeader({ day, dayNumber, onCityOverride }) {
 
   if (!day) return null;
 
-  const city = day.resolvedCity ?? day.city;
+  const city = dayDisplayLabel(day);
 
   const startEdit = () => {
     setDraft(day.cityOverride ?? city ?? '');
