@@ -1,6 +1,9 @@
 # Plan 8 Production QA — Findings (2026-07-10)
 
-**Status: FINDINGS DELIVERED — awaiting owner approval before any fix work. Investigation only; no production data or code was modified.**
+**Status: CLOSED INTO PLAN 9 (2026-07-10) — findings and design decisions D1–D6 approved
+by owner and encoded in
+[Implementation Plan 9](../plans/Implementation%20Plan%209%20Language-Robust%20Scopes%20and%20Client%20State%20Integrity.md).
+Investigation only; no production data or code was modified.**
 
 **Scope:** post-deploy validation of
 [Implementation Plan 8](../plans/Implementation%20Plan%208%20Destination%20Scopes%20and%20Geography%20Identity.md)
