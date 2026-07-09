@@ -1,9 +1,9 @@
 # Implementation Plan 8 — Destination Scopes and Geography Identity
 
-**Status: IN PROGRESS (2026-07-09) — W1 + W2 + W3 + W4 + W5 complete; W6 remains.**
-Owner has accepted risk #1's default (guarded demotion) contingent on the Wave 2 demotion
-log confirming low real-world frequency. All six waves, **including W6 cleanup, are mandatory
-for plan completion** — W6's gate is sequencing only, not a maybe.
+**Status: COMPLETE (2026-07-09) — all six waves done and deployed to production.**
+Owner accepted risk #1's default (guarded demotion); the W2 demotion log is live in
+production and should be reviewed after a few weeks of real usage (count distinct
+`bookingId`s, not log lines) before deciding whether the known-city map needs extending.
 
 **Origin:**
 [Destination Scope and Hotel Geography Review](../reviews/2026-07-08-destination-scope-and-hotel-geography-review.md)
@@ -641,7 +641,39 @@ consistent at 375 px.
 
 ---
 
-## Wave 6 — Data cleanup + doc debt (NOT STARTED — runs last, after W1–W2 verified in production)
+## Wave 6 — Data cleanup + doc debt (DONE 2026-07-09)
+
+> **Completion notes (2026-07-09):** All of 6.1–6.4 shipped and deployed. Backend 378→387
+> tests, all green. This session also carried out the plan's **first production deploy**:
+> W1–W5 had never left the local machine (production was 8 commits behind at `e241001`), so
+> per owner decision the session ran two-step — deploy W1–W5, verify healing live, then build
+> and deploy W6. W1–W2 production verification (via the public share endpoint and the deployed
+> service code, read-only): Bali days seed `Denpasar` + fragment bookings yet resolve
+> `Bali/ID` with anchor `Kabupaten Badung`; Taipei-seeded days Jul 23–26 resolve `Kaohsiung`;
+> demotion warns fired exactly for the two Bali fragment bookings; Chengdu↔Chongqing movement
+> intact on the share link. **6.1 inventory findings (owner-reviewed):** production had no raw
+> un-normalized keys at all (the 016-backfill rows were single-word cities that fold
+> identically), and `days.city_country` is fully clean (ISO codes only) — the W4 finding is a
+> confirmed non-issue, no migration needed for it. Pollution present: `kabupatenbadung|ID`
+> (101 places), empty-country twins `chengdu|''` (183) / `chongqing|''` (76), plus
+> `kualalumpur|''` (160, no MY twin). **Owner decision:** all trips are test data, so 6.2's
+> merge machinery was dropped in favor of deletion — 021 deletes fragment/un-normalized/
+> twin rows (children explicitly, counts logged) and stamps `kualalumpur|''`→`MY` so the KL
+> trip's Discovery hits the existing 160-place catalogue. CJK free-text rows (`北京`, `南疆`)
+> kept — valid keys under the new folding. 022 dropped `discovery_cache` (bare DROP, 018's
+> convention; the one test expecting the table was updated to expect its absence).
+> Post-migration production state verified read-only: 9 rows, every `city_key` equals
+> `canonicalGeoKey(display_name)` (checked with the deployed helper), Bali (82 places) and
+> Kaohsiung (79) catalogues fresh until Jul 14–15, `discovery_cache` gone, health OK. Both
+> deploys took fresh pre-deploy backups (`trippy-pre-plan8-w1-5.db`,
+> `trippy-pre-plan8-w6-migrations.db`). Deviations/observations: (a) rule 4's MY-twin delete
+> branch is unreachable in a single run (rule 3 catches that case first) — kept as defensive
+> code, covered by final-state tests; (b) not verified via logged-in production browser (no
+> credentials on the dev machine) — owner should eyeball the Bali/Kaohsiung trips once;
+> (c) two ops anomalies found in passing, tracked outside this plan: the nightly backup cron
+> produced no backups Jul 8–9 despite host uptime, and the Chengdu trip's Jun 8 day carries a
+> user-typed override "ChengDu" (renders verbatim by design, decision #5 — clear the override
+> to tidy).
 
 **Mandatory for plan completion.** Gate is sequencing (cleanup before prevention would
 re-pollute) plus one owner touchpoint: reviewing the inventory before destructive changes.
@@ -807,4 +839,4 @@ new fragment-shaped key.
 - W3 booking write path + hotel names: **DONE 2026-07-09** (370/51 tests green, browser-verified with live Places calls on the seeded Bali + Taipei-Kaohsiung trips; see Wave 3 completion notes for five documented deviations/observations)
 - W4 destination-scope picker: **DONE 2026-07-09** (375/57 tests green, browser-verified with live Places calls: Bali→REGION/ID, Kaohsiung→city-kind, transit fields unaffected, `/cities` route removed; see Wave 4 completion notes for the no-session-token decision and two other deviations)
 - W5 consumer alignment: **DONE 2026-07-09** (375/57 → 378/66 tests green, browser-verified: resolver confirmed to receive the anchor label/country over the resolved city on the Kaohsiung anchor night, cross-city Discovery add stamps the correct resolved country, `dayDisplayLabel` adopted consistently across Plan/Today/Map with MapTab's redundant `cityOverride` prefix and AddPlaceModal's reversed fallback both fixed; see Wave 5 completion notes for the verification-methodology deviation)
-- W6 data cleanup + doc debt (mandatory, runs last): **not started**
+- W6 data cleanup + doc debt (mandatory, runs last): **DONE 2026-07-09** (378→387 tests green; W1–W5 and W6 both deployed to production this session with pre-deploy backups; migrations 021/022 ran clean — catalogue reduced to 9 fully-canonical rows, `discovery_cache` dropped; see Wave 6 completion notes)
