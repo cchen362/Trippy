@@ -1,15 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
 import DestinationChipPicker from './DestinationChipPicker';
 import { dayDisplayLabel } from '../../utils/dayGeo.js';
+import { canonicalGeoKey } from '../../utils/geoIdentity.js';
 
-// Pre-fill source for the destination chips: prefer the per-day resolved pairs (Wave 2's
-// resolvedCity/resolvedCountry on each day), de-duped in day order, since that reflects
-// the trip's *actual* current geography (including any city_override corrections) rather
-// than the legacy trips.destinations/destinationCountries columns, which are independent
-// arrays that can drift out of sync with each other and with what the days actually show.
-// Falls back to zipping destinations/destinationCountries when no days are available yet.
+// Pre-fill source for the destination chips: prefer trip.scopes — the durable,
+// position-ordered scope list Plan 9 introduced — since it's the source of truth for
+// "what destinations does this trip cover" independent of day-level resolution. Falls
+// back to the older per-day resolved pairs / destinations-zip logic only for cached
+// payloads that predate scopes (bounds/placeId are not carried in scopes, so those
+// fields are null — the picker re-derives them lazily if the chip is re-added).
 function deriveInitialChips(trip, days) {
+  if (Array.isArray(trip.scopes) && trip.scopes.length > 0) {
+    return trip.scopes.map((scope) => ({
+      label: scope.label,
+      countryCode: scope.countryCode ?? null,
+      kind: scope.kind ?? null,
+      placeId: null,
+      bounds: null,
+    }));
+  }
+
   if (Array.isArray(days) && days.length > 0) {
     const chips = [];
     const seen = new Set();
@@ -17,14 +28,28 @@ function deriveInitialChips(trip, days) {
       const city = dayDisplayLabel(day);
       if (!city || seen.has(city)) continue;
       seen.add(city);
-      chips.push({ label: city, countryCode: day.resolvedCountry ?? null, kind: null });
+      chips.push({ label: city, countryCode: day.resolvedCountry ?? null, kind: null, placeId: null, bounds: null });
     }
     if (chips.length > 0) return chips;
   }
 
   const destinations = trip.destinations ?? [];
   const destinationCountries = trip.destinationCountries ?? [];
-  return destinations.map((city, i) => ({ label: city, countryCode: destinationCountries[i] ?? null, kind: null }));
+  return destinations.map((city, i) => ({
+    label: city,
+    countryCode: destinationCountries[i] ?? null,
+    kind: null,
+    placeId: null,
+    bounds: null,
+  }));
+}
+
+// Count how many of the trip's currently-resolved days still show this label, for the
+// honest "removing this chip doesn't rename days" note.
+function countResolvedDaysMatching(days, label) {
+  if (!Array.isArray(days) || !label) return 0;
+  const key = canonicalGeoKey(label);
+  return days.filter((day) => canonicalGeoKey(dayDisplayLabel(day)) === key).length;
 }
 
 export default function EditTripModal({ trip, days, open, onClose, onSubmit, saving, onDelete, deleting, lookupCities }) {
@@ -36,8 +61,33 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
     interestTags: trip.interestTags ?? [],
   });
   const [destinationChips, setDestinationChips] = useState(() => deriveInitialChips(trip, days));
+  const [removalNote, setRemovalNote] = useState(null);
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // The picker owns chip-list integrity (it uses functional onChange updates so async
+  // bounds fetches can't clobber a just-added chip), so we hand it setDestinationChips
+  // directly. The removal note is a pure function of chip transitions, computed here by
+  // diffing the current chips against the previous render's value — never by resolving
+  // the picker's update against a stale snapshot, which would defeat the functional update.
+  const prevChipsRef = useRef(destinationChips);
+  useEffect(() => {
+    const prev = prevChipsRef.current;
+    if (destinationChips.length < prev.length) {
+      const removed = prev.find(
+        (chip) => !destinationChips.some((next) => next.label === chip.label)
+      );
+      const matchCount = removed ? countResolvedDaysMatching(days, removed.label) : 0;
+      setRemovalNote(
+        matchCount > 0
+          ? `${matchCount} day${matchCount === 1 ? '' : 's'} still show ${removed.label} — days keep their identity; edit day headers or bookings to change them`
+          : null
+      );
+    } else if (destinationChips.length > prev.length) {
+      setRemovalNote(null);
+    }
+    prevChipsRef.current = destinationChips;
+  }, [destinationChips, days]);
 
   if (!open) return null;
 
@@ -51,7 +101,13 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
     setError(null);
     const payload = {
       ...form,
-      destinations: destinationChips.map((chip) => ({ city: chip.label, countryCode: chip.countryCode || null })),
+      destinations: destinationChips.map((chip) => ({
+        city: chip.label,
+        countryCode: chip.countryCode || null,
+        kind: chip.kind || null,
+        placeId: chip.placeId || null,
+        bounds: chip.bounds || null,
+      })),
     };
     try {
       await onSubmit(payload);
@@ -101,6 +157,11 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
               onChange={setDestinationChips}
               lookupCities={lookupCities}
             />
+            {removalNote && (
+              <p className="sm:col-span-2 -mt-2 font-mono text-[11px] tracking-[0.08em]" style={{ color: 'var(--cream-dim)' }}>
+                {removalNote}
+              </p>
+            )}
 
             <label className="block">
               <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>

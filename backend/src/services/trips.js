@@ -114,12 +114,15 @@ function normalizeArray(value) {
   return [];
 }
 
-// destinations accepts either the legacy string-array shape (["Chengdu"]) or the new
-// paired shape ([{ city, countryCode }]) — both normalize to { city, countryCode } pairs.
+// destinations accepts either the legacy string-array shape (["Chengdu"]), the Plan 6
+// paired shape ([{ city, countryCode }]), or the Plan 9 chip shape ([{ city, countryCode,
+// kind, placeId, bounds }]) — all normalize to { city, countryCode, kind, placeId, bounds }
+// pairs. String items and object items missing kind/placeId/bounds get those fields as
+// null so every caller can rely on the full shape being present.
 function normalizeDestinationPairs(value) {
   if (!Array.isArray(value)) {
     const city = typeof value === 'string' ? value.trim() : '';
-    return city ? [{ city, countryCode: null }] : [];
+    return city ? [{ city, countryCode: null, kind: null, placeId: null, bounds: null }] : [];
   }
 
   return value
@@ -129,33 +132,49 @@ function normalizeDestinationPairs(value) {
         if (!city) return null;
         const rawCode = item.countryCode ? String(item.countryCode).trim() : '';
         const countryCode = rawCode ? (countryCodeFromName(rawCode) ?? rawCode.toUpperCase()) : null;
-        return { city, countryCode };
+        const kind = item.kind ? String(item.kind) : null;
+        const placeId = item.placeId ? String(item.placeId) : null;
+        const bounds = item.bounds && typeof item.bounds === 'object' ? item.bounds : null;
+        return { city, countryCode, kind, placeId, bounds };
       }
       const city = String(item || '').trim();
-      return city ? { city, countryCode: null } : null;
+      return city ? { city, countryCode: null, kind: null, placeId: null, bounds: null } : null;
     })
     .filter(Boolean);
 }
 
 /**
- * Builds a trip's destination scopes once from its days' seed and override cities —
- * these are the "chips" a hotel's raw city evidence is allowed to promote to (Task 2.1,
- * Plan 8 Wave 2). Callers pass either mapped camelCase days ({city, cityOverride}) or raw
- * snake_case rows ({city, city_override}) — both shapes are supported. Deduped by
- * canonicalGeoKey, first label seen wins; blanks are skipped.
+ * Builds a trip's destination scopes — these are the "chips" a hotel's raw city evidence
+ * is allowed to promote to (Task 2.1/2.2, Plan 8/9 Wave 2). Stored scopes (the trip's
+ * persisted trip_scopes rows, position-ordered) come first, then any day-derived seed/
+ * override label not already present is appended — so a chip with no matching day still
+ * appears, and a day's raw seed still appears even on a trip with no stored scopes yet
+ * (pre-Plan-9 trips, or the 023 backfill window). Deduped by canonicalGeoKey; a stored
+ * scope's label/bounds win over a day-derived duplicate. Callers pass either mapped
+ * camelCase days ({city, cityOverride}) or raw snake_case rows ({city, city_override}) —
+ * both shapes are supported.
  * @param {Array<object>} days
- * @returns {Array<{label: string, canonicalKey: string}>}
+ * @param {Array<{label: string, canonicalKey: string, boundsJson: string|null}>} storedScopes
+ * @returns {Array<{label: string, canonicalKey: string, boundsJson: string|null}>}
  */
-export function buildTripScopes(days) {
+export function buildTripScopes(days, storedScopes = []) {
   const scopes = [];
   const seenKeys = new Set();
+
+  for (const stored of storedScopes || []) {
+    const key = stored.canonicalKey || canonicalGeoKey(stored.label);
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    scopes.push({ label: stored.label, canonicalKey: key, boundsJson: stored.boundsJson ?? null });
+  }
+
   const addLabel = (label) => {
     const trimmed = typeof label === 'string' ? label.trim() : '';
     if (!trimmed) return;
     const key = canonicalGeoKey(trimmed);
     if (!key || seenKeys.has(key)) return;
     seenKeys.add(key);
-    scopes.push({ label: trimmed, canonicalKey: key });
+    scopes.push({ label: trimmed, canonicalKey: key, boundsJson: null });
   };
 
   for (const day of days || []) {
@@ -363,6 +382,173 @@ export function deriveTripDestinationsFromDays(days) {
   };
 }
 
+/**
+ * Loads a trip's persisted destination scopes (trip_scopes rows — Plan 9 Wave 2 §2.1),
+ * position-ordered. This is the durable "what destinations does this trip have" list,
+ * independent of what any day row currently resolves to.
+ * @param {string} tripId
+ * @returns {Array<{label, countryCode, kind, placeId, boundsJson, source, position, canonicalKey}>}
+ */
+export function listTripScopes(tripId) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT label, country_code, kind, place_id, bounds_json, source, position, canonical_key
+    FROM trip_scopes
+    WHERE trip_id = ?
+    ORDER BY position ASC
+  `).all(tripId).map((row) => ({
+    label: row.label,
+    countryCode: row.country_code,
+    kind: row.kind,
+    placeId: row.place_id,
+    boundsJson: row.bounds_json,
+    source: row.source,
+    position: row.position,
+    canonicalKey: row.canonical_key,
+  }));
+}
+
+function insertTripScope(db, tripId, { label, countryCode, kind, placeId, bounds, source, position, canonicalKey }) {
+  db.prepare(`
+    INSERT INTO trip_scopes (trip_id, label, country_code, kind, place_id, bounds_json, source, canonical_key, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    tripId,
+    label,
+    countryCode || null,
+    kind || null,
+    placeId || null,
+    bounds ? JSON.stringify(bounds) : null,
+    source,
+    canonicalKey,
+    position,
+  );
+}
+
+// Writes one trip_scopes row per submitted chip, in the caller's transaction — used only
+// by createTrip, where every chip is brand new (no reconcile needed against prior rows).
+// Chips with a blank or duplicate canonicalKey are skipped (first-seen wins).
+function seedTripScopesFromChips(db, tripId, destinationPairs) {
+  const seenKeys = new Set();
+  let position = 0;
+  for (const pair of destinationPairs) {
+    const canonicalKey = canonicalGeoKey(pair.city);
+    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
+    seenKeys.add(canonicalKey);
+    insertTripScope(db, tripId, {
+      label: pair.city,
+      countryCode: pair.countryCode,
+      kind: pair.kind,
+      placeId: pair.placeId,
+      bounds: pair.bounds,
+      source: pair.kind === 'freetext' ? 'freetext' : 'picker',
+      position,
+      canonicalKey,
+    });
+    position += 1;
+  }
+}
+
+// Reconciles a trip's persisted scope rows against a freshly submitted chip list
+// (updateTrip's destination chip editor — Plan 9 Wave 2 §2.2). Days are never touched:
+// this only adds/updates/removes trip_scopes rows. A submitted chip that matches an
+// existing row's canonicalKey UPDATEs that row's position/label, and only overwrites
+// country/kind/placeId/bounds when the submitted chip actually carries them — so
+// re-submitting a chip the client loaded from `scopes` (which never carries bounds/
+// placeId) doesn't wipe out bounds a previous picker selection stored. A submitted chip
+// with no matching row is INSERTed fresh. Any existing row whose canonicalKey isn't in
+// the new submitted set is DELETEd.
+function reconcileTripScopes(db, tripId, destinationPairs) {
+  const existingScopes = listTripScopes(tripId);
+  const existingByKey = new Map(existingScopes.map((scope) => [scope.canonicalKey, scope]));
+
+  const newKeys = new Set();
+  const dedupedPairs = [];
+  for (const pair of destinationPairs) {
+    const canonicalKey = canonicalGeoKey(pair.city);
+    if (!canonicalKey || newKeys.has(canonicalKey)) continue;
+    newKeys.add(canonicalKey);
+    dedupedPairs.push({ ...pair, canonicalKey });
+  }
+
+  for (const scope of existingScopes) {
+    if (!newKeys.has(scope.canonicalKey)) {
+      db.prepare('DELETE FROM trip_scopes WHERE trip_id = ? AND canonical_key = ?').run(tripId, scope.canonicalKey);
+    }
+  }
+
+  const updateStmt = db.prepare(`
+    UPDATE trip_scopes
+    SET position = ?, label = ?, country_code = ?, kind = ?, place_id = ?, bounds_json = ?
+    WHERE trip_id = ? AND canonical_key = ?
+  `);
+
+  dedupedPairs.forEach((pair, position) => {
+    const existing = existingByKey.get(pair.canonicalKey);
+    if (existing) {
+      const providesBounds = pair.placeId || pair.bounds;
+      updateStmt.run(
+        position,
+        pair.city,
+        providesBounds ? (pair.countryCode || null) : existing.countryCode,
+        providesBounds ? (pair.kind || null) : existing.kind,
+        providesBounds ? (pair.placeId || null) : existing.placeId,
+        providesBounds ? (pair.bounds ? JSON.stringify(pair.bounds) : null) : existing.boundsJson,
+        tripId,
+        pair.canonicalKey,
+      );
+    } else {
+      insertTripScope(db, tripId, {
+        label: pair.city,
+        countryCode: pair.countryCode,
+        kind: pair.kind,
+        placeId: pair.placeId,
+        bounds: pair.bounds,
+        source: pair.kind === 'freetext' ? 'freetext' : 'picker',
+        position,
+        canonicalKey: pair.canonicalKey,
+      });
+    }
+  });
+}
+
+/**
+ * Combines a trip's persisted scopes with its day-derived resolved pairs into the
+ * legacy trips.destinations/destinationCountries response shape (Plan 9 Wave 2 §2.2).
+ * Stored scopes come first, in position order — they are the durable, user-edited
+ * destination list — followed by any day-resolved city not already covered (dedup by
+ * canonicalGeoKey), so a city only ever reached via booking resolution (never an
+ * explicit chip) still surfaces. destinationCountries preserves the legacy
+ * pairs.map(p => p.countryCode).filter(Boolean) shape/quirk exactly — a scope's country
+ * comes from its own country_code.
+ * @param {Array<{label, countryCode, canonicalKey}>} storedScopes
+ * @param {Array<{city, countryCode}>} dayDerivedPairs
+ * @returns {{destinations: string[], destinationCountries: string[]}}
+ */
+export function mergeDestinationsWithScopes(storedScopes, dayDerivedPairs) {
+  const seenKeys = new Set();
+  const pairs = [];
+
+  for (const scope of storedScopes || []) {
+    const canonicalKey = scope.canonicalKey || canonicalGeoKey(scope.label);
+    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
+    seenKeys.add(canonicalKey);
+    pairs.push({ city: scope.label, countryCode: scope.countryCode || null });
+  }
+
+  for (const pair of dayDerivedPairs || []) {
+    const canonicalKey = canonicalGeoKey(pair.city);
+    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
+    seenKeys.add(canonicalKey);
+    pairs.push({ city: pair.city, countryCode: pair.countryCode || null });
+  }
+
+  return {
+    destinations: pairs.map((p) => p.city),
+    destinationCountries: pairs.map((p) => p.countryCode).filter(Boolean),
+  };
+}
+
 export function assertTripAccess(userId, tripId) {
   const db = getDb();
   const trip = db.prepare(`
@@ -452,8 +638,11 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
   return rows.map((row) => {
     const bookings = listBookingsForTrip(row.id);
     const days = listDaysForTrip(row.id, userId, bookings);
-    const { destinations, destinationCountries } = deriveTripDestinationsFromDays(
+    const dayDerivedPairs = deriveTripDestinationPairsFromDays(
       days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
+    );
+    const { destinations, destinationCountries } = mergeDestinationsWithScopes(
+      listTripScopes(row.id), dayDerivedPairs,
     );
     return mapTrip(row, today, destinations, destinationCountries);
   });
@@ -483,6 +672,13 @@ export function createTrip(userId, input) {
     .map((raw) => countryCodeFromName(raw) ?? raw);
   const pairCountries = destinationPairs.map((pair) => pair.countryCode).filter(Boolean);
   const destinationCountries = legacyCountries.length ? legacyCountries : pairCountries;
+  // Scope rows carry each chip's own countryCode; the legacy destinationCountries array
+  // (a separate, positional list some older callers still send) fills in only when a
+  // given pair has no embedded country of its own.
+  const scopeSeedPairs = destinationPairs.map((pair, index) => ({
+    ...pair,
+    countryCode: pair.countryCode || destinationCountries[index] || null,
+  }));
   const interestTags = normalizeArray(input.interestTags);
   const defaultCity = destinations[0] || title;
   const defaultCityCountry = destinationPairs[0]?.countryCode || destinationCountries[0] || null;
@@ -524,11 +720,13 @@ export function createTrip(userId, input) {
       );
     }
 
+    seedTripScopesFromChips(db, trip.id, scopeSeedPairs);
+
     return trip.id;
   });
 
   const tripId = create();
-  return getTripDetail(tripId, userId, { destinationsOverride: { destinations, destinationCountries } });
+  return getTripDetail(tripId, userId);
 }
 
 export function updateTrip(userId, tripId, input) {
@@ -542,49 +740,18 @@ export function updateTrip(userId, tripId, input) {
     ? normalizeArray(input.interestTags)
     : parseJson(existingRow.interest_tags, []);
 
-  // Destination chip-list edit (§3.3): rewrites the seed layer (days.city/city_country)
-  // only, and only on days that have no city_override. Reordering alone (same set of
-  // {city, countryCode} pairs, any order) must not touch any day's seed — so we diff by
-  // matching each existing pair to a new pair at the same array index; a day's seed is
-  // only rewritten when the pair at its "slot" actually changed identity (rename/removal).
-  // This is deliberately positional/conservative, not a smart re-diff — it corrects wrong
-  // or renamed city identity, it does not re-plan which days belong to which destination.
-  // destinationsOverride, when set, is echoed straight through to the response (bypassing
-  // days-derivation) — matching the pre-Wave-4 behavior where an explicit edit's response
-  // reflected exactly what was submitted. When destinations isn't part of this input, no
-  // override is set and getTripDetail below derives fresh from (possibly date-extended)
-  // days instead, since there's no explicit edit to echo.
-  let destinationsOverride;
+  // Destination chip-list edit (Plan 9 Wave 2 §2.2): reconciles the trip's persisted
+  // trip_scopes rows against the submitted chip list — days are NEVER rewritten by a
+  // chip edit (the old positional rename/removal heuristic that rewrote days.city/
+  // city_country on matching-seed days is removed; see git history for that block).
+  // When `destinations` isn't part of this input, no reconcile runs and getTripDetail's
+  // scope+day merge reflects whatever scopes already exist.
   if (input.destinations !== undefined) {
-    const oldDayRows = db.prepare('SELECT city, city_country AS cityCountry FROM days WHERE trip_id = ? ORDER BY date ASC').all(tripId);
-    const oldPairs = deriveTripDestinationPairsFromDays(oldDayRows);
     const newPairs = normalizeDestinationPairs(input.destinations);
-
-    const destinations = newPairs.map((pair) => pair.city);
-    const destinationCountries = newPairs.map((pair) => pair.countryCode).filter(Boolean);
-    destinationsOverride = { destinations, destinationCountries };
-
-    // Build a rename/removal map: for each old city that no longer appears (by exact
-    // city string) anywhere in the new list, if there's a new pair at the same index,
-    // treat that as "this slot was renamed" and retarget matching-seed days to it.
-    const newCitySet = new Set(newPairs.map((p) => p.city));
-    oldPairs.forEach((oldPair, index) => {
-      if (newCitySet.has(oldPair.city)) return; // still present elsewhere — not removed/renamed
-      const replacement = newPairs[index]; // may be undefined if the list shrank
-      const days = db.prepare(`
-        SELECT id, city FROM days
-        WHERE trip_id = ? AND city_override IS NULL AND city = ?
-      `).all(tripId, oldPair.city);
-      if (!days.length) return;
-      const updateSeed = db.prepare('UPDATE days SET city = ?, city_country = ? WHERE id = ?');
-      for (const day of days) {
-        updateSeed.run(
-          replacement?.city ?? day.city,
-          replacement?.countryCode ?? null,
-          day.id,
-        );
-      }
+    const reconcile = db.transaction(() => {
+      reconcileTripScopes(db, tripId, newPairs);
     });
+    reconcile();
   }
 
   let newEndDate = existingRow.end_date;
@@ -669,7 +836,7 @@ export function updateTrip(userId, tripId, input) {
     title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, tripId,
   );
 
-  return getTripDetail(tripId, userId, { destinationsOverride });
+  return getTripDetail(tripId, userId);
 }
 
 export function listBookingsForTrip(tripId) {
@@ -693,7 +860,10 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
     ORDER BY d.date ASC
   `).all(tripId);
 
-  const tripScopes = buildTripScopes(rows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
+  const tripScopes = buildTripScopes(
+    rows.map((row) => ({ city: row.city, cityOverride: row.city_override })),
+    listTripScopes(tripId),
+  );
 
   let previousResolvedGeo = null;
   return rows.map((row, index) => {
@@ -740,7 +910,10 @@ export function getDayGeo(dayId) {
   // by a later day — but the fold itself only replays days up to and including the
   // target date, so layer 4 (previous-day carry) stays correct.
   const allRows = db.prepare('SELECT * FROM days WHERE trip_id = ? ORDER BY date ASC').all(targetDay.trip_id);
-  const tripScopes = buildTripScopes(allRows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
+  const tripScopes = buildTripScopes(
+    allRows.map((row) => ({ city: row.city, cityOverride: row.city_override })),
+    listTripScopes(targetDay.trip_id),
+  );
   const rows = allRows.filter((row) => row.date <= targetDay.date);
 
   let previousResolvedGeo = null;
@@ -759,7 +932,7 @@ export function getDayGeo(dayId) {
   return geo;
 }
 
-export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()), destinationsOverride } = {}) {
+export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } = {}) {
   const tripRow = assertTripAccess(userId, tripId);
   const db = getDb();
 
@@ -768,9 +941,18 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()), d
 
   const days = listDaysForTrip(tripId, userId, bookings);
 
-  const { destinations, destinationCountries } = destinationsOverride
-    ?? deriveTripDestinationsFromDays(days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })));
+  const storedScopes = listTripScopes(tripId);
+  const dayDerivedPairs = deriveTripDestinationPairsFromDays(
+    days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
+  );
+  const { destinations, destinationCountries } = mergeDestinationsWithScopes(storedScopes, dayDerivedPairs);
   const trip = mapTrip(tripRow, today, destinations, destinationCountries);
+  trip.scopes = storedScopes.map((scope) => ({
+    label: scope.label,
+    countryCode: scope.countryCode,
+    kind: scope.kind,
+    source: scope.source,
+  }));
 
   const stops = db.prepare(`
     SELECT *

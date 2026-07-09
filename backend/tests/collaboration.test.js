@@ -194,6 +194,8 @@ describe('share service', () => {
       title: 'Spring Chengdu',
       destinations: ['Chengdu'],
       destinationCountries: ['CN'],
+      // Plan 9 Wave 2 §2.2 additive field — the trip's persisted scope list.
+      scopes: [{ label: 'Chengdu', countryCode: 'CN', kind: null, source: 'picker' }],
       startDate: '2026-05-01',
       endDate: '2026-05-02',
       travellers: 'friends',

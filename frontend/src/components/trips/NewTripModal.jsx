@@ -148,7 +148,15 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
         startDate: prefill.startDate || current.startDate,
         endDate: prefill.endDate || current.endDate,
       }));
-      setDestinationChips(prefill.chips.map(({ city, country }) => ({ city, country })));
+      setDestinationChips(
+        prefill.chips.map(({ city, country }) => ({
+          label: city,
+          countryCode: country ?? null,
+          kind: null,
+          placeId: null,
+          bounds: null,
+        }))
+      );
       setCaptureResult({ artifactId: artifact.id, bookings: extraction.bookings });
       setPhase('details');
     } catch (err) {
@@ -163,7 +171,13 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
     setError(null);
     const payload = {
       ...form,
-      destinations: destinationChips.map((chip) => ({ city: chip.label, countryCode: chip.countryCode || null })),
+      destinations: destinationChips.map((chip) => ({
+        city: chip.label,
+        countryCode: chip.countryCode || null,
+        kind: chip.kind || null,
+        placeId: chip.placeId || null,
+        bounds: chip.bounds || null,
+      })),
     };
     if (captureResult) {
       payload.captureArtifactId = captureResult.artifactId;

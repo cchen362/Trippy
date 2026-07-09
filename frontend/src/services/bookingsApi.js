@@ -27,7 +27,16 @@ export const bookingsApi = {
     if (near) params.set('near', near);
     return request(`/api/lookups/places/search?${params}`);
   },
-  lookupCities: (query) => request(`/api/lookups/destinations?q=${encodeURIComponent(query)}`),
+  lookupCities: (query, sessionToken) => {
+    const params = new URLSearchParams({ q: query });
+    if (sessionToken) params.set('sessionToken', sessionToken);
+    return request(`/api/lookups/destinations?${params}`);
+  },
+  lookupDestinationBounds: (placeId, sessionToken) => {
+    const params = new URLSearchParams({ placeId });
+    if (sessionToken) params.set('sessionToken', sessionToken);
+    return request(`/api/lookups/destination-bounds?${params}`);
+  },
   lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
     const params = new URLSearchParams({ departureDate });
     if (flightQuery) {

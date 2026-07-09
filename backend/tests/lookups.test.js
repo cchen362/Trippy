@@ -17,6 +17,7 @@ const {
   normalizeFlightQuery,
   mergeDestinationPredictions,
   lookupDestinationPredictions,
+  lookupDestinationBounds,
 } = await import('../src/services/lookups.js');
 
 beforeEach(() => {
@@ -254,6 +255,108 @@ describe('lookupDestinationPredictions', () => {
       { label: 'Bali', countryCode: 'ID', kind: 'region' },
       { label: 'Kabupaten Badung', countryCode: 'ID', kind: 'city' },
     ]);
+  });
+
+  it('carries each suggestion\'s placeId through (Plan 9 Wave 2 §2.3)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const placeId = body.includedPrimaryTypes.includes('locality') ? 'place-city-1' : 'place-region-1';
+      return {
+        ok: true,
+        json: async () => ({
+          suggestions: [
+            {
+              placePrediction: {
+                placeId,
+                structuredFormat: {
+                  mainText: { text: body.includedPrimaryTypes.includes('locality') ? 'Chengdu' : 'Sichuan' },
+                  secondaryText: { text: 'China' },
+                },
+              },
+            },
+          ],
+        }),
+      };
+    });
+
+    const suggestions = await lookupDestinationPredictions('Chengdu');
+    expect(suggestions.find((s) => s.label === 'Chengdu').placeId).toBe('place-city-1');
+    expect(suggestions.find((s) => s.label === 'Sichuan').placeId).toBe('place-region-1');
+  });
+});
+
+describe('lookupDestinationBounds', () => {
+  it('requests languageCode=en, the viewport field mask, and joins sessionToken when present; maps viewport to bounds', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'place-bali-1',
+        viewport: {
+          low: { latitude: -8.9, longitude: 114.9 },
+          high: { latitude: -8.0, longitude: 115.7 },
+        },
+      }),
+    });
+
+    const result = await lookupDestinationBounds('place-bali-1', 'session-xyz');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe('/v1/places/place-bali-1');
+    expect(parsed.searchParams.get('languageCode')).toBe('en');
+    expect(parsed.searchParams.get('sessionToken')).toBe('session-xyz');
+    expect(options.headers['X-Goog-FieldMask']).toBe('id,location,viewport');
+
+    expect(result).toEqual({
+      placeId: 'place-bali-1',
+      bounds: {
+        low: { lat: -8.9, lng: 114.9 },
+        high: { lat: -8.0, lng: 115.7 },
+      },
+    });
+  });
+
+  it('returns bounds: null when the place has no viewport', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'place-no-viewport' }),
+    });
+
+    const result = await lookupDestinationBounds('place-no-viewport');
+    expect(result).toEqual({ placeId: 'place-no-viewport', bounds: null });
+  });
+
+  it('omits sessionToken from the URL when not provided', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'place-1' }),
+    });
+
+    await lookupDestinationBounds('place-1');
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(new URL(url).searchParams.has('sessionToken')).toBe(false);
+  });
+
+  it('rejects a blank placeId', async () => {
+    await expect(lookupDestinationBounds('')).rejects.toThrow('placeId is required');
+  });
+});
+
+describe('lookupDestinationPredictions — sessionToken threading (Plan 9 Wave 2 §2.3)', () => {
+  it('threads sessionToken into both autocomplete calls when provided', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ suggestions: [] }),
+    });
+
+    await lookupDestinationPredictions('Bali', 'session-abc');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse(call[1].body);
+      expect(body.sessionToken).toBe('session-abc');
+    }
   });
 });
 

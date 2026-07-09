@@ -1,7 +1,9 @@
 import { getDb } from '../db/database.js';
 import { getMapConfig, getMapConfigForCountry } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
-import { assertTripAccess, deriveDayGeo, deriveTripDestinationsFromDays, buildTripScopes } from './trips.js';
+import {
+  assertTripAccess, deriveDayGeo, deriveTripDestinationsFromDays, buildTripScopes, listTripScopes,
+} from './trips.js';
 
 const TRANSIT_TYPES = new Set(['flight', 'train', 'bus', 'ferry']);
 
@@ -132,9 +134,12 @@ function toGeoBooking(row) {
   };
 }
 
-function computeDayGeographies(days, bookingRows) {
+function computeDayGeographies(days, bookingRows, storedScopes = []) {
   const geoBookings = bookingRows.map(toGeoBooking);
-  const tripScopes = buildTripScopes(days.map((d) => ({ city: d.city, cityOverride: d.city_override })));
+  const tripScopes = buildTripScopes(
+    days.map((d) => ({ city: d.city, cityOverride: d.city_override })),
+    storedScopes,
+  );
   const geoByDayId = new Map();
   let previousResolvedGeo = null;
   for (const day of days) {
@@ -166,7 +171,8 @@ export function getMapConfigsForTrip(trip) {
   `).all(trip.id);
 
   const bookingRows = db.prepare('SELECT * FROM bookings WHERE trip_id = ?').all(trip.id);
-  const geoByDayId = computeDayGeographies(days, bookingRows);
+  const storedScopes = listTripScopes(trip.id);
+  const geoByDayId = computeDayGeographies(days, bookingRows, storedScopes);
 
   // Use each day's resolved (override/booking-aware) geo, not the raw seed columns — a
   // real trip's multi-country identity can come entirely from an active hotel booking

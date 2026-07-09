@@ -218,7 +218,7 @@ function extractAdminAreasFromAddressComponents(components) {
   return { aal1: find('administrative_area_level_1'), aal2: find('administrative_area_level_2') };
 }
 
-async function fetchDestinationAutocomplete(query, includedPrimaryTypes) {
+async function fetchDestinationAutocomplete(query, includedPrimaryTypes, sessionToken) {
   const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
     method: 'POST',
     headers: {
@@ -229,6 +229,7 @@ async function fetchDestinationAutocomplete(query, includedPrimaryTypes) {
       input: query,
       includedPrimaryTypes,
       languageCode: 'en',
+      ...(sessionToken ? { sessionToken } : {}),
     }),
   });
 
@@ -244,6 +245,7 @@ async function fetchDestinationAutocomplete(query, includedPrimaryTypes) {
     .map((p) => ({
       label: p.structuredFormat?.mainText?.text || p.text?.text || '',
       countryCode: countryCodeFromName(p.structuredFormat?.secondaryText?.text || ''),
+      placeId: p.placeId,
     }))
     .filter((entry) => entry.label);
 }
@@ -281,8 +283,10 @@ export function mergeDestinationPredictions(query, cityResults, regionResults) {
     .map(({ entry }) => entry);
 }
 
-// No session token: there is no follow-up Place Details call to close the session (billing discount requires a completed autocomplete→details pair).
-export async function lookupDestinationPredictions(input) {
+// sessionToken threads into both autocomplete calls (Plan 9 Wave 2 §2.3) so a completed
+// autocomplete->destination-bounds Place Details pair gets Google's billing discount —
+// mirrors lookupHotelPredictions/lookupHotelDetails's existing session-token handling.
+export async function lookupDestinationPredictions(input, sessionToken) {
   const query = input?.trim();
   if (!query || query.length < 2) {
     throw Object.assign(new Error('Destination query must be at least 2 characters'), { status: 400 });
@@ -293,8 +297,8 @@ export async function lookupDestinationPredictions(input) {
   }
 
   const [cityResults, regionResults] = await Promise.all([
-    fetchDestinationAutocomplete(query, ['locality', 'administrative_area_level_2']),
-    fetchDestinationAutocomplete(query, ['administrative_area_level_1']),
+    fetchDestinationAutocomplete(query, ['locality', 'administrative_area_level_2'], sessionToken),
+    fetchDestinationAutocomplete(query, ['administrative_area_level_1'], sessionToken),
   ]);
 
   return mergeDestinationPredictions(
@@ -302,6 +306,58 @@ export async function lookupDestinationPredictions(input) {
     cityResults.map((entry) => ({ ...entry, kind: 'city' })),
     regionResults.map((entry) => ({ ...entry, kind: 'region' })),
   );
+}
+
+/**
+ * Fetches a destination's viewport bounds from Google Place Details (Plan 9 Wave 2 §2.3) —
+ * used to give a picked destination chip a bounding box for later geocoding bias. Mirrors
+ * lookupHotelDetails's URL/header/session-token handling: languageCode=en keeps the field
+ * mask response in English regardless of Google's per-place default locale, and the
+ * sessionToken (when present) closes out the billing-discounted autocomplete session.
+ * @param {string} placeId
+ * @param {string|undefined} sessionToken
+ * @returns {Promise<{placeId: string, bounds: {low:{lat,lng},high:{lat,lng}}|null}>}
+ */
+export async function lookupDestinationBounds(placeId, sessionToken) {
+  const normalizedPlaceId = placeId?.trim();
+  if (!normalizedPlaceId) {
+    throw Object.assign(new Error('placeId is required'), { status: 400 });
+  }
+
+  if (!config.googlePlacesKey) {
+    throw Object.assign(new Error('Google Places API key is not configured'), { status: 503 });
+  }
+
+  const detailsParams = new URLSearchParams({ languageCode: 'en' });
+  if (sessionToken) detailsParams.set('sessionToken', sessionToken);
+  const detailsUrl = `https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}?${detailsParams.toString()}`;
+  const response = await fetch(detailsUrl, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': config.googlePlacesKey,
+      'X-Goog-FieldMask': 'id,location,viewport',
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw Object.assign(new Error(body || 'Google Places details lookup failed'), { status: 502 });
+  }
+
+  const place = await response.json();
+  const viewport = place.viewport;
+  const hasViewport = viewport?.low?.latitude != null && viewport?.low?.longitude != null
+    && viewport?.high?.latitude != null && viewport?.high?.longitude != null;
+
+  return {
+    placeId: place.id || normalizedPlaceId,
+    bounds: hasViewport
+      ? {
+        low: { lat: viewport.low.latitude, lng: viewport.low.longitude },
+        high: { lat: viewport.high.latitude, lng: viewport.high.longitude },
+      }
+      : null,
+  };
 }
 
 export async function lookupPhotos(query) {

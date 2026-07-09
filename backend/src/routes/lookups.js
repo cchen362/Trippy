@@ -6,6 +6,7 @@ import {
   lookupHotelPredictions,
   lookupPlacePredictions,
   lookupDestinationPredictions,
+  lookupDestinationBounds,
   lookupPhotos,
 } from '../services/lookups.js';
 
@@ -49,7 +50,18 @@ router.get('/places/:placeId', async (req, res, next) => {
 
 router.get('/destinations', async (req, res, next) => {
   try {
-    res.json({ suggestions: await lookupDestinationPredictions(req.query.q) });
+    res.json({ suggestions: await lookupDestinationPredictions(req.query.q, req.query.sessionToken) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/destination-bounds', async (req, res, next) => {
+  try {
+    if (!req.query.placeId) {
+      throw Object.assign(new Error('placeId is required'), { status: 400 });
+    }
+    res.json(await lookupDestinationBounds(req.query.placeId, req.query.sessionToken));
   } catch (error) {
     next(error);
   }

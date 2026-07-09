@@ -63,4 +63,46 @@ describe('CityInput — region tag and suggestion rendering', () => {
     fireEvent.click(button);
     expect(onCitySelect).toHaveBeenCalledWith(suggestion);
   });
+
+  it('commits free text on Enter via onFreeTextCommit when provided', () => {
+    const onFreeTextCommit = vi.fn();
+    const onCitySelect = vi.fn();
+    render(
+      <CityInput
+        value="Somewhere Remote"
+        onChange={() => {}}
+        onCitySelect={onCitySelect}
+        onFreeTextCommit={onFreeTextCommit}
+        lookupCities={async () => ({ suggestions: [] })}
+        placeholder="e.g. Chengdu"
+        label="City"
+      />
+    );
+    const input = screen.getByLabelText('City');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onFreeTextCommit).toHaveBeenCalledWith('Somewhere Remote');
+    expect(onCitySelect).not.toHaveBeenCalled();
+  });
+
+  it('falls back to onCitySelect with a freetext-kind suggestion on Enter when onFreeTextCommit is absent', () => {
+    const onCitySelect = vi.fn();
+    render(
+      <CityInput
+        value="Somewhere Remote"
+        onChange={() => {}}
+        onCitySelect={onCitySelect}
+        lookupCities={async () => ({ suggestions: [] })}
+        placeholder="e.g. Chengdu"
+        label="City"
+      />
+    );
+    const input = screen.getByLabelText('City');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCitySelect).toHaveBeenCalledWith({
+      label: 'Somewhere Remote',
+      countryCode: null,
+      kind: 'freetext',
+      placeId: null,
+    });
+  });
 });

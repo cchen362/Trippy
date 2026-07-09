@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export default function CityInput({ value, onChange, onCitySelect, lookupCities, placeholder, label }) {
+export default function CityInput({ value, onChange, onCitySelect, onFreeTextCommit, lookupCities, placeholder, label }) {
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
   // Track the last selected city text to suppress re-triggering autocomplete on it
@@ -33,6 +33,20 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
     onCitySelect(suggestion);
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const text = value?.trim();
+    if (!text) return;
+    setSelectedText(text);
+    setSuggestions([]);
+    if (onFreeTextCommit) {
+      onFreeTextCommit(text);
+    } else {
+      onCitySelect({ label: text, countryCode: null, kind: 'freetext', placeId: null });
+    }
+  };
+
   return (
     <label className="block">
       <span className="modal-label">{label}</span>
@@ -42,6 +56,7 @@ export default function CityInput({ value, onChange, onCitySelect, lookupCities,
           setSelectedText('');
           onChange(e.target.value);
         }}
+        onKeyDown={handleKeyDown}
         className={`modal-input${searching ? ' opacity-70' : ''}`}
         placeholder={placeholder}
       />

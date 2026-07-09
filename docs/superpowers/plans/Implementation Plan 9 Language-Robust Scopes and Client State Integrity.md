@@ -1,7 +1,7 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
 **Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
-W2–W6 not started.**
+W2 complete (2026-07-10); W3–W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -190,6 +190,9 @@ Unsplash misses. 375 px pass on the booking modal.
 ---
 
 ## Wave 2 — Persisted trip scopes + honest chip editing
+
+**Status: COMPLETE (2026-07-10).** See §Wave status for the full result summary,
+including a browser-QA-discovered client-state bug that was root-caused and fixed in-wave.
 
 **Goal:** chips become durable scope vocabulary (D1/D2), with place IDs and bounds
 captured at selection (feeding W3), free-text chips for non-entity destinations, and an
@@ -529,7 +532,49 @@ and the manual browser pass defined in Wave 6.
   Google Places/Unsplash (requires a real mainland-China hotel add + API keys) —
   orchestrator/owner should do a live smoke test before Wave 5's re-fetch script
   depends on this.
-- W2 persisted scopes + honest chip editing: **NOT STARTED**
+- W2 persisted scopes + honest chip editing: **COMPLETE** (2026-07-10) — new `trip_scopes`
+  table (migration 023) with `canonical_key` unique per trip and raw-seed+override-only
+  backfill (never hotel-derived; `杭州市` correctly excluded — F12 verified). `buildTripScopes`
+  now merges stored scopes (position order, carrying `boundsJson` for W3) ∪ day seed/override
+  labels across all four call sites (`listDaysForTrip`, `getDayGeo`, `mapData`, `share`);
+  existing trips are byte-stable because their backfill equals the old day-derived set.
+  `createTrip` writes one scope row per chip (`picker`/`freetext`); `updateTrip`'s positional
+  rename/removal heuristic is **deleted** and replaced by a canonical-key reconcile that never
+  rewrites days and preserves stored bounds on chips resubmitted without them (the modal loads
+  chips from `scopes`, which carry no bounds). `destinationsOverride` echo removed — trip
+  `destinations`/`destinationCountries` are now `mergeDestinationsWithScopes` (stored scopes
+  first, then resolved-day cities not already present, legacy `.filter(Boolean)` quirk intact)
+  in `getTripDetail`/`listTripsForUser`/`share`. New `scopes:[{label,countryCode,kind,source}]`
+  response field (bounds/placeId server-side only). Bounds capture: `fetchDestinationAutocomplete`
+  keeps `placeId`; new `lookupDestinationBounds` (Place Details `id,location,viewport`,
+  `languageCode=en`); route `GET /api/lookups/destination-bounds`; **session tokens
+  reintroduced** on destination autocomplete so the autocomplete→bounds pair earns Google's
+  discount (§0 fact 13). Frontend: chips carry `{label,countryCode,kind,placeId,bounds}`;
+  free-text Enter path adds a `freetext` chip with a `FREETEXT` DM-Mono/`--cream-dim` tag
+  (no gold — accent discipline); one session token per picker instance threads through
+  autocomplete + bounds; EditTripModal reads initial chips from `trip.scopes`; honest
+  non-blocking removal note; NewTripModal import-prefill shape bug fixed.
+  **Backend 409/409, frontend 74/74 green** (391+18 backend fixtures incl. F2/F3/F4/F11/F12,
+  scope reconcile, buildTripScopes merge, bounds endpoint; 66+8 frontend incl. the regression
+  below).
+  **Browser-verified end-to-end at 375 px** (real Google Places, owner account, dev DB):
+  created a Shanghai+Hangzhou trip → card reads both immediately, all days seed Shanghai (D4);
+  Edit Trip add Suzhou → survives save+reload, zero day rows changed (F3); remove Shanghai →
+  days untouched, `destinations` still lists Shanghai from resolved days, honest note shown
+  (F4); free-text 南疆 → `freetext` scope, no bounds/country, card reads
+  "Hangzhou · Suzhou · 南疆 · Shanghai" from storage (F11); network trace confirmed the
+  autocomplete + destination-bounds calls share one session token.
+  **Client-state bug found in browser QA and fixed in-wave (root cause, not bandaid):**
+  every picker-added *city* chip vanished ~200 ms after selection. Cause: `EditTripModal`
+  wrapped `setDestinationChips` to compute the removal note and resolved the picker's
+  *functional* onChange updates against a **stale closure snapshot** taken before the add; the
+  chip's own async bounds fetch (a functional update, correctly) then reverted the addition.
+  Only city chips (which have a `placeId` → bounds fetch) were hit; free-text chips survived.
+  Fix: the picker now uses functional updates for every mutation (`addChip`/`addFreeText`/
+  `removeChip`), and `EditTripModal` hands the picker React's setter directly and derives the
+  removal note in a `useEffect` diff against a ref — never by collapsing a functional update
+  against a stale value. Locked by a new EditTripModal regression test. (This is a W2-surface
+  instance of the same client-clobber class W4 addresses in `useTrip`.)
 - W3 containment matching + overlap policy (after W2): **NOT STARTED**
 - W4 client state integrity (independent): **NOT STARTED**
 - W5 Discovery guard + data repair (after W1; destructive migration — backup + owner

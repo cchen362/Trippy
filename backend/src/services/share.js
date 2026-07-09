@@ -1,7 +1,8 @@
 import { randomBytes } from 'crypto';
 import { getDb } from '../db/database.js';
 import {
-  assertTripAccess, deriveDayGeo, listBookingsForTrip, deriveTripDestinationsFromDays, buildTripScopes,
+  assertTripAccess, deriveDayGeo, listBookingsForTrip, deriveTripDestinationPairsFromDays,
+  buildTripScopes, listTripScopes, mergeDestinationsWithScopes,
 } from './trips.js';
 
 function parseJson(value, fallback) {
@@ -13,12 +14,13 @@ function parseJson(value, fallback) {
   }
 }
 
-function mapTrip(row, destinations = [], destinationCountries = []) {
+function mapTrip(row, destinations = [], destinationCountries = [], scopes = []) {
   return {
     id: row.id,
     title: row.title,
     destinations,
     destinationCountries,
+    scopes,
     startDate: row.start_date,
     endDate: row.end_date,
     travellers: row.travellers,
@@ -96,7 +98,11 @@ function buildPublicTripDetail(tripId) {
   `).all(tripId);
 
   const bookings = listBookingsForTrip(tripId);
-  const tripScopes = buildTripScopes(dayRows.map((row) => ({ city: row.city, cityOverride: row.city_override })));
+  const storedScopes = listTripScopes(tripId);
+  const tripScopes = buildTripScopes(
+    dayRows.map((row) => ({ city: row.city, cityOverride: row.city_override })),
+    storedScopes,
+  );
   let previousResolvedGeo = null;
   const days = dayRows.map((row, index) => {
     const { day, geo } = withResolvedGeo(mapDay(row, index), row, bookings, previousResolvedGeo, tripScopes);
@@ -120,12 +126,19 @@ function buildPublicTripDetail(tripId) {
   // Use each day's resolved (override/booking-aware) geo, not the raw seed columns — a
   // real trip's multi-city identity can come entirely from an active hotel booking
   // (deriveDayGeo layer 2), with every day's raw seed sharing one city.
-  const { destinations, destinationCountries } = deriveTripDestinationsFromDays(
+  const dayDerivedPairs = deriveTripDestinationPairsFromDays(
     days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
   );
+  const { destinations, destinationCountries } = mergeDestinationsWithScopes(storedScopes, dayDerivedPairs);
+  const scopes = storedScopes.map((scope) => ({
+    label: scope.label,
+    countryCode: scope.countryCode,
+    kind: scope.kind,
+    source: scope.source,
+  }));
 
   return {
-    trip: mapTrip(tripRow, destinations, destinationCountries),
+    trip: mapTrip(tripRow, destinations, destinationCountries, scopes),
     days: days.map((day) => ({
       ...day,
       stops: stopsByDay.get(day.id) || [],

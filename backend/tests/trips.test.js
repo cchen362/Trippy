@@ -7,6 +7,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import {
   createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
+  listTripScopes,
 } from '../src/services/trips.js';
 import { createShareLink, getSharedTrip } from '../src/services/share.js';
 import { canonicalGeoKey } from '../src/utils/geoIdentity.js';
@@ -255,8 +256,8 @@ describe('deriveDayGeo / listDaysForTrip resolvedCountry (Plan 6 Wave 2)', () =>
   });
 });
 
-describe('updateTrip — destination chip editor semantics (Plan 6 Wave 3 §3.3)', () => {
-  it('renaming a chip updates the seed on matching non-override days only', () => {
+describe('updateTrip — destination chip editor semantics (Plan 9 Wave 2 §2.2 — scope reconcile, days never rewritten)', () => {
+  it('renaming a chip updates only its scope row — no day row (seed or override) is ever touched', () => {
     const trip = createTrip(owner.id, {
       title: 'Multi-city Trip',
       destinations: [{ city: 'Chengdu', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
@@ -275,23 +276,28 @@ describe('updateTrip — destination chip editor semantics (Plan 6 Wave 3 §3.3)
     getDb().prepare('UPDATE days SET city_override = ?, city_override_country = ? WHERE trip_id = ? AND date = ?')
       .run('Chengdu Old Town', 'CN', tripId, '2026-09-11');
 
+    const beforeDay10 = rawDay(tripId, '2026-09-10');
+    const beforeDay12 = rawDay(tripId, '2026-09-12');
+
     // Rename 'Chengdu' -> 'Chengdu Renamed' (same slot/index 0)
     const updated = updateTrip(owner.id, tripId, {
       destinations: [{ city: 'Chengdu Renamed', countryCode: 'CN' }, { city: 'Chongqing', countryCode: 'CN' }],
     });
 
-    expect(updated.trip.destinations).toEqual(['Chengdu Renamed', 'Chongqing']);
-    // day 09-10 had seed 'Chengdu', no override -> retargeted to the renamed pair
-    const day10 = rawDay(tripId, '2026-09-10');
-    expect(day10.city).toBe('Chengdu Renamed');
-    expect(day10.city_country).toBe('CN');
-    // day 09-11 has an override -> untouched (seed AND override both unchanged)
+    // The scope layer reflects the rename immediately...
+    expect(updated.trip.scopes.map((s) => s.label)).toEqual(['Chengdu Renamed', 'Chongqing']);
+    // ...and trip.destinations puts the renamed scopes first, then still appends the
+    // days' own still-unrenamed resolved geography (seed 'Chengdu', override 'Chengdu Old
+    // Town') — a rename is honest about NOT having touched any day, so a day whose
+    // resolved city doesn't canonically match the new scope label keeps surfacing on its
+    // own, exactly as mergeDestinationsWithScopes's day-derived fallback is designed to do.
+    expect(updated.trip.destinations).toEqual(['Chengdu Renamed', 'Chongqing', 'Chengdu', 'Chengdu Old Town']);
+    // ...but every day row (seed AND override) is byte-identical to before the edit.
+    expect(rawDay(tripId, '2026-09-10')).toEqual(beforeDay10);
     const day11 = getDb().prepare('SELECT city, city_country, city_override, city_override_country FROM days WHERE trip_id = ? AND date = ?').get(tripId, '2026-09-11');
     expect(day11.city_override).toBe('Chengdu Old Town');
     expect(day11.city_override_country).toBe('CN');
-    // day 09-12 already seeded to 'Chongqing' (still present in the new list) -> untouched
-    const day12 = rawDay(tripId, '2026-09-12');
-    expect(day12.city).toBe('Chongqing');
+    expect(rawDay(tripId, '2026-09-12')).toEqual(beforeDay12);
   });
 
   it('reordering chips alone does not rewrite any day seed', () => {
@@ -322,17 +328,19 @@ describe('updateTrip — destination chip editor semantics (Plan 6 Wave 3 §3.3)
     expect(after11).toEqual(before11);
   });
 
-  it('removing a chip with no replacement at that slot nulls the seed country and keeps the city (no explicit replacement)', () => {
+  it('removing every chip leaves every day row untouched and clears the scope list (day-derived destinations still surface)', () => {
     const trip = makeTrip(); // single destination 'Chengdu'/'CN'
     const tripId = trip.trip.id;
+    const beforeDay = rawDay(tripId, '2026-09-10');
 
-    updateTrip(owner.id, tripId, { destinations: [] });
+    const updated = updateTrip(owner.id, tripId, { destinations: [] });
 
     const day = rawDay(tripId, '2026-09-10');
-    // No replacement pair at index 0 -> city left as-is, country cleared (per implementation:
-    // replacement?.city ?? day.city, replacement?.countryCode ?? null)
-    expect(day.city).toBe('Chengdu');
-    expect(day.city_country).toBeNull();
+    expect(day).toEqual(beforeDay);
+    expect(updated.trip.scopes).toEqual([]);
+    // No stored scopes left, but the day's own seed still surfaces the destination via the
+    // day-derived merge fallback (Plan 9 §2.2 mergeDestinationsWithScopes).
+    expect(updated.trip.destinations).toEqual(['Chengdu']);
   });
 });
 
@@ -356,7 +364,7 @@ describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
   });
 });
 
-describe('buildTripScopes (Plan 8 Wave 2 — Task 2.1)', () => {
+describe('buildTripScopes (Plan 8/9 Wave 2 — Task 2.1/2.2)', () => {
   it('collects distinct seed and override cities, deduped by canonical key (first label wins)', () => {
     const days = [
       { city: 'Chengdu', cityOverride: null },
@@ -365,8 +373,8 @@ describe('buildTripScopes (Plan 8 Wave 2 — Task 2.1)', () => {
     ];
     const scopes = buildTripScopes(days);
     expect(scopes).toEqual([
-      { label: 'Chengdu', canonicalKey: canonicalGeoKey('Chengdu') },
-      { label: 'Chongqing', canonicalKey: canonicalGeoKey('Chongqing') },
+      { label: 'Chengdu', canonicalKey: canonicalGeoKey('Chengdu'), boundsJson: null },
+      { label: 'Chongqing', canonicalKey: canonicalGeoKey('Chongqing'), boundsJson: null },
     ]);
   });
 
@@ -379,6 +387,24 @@ describe('buildTripScopes (Plan 8 Wave 2 — Task 2.1)', () => {
     expect(buildTripScopes([{ city: '', cityOverride: null }, { city: null }])).toEqual([]);
     expect(buildTripScopes([])).toEqual([]);
     expect(buildTripScopes(undefined)).toEqual([]);
+  });
+
+  it('puts stored scopes first, in position order, and lets a stored label/bounds win over an overlapping day-derived duplicate', () => {
+    const storedScopes = [
+      { label: 'Chengdu', canonicalKey: canonicalGeoKey('Chengdu'), boundsJson: '{"low":{"lat":1,"lng":1},"high":{"lat":2,"lng":2}}' },
+    ];
+    const days = [{ city: 'chengdu', cityOverride: null }, { city: 'Chongqing', cityOverride: null }];
+    const scopes = buildTripScopes(days, storedScopes);
+    expect(scopes).toEqual([
+      { label: 'Chengdu', canonicalKey: canonicalGeoKey('Chengdu'), boundsJson: storedScopes[0].boundsJson },
+      { label: 'Chongqing', canonicalKey: canonicalGeoKey('Chongqing'), boundsJson: null },
+    ]);
+  });
+
+  it('includes a stored-only scope with no matching day at all', () => {
+    const storedScopes = [{ label: 'Hangzhou', canonicalKey: canonicalGeoKey('Hangzhou'), boundsJson: null }];
+    const scopes = buildTripScopes([{ city: 'Shanghai', cityOverride: null }], storedScopes);
+    expect(scopes.map((s) => s.label)).toEqual(['Hangzhou', 'Shanghai']);
   });
 });
 
@@ -661,5 +687,191 @@ describe('getSharedTrip — resolutionAnchor stamped on shared days (Plan 8 Wave
     expect(day.resolvedCity).toBe('Kaohsiung');
     expect(day.resolvedCountry).toBe('TW');
     expect(day.resolutionAnchor).toEqual({ label: 'Sinsing District', countryCode: 'TW', source: 'hotel' });
+  });
+});
+
+describe('trip_scopes persistence (Plan 9 Wave 2 §2.1/2.2)', () => {
+  it('F2: createTrip with two chips writes two trip_scopes rows in position order; every day seeds destinations[0]; response carries scopes', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Zhejiang Trip',
+      destinations: [
+        { city: 'Shanghai', countryCode: 'CN' },
+        { city: 'Hangzhou', countryCode: 'CN' },
+      ],
+      startDate: '2026-09-01',
+      endDate: '2026-09-03',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+
+    const scopes = listTripScopes(tripId);
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).toMatchObject({ label: 'Shanghai', countryCode: 'CN', position: 0, source: 'picker' });
+    expect(scopes[1]).toMatchObject({ label: 'Hangzhou', countryCode: 'CN', position: 1, source: 'picker' });
+
+    const dayRows = getDb().prepare('SELECT city, city_country FROM days WHERE trip_id = ?').all(tripId);
+    expect(dayRows.every((d) => d.city === 'Shanghai' && d.city_country === 'CN')).toBe(true);
+
+    expect(trip.trip.destinations).toEqual(['Shanghai', 'Hangzhou']);
+    expect(trip.trip.scopes).toEqual([
+      { label: 'Shanghai', countryCode: 'CN', kind: null, source: 'picker' },
+      { label: 'Hangzhou', countryCode: 'CN', kind: null, source: 'picker' },
+    ]);
+  });
+
+  it('F3: updateTrip adding a Suzhou chip inserts a scope row and touches zero day rows', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Zhejiang Trip',
+      destinations: [
+        { city: 'Shanghai', countryCode: 'CN' },
+        { city: 'Hangzhou', countryCode: 'CN' },
+      ],
+      startDate: '2026-09-01',
+      endDate: '2026-09-03',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    const daysBefore = getDb().prepare('SELECT id, city, city_country, city_override FROM days WHERE trip_id = ? ORDER BY date').all(tripId);
+
+    const updated = updateTrip(owner.id, tripId, {
+      destinations: [
+        { city: 'Shanghai', countryCode: 'CN' },
+        { city: 'Hangzhou', countryCode: 'CN' },
+        { city: 'Suzhou', countryCode: 'CN' },
+      ],
+    });
+
+    const daysAfter = getDb().prepare('SELECT id, city, city_country, city_override FROM days WHERE trip_id = ? ORDER BY date').all(tripId);
+    expect(daysAfter).toEqual(daysBefore);
+
+    const scopes = listTripScopes(tripId);
+    expect(scopes.map((s) => s.label)).toEqual(['Shanghai', 'Hangzhou', 'Suzhou']);
+    expect(updated.trip.destinations).toContain('Suzhou');
+
+    // Re-reading the trip afresh still lists Suzhou.
+    const reread = updateTrip(owner.id, tripId, {}); // no destinations key -> no reconcile, pure re-read path
+    expect(reread.trip.destinations).toContain('Suzhou');
+  });
+
+  it('F4: removing the Hangzhou chip while a day resolves Hangzhou via a hotel booking deletes the scope row, leaves days untouched, and destinations still contains Hangzhou (day-derived fallback)', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Zhejiang Trip 2',
+      destinations: [
+        { city: 'Shanghai', countryCode: 'CN' },
+        { city: 'Hangzhou', countryCode: 'CN' },
+      ],
+      startDate: '2026-09-01',
+      endDate: '2026-09-03',
+      travellers: 'couple',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-02T15:00',
+      checkOut: '2026-09-03T11:00',
+      detailsJson: { city: 'Hangzhou', countryCode: 'CN' },
+    });
+    const daysBefore = getDb().prepare('SELECT id, city, city_country FROM days WHERE trip_id = ? ORDER BY date').all(tripId);
+
+    const updated = updateTrip(owner.id, tripId, {
+      destinations: [{ city: 'Shanghai', countryCode: 'CN' }],
+    });
+
+    const daysAfter = getDb().prepare('SELECT id, city, city_country FROM days WHERE trip_id = ? ORDER BY date').all(tripId);
+    expect(daysAfter).toEqual(daysBefore);
+
+    const scopes = listTripScopes(tripId);
+    expect(scopes.map((s) => s.label)).toEqual(['Shanghai']);
+    // The hotel booking still resolves a day to Hangzhou, so the day-derived merge
+    // fallback still surfaces it in trip.destinations even with no stored scope for it.
+    expect(updated.trip.destinations).toContain('Hangzhou');
+  });
+
+  it('F11: a free-text chip with no placeId/bounds writes a scope row sourced "freetext" with null country and null boundsJson', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Xinjiang Trip',
+      destinations: [{ city: '南疆', countryCode: null, kind: 'freetext', placeId: null, bounds: null }],
+      startDate: '2026-10-01',
+      endDate: '2026-10-02',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'relaxed',
+    });
+    const tripId = trip.trip.id;
+
+    const scopes = listTripScopes(tripId);
+    expect(scopes).toHaveLength(1);
+    expect(scopes[0]).toMatchObject({
+      label: '南疆',
+      countryCode: null,
+      source: 'freetext',
+      boundsJson: null,
+    });
+  });
+
+  describe('scope reconcile — rename-at-position and bounds retention', () => {
+    it('remove A + add B at the same index -> A row gone, B row present at that position; a kept chip with no resubmitted bounds retains its stored bounds', () => {
+      const trip = createTrip(owner.id, {
+        title: 'Bounds Trip',
+        destinations: [
+          { city: 'Chengdu', countryCode: 'CN', kind: 'city', placeId: 'place-chengdu', bounds: { low: { lat: 30, lng: 103 }, high: { lat: 31, lng: 104 } } },
+          { city: 'Chongqing', countryCode: 'CN' },
+        ],
+        startDate: '2026-09-10',
+        endDate: '2026-09-11',
+        travellers: 'solo',
+        interestTags: [],
+        pace: 'moderate',
+      });
+      const tripId = trip.trip.id;
+      const before = listTripScopes(tripId);
+      const chengduBoundsBefore = before.find((s) => s.label === 'Chengdu').boundsJson;
+      expect(chengduBoundsBefore).not.toBeNull();
+
+      // Remove Chongqing (index 1), add Leshan at the same index — and resubmit Chengdu
+      // exactly as the client loaded it from `scopes` (no placeId/bounds carried).
+      updateTrip(owner.id, tripId, {
+        destinations: [
+          { city: 'Chengdu', countryCode: 'CN' },
+          { city: 'Leshan', countryCode: 'CN' },
+        ],
+      });
+
+      const after = listTripScopes(tripId);
+      expect(after.map((s) => s.label)).toEqual(['Chengdu', 'Leshan']);
+      expect(after.find((s) => s.label === 'Chongqing')).toBeUndefined();
+      const leshan = after.find((s) => s.label === 'Leshan');
+      expect(leshan.position).toBe(1);
+      // Chengdu's previously-stored bounds survive even though the resubmitted chip carried none.
+      const chengduAfter = after.find((s) => s.label === 'Chengdu');
+      expect(chengduAfter.boundsJson).toBe(chengduBoundsBefore);
+      expect(chengduAfter.placeId).toBe('place-chengdu');
+    });
+
+    it('a chip resubmitted WITH a new placeId/bounds overwrites the stored bounds', () => {
+      const trip = createTrip(owner.id, {
+        title: 'Bounds Overwrite Trip',
+        destinations: [{ city: 'Chengdu', countryCode: 'CN', placeId: 'place-old', bounds: { low: { lat: 1, lng: 1 }, high: { lat: 2, lng: 2 } } }],
+        startDate: '2026-09-10',
+        endDate: '2026-09-10',
+        travellers: 'solo',
+        interestTags: [],
+        pace: 'moderate',
+      });
+      const tripId = trip.trip.id;
+
+      updateTrip(owner.id, tripId, {
+        destinations: [{ city: 'Chengdu', countryCode: 'CN', placeId: 'place-new', bounds: { low: { lat: 3, lng: 3 }, high: { lat: 4, lng: 4 } } }],
+      });
+
+      const scope = listTripScopes(tripId)[0];
+      expect(scope.placeId).toBe('place-new');
+      expect(JSON.parse(scope.boundsJson)).toEqual({ low: { lat: 3, lng: 3 }, high: { lat: 4, lng: 4 } });
+    });
   });
 });
