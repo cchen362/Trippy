@@ -386,14 +386,18 @@ columns populated and credit rendering on a real stop.
   still in place, `generatePhotoDescriptor` correctly caught the 401 and returned
   `null`, and `createStop` still completed with the title+city fallback query, which
   incidentally doubled as a live "Haiku outage" proof before the key was fixed.
-  **Not browser-verified in the owner's UI this session:** another chat's dev servers
-  already held ports 3002/5174, so this session's Browser pane could not reach a
-  server running the corrected `backend/.env` (that dev backend uses `node --watch`,
-  which does not reload `.env` on edit — only source changes — so even the
-  already-running server needs a manual restart to pick up the fixed key). The
-  service-level live verification above exercises the exact same code path
-  (`createStop` → `resolvePhotoUrl` → `generatePhotoDescriptor`/`selectPhoto`) that
-  the UI would call, so this is a coverage gap in *where* it was proven, not *what*.
+  **Browser-verified by the owner (2026-07-11)**, after killing the other session's
+  stale dev servers and restarting both (backend now reads the corrected
+  `ANTHROPIC_API_KEY`): a manual "Egg Coffee Cafe" add in the live Shanghai–Hangzhou
+  trip rendered a topically Chinese food photo + credit line — correct, since the
+  descriptor call is seeded with the trip's actual day city/country (Shanghai/
+  Hangzhou, China), not anything inferred from the ambiguous Vietnamese title; a
+  Discovery-panel add for a Hanoi suggestion rendered Vietnamese-lantern imagery +
+  credit line via the catalogue's own descriptor (no extra Haiku call); a flight
+  booking (transit) rendered with no photo/credit line, untouched. No console errors,
+  no stuck states. The no-image styled-tint fallback path was not exercised in the UI
+  (rare — both descriptor and fallback search would need to miss) but remains covered
+  by the automated Wave 2/3 test suite.
 - **W4 — NOT STARTED** (depends on W1–W3)
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
