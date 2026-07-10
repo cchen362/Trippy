@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { dayDisplayLabel } from '../../utils/dayGeo.js';
 
 const monoStyle = {
   fontFamily: "'DM Mono', monospace",
@@ -206,7 +207,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
                             cursor: 'pointer',
                           }}
                         >
-                          Day {days.indexOf(day) + 1}{day.city ? ` · ${day.city}` : ''}
+                          Day {days.indexOf(day) + 1}{dayDisplayLabel(day) ? ` · ${dayDisplayLabel(day)}` : ''}
                         </button>
                       ))}
                     </div>

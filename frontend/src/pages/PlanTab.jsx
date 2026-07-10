@@ -124,23 +124,24 @@ export default function PlanTab() {
         </button>
       </div>
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeDayId || 'no-day'}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.18 }}
-          className="space-y-6"
-        >
-          <DayHeader
-            day={activeDay}
-            dayNumber={days.findIndex((day) => day.id === activeDayId) + 1}
-            onCityOverride={handleCityOverride}
-          />
-          <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={handleDeleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
-        </motion.div>
-      </AnimatePresence>
+      {/* Must NOT be wrapped in AnimatePresence: a stop card unmounting inside
+          Timeline (on move/remove) is a descendant unmount beneath this keyed
+          panel, which corrupts framer-motion's presence tracking and makes
+          mode="wait" freeze the next day-tab switch on the exit animation. */}
+      <motion.div
+        key={activeDayId || 'no-day'}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18 }}
+        className="space-y-6"
+      >
+        <DayHeader
+          day={activeDay}
+          dayNumber={days.findIndex((day) => day.id === activeDayId) + 1}
+          onCityOverride={handleCityOverride}
+        />
+        <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={handleDeleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
+      </motion.div>
 
       <AnimatePresence>
         {discoveryOpen && (

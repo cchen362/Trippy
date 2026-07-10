@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { dayDisplayLabel } from '../../utils/dayGeo.js';
 
 const monoStyle = {
   fontFamily: "'DM Mono', monospace",
@@ -258,7 +259,7 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                               opacity: moving ? 0.45 : 1,
                             }}
                           >
-                            Day {days.indexOf(day) + 1}{day.city ? ` · ${day.city}` : ''}
+                            Day {days.indexOf(day) + 1}{dayDisplayLabel(day) ? ` · ${dayDisplayLabel(day)}` : ''}
                           </button>
                         ))}
                       </div>

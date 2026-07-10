@@ -7,8 +7,8 @@ exactly per the owner-approved inventory; 5.3 executed with a documented finding
 serves no English components for the Hangzhou place — rule 1.5 is the healing path, per
 §5); 5.4 photo backfill deferred into W6 step 1 (needs the resolved English city from the
 owner's Hangzhou chip); two client-side bugs found in owner production testing after the
-W5 deploy (see §Wave status "Post-W5 production findings") — fixed in a dedicated frontend
-session BEFORE W6; W6 not started.**
+W5 deploy (see §Wave status "Post-W5 production findings") — BOTH FIXED, root-caused +
+regression-tested + browser-verified + deployed (2026-07-10); W6 UNBLOCKED, not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -727,6 +727,31 @@ and the manual browser pass defined in Wave 6.
   add-to-day) for the same pattern. **Owner decision (2026-07-10): fix both in a
   dedicated frontend-only session BEFORE W6** — W6 is the final verification pass and
   its step 5 (rapid adds/moves) would fail against bug (a).
-- W6 production verification pass (last): **NOT STARTED — gated on the post-W5 client
-  bugfix session above; W6 step 1 additionally runs the deferred 5.4 photo backfill
+  **FIX SESSION OUTCOME (2026-07-10, commit `fix(plan-9-postw5)`):** Bug (a) root-caused
+  empirically in a real browser — the DOM inspection revealed a third signature the two
+  hypotheses bracketed: the day-panel `motion.div` stays IN the DOM with all children
+  rendered but frozen at the exit animation's final frame (`opacity: 0`,
+  `translateY(-8px)`). Deterministic repro (100%, no race/latency needed): move or remove
+  a stop, then click ANY day tab — the outgoing panel plays its exit to completion but
+  framer-motion 11.18.2's AnimatePresence never receives exit-complete, so `mode="wait"`
+  never mounts the incoming day; further tab clicks don't recover. Mechanism: the
+  move/remove unmounts the stop card's motion subtree (inside `Reorder.Item`) BENEATH the
+  AnimatePresence-managed panel, corrupting presence bookkeeping for the next exit. This
+  matches production exactly (owner switches to the target day right after moving —
+  hypothesis 1 was ruled out: `activeDay` never resolves null; day ids are stable DB
+  rows). Fix: removed the `AnimatePresence mode="wait"` wrapper + `exit` prop from the
+  day panel in `PlanTab.jsx` (keyed fade-in retained; modal AnimatePresence blocks
+  untouched) — the freeze class is structurally impossible without exit machinery.
+  Regression suite `PlanTab.dayswitch.test.jsx` (full-fidelity harness: real
+  useTrip/useStops/Timeline/StopCard, API-layer mocks) locks move→tab-switch and
+  remove→tab-switch; the move→tab-switch test reproduced the freeze red against unfixed
+  code. Bug (b) fixed as specified: `StopCard.jsx` + `TransitStop.jsx` move chips now
+  label via the existing `dayDisplayLabel()` (`resolvedCity ?? city`); `DayPicker.jsx`
+  audited — clean (renders dates, not cities). New tests in `StopCard.test.jsx` +
+  `TransitStop.test.jsx` (new file) assert resolved-city chip labels. Frontend suite
+  90/90 (was 83). Browser-verified at 375px AND desktop on the dev replica trip:
+  move→switch, remove→switch, rapid switches all render; chips read `Day 5 · Hangzhou`
+  etc. against Shanghai seeds. Deployed to production + re-verified same checks.
+- W6 production verification pass (last): **UNBLOCKED (post-W5 bugfix session complete,
+  2026-07-10) — NOT STARTED; W6 step 1 additionally runs the deferred 5.4 photo backfill
   after the Hangzhou chip is added (see W5 entry).**

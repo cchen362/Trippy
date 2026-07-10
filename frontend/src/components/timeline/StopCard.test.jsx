@@ -87,3 +87,17 @@ describe('StopCard — per-stop move pending state (Wave 4 §4.2)', () => {
     pending.resolve();
   });
 });
+
+describe('StopCard — move chip city label (bug b: resolved city)', () => {
+  it('shows the resolved city, not the raw seed city, on a move chip', () => {
+    const days = [
+      { id: 'day-1' },
+      { id: 'day-2', city: 'Shanghai', resolvedCity: 'Hangzhou' },
+    ];
+    renderCard({ days });
+
+    fireEvent.click(screen.getByRole('button', { name: /move to →/i }));
+    expect(screen.getByRole('button', { name: /day 2 · hangzhou/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /day 2 · shanghai/i })).not.toBeInTheDocument();
+  });
+});
