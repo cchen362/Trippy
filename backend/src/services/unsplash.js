@@ -18,6 +18,9 @@ function mapPhoto(photo) {
     photographerUrl: buildReferralUrl(photo.user?.links?.html || ''),
     unsplashUrl: buildReferralUrl(photo.links?.html || ''),
     downloadLocation: photo.links?.download_location || '',
+    tags: Array.isArray(photo.tags)
+      ? photo.tags.map((t) => (t?.title || '').toLowerCase()).filter(Boolean)
+      : [],
   };
 }
 
@@ -79,19 +82,63 @@ export async function searchPhotos(query) {
   return search(query.trim());
 }
 
-export async function pickPhoto({ query, fallbackQuery, dayIndex = 0, stopSeed = 0 }) {
-  const primaryResults = await searchPhotos(query);
-  const fallbackResults = primaryResults.length > 0 || !fallbackQuery
-    ? []
-    : await searchPhotos(fallbackQuery);
-  const results = primaryResults.length > 0 ? primaryResults : fallbackResults;
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'of', 'at', 'in', 'on', 'to', 'for', 'with',
+  'near', 'best', 'top', 'travel', 'trip', 'tour', 'visit', 'place', 'spot',
+  'local', 'famous', 'popular',
+]);
 
-  if (results.length === 0) {
+function tokenize(str) {
+  return String(str || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3);
+}
+
+function significantTokens(query, city, country) {
+  const excluded = new Set([...tokenize(city), ...tokenize(country), ...STOPWORDS]);
+  return tokenize(query).filter((token) => !excluded.has(token));
+}
+
+function passesGate(photo, sigTokens) {
+  if (sigTokens.length === 0) return true;
+  const haystack = `${photo.alt || ''} ${(photo.tags || []).join(' ')}`.toLowerCase();
+  return sigTokens.some((token) => haystack.includes(token));
+}
+
+// Replaces the old index-hashing pickPhoto (dayIndex*7 + stopSeed) that picked an
+// arbitrary result out of relevance order — that was the bug (Plan 10 Wave 2). Results
+// from searchPhotos are already Unsplash-relevance-ordered; selectPhoto walks that order
+// and returns the first result that is both unused within the trip (excludeIds) and
+// relevant to the query (passesGate), falling back to a broader, gate-free search when
+// nothing in the primary pool qualifies.
+export async function selectPhoto({ query, sceneType, country, city, excludeIds = [] }) {
+  const exclude = new Set(excludeIds);
+  const sigTokens = significantTokens(query, city, country);
+
+  const primary = await searchPhotos(query);
+  for (const photo of primary) {
+    if (exclude.has(photo.id)) continue;
+    if (!passesGate(photo, sigTokens)) continue;
+    return photo;
+  }
+
+  let fallbackQuery;
+  if (sceneType && sceneType !== 'generic') {
+    fallbackQuery = `${sceneType.replace(/_/g, ' ')} ${country || ''}`.trim();
+  } else {
+    fallbackQuery = `${city || ''} travel`.trim();
+  }
+
+  if (!fallbackQuery || fallbackQuery.length < 2) {
     return null;
   }
 
-  // Combine dayIndex and a per-stop seed so stops on the same day get different photos.
-  // Multiplying dayIndex by a prime (7) prevents periodicity across sort positions.
-  const index = Math.abs(dayIndex * 7 + stopSeed) % results.length;
-  return results[index];
+  const fallback = await searchPhotos(fallbackQuery);
+  for (const photo of fallback) {
+    if (exclude.has(photo.id)) continue;
+    return photo;
+  }
+
+  return null;
 }

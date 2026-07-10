@@ -29,6 +29,35 @@ const noPinChipStyle = {
   cursor: 'pointer',
 };
 
+// Plan 10 Wave 2 owner-approved per-scene no-image tints — each fades to
+// --ink-deep (#0d0b09); gold stays accent-only and is never used as a fill.
+const SCENE_TINTS = {
+  temple_shrine: '#232227',
+  museum_gallery: '#232227',
+  landmark_architecture: '#232227',
+  food_drink: '#2a1d12',
+  market: '#2b1a13',
+  street_neighborhood: '#2b1a13',
+  nature_outdoors: '#14201a',
+  viewpoint: '#14201a',
+  beach_water: '#14201a',
+  nightlife: '#241419',
+  entertainment: '#241419',
+  wellness: '#1a201d',
+  hotel_stay: '#201d18',
+  generic: '#241a12',
+};
+
+const TYPE_TINT_FALLBACK = {
+  food: SCENE_TINTS.food_drink,
+  hotel: SCENE_TINTS.hotel_stay,
+};
+
+function noImageTint(stop) {
+  const top = SCENE_TINTS[stop.sceneType] || TYPE_TINT_FALLBACK[stop.type] || SCENE_TINTS.generic;
+  return `linear-gradient(135deg, ${top}, #0d0b09)`;
+}
+
 export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps }) {
   const navigate = useNavigate();
   const [action, setAction] = useState(null); // null | 'delete' | 'move'
@@ -100,7 +129,7 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
           {stop.unsplashPhotoUrl ? (
             <img src={stop.unsplashPhotoUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
           ) : (
-            <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, #3d3021, #101010)' }} />
+            <div className="absolute inset-0" style={{ background: noImageTint(stop) }} />
           )}
           <div className="absolute inset-0 trip-card-overlay" />
           {expanded && (

@@ -923,22 +923,22 @@ describe('resolutionAnchor consumption (Plan 8 Wave 5 — Task 5.1)', () => {
       VALUES (?, 'hotel', 'Chongqing Hotel', '2026-06-09T15:00', '2026-06-10T11:00', ?)
     `).run(multiCityTrip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
 
-    const pickPhotoSpy = vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(null);
+    const selectPhotoSpy = vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
 
     await createStop(user.id, day.id, {
       title: 'Random New Spot',
       type: 'experience',
     });
 
-    expect(pickPhotoSpy).toHaveBeenCalledOnce();
-    const { query, fallbackQuery } = pickPhotoSpy.mock.calls[0][0];
+    expect(selectPhotoSpy).toHaveBeenCalledOnce();
+    const { query, city } = selectPhotoSpy.mock.calls[0][0];
     expect(query).toContain('Chongqing');
     expect(query).not.toContain('Chengdu');
-    expect(fallbackQuery).toContain('Chongqing');
+    expect(city).toBe('Chongqing');
   });
 
   it('warns and returns null when Unsplash yields no result, without throwing', async () => {
-    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(null);
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const stop = await createStop(user.id, dayId, {
@@ -951,7 +951,7 @@ describe('resolutionAnchor consumption (Plan 8 Wave 5 — Task 5.1)', () => {
   });
 
   it('warns and returns null when the Unsplash lookup throws, without propagating the error', async () => {
-    vi.spyOn(unsplashService, 'pickPhoto').mockRejectedValue(new Error('Unsplash lookup failed'));
+    vi.spyOn(unsplashService, 'selectPhoto').mockRejectedValue(new Error('Unsplash lookup failed'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const stop = await createStop(user.id, dayId, {
@@ -976,10 +976,11 @@ describe('stop photo attribution (Plan 10 Wave 1)', () => {
     photographerUrl: 'https://unsplash.com/@janedoe?utm_source=trippy&utm_medium=referral',
     unsplashUrl: 'https://unsplash.com/photos/photo-123?utm_source=trippy&utm_medium=referral',
     downloadLocation: 'https://api.unsplash.com/photos/photo-123/download',
+    tags: ['market'],
   };
 
   it('persists photo id, attribution, and query on the stop row and serializes them back (round-trip)', async () => {
-    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(FULL_PHOTO);
     vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
 
     const stop = await createStop(user.id, dayId, {
@@ -1002,7 +1003,7 @@ describe('stop photo attribution (Plan 10 Wave 1)', () => {
   });
 
   it('fires the Unsplash download-tracking call once when a photo is selected', async () => {
-    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(FULL_PHOTO);
     const trackSpy = vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
 
     await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
@@ -1012,20 +1013,162 @@ describe('stop photo attribution (Plan 10 Wave 1)', () => {
   });
 
   it('does not re-fetch or re-track a photo when updating a stop without title/type/day changes', async () => {
-    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(FULL_PHOTO);
     vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
     const stop = await createStop(user.id, dayId, { title: 'Hongyadong', type: 'experience' });
 
-    const pickSpy = vi.spyOn(unsplashService, 'pickPhoto');
+    const selectSpy = vi.spyOn(unsplashService, 'selectPhoto');
     const trackSpy = vi.spyOn(unsplashService, 'trackDownload');
-    pickSpy.mockClear();
+    selectSpy.mockClear();
     trackSpy.mockClear();
 
     const updated = await updateStop(user.id, stop.id, { note: 'Great at night' });
 
-    expect(pickSpy).not.toHaveBeenCalled();
+    expect(selectSpy).not.toHaveBeenCalled();
     expect(trackSpy).not.toHaveBeenCalled();
     expect(updated.unsplashPhotoId).toBe(FULL_PHOTO.id);
     expect(updated.photoAttribution).toEqual(stop.photoAttribution);
+  });
+});
+
+describe('stop photo selection (Plan 10 Wave 2)', () => {
+  function rawPhoto(id, { alt = '', tags = [] } = {}) {
+    return {
+      id,
+      urls: { regular: `https://images.unsplash.com/${id}` },
+      alt_description: alt,
+      description: '',
+      tags: tags.map((title) => ({ title })),
+      user: { name: 'Test Photographer', links: { html: 'https://unsplash.com/@test' } },
+      links: {
+        html: `https://unsplash.com/photos/${id}`,
+        download_location: `https://api.unsplash.com/photos/${id}/download`,
+      },
+    };
+  }
+
+  function mockSearchPool(pool) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ results: pool }),
+    }));
+  }
+
+  it('trip-level dedup: two stops in the same trip never receive the same unsplashPhotoId', async () => {
+    // sigTokens end up empty for query "Chongqing Chongqing" (title == city, both
+    // stripped by significantTokens), so the gate is a no-op and pure result order
+    // (minus exclusion) decides the winner — isolating the dedup behavior under test.
+    mockSearchPool([rawPhoto('photo-1'), rawPhoto('photo-2'), rawPhoto('photo-3')]);
+
+    const first = await createStop(user.id, dayId, { title: 'Chongqing', type: 'experience' });
+    const second = await createStop(user.id, dayId, { title: 'Chongqing', type: 'experience' });
+
+    expect(first.unsplashPhotoId).toBe('photo-1');
+    expect(second.unsplashPhotoId).toBe('photo-2');
+    expect(second.unsplashPhotoId).not.toBe(first.unsplashPhotoId);
+  });
+
+  it('relevance gate rejects a primary pool with no significant-token overlap and falls through to the fallback query', async () => {
+    const primaryPool = [
+      rawPhoto('primary-1', { alt: 'a mountain view' }),
+      rawPhoto('primary-2', { alt: 'a cloudy sky' }),
+    ];
+    const fallbackPool = [rawPhoto('fallback-1', { alt: 'busy street scene' })];
+
+    let callCount = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callCount += 1;
+      return { ok: true, json: async () => ({ results: callCount === 1 ? primaryPool : fallbackPool }) };
+    });
+
+    const photo = await unsplashService.selectPhoto({
+      query: 'Night Bazaar Chongqing',
+      sceneType: 'street_market',
+      country: '',
+      city: 'Chongqing',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(photo.id).toBe('fallback-1');
+  });
+
+  it('builds the fallback query as "{scene words} {country}" for a real sceneType', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ results: [] }) });
+
+    await unsplashService.selectPhoto({
+      query: 'Random Alley Vietnam',
+      sceneType: 'street_neighborhood',
+      country: 'Vietnam',
+      city: 'Hanoi',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const fallbackUrl = new URL(fetchMock.mock.calls[1][0]);
+    expect(fallbackUrl.searchParams.get('query')).toBe('street neighborhood Vietnam');
+  });
+
+  it('builds the fallback query as "{city} travel" for a generic/null sceneType', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ results: [] }) });
+
+    await unsplashService.selectPhoto({
+      query: 'Random Alley',
+      sceneType: null,
+      country: '',
+      city: 'Hanoi',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const fallbackUrl = new URL(fetchMock.mock.calls[1][0]);
+    expect(fallbackUrl.searchParams.get('query')).toBe('Hanoi travel');
+  });
+
+  it('does not re-roll the photo when a stop is only moved to another day (D6)', async () => {
+    const multiDayTrip = createTrip(user.id, {
+      title: 'Chongqing Two Day',
+      destinations: ['Chongqing'],
+      destinationCountries: ['CN'],
+      startDate: '2026-06-09',
+      endDate: '2026-06-10',
+      travellers: 'couple',
+      interestTags: ['food'],
+      pace: 'moderate',
+    });
+    const firstDay = multiDayTrip.days[0].id;
+    const secondDay = multiDayTrip.days[1].id;
+
+    const movedPhoto = {
+      id: 'photo-move',
+      url: 'https://images.unsplash.com/photo-move',
+      photographer: 'Mover',
+      photographerUrl: 'https://unsplash.com/@mover',
+      unsplashUrl: 'https://unsplash.com/photos/photo-move',
+    };
+    const selectPhotoSpy = vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(movedPhoto);
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+
+    const stop = await createStop(user.id, firstDay, { title: 'Ciqikou Ancient Town', type: 'experience' });
+    selectPhotoSpy.mockClear();
+
+    const moved = await updateStop(user.id, stop.id, { dayId: secondDay });
+
+    expect(selectPhotoSpy).not.toHaveBeenCalled();
+    expect(moved.dayId).toBe(secondDay);
+    expect(moved.unsplashPhotoId).toBe('photo-move');
+    expect(moved.unsplashPhotoUrl).toBe(movedPhoto.url);
+  });
+
+  it('excludes transit stops from photo search entirely', async () => {
+    const selectPhotoSpy = vi.spyOn(unsplashService, 'selectPhoto');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'G123 Chongqing to Chengdu',
+      type: 'transit',
+    });
+
+    expect(selectPhotoSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stop.unsplashPhotoUrl).toBeNull();
+    expect(stop.unsplashPhotoId).toBeNull();
   });
 });

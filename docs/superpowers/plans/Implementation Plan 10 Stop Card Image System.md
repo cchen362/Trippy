@@ -1,6 +1,6 @@
 # Implementation Plan 10 — Stop Card Image System (Descriptor-Driven Imagery)
 
-**Status: Wave 1 COMPLETE (2026-07-11).**
+**Status: Wave 2 COMPLETE (2026-07-11).**
 
 **Origin:** independent review of the activity-card image system, 2026-07-11 (this plan
 encodes its findings and the owner-approved design decisions from that session).
@@ -276,8 +276,55 @@ columns populated and credit rendering on a real stop.
   "invalid Unsplash key" reading, corrected once the owner updated
   `backend/.env` and the backend was restarted.) Test/synthetic data cleaned up
   after verification — no residual rows in the owner's trip data.
-- **W2 — NOT STARTED** (depends on W1 columns — ready to start; dev Unsplash key
-  confirmed working as of 2026-07-11).
+- **W2 — COMPLETE (2026-07-11).** Selection engine fully reworked. `unsplash.js`:
+  `mapPhoto` now maps `tags` (from the raw `[{title}]` shape → flat lowercase array);
+  `pickPhoto` (the `dayIndex×7 + titleHash` index-hasher — the root cause of both
+  repeats and wrongness) **deleted** and replaced by `selectPhoto({ query, sceneType,
+  country, city, excludeIds })` — walks `searchPhotos` results in native Unsplash
+  relevance order and returns the first photo that is both un-excluded (trip-level
+  dedup) and passes a token-overlap relevance gate (significant query tokens, with
+  city/country/stopwords stripped, matched against `alt` + `tags`); on a full gate
+  miss it falls back to a gate-free `"{scene words} {country}"` search (or `"{city}
+  travel"` for null/`generic` scenes), dedup still applied; both tiers empty → NULL.
+  `stops.js`: `resolvePhotoUrl` re-signatured to `{ title, type, city, countryCode,
+  resolvedName, photoQuery, sceneType, excludeIds, existing }` with query precedence
+  `stored/incoming photoQuery → resolvedName+city → title+city` (country name via the
+  existing `countryNameFromCode` util); dead helpers `cleanTitle`, `cityInTitle`,
+  `buildPhotoQuery`, `buildFallbackQuery`, `titleHash`, and `getDayIndex` all deleted
+  (grep-confirmed zero references). New `getTripPhotoIds(tripId, excludeStopId)`
+  supplies the dedup exclusion set; wired into all four write paths — `createStop`,
+  `updateStop`, `backfillTripPhotos` (seeds the set once and pushes each newly-assigned
+  id so backfilled stops don't collide with each other), and `syncStopWithBooking`
+  (dedup only on the new-INSERT search path). **D6 stability landed:** `isMoving`
+  removed from `updateStop`'s `shouldRefreshPhoto`, so a bare day-move never re-rolls
+  the image; a title change invalidates the stored descriptor (falls through to
+  resolvedName/title), a type-only change reuses it. `trackDownload` call site
+  preserved. StopCard no-image card now uses the **owner-approved 8-family per-scene
+  tint map** (keyed by `sceneType`, falling back to stop `type`, then `generic`; all
+  fade to `--ink-deep` #0d0b09, gold never a fill): Culture #232227, Food #2a1d12,
+  Market/Street #2b1a13, Nature/Beach/Viewpoint #14201a, Nightlife/Entertainment
+  #241419, Wellness #1a201d, Hotel #201d18, Generic #241a12. (Note: `sceneType` is
+  null for most stops until W3 authors descriptors, so the `type`-fallback/generic
+  tints dominate today — owner accepted this as clean temporary-until-W3 infra.)
+  **Deviation:** one pre-existing test in the "resolutionAnchor consumption (Plan 8
+  Wave 5)" block ("uses the resolved city for photo queries") was rewritten — its
+  assertion destructured a `fallbackQuery` param off the old `pickPhoto` call that
+  `selectPhoto` no longer exposes; replaced with equivalent `query`/`city` assertions.
+  **Tests:** backend 446→453 green (6 new Wave 2 cases: trip-level dedup, gate→fallback
+  fallthrough, fallback-query shape for real vs. generic/null scene, D6 move-preserves,
+  transit exclusion; the previously-flaky auth timing test also passed this run).
+  Frontend 94/94 green (StopCard DOM tests still pass with the new fallback background).
+  **Browser/live verification (not just green tests):** ran the real service stack
+  (`createStop`/`updateStop` → `resolvePhotoUrl` → `selectPhoto`) against a fresh temp
+  DB and the **live Unsplash API** — three same-city Hanoi stops returned three distinct
+  real photo ids (dedup PASS); moving a stop day→day preserved its photo id (D6 PASS); a
+  nonsense-title stop resolved via the `"Hanoi travel"` country/city fallback rather than
+  a random tail result (gate PASS); transit excluded (PASS). In the live local app
+  (Bali trip) the no-image hotel card ("W Bali - Seminyak") renders the exact approved
+  Hotel tint `linear-gradient(135deg,#201d18,#0d0b09)`; frontend boots clean, no console
+  or build errors. Not browser-verified in the owner's UI: two activity photos shown
+  side-by-side (that distinct-render behavior was proven against live Unsplash in
+  isolation and by W1's Bali render, so no owner-data stops were created/deleted here).
 - **W3 — NOT STARTED** (3.1/3.2 can run parallel to W2; 3.3 depends on W2's
   `resolvePhotoUrl` shape)
 - **W4 — NOT STARTED** (depends on W1–W3)

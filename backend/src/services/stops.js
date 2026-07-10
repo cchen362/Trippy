@@ -1,8 +1,9 @@
 import { getDb } from '../db/database.js';
-import { pickPhoto, trackDownload } from './unsplash.js';
+import { selectPhoto, trackDownload } from './unsplash.js';
 import { assertDayAccess, assertStopAccess, getDayGeo } from './trips.js';
 import { resolvePlace } from './placeResolver.js';
 import { lookupHotelDetails } from './lookups.js';
+import { countryNameFromCode } from '../utils/countries.js';
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -50,44 +51,6 @@ function formatStop(row) {
 
 function isPhotoEligible(type) {
   return type !== 'transit';
-}
-
-function cleanTitle(title) {
-  return title
-    .replace(/\([^)]*\)/g, '')   // strip (parentheticals)
-    .replace(/\s+at\s+.*/i, '')  // strip "at Venue Name"
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function cityInTitle(title, city) {
-  return Boolean(city && title.toLowerCase().includes(city.toLowerCase()));
-}
-
-function buildPhotoQuery(title, type, city) {
-  const clean = cleanTitle(title);
-  const hasCity = cityInTitle(title, city);
-
-  if (type === 'hotel') {
-    return hasCity ? `${clean} hotel` : `${clean} ${city} hotel`.trim();
-  }
-  if (type === 'food') {
-    // Avoid city name — city-specific fallback images are often off-topic (e.g. panda for Chengdu)
-    return `${clean} food`;
-  }
-  return hasCity ? clean : `${clean} ${city || ''}`.trim();
-}
-
-function buildFallbackQuery(type, city, title) {
-  if (type === 'hotel') return city ? `${city} hotel interior` : 'hotel lobby';
-  if (type === 'food') return city ? `${city} food restaurant` : 'restaurant food';
-  return city || title;
-}
-
-function titleHash(title) {
-  let h = 5381;
-  for (const ch of title) h = ((h << 5) + h + ch.charCodeAt(0)) | 0;
-  return Math.abs(h);
 }
 
 function normalizeText(value) {
@@ -318,14 +281,25 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
   };
 }
 
-function getDayIndex(tripId, dayDate) {
+// All photo ids already assigned to stops in a trip, for trip-level dedup (Plan 10
+// Wave 2 §2.2). excludeStopId lets a stop being updated exclude its own current photo
+// from the "already used" set (a stop's photo is never "used" against itself).
+function getTripPhotoIds(tripId, excludeStopId = null) {
   const db = getDb();
-  const row = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM days
-    WHERE trip_id = ? AND date < ?
-  `).get(tripId, dayDate);
-  return row?.count || 0;
+  const rows = excludeStopId
+    ? db.prepare(`
+      SELECT s.unsplash_photo_id AS id
+      FROM stops s
+      JOIN days d ON s.day_id = d.id
+      WHERE d.trip_id = ? AND s.unsplash_photo_id IS NOT NULL AND s.id != ?
+    `).all(tripId, excludeStopId)
+    : db.prepare(`
+      SELECT s.unsplash_photo_id AS id
+      FROM stops s
+      JOIN days d ON s.day_id = d.id
+      WHERE d.trip_id = ? AND s.unsplash_photo_id IS NOT NULL
+    `).all(tripId);
+  return rows.map((row) => row.id);
 }
 
 const EMPTY_PHOTO = { url: null, photoId: null, attribution: null, photoQuery: null, sceneType: null };
@@ -333,7 +307,7 @@ const EMPTY_PHOTO = { url: null, photoId: null, attribution: null, photoQuery: n
 // existing, when provided, is the { url, photoId, attribution, photoQuery, sceneType }
 // to keep unchanged (explicit override from input, or the stop's own stored photo when
 // a refresh isn't warranted) — no search is performed in that case.
-async function resolvePhotoUrl({ title, type, city, dayIndex, existing }) {
+async function resolvePhotoUrl({ title, type, city, countryCode, resolvedName, photoQuery, sceneType, excludeIds = [], existing }) {
   if (existing !== undefined) {
     return {
       url: existing?.url ?? null,
@@ -345,17 +319,16 @@ async function resolvePhotoUrl({ title, type, city, dayIndex, existing }) {
   }
   if (!isPhotoEligible(type)) return EMPTY_PHOTO;
 
-  const query = buildPhotoQuery(title, type, city);
+  const query = (photoQuery && photoQuery.trim())
+    || (resolvedName ? `${resolvedName} ${city || ''}`.trim() : '')
+    || `${title} ${city || ''}`.trim();
+  const country = countryNameFromCode(countryCode) || '';
+
   try {
-    const photo = await pickPhoto({
-      query,
-      fallbackQuery: buildFallbackQuery(type, city, title),
-      dayIndex,
-      stopSeed: titleHash(title),
-    });
+    const photo = await selectPhoto({ query, sceneType: sceneType ?? null, country, city, excludeIds });
     if (!photo?.url) {
       console.warn('[photo] no unsplash result', { query });
-      return { ...EMPTY_PHOTO, photoQuery: query };
+      return { ...EMPTY_PHOTO, photoQuery: query, sceneType: sceneType ?? null };
     }
     trackDownload(photo);
     return {
@@ -365,11 +338,11 @@ async function resolvePhotoUrl({ title, type, city, dayIndex, existing }) {
         ? { photographer: photo.photographer, photographerUrl: photo.photographerUrl, unsplashUrl: photo.unsplashUrl }
         : null,
       photoQuery: query,
-      sceneType: null,
+      sceneType: sceneType ?? null,
     };
   } catch (err) {
     console.warn('[photo] unsplash lookup failed', { title, city, error: err?.message });
-    return { ...EMPTY_PHOTO, photoQuery: query };
+    return { ...EMPTY_PHOTO, photoQuery: query, sceneType: sceneType ?? null };
   }
 }
 
@@ -404,13 +377,17 @@ export async function createStop(userId, dayId, input) {
   const type = input.type || 'explore';
   const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input });
-  const dayIndex = getDayIndex(day.trip_id, day.date);
+  const excludeIds = getTripPhotoIds(day.trip_id);
   const photo = await resolvePhotoUrl({
     title,
     type,
     // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
     city: dayGeo.city ?? day.city,
-    dayIndex,
+    countryCode: location.countryCode,
+    resolvedName: location.resolvedName,
+    photoQuery: input.photoQuery,
+    sceneType: input.sceneType,
+    excludeIds,
     existing: photoOverrideFromInput(input),
   });
 
@@ -481,15 +458,23 @@ export async function updateStop(userId, stopId, input) {
   const type = input.type ?? existing.type;
   const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input, existing });
-  const shouldRefreshPhoto = isMoving || input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
-  const dayIndex = getDayIndex(day.trip_id, day.date);
+  // D6 (Plan 10 Wave 2 §2.4): a bare day move must not re-roll the photo — only a
+  // title/type/explicit-photo change warrants a refresh.
+  const shouldRefreshPhoto = input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
+  const titleChanged = input.title !== undefined && normalizeText(title) !== normalizeText(existing.title);
   const photo = shouldRefreshPhoto
     ? await resolvePhotoUrl({
       title,
       type,
       // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
       city: dayGeo.city ?? day.city,
-      dayIndex,
+      countryCode: location.countryCode,
+      resolvedName: location.resolvedName,
+      // A title change makes the old stored descriptor stale — fall through to
+      // resolvedName+city / title+city instead of reusing it.
+      photoQuery: input.photoQuery ?? (titleChanged ? undefined : existing.photo_query),
+      sceneType: input.sceneType ?? existing.scene_type,
+      excludeIds: getTripPhotoIds(day.trip_id, stopId),
       existing: photoOverrideFromInput(input),
     })
     : {
@@ -677,18 +662,28 @@ export async function backfillTripPhotos(userId, tripId) {
   if (!trip) throw Object.assign(new Error('Not found'), { status: 404 });
 
   const nullStops = db.prepare(`
-    SELECT s.id, s.title, s.type, s.day_id, d.city, d.trip_id, d.date
+    SELECT s.id, s.title, s.type, s.day_id, d.city, d.trip_id, d.date,
+      s.photo_query, s.scene_type, s.resolved_name, s.country_code
     FROM stops s
     JOIN days d ON s.day_id = d.id
     WHERE d.trip_id = ? AND s.unsplash_photo_url IS NULL AND s.type != 'transit'
   `).all(tripId);
 
+  const excludeIds = getTripPhotoIds(tripId);
   const updated = [];
   for (const s of nullStops) {
-    const dayIndex = getDayIndex(s.trip_id, s.date);
     // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
     const dayGeo = getDayGeo(s.day_id);
-    const photo = await resolvePhotoUrl({ title: s.title, type: s.type, city: dayGeo.city ?? s.city, dayIndex });
+    const photo = await resolvePhotoUrl({
+      title: s.title,
+      type: s.type,
+      city: dayGeo.city ?? s.city,
+      countryCode: s.country_code,
+      resolvedName: s.resolved_name,
+      photoQuery: s.photo_query,
+      sceneType: s.scene_type,
+      excludeIds,
+    });
     if (photo.url) {
       db.prepare(`
         UPDATE stops
@@ -703,6 +698,7 @@ export async function backfillTripPhotos(userId, tripId) {
         s.id,
       );
       updated.push(s.id);
+      if (photo.photoId) excludeIds.push(photo.photoId);
     }
   }
   return updated;
@@ -861,7 +857,6 @@ export async function syncStopWithBooking(booking) {
     countryCode: resolvedLocation.countryCode || bookingCountryCode(booking),
   };
 
-  const dayIndex = getDayIndex(day.trip_id, day.date);
   // Photos want broad-scope imagery, so the resolved city wins when present, falling
   // back to the booking's own city hint then the raw seed — Plan 8 Wave 5 §5.1.
   const dayGeo = getDayGeo(day.id);
@@ -869,7 +864,11 @@ export async function syncStopWithBooking(booking) {
     title: inferred.title,
     type: inferred.type,
     city: dayGeo.city || inferred.cityHint || day.city,
-    dayIndex,
+    countryCode: location.countryCode,
+    resolvedName: location.resolvedName,
+    // Booking stops carry no descriptor; dedup only matters for the new-INSERT search
+    // path — an existing stop is a pure passthrough via `existing`.
+    excludeIds: existingStop ? [] : getTripPhotoIds(day.trip_id),
     existing: existingStop
       ? {
         url: existingStop.unsplash_photo_url,
