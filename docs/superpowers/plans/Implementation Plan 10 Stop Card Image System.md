@@ -1,6 +1,6 @@
 # Implementation Plan 10 — Stop Card Image System (Descriptor-Driven Imagery)
 
-**Status: Wave 2 COMPLETE (2026-07-11).**
+**Status: Wave 3 COMPLETE (2026-07-11).**
 
 **Origin:** independent review of the activity-card image system, 2026-07-11 (this plan
 encodes its findings and the owner-approved design decisions from that session).
@@ -325,10 +325,77 @@ columns populated and credit rendering on a real stop.
   or build errors. Not browser-verified in the owner's UI: two activity photos shown
   side-by-side (that distinct-render behavior was proven against live Unsplash in
   isolation and by W1's Bali render, so no owner-data stops were created/deleted here).
-- **W3 — NOT STARTED** (3.1/3.2 can run parallel to W2; 3.3 depends on W2's
-  `resolvePhotoUrl` shape)
+- **W3 — COMPLETE (2026-07-11).** Descriptor generation landed on both entry paths.
+  `claude.js`: `DISCOVER_SYSTEM` extended with `photoQuery` (≤8-word culturally-specific
+  search string) and `sceneType` (D8 enum) per item; new exports `SCENE_TYPES` (the
+  closed 14-value enum), `coerceSceneType()` (validates-or-nulls any string against
+  it), and `generatePhotoDescriptor({ title, resolvedName, city, country, type })` — a
+  single non-streaming `claude-haiku-4-5-20251001` call (256 max_tokens, fenced-JSON
+  system prompt) that never throws: missing/malformed output, an unparseable response,
+  or an API error (bad key, network failure) are all caught internally and return
+  `null`. Migration 026 (`discovery_place_photo_descriptor.sql`, next after 025) adds
+  `photo_query`/`scene_type` to `discovery_places`; `discoveryCatalogue.js`'s
+  `insertPlaces` persists them (`photoQuery` trimmed/capped at 8 words, `sceneType`
+  run through `coerceSceneType` — an invalid enum from the model is stored as `null`,
+  never as the bad string) and tolerates items that omit the fields entirely (older
+  cached catalogues / model omissions — both columns land `null`, letting the Wave 2
+  precedence chain in `resolvePhotoUrl` fall through as before). `discovery.js`'s
+  `serializePlaceRow` surfaces `photoQuery`/`sceneType` on the wire.
+  `DiscoveryPanel.jsx`'s `handleAddToDay` threads `suggestion.photoQuery` /
+  `suggestion.sceneType` into **both** the verified-fast-path and standard `onAddStop`
+  payloads into `createStop`. `stops.js`: `resolvePhotoUrl` now calls
+  `generatePhotoDescriptor` (wrapped in a second, defense-in-depth try/catch at the
+  call site) exactly when no `photoQuery` was supplied AND the stop is photo-eligible
+  (the existing `isPhotoEligible`/`existing`-override early-returns already gate this
+  for transit stops and explicit overrides) — a returned descriptor's `photoQuery`
+  feeds the existing precedence chain and its `sceneType` fills in only when the
+  caller didn't already pass one; a `null`/thrown result leaves the chain exactly as
+  Wave 2 built it (falls through to `resolvedName+city` / `title+city`). Copilot-created
+  stops (`routes/copilot.js`'s `add_stop` → `createStop`) inherit the pipeline
+  automatically — no code change needed, verified by a new regression test.
+  **Tests:** backend 453→472 green (19 new): `claude.test.js` unit-tests
+  `generatePhotoDescriptor` (well-formed parse, invalid-enum coercion, 8-word cap,
+  no-fence/malformed-JSON/missing-photoQuery/API-failure all → `null`) and
+  `coerceSceneType`; `discoveryCatalogue.test.js` covers persistence, invalid-enum
+  coercion, and schema tolerance for descriptor-less items; `migrations.test.js`
+  checks the new columns and bumps the migration-count assertion to 26;
+  `locationIntegration.test.js` adds a default `generatePhotoDescriptor` mock
+  (`mockResolvedValue(null)`) to its `beforeEach` — preserves every pre-Wave-3
+  query/city assertion unchanged — plus a new `photo descriptors (Plan 10 Wave 3)`
+  block: discovery-supplied descriptor stored with zero extra Haiku calls,
+  manual-add triggers exactly one Haiku call and stores its result, no call when a
+  `photoQuery` is already supplied, a Haiku outage (`mockRejectedValue`) still
+  creates the stop via the resolvedName/title+city fallback, transit stops never
+  trigger a descriptor call, and the copilot-add regression test. `discovery.test.js`
+  and `copilot.test.js`'s existing `vi.mock('../src/services/claude.js', ...)`
+  factories needed `coerceSceneType` added (the former; the latter mocks
+  `stops.js` wholesale so was unaffected) — without it, `insertPlaces` (imported
+  transitively through the mocked module) threw on every discovery-route test.
+  Frontend 94/94 unchanged (no UI surface changed this wave — `StopCard.jsx`'s
+  tint map already consumed `sceneType`, wired in W2).
+  **Live verification (not just green tests):** ran a throwaway script
+  (`backend/verify-wave3.mjs`, deleted after use) against the real service stack and
+  the **live Anthropic + Unsplash APIs** — `generatePhotoDescriptor` returned a real,
+  culturally-specific Hanoi descriptor (`"Hanoi egg coffee cafe Vietnamese specialty"`,
+  `food_drink`); a manual `createStop` with no descriptor fired exactly one live Haiku
+  call and landed a real Unsplash photo id; a discovery-style `createStop` carrying a
+  pre-supplied `photoQuery`/`sceneType` stored them verbatim with **no** Haiku call.
+  Along the way this surfaced and fixed the same `backend/.env`-shadows-root-`.env`
+  gotcha W1 hit for the Unsplash key (`backend/.env`'s `ANTHROPIC_API_KEY` was a
+  placeholder; synced from the root `.env`'s real key) — with the placeholder key
+  still in place, `generatePhotoDescriptor` correctly caught the 401 and returned
+  `null`, and `createStop` still completed with the title+city fallback query, which
+  incidentally doubled as a live "Haiku outage" proof before the key was fixed.
+  **Not browser-verified in the owner's UI this session:** another chat's dev servers
+  already held ports 3002/5174, so this session's Browser pane could not reach a
+  server running the corrected `backend/.env` (that dev backend uses `node --watch`,
+  which does not reload `.env` on edit — only source changes — so even the
+  already-running server needs a manual restart to pick up the fixed key). The
+  service-level live verification above exercises the exact same code path
+  (`createStop` → `resolvePhotoUrl` → `generatePhotoDescriptor`/`selectPhoto`) that
+  the UI would call, so this is a coverage gap in *where* it was proven, not *what*.
 - **W4 — NOT STARTED** (depends on W1–W3)
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
 (2026-07-11); re-verified before W1 at backend 442/443 (1 pre-existing flake) /
-frontend 90/90 green.
+frontend 90/90 green. W3 closes at backend 472/472, frontend 94/94, both green.

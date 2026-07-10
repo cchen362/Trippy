@@ -11,7 +11,7 @@
 // Nothing trip-specific (trip id, user id, trip preferences) is ever
 // written to either table — this catalogue is destination-scoped only.
 
-import { normalizeName } from '../services/claude.js';
+import { normalizeName, coerceSceneType } from '../services/claude.js';
 import { score } from '../services/discoveryRank.js';
 
 // Gets the destination row for (cityKey, countryCode), creating it if it
@@ -79,8 +79,8 @@ export function insertPlaces(db, destinationId, items, batch) {
     INSERT INTO discovery_places (
       destination_id, category, name, normalized_name, local_name, aliases_json,
       description, why_go, estimated_duration, opening_hours, lat, lng,
-      provenance, status, batch, generated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unverified', 'active', ?, ?)
+      provenance, status, batch, generated_at, photo_query, scene_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unverified', 'active', ?, ?, ?, ?)
   `);
   const selectById = db.prepare('SELECT * FROM discovery_places WHERE id = ?');
 
@@ -100,6 +100,9 @@ export function insertPlaces(db, destinationId, items, batch) {
     }
 
     const generatedAt = item.generatedAt ?? new Date().toISOString();
+    const photoQuery = typeof item.photoQuery === 'string' && item.photoQuery.trim()
+      ? item.photoQuery.trim().split(/\s+/).slice(0, 8).join(' ')
+      : null;
     const result = insert.run(
       destinationId,
       item.category,
@@ -115,6 +118,8 @@ export function insertPlaces(db, destinationId, items, batch) {
       null, // lng — never stored
       batch,
       generatedAt,
+      photoQuery,
+      coerceSceneType(item.sceneType),
     );
 
     inserted.push(selectById.get(result.lastInsertRowid));

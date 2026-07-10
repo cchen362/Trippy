@@ -12,6 +12,24 @@ export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 
 
 export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
 
+export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001';
+
+// Closed D8 scene-type vocabulary (Plan 10 §1) — used by both discovery-authored
+// and Haiku-authored photo descriptors, and by the fallback query builder in
+// unsplash.js. Never persist a value outside this set.
+export const SCENE_TYPES = [
+  'temple_shrine', 'market', 'street_neighborhood', 'nature_outdoors', 'museum_gallery',
+  'landmark_architecture', 'food_drink', 'nightlife', 'beach_water', 'viewpoint',
+  'wellness', 'hotel_stay', 'entertainment', 'generic',
+];
+
+// Coerces a possibly-invalid/absent sceneType string to a valid D8 enum member
+// or null. Used at every write path that persists a scene_type value so a bad
+// enum (model hallucination, stale client, malformed cache) never lands in the DB.
+export function coerceSceneType(value) {
+  return SCENE_TYPES.includes(value) ? value : null;
+}
+
 const EXTRACTION_SYSTEM = `You are a travel-booking extraction engine. You receive raw content (pasted text, email text, screenshots, or PDFs of travel confirmations) and must extract every distinct booking as structured JSON.
 
 Output ONLY a single fenced JSON code block (\`\`\`json fence). No prose before or after it.
@@ -176,6 +194,8 @@ Each item: { "name": string, "description": string (1-2 sentences, specific and 
 Additional item fields:
 - Include "localName": string|null and "aliases": string[] on every item.
 - For places whose common indexed/local name is not English, put the traveler-friendly English or romanized name in "name", the local-script/common local name in "localName", and useful alternate spellings/official names in "aliases". Use null/[] when no meaningful local variant exists.
+- Include "photoQuery": a culturally specific English search string for stock-photo search (at most 8 words, referencing the actual place/cuisine/activity — never generic terms like "nice place" or "travel photo").
+- Include "sceneType": exactly one of temple_shrine, market, street_neighborhood, nature_outdoors, museum_gallery, landmark_architecture, food_drink, nightlife, beach_water, viewpoint, wellness, hotel_stay, entertainment, generic. Choose the closest match; use "generic" if unsure.
 
 Curation rules:
 - Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
@@ -308,6 +328,57 @@ export async function discoverDestination(destination, existingStopTitles = [], 
 
   console.log('[discover] ok categories=%o', accumulated.map((c) => c.category));
   return accumulated;
+}
+
+const PHOTO_DESCRIPTOR_SYSTEM = `You generate a stock-photo search descriptor for a single travel stop. Output ONLY a single fenced JSON code block (\`\`\`json fence), nothing else.
+
+Output shape:
+{"photoQuery": string, "sceneType": string}
+
+Rules:
+- photoQuery: a culturally specific English search string for stock-photo search, at most 8 words. Reference the actual place, cuisine, or activity — never generic terms like "nice place" or "travel photo".
+- sceneType: exactly one of temple_shrine, market, street_neighborhood, nature_outdoors, museum_gallery, landmark_architecture, food_drink, nightlife, beach_water, viewpoint, wellness, hotel_stay, entertainment, generic. Choose the closest match; use "generic" if unsure.
+- Output nothing outside the single fenced JSON block.`;
+
+// Single cheap Haiku call generating { photoQuery, sceneType } for a manually-added
+// stop that carries no descriptor of its own (D3). Must never block stop creation:
+// every failure mode (missing key, network error, malformed output, invalid schema)
+// is caught and returns null so the caller falls through to resolvedName+city.
+export async function generatePhotoDescriptor({ title, resolvedName, city, country, type }) {
+  try {
+    const client = getClient();
+
+    const contextParts = [
+      resolvedName || title,
+      city,
+      country,
+      type ? `stop type: ${type}` : null,
+    ].filter(Boolean);
+
+    const response = await client.messages.create({
+      model: PHOTO_DESCRIPTOR_MODEL,
+      max_tokens: 256,
+      system: PHOTO_DESCRIPTOR_SYSTEM,
+      messages: [{ role: 'user', content: contextParts.join(', ') }],
+    });
+
+    const text = response.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('');
+
+    const match = text.match(/```json\r?\n([\s\S]*?)\r?\n?```/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[1]);
+    if (typeof parsed.photoQuery !== 'string' || !parsed.photoQuery.trim()) return null;
+
+    const photoQuery = parsed.photoQuery.trim().split(/\s+/).slice(0, 8).join(' ');
+    return { photoQuery, sceneType: coerceSceneType(parsed.sceneType) };
+  } catch (err) {
+    console.warn('[photo] descriptor generation failed', { title, error: err?.message });
+    return null;
+  }
 }
 
 export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req) {

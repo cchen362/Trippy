@@ -4,6 +4,7 @@ import { assertDayAccess, assertStopAccess, getDayGeo } from './trips.js';
 import { resolvePlace } from './placeResolver.js';
 import { lookupHotelDetails } from './lookups.js';
 import { countryNameFromCode } from '../utils/countries.js';
+import { generatePhotoDescriptor } from './claude.js';
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -319,16 +320,37 @@ async function resolvePhotoUrl({ title, type, city, countryCode, resolvedName, p
   }
   if (!isPhotoEligible(type)) return EMPTY_PHOTO;
 
-  const query = (photoQuery && photoQuery.trim())
+  // D3/§3.3: no descriptor was supplied by the caller (discovery catalogue item or
+  // an explicit override) — generate one via a single cheap Haiku call. Never blocks:
+  // generatePhotoDescriptor swallows every failure and returns null, in which case
+  // effectiveQuery/effectiveScene stay as given and the precedence chain below falls
+  // through to resolvedName+city exactly as it did before this descriptor existed.
+  let effectiveQuery = photoQuery;
+  let effectiveScene = sceneType;
+  if (!effectiveQuery || !effectiveQuery.trim()) {
+    try {
+      const descriptor = await generatePhotoDescriptor({
+        title, resolvedName, city, country: countryNameFromCode(countryCode), type,
+      });
+      if (descriptor) {
+        effectiveQuery = descriptor.photoQuery;
+        if (effectiveScene === undefined || effectiveScene === null) effectiveScene = descriptor.sceneType;
+      }
+    } catch (err) {
+      console.warn('[photo] descriptor generation failed', { title, error: err?.message });
+    }
+  }
+
+  const query = (effectiveQuery && effectiveQuery.trim())
     || (resolvedName ? `${resolvedName} ${city || ''}`.trim() : '')
     || `${title} ${city || ''}`.trim();
   const country = countryNameFromCode(countryCode) || '';
 
   try {
-    const photo = await selectPhoto({ query, sceneType: sceneType ?? null, country, city, excludeIds });
+    const photo = await selectPhoto({ query, sceneType: effectiveScene ?? null, country, city, excludeIds });
     if (!photo?.url) {
       console.warn('[photo] no unsplash result', { query });
-      return { ...EMPTY_PHOTO, photoQuery: query, sceneType: sceneType ?? null };
+      return { ...EMPTY_PHOTO, photoQuery: query, sceneType: effectiveScene ?? null };
     }
     trackDownload(photo);
     return {
@@ -338,11 +360,11 @@ async function resolvePhotoUrl({ title, type, city, countryCode, resolvedName, p
         ? { photographer: photo.photographer, photographerUrl: photo.photographerUrl, unsplashUrl: photo.unsplashUrl }
         : null,
       photoQuery: query,
-      sceneType: sceneType ?? null,
+      sceneType: effectiveScene ?? null,
     };
   } catch (err) {
     console.warn('[photo] unsplash lookup failed', { title, city, error: err?.message });
-    return { ...EMPTY_PHOTO, photoQuery: query, sceneType: sceneType ?? null };
+    return { ...EMPTY_PHOTO, photoQuery: query, sceneType: effectiveScene ?? null };
   }
 }
 

@@ -17,9 +17,21 @@ function normalizeName(str) {
     .trim();
 }
 
+// Mirrors the real coerceSceneType in src/services/claude.js — discoveryCatalogue.js's
+// insertPlaces (exercised transitively via the /discover route) imports it directly.
+const SCENE_TYPES = [
+  'temple_shrine', 'market', 'street_neighborhood', 'nature_outdoors', 'museum_gallery',
+  'landmark_architecture', 'food_drink', 'nightlife', 'beach_water', 'viewpoint',
+  'wellness', 'hotel_stay', 'entertainment', 'generic',
+];
+function coerceSceneType(value) {
+  return SCENE_TYPES.includes(value) ? value : null;
+}
+
 vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
   normalizeName,
+  coerceSceneType,
 }));
 
 // --- Mock config to avoid env var validation ---

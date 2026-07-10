@@ -10,6 +10,7 @@ import { createStop, reorderStops, repairTripStopLocations, updateStop } from '.
 import { createTrip } from '../src/services/trips.js';
 import { getTripMapData } from '../src/services/mapData.js';
 import * as unsplashService from '../src/services/unsplash.js';
+import * as claudeService from '../src/services/claude.js';
 
 let tmpDir;
 let user;
@@ -21,6 +22,10 @@ beforeEach(async () => {
   initDb(join(tmpDir, 'test.db'));
   await runMigrations();
   vi.restoreAllMocks();
+  // Wave 3 default: no Haiku descriptor unless a test explicitly opts in — keeps
+  // every pre-Wave-3 test's query/city assertions unchanged (falls through to
+  // resolvedName+city / title+city exactly as before the descriptor existed).
+  vi.spyOn(claudeService, 'generatePhotoDescriptor').mockResolvedValue(null);
 
   user = authService.setup('owner', 'password123', 'Trip Owner').user;
   trip = createTrip(user.id, {
@@ -1159,6 +1164,7 @@ describe('stop photo selection (Plan 10 Wave 2)', () => {
 
   it('excludes transit stops from photo search entirely', async () => {
     const selectPhotoSpy = vi.spyOn(unsplashService, 'selectPhoto');
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     const stop = await createStop(user.id, dayId, {
@@ -1167,8 +1173,103 @@ describe('stop photo selection (Plan 10 Wave 2)', () => {
     });
 
     expect(selectPhotoSpy).not.toHaveBeenCalled();
+    expect(descriptorSpy).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(stop.unsplashPhotoUrl).toBeNull();
     expect(stop.unsplashPhotoId).toBeNull();
+  });
+});
+
+describe('photo descriptors (Plan 10 Wave 3)', () => {
+  it('a discovery add with a catalogue-authored descriptor stores it with no extra Haiku call', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor');
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Ciqikou Ancient Town',
+      type: 'experience',
+      photoQuery: 'ancient riverside stone alley Ciqikou',
+      sceneType: 'street_neighborhood',
+      source: 'discovery',
+      provenance: 'unverified',
+    });
+
+    expect(descriptorSpy).not.toHaveBeenCalled();
+    expect(stop.photoQuery).toBe('ancient riverside stone alley Ciqikou');
+    expect(stop.sceneType).toBe('street_neighborhood');
+  });
+
+  it('a manual add with no descriptor stores a Haiku-authored one', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor')
+      .mockResolvedValue({ photoQuery: 'steaming hotpot table Chengdu', sceneType: 'food_drink' });
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Hotpot Spot',
+      type: 'food',
+    });
+
+    expect(descriptorSpy).toHaveBeenCalledOnce();
+    expect(descriptorSpy.mock.calls[0][0]).toMatchObject({ title: 'Hotpot Spot', type: 'food' });
+    expect(stop.photoQuery).toBe('steaming hotpot table Chengdu');
+    expect(stop.sceneType).toBe('food_drink');
+  });
+
+  it('does not call the Haiku descriptor when the caller already supplied a photoQuery', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor');
+
+    await createStop(user.id, dayId, {
+      title: 'Hotpot Spot',
+      type: 'food',
+      photoQuery: 'already have a query',
+    });
+
+    expect(descriptorSpy).not.toHaveBeenCalled();
+  });
+
+  it('a Haiku outage still creates the stop, falling through to a resolvedName/title+city query', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    vi.spyOn(claudeService, 'generatePhotoDescriptor').mockRejectedValue(new Error('Haiku outage'));
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Some Random New Cafe',
+      type: 'food',
+    });
+
+    expect(stop).toBeTruthy();
+    expect(stop.unsplashPhotoUrl).toBeNull();
+    expect(stop.photoQuery).toBe('Some Random New Cafe Chongqing');
+    expect(stop.sceneType).toBeNull();
+  });
+
+  it('a manual descriptor is never generated for a photo-ineligible (transit) stop', async () => {
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor');
+
+    await createStop(user.id, dayId, {
+      title: 'G123 Chongqing to Chengdu',
+      type: 'transit',
+    });
+
+    expect(descriptorSpy).not.toHaveBeenCalled();
+  });
+
+  it('copilot-created stops inherit the descriptor pipeline the same as manual createStop calls', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const descriptorSpy = vi.spyOn(claudeService, 'generatePhotoDescriptor')
+      .mockResolvedValue({ photoQuery: 'street food stall night market', sceneType: 'food_drink' });
+
+    // Mirrors routes/copilot.js's apply handler: a copilot add_stop operation
+    // supplies no photoQuery/sceneType of its own and goes through createStop
+    // exactly like a manual add (Plan 10 Wave 3 §3.4 regression coverage).
+    const stop = await createStop(user.id, dayId, {
+      title: 'Night Market Skewers',
+      type: 'food',
+      note: 'Copilot suggested this',
+    });
+
+    expect(descriptorSpy).toHaveBeenCalledOnce();
+    expect(stop.photoQuery).toBe('street food stall night market');
+    expect(stop.sceneType).toBe('food_drink');
   });
 });

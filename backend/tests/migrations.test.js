@@ -86,8 +86,9 @@ describe('migrations', () => {
     const count = db.prepare('SELECT COUNT(*) as c FROM _migrations').get();
     // 001-018, 019 (fix_google_cn_coordinates), 020 (reset_bali_catalogue),
     // 021 (canonicalize_discovery_keys), 022 (drop_dead_discovery_cache),
-    // 023 (trip_scopes), 024 (geo_data_repair), and 025 (stop_photo_attribution).
-    expect(count.c).toBe(25);
+    // 023 (trip_scopes), 024 (geo_data_repair), 025 (stop_photo_attribution),
+    // and 026 (discovery_place_photo_descriptor).
+    expect(count.c).toBe(26);
   });
 
   it('adds stop photo attribution columns (Plan 10 Wave 1)', () => {
@@ -96,6 +97,14 @@ describe('migrations', () => {
 
     expect(columns).toContain('unsplash_photo_id');
     expect(columns).toContain('photo_attribution_json');
+    expect(columns).toContain('photo_query');
+    expect(columns).toContain('scene_type');
+  });
+
+  it('adds discovery place photo descriptor columns (Plan 10 Wave 3)', () => {
+    const db = getDb();
+    const columns = db.prepare('PRAGMA table_info(discovery_places)').all().map((r) => r.name);
+
     expect(columns).toContain('photo_query');
     expect(columns).toContain('scene_type');
   });

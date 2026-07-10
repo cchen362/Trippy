@@ -445,6 +445,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         duration: suggestion.estimatedDuration,
         source: 'discovery',
         provenance: suggestion.provenance,
+        photoQuery: suggestion.photoQuery,
+        sceneType: suggestion.sceneType,
       });
       return;
     }
@@ -461,6 +463,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       duration: suggestion.estimatedDuration,
       source: 'discovery',
       provenance: suggestion.provenance,
+      photoQuery: suggestion.photoQuery,
+      sceneType: suggestion.sceneType,
     });
   };
 

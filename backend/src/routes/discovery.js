@@ -99,6 +99,8 @@ function serializePlaceRow(row, prefs) {
     openingHours: row.opening_hours,
     localName: row.local_name,
     aliases: JSON.parse(row.aliases_json || '[]'),
+    photoQuery: row.photo_query || null,
+    sceneType: row.scene_type || null,
     lat: row.provenance === 'verified' ? row.lat : null,
     lng: row.provenance === 'verified' ? row.lng : null,
     generatedAt: row.generated_at,

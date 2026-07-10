@@ -21,7 +21,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
-const { discoverDestination, streamCopilotResponse } = await import('../src/services/claude.js');
+const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
 // discoverDestination
@@ -367,5 +367,87 @@ describe('streamCopilotResponse — return value', () => {
     const returned = await streamCopilotResponse([], {}, res);
 
     expect(returned).toBe(fullText);
+  });
+});
+
+describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+  });
+
+  function respondWith(text) {
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text }] });
+  }
+
+  it('parses a well-formed descriptor', async () => {
+    respondWith('```json\n{"photoQuery": "steaming hotpot table Chengdu", "sceneType": "food_drink"}\n```');
+
+    const result = await generatePhotoDescriptor({ title: 'Hotpot Spot', city: 'Chengdu', country: 'China', type: 'food' });
+
+    expect(result).toEqual({ photoQuery: 'steaming hotpot table Chengdu', sceneType: 'food_drink' });
+    expect(mockCreate).toHaveBeenCalledOnce();
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: 'claude-haiku-4-5-20251001' });
+  });
+
+  it('coerces an invalid sceneType to null while keeping a valid photoQuery', async () => {
+    respondWith('```json\n{"photoQuery": "night market skewers", "sceneType": "not_a_real_scene"}\n```');
+
+    const result = await generatePhotoDescriptor({ title: 'Night Market', type: 'food' });
+
+    expect(result).toEqual({ photoQuery: 'night market skewers', sceneType: null });
+  });
+
+  it('caps photoQuery at 8 words', async () => {
+    respondWith('```json\n{"photoQuery": "one two three four five six seven eight nine ten", "sceneType": "generic"}\n```');
+
+    const result = await generatePhotoDescriptor({ title: 'Long Query Place' });
+
+    expect(result.photoQuery.split(/\s+/)).toHaveLength(8);
+  });
+
+  it('returns null when the response has no fenced JSON block', async () => {
+    respondWith('Sorry, I cannot help with that.');
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the JSON is malformed', async () => {
+    respondWith('```json\n{"photoQuery": "broken\n```');
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when photoQuery is missing or empty', async () => {
+    respondWith('```json\n{"sceneType": "market"}\n```');
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null (never throws) when the API call fails', async () => {
+    mockCreate.mockRejectedValue(new Error('Anthropic outage'));
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+  });
+});
+
+describe('coerceSceneType (Plan 10 Wave 3)', () => {
+  it('passes through every D8 enum member', () => {
+    expect(coerceSceneType('temple_shrine')).toBe('temple_shrine');
+    expect(coerceSceneType('generic')).toBe('generic');
+  });
+
+  it('coerces anything else — including null/undefined/empty string — to null', () => {
+    expect(coerceSceneType('bogus')).toBeNull();
+    expect(coerceSceneType(null)).toBeNull();
+    expect(coerceSceneType(undefined)).toBeNull();
+    expect(coerceSceneType('')).toBeNull();
   });
 });

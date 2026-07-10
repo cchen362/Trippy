@@ -196,6 +196,49 @@ describe('insertPlaces', () => {
     expect(inserted[0].local_name).toBeNull();
     expect(JSON.parse(inserted[0].aliases_json)).toEqual([]);
   });
+
+  it('persists a valid photoQuery/sceneType descriptor (Plan 10 Wave 3)', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'nara2', countryCode: 'JP', displayName: 'Nara' });
+
+    const inserted = insertPlaces(db, dest.id, [makeItem({
+      name: 'Todaiji Temple',
+      photoQuery: 'giant bronze Buddha wooden temple hall',
+      sceneType: 'temple_shrine',
+    })], 0);
+
+    expect(inserted[0].photo_query).toBe('giant bronze Buddha wooden temple hall');
+    expect(inserted[0].scene_type).toBe('temple_shrine');
+  });
+
+  it('coerces an invalid sceneType to null instead of persisting it (Plan 10 Wave 3)', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'nara3', countryCode: 'JP', displayName: 'Nara' });
+
+    const inserted = insertPlaces(db, dest.id, [makeItem({
+      name: 'Nara Park',
+      photoQuery: 'deer roaming a park lawn',
+      sceneType: 'not_a_real_scene',
+    })], 0);
+
+    expect(inserted[0].photo_query).toBe('deer roaming a park lawn');
+    expect(inserted[0].scene_type).toBeNull();
+  });
+
+  it('tolerates items with no photoQuery/sceneType fields — older cached catalogues, model omissions (Plan 10 Wave 3 §3.1)', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'nara4', countryCode: 'JP', displayName: 'Nara' });
+
+    const inserted = insertPlaces(db, dest.id, [{
+      category: 'culture',
+      name: 'Isuien Garden',
+      description: 'A quiet strolling garden beside Todaiji.',
+    }], 0);
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].photo_query).toBeNull();
+    expect(inserted[0].scene_type).toBeNull();
+  });
 });
 
 describe('listExclusionNames', () => {
