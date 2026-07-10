@@ -628,6 +628,89 @@ describe('POST /trips/:tripId/discover — country-qualified destinations', () =
 });
 
 // ---------------------------------------------------------------------------
+// D6 empty-country guard (Plan 9 Wave 5.1, fixture F10) — an EMPTY-countryCode
+// request reuses the single existing country-coded catalogue row for the same
+// city key instead of minting a fresh ''-bucket twin. Zero or multiple
+// country-coded rows keep today's ''-bucket behavior exactly.
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/discover — D6 empty-country guard', () => {
+  it('reuses the single existing country-coded row (kualalumpur|MY) for an empty-countryCode request — no "" row created', async () => {
+    const myDest = seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
+    seedPlace(myDest.id, { category: 'culture', name: 'Petronas Towers' });
+
+    const { events, error } = await callDiscover({ destination: 'Kuala Lumpur' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled(); // cache hit against the MY row
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
+    const categoryEvent = events.find((e) => e.type === 'category');
+    expect(categoryEvent?.items[0].name).toBe('Petronas Towers');
+
+    const db = getDb();
+    const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('kualalumpur');
+    expect(allRows).toHaveLength(1);
+    expect(allRows[0].country_code).toBe('MY');
+  });
+
+  it('falls back to the "" bucket as today when zero country-coded rows exist', async () => {
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    const { error } = await callDiscover({ destination: 'Novaria' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('novaria');
+    expect(row).toBeDefined();
+    expect(row.country_code).toBe('');
+  });
+
+  it('falls back to the "" bucket as today when two country-coded rows exist (georgetown|MY, georgetown|GY)', async () => {
+    seedDestination({ cityKey: 'georgetown', countryCode: 'MY', displayName: 'Georgetown' });
+    seedDestination({ cityKey: 'georgetown', countryCode: 'GY', displayName: 'Georgetown' });
+
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    const { error } = await callDiscover({ destination: 'Georgetown' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+
+    const db = getDb();
+    const emptyRow = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code = ?').get('georgetown', '');
+    expect(emptyRow).toBeDefined();
+    const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('georgetown');
+    expect(allRows).toHaveLength(3);
+  });
+
+  it('leaves a CJK free-text key (北京) with no country-coded twin in the "" bucket, unchanged', async () => {
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+
+    const { error } = await callDiscover({ destination: '北京' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('北京');
+    expect(row).toBeDefined();
+    expect(row.country_code).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Golden fixture — route serves identical category/item sets before/after
 // migrating a blob into the new catalogue (whyItFits mapped correctly)
 // ---------------------------------------------------------------------------

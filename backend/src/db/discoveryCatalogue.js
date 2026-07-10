@@ -36,6 +36,18 @@ export function getOrCreateDestination(db, { cityKey, countryCode, displayName }
   ).get(cityKey, normalizedCountryCode);
 }
 
+// Backs the D6 empty-country guard (Plan 9 Wave 5): every country-coded row
+// (country_code != '') that already exists for a city_key. The route uses
+// this to decide whether an EMPTY-countryCode Discovery request can safely
+// adopt an existing country-coded catalogue row instead of minting a fresh
+// ''-bucket twin — only when exactly one such row exists (zero or multiple
+// is left alone; multiple is genuinely ambiguous and must not be guessed at).
+export function listCountryCodedRows(db, cityKey) {
+  return db.prepare(
+    "SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code != ''",
+  ).all(cityKey);
+}
+
 // Returns every active place for a destination, grouped/ordered by
 // (category, id) — the same order the route streams categories in.
 export function listActivePlaces(db, destinationId) {

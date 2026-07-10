@@ -14,6 +14,7 @@ import {
   enforceCategoryCap,
   getDailyGenerationCount,
   incrementDailyGenerationCount,
+  listCountryCodedRows,
 } from '../db/discoveryCatalogue.js';
 import { rankPlaces, orderCategories, parseDurationHours, TAG_TO_CATEGORY } from '../services/discoveryRank.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
@@ -144,7 +145,12 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     if (countryCode !== undefined && countryCode !== null && !/^[A-Z]{2}$/.test(countryCode)) {
       throw Object.assign(new Error('countryCode must be a 2-letter uppercase code'), { status: 400 });
     }
-    const normalizedCountryCode = countryCode ?? '';
+    let normalizedCountryCode = countryCode ?? '';
+
+    // db handle has no side effects — obtained early so the D6 guard below
+    // (which needs to query the catalogue) can run before it's otherwise
+    // needed for getOrCreateDestination.
+    const db = getDb();
 
     // Trip-fit preferences (Wave 3): computed once per request from the
     // access-checked trip row (req.trip, set by requireTripAccess). Never
@@ -164,6 +170,27 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const claudeDestinationBase = destination.trim().toLowerCase();
     const cacheKey = canonicalGeoKey(destination);
 
+    // D6 (Plan 9 W5.1): an EMPTY-countryCode Discovery request reuses the
+    // single existing country-coded catalogue row for the same city key,
+    // instead of minting a fresh ''-bucket twin (the bug that recreated the
+    // kualalumpur|'' row on 2026-07-09, since the KL trip's days.city_country
+    // is NULL). Zero or multiple country-coded rows keep today's ''-bucket
+    // behavior exactly — multiple is genuinely ambiguous and must not be
+    // guessed at. Adopting the code here (before getOrCreateDestination)
+    // makes it the effective country for the whole request: the catalogue
+    // row lookup, the Claude destination-string composition below, and
+    // anything else keyed on the request's country.
+    if (normalizedCountryCode === '') {
+      const countryCodedRows = listCountryCodedRows(db, cacheKey);
+      if (countryCodedRows.length === 1) {
+        normalizedCountryCode = countryCodedRows[0].country_code;
+        console.log(
+          '[discovery] country-fallback city_key=%s -> %s',
+          cacheKey, normalizedCountryCode,
+        );
+      }
+    }
+
     // When the country is known, disambiguate homonym cities (e.g. Chengdu,
     // multiple Georgetowns) by composing it into the STRING sent to Claude
     // only — discoverDestination's signature is untouched (backward
@@ -175,8 +202,6 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const claudeDestination = countryDisplayName
       ? `${destination.trim()}, ${countryDisplayName} (${normalizedCountryCode})`
       : claudeDestinationBase;
-
-    const db = getDb();
 
     // SSE headers — set before any potential cache hit or miss
     res.setHeader('Content-Type', 'text/event-stream');

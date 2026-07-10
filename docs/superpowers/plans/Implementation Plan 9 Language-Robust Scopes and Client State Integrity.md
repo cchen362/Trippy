@@ -648,5 +648,33 @@ and the manual browser pass defined in Wave 6.
   stop between days twice and confirm the final placement matches the last completed action;
   force a move failure (e.g. offline) and confirm the error banner shows a clean message.
 - W5 Discovery guard + data repair (after W1; destructive migration — backup + owner
-  inventory review): **NOT STARTED**
+  inventory review): **CODE COMPLETE + LOCALLY VERIFIED (2026-07-10); deploy gated on
+  owner inventory review.** D6 guard: new `listCountryCodedRows` in `discoveryCatalogue.js`;
+  the Discovery route, on an empty-country request, adopts the single existing country-coded
+  row's country as the *effective* country for the whole request (catalogue lookup + Claude
+  destination composition), logging `[discovery] country-fallback`; zero/multiple rows →
+  byte-identical `''`-bucket behavior; free-text CJK keys unaffected (F10, all four cases
+  tested). Migration `024_geo_data_repair.js` exports read-only `computeRepairPlan(db)` +
+  `up(db)` that applies it (021's child-deletion/logging/idempotence pattern): stamps NULL
+  `days.city_country` only when catalogue+scope evidence agree on exactly one country,
+  deletes empty-country twins (021 rule-3 semantics), deletes the reviewed `杭州市|CN` row.
+  New `backend/scripts/`: `geoRepairInventory.js` (read-only printer of the 024 plan) and
+  `refetchCjkBookingEvidence.js` (5.3 — dry-run by default, `--apply` to fetch+write;
+  exported testable `hasCjkEvidence` (`\p{Script=Han}` on city/locality/sublocality/
+  adminAreas values, countryCode excluded), `selectCjkHotelBookings`, `mergeRefetchedFields`
+  which rewrites ONLY the five language-sensitive fields; per-booking fetch failures logged
+  and skipped, never abort). **Backend 443/443 green** (416 + 27: F10 ×4, migration024 ×11,
+  refetch ×12); `migrations.test.js` count bumped 23→24 (routine). **Locally verified
+  against real data:** dev-DB dry-run selected exactly the W3-verify Park Hyatt Hangzhou
+  booking (city/locality/sublocality/adminAreas.aal1 flagged, no network calls, no writes);
+  a read-only production snapshot (scp of the quiescent DB files; 023 applied to the LOCAL
+  copy only, reproducing deploy-time state) yielded the owner-review inventory: **3 KL day
+  stamps → MY; delete `kualalumpur|''` (173 places); delete `杭州市|CN` (83 places);
+  1 booking selected for 5.3 (Park Hyatt Hangzhou, trip `d2813bc5…`)** — matches §0 fact 10
+  exactly; `北京`/`南疆` free-text rows untouched. Production was not modified. **Remaining
+  (ops, after owner approval):** fresh pre-migration backup → deploy (023+024 run in the
+  same pass as the D6 guard, satisfying the cleanup-with-prevention ordering) → owner
+  live-smoke-tests W1's `languageCode=en` → server-side 5.3 dry-run then `--apply` →
+  5.4 `backfillTripPhotos` for the Hangzhou trip (verify the 1.3 photo warn stays silent) →
+  post-deploy read-only checks per §Wave 5 verification.
 - W6 production verification pass (last): **NOT STARTED**
