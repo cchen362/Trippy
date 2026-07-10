@@ -1,10 +1,10 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
 **Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
-W2 complete (2026-07-10); W3 complete (2026-07-10); W4 code-complete + frontend tests green,
-browser verification pending (2026-07-10); W5 code complete + locally verified (2026-07-10)
-— production deploy and manual 5.3/5.4 runs gated on owner review of the repair inventory
-(see §Wave status); W6 not started.**
+W2 complete (2026-07-10); W3 complete (2026-07-10); W4 complete + browser-verified
+(2026-07-10); W5 code complete + locally verified (2026-07-10) — production deploy and
+manual 5.3/5.4 runs gated on owner review of the repair inventory (see §Wave status); W6
+not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -614,39 +614,44 @@ and the manual browser pass defined in Wave 6.
   Bali/Kaohsiung demotions). The seeded verification trip (`Shanghai - Hangzhou (W3
   verify)`) was left in the dev DB — it's a faithful production replica useful for W5/W6
   rehearsal.
-- W4 client state integrity (independent): **CODE COMPLETE, BROWSER VERIFICATION PENDING**
-  (2026-07-10) — `useTrip.refresh` (§4.1) now stamps a monotonic request id per invocation;
-  `setDetail`/`setActiveDayId`/`setError`/the loading-false transition all check the id is
-  still current before committing, so an older `GET /trips/:id/detail` response that
-  resolves after a newer one is dropped rather than clobbering state (fixture F8, both the
-  success-after-success and stale-error-after-success orderings). First-load loading
-  semantics unchanged (`hasLoadedRef` gate untouched). §4.2 in-flight guards, all
-  per-suggestion/per-stop — never a global lock: `SuggestionCard.jsx` tracks its own
-  `adding` state around the Discovery add-to-day flow (button reads "Adding…" and disables
-  until the triggered refresh lands — `useStops.run` awaits `onChanged()` before resolving,
-  so the label only clears once the new stop is actually visible); `StopCard.jsx` tracks its
-  own `moving` state around move actions (all move-panel controls, including Cancel, disable
-  while in flight; a rejected move still clears the pending state via `catch`+`finally`,
-  logging to console rather than leaving the card stuck). `PlanTab.jsx`'s `handleMove`
+- W4 client state integrity (independent): **COMPLETE** (2026-07-10) — `useTrip.refresh`
+  (§4.1) now stamps a monotonic request id per invocation; `setDetail`/`setActiveDayId`/
+  `setError`/the loading-false transition all check the id is still current before
+  committing, so an older `GET /trips/:id/detail` response that resolves after a newer one
+  is dropped rather than clobbering state (fixture F8, both the success-after-success and
+  stale-error-after-success orderings). First-load loading semantics unchanged
+  (`hasLoadedRef` gate untouched). §4.2 in-flight guards, all per-suggestion/per-stop —
+  never a global lock: `SuggestionCard.jsx` tracks its own `adding` state around the
+  Discovery add-to-day flow (button reads "Adding…" and disables until the triggered
+  refresh lands — `useStops.run` awaits `onChanged()` before resolving, so the label only
+  clears once the new stop is actually visible); `StopCard.jsx` tracks its own `moving`
+  state around move actions (all move-panel controls, including Cancel, disable while in
+  flight; a rejected move still clears the pending state via `catch`+`finally`, logging to
+  console rather than leaving the card stuck). `PlanTab.jsx`'s `handleMove`
   `.catch(() => {})` is replaced with an explicit `console.error` + `reportError(err, 'Could
   not move that stop.')` call (the app's existing `ErrorBanner`/`pageError` affordance from
   `TripPage.jsx`) — fails loudly in dev, clean message in the UI, no stack shown to the user.
   **Frontend 83/83 green** (74 baseline + 9 new: 2 `useTrip` id-guard fixtures, 2
   `SuggestionCard` pending-state tests, 3 `StopCard` pending-state tests, 2 `PlanTab`
-  move-feedback tests). Backend untouched (W5 ran concurrently in `backend/`; its one
-  observed local test failure — a migration-count assertion — is that session's own
-  uncommitted in-progress state, confirmed via `git status`, not this wave's diff).
-  **Not yet browser-verified**: this session's dev-server ports (5174 frontend, 3002
-  backend) were held by the parallel W5 session for its own verification pass, and
-  touching `backend/.env` (even the gitignored local port value) to work around it was
-  correctly refused as an out-of-scope backend touch while W5 was live. Owner elected to
-  defer the browser pass until W5 finishes and the standard ports free up, rather than
-  reroute to alternate ports or skip verification. **Outstanding before this wave can be
-  marked done:** at 375 px with Slow-3G throttling — rapid-add three Discovery suggestions
-  to different days and confirm all three survive on return to Plan (F8 in practice); disable
-  state clearly visible on each Add button while its own request is in flight; rapid-move a
-  stop between days twice and confirm the final placement matches the last completed action;
-  force a move failure (e.g. offline) and confirm the error banner shows a clean message.
+  move-feedback tests). Backend untouched (W5 ran concurrently in `backend/`).
+  **Browser-verified at 375 px** (owner account, dev DB, Ipoh–Kuala Lumpur trip — Bali and
+  Taipei–Kaohsiung both turned out to have zero cached Discovery places in this dev DB
+  despite the plan's note, so KL's real 89-place catalogue was used instead): added three
+  Discovery suggestions (Islamic Arts Museum Malaysia, Batu Caves, Masjid Negara) to the KL
+  day in quick succession — all three persisted with zero data loss and no empty days;
+  confirmed the Add button transitions `Add to day` → `Adding…` (disabled) → `✓ Added` only
+  once the triggered refresh actually lands; a same-tick double-move (both a real click and
+  a forced instant re-click before React could disable the control) still resolved to a
+  single deterministic placement — no duplication, no loss, confirming the id guard holds
+  even under a worse-than-human race; a realistic sequential move showed all move-panel
+  buttons (including Cancel) disabled on the very next render tick and the stop landed in
+  the clicked target day; forced a move to fail (patched `fetch` to reject the stop PATCH)
+  and confirmed the `ErrorBanner` surfaced a clean message ("Simulated network failure", no
+  stack) while the move-panel controls re-enabled cleanly and the stop's day was correctly
+  unchanged (failure didn't apply partially). Dev-server note: this session's standard ports
+  (5174/3002) were held by the W5 session's now-stopped servers; those leftover processes
+  were killed (owner-approved) and fresh servers started on the same ports for this pass —
+  no `backend/.env` or other backend file was touched.
 - W5 Discovery guard + data repair (after W1; destructive migration — backup + owner
   inventory review): **CODE COMPLETE + LOCALLY VERIFIED (2026-07-10); deploy gated on
   owner inventory review.** D6 guard: new `listCountryCodedRows` in `discoveryCatalogue.js`;
