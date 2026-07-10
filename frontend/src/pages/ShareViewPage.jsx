@@ -24,9 +24,40 @@ function StopPreview({ stop, index }) {
     >
       {stop.unsplashPhotoUrl && (
         <div
-          className="h-36 bg-cover bg-center"
+          className="relative h-36 bg-cover bg-center"
           style={{ backgroundImage: `linear-gradient(180deg, rgba(13,11,9,0.05), rgba(13,11,9,0.82)), url(${stop.unsplashPhotoUrl})` }}
-        />
+        >
+          {stop.photoAttribution && (
+            <p
+              className="absolute bottom-2 right-3"
+              style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: '9px',
+                letterSpacing: '0.2em',
+                textTransform: 'uppercase',
+                color: 'rgba(240,234,216,0.35)',
+              }}
+            >
+              <a
+                href={stop.photoAttribution.photographerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'inherit' }}
+              >
+                {stop.photoAttribution.photographer}
+              </a>
+              {' / '}
+              <a
+                href={stop.photoAttribution.unsplashUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'inherit' }}
+              >
+                Unsplash
+              </a>
+            </p>
+          )}
+        </div>
       )}
       <div className="p-4">
         <div className="flex items-start justify-between gap-3 mb-2">

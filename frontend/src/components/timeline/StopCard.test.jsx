@@ -101,3 +101,41 @@ describe('StopCard — move chip city label (bug b: resolved city)', () => {
     expect(screen.queryByRole('button', { name: /day 2 · shanghai/i })).not.toBeInTheDocument();
   });
 });
+
+describe('StopCard — photo attribution (Plan 10 Wave 1 §1.4)', () => {
+  const PHOTO_ATTRIBUTION = {
+    photographer: 'Jane Doe',
+    photographerUrl: 'https://unsplash.com/@janedoe?utm_source=trippy&utm_medium=referral',
+    unsplashUrl: 'https://unsplash.com/photos/photo-123?utm_source=trippy&utm_medium=referral',
+  };
+
+  it('renders the credit line in the expanded state when a photo and attribution are present', () => {
+    renderCard({
+      stop: { ...STOP, unsplashPhotoUrl: 'https://images.unsplash.com/photo-123', photoAttribution: PHOTO_ATTRIBUTION },
+    });
+
+    expect(screen.getByText(/photo —/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Jane Doe' })).toHaveAttribute('href', PHOTO_ATTRIBUTION.photographerUrl);
+    expect(screen.getByRole('link', { name: 'Unsplash' })).toHaveAttribute('href', PHOTO_ATTRIBUTION.unsplashUrl);
+  });
+
+  it('omits the credit line when there is no photo', () => {
+    renderCard({ stop: { ...STOP, unsplashPhotoUrl: null, photoAttribution: null } });
+    expect(screen.queryByText(/photo —/i)).not.toBeInTheDocument();
+  });
+
+  it('omits the credit line when a photo is present but has no attribution', () => {
+    renderCard({
+      stop: { ...STOP, unsplashPhotoUrl: 'https://images.unsplash.com/photo-123', photoAttribution: null },
+    });
+    expect(screen.queryByText(/photo —/i)).not.toBeInTheDocument();
+  });
+
+  it('never renders the credit line (or the image) on the collapsed card — collapsed DOM stays unchanged', () => {
+    renderCard({
+      expanded: false,
+      stop: { ...STOP, unsplashPhotoUrl: 'https://images.unsplash.com/photo-123', photoAttribution: PHOTO_ATTRIBUTION },
+    });
+    expect(screen.queryByText(/photo —/i)).not.toBeInTheDocument();
+  });
+});

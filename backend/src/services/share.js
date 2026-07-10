@@ -74,6 +74,7 @@ function mapStop(row) {
     lat: row.lat,
     lng: row.lng,
     unsplashPhotoUrl: row.unsplash_photo_url,
+    photoAttribution: parseJson(row.photo_attribution_json, null),
     estimatedCost: row.estimated_cost,
     bestTime: row.best_time,
     duration: row.duration,

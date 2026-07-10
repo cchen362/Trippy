@@ -1,6 +1,6 @@
 # Implementation Plan 10 — Stop Card Image System (Descriptor-Driven Imagery)
 
-**Status: NOT STARTED.**
+**Status: Wave 1 COMPLETE (2026-07-11).**
 
 **Origin:** independent review of the activity-card image system, 2026-07-11 (this plan
 encodes its findings and the owner-approved design decisions from that session).
@@ -246,11 +246,41 @@ columns populated and credit rendering on a real stop.
 
 ## 5. Wave status
 
-- **W1 — NOT STARTED**
-- **W2 — NOT STARTED** (depends on W1 columns)
+- **W1 — COMPLETE (2026-07-11).** Migration 025 added `unsplash_photo_id`,
+  `photo_attribution_json`, `photo_query`, `scene_type` to `stops`. `unsplash.js`
+  maps `links.download_location` and exports `trackDownload()` (fired, non-blocking,
+  whenever `resolvePhotoUrl` selects a fresh photo). `resolvePhotoUrl` now returns
+  `{ url, photoId, attribution, photoQuery, sceneType }` instead of a bare URL string;
+  every write path that used to touch `unsplash_photo_url` alone now persists all four
+  new columns — `createStop`, `updateStop` (both the refresh and passthrough branches),
+  `backfillTripPhotos`, and `syncStopWithBooking` (2 UPDATE branches + 1 INSERT branch;
+  this fourth write path wasn't called out in the plan's explore findings but was
+  found and updated during implementation). Serialization threaded through all three
+  independent row mappers: `stops.js formatStop`, `trips.js mapStop` (full internal
+  fields), `share.js mapStop` (attribution only — no id/query/sceneType leaked
+  publicly). Attribution UI landed exactly per D7: StopCard micro-line in the expanded
+  state only (`stopPropagation` on both credit links so they don't collapse the card
+  on tap), ShareViewPage bottom-right corner caption inside the existing gradient;
+  collapsed card DOM verified unchanged (image renders, no credit). Backend
+  442→446 tests green (7 new), frontend 90→94 green (4 new); one pre-existing
+  `auth.test.js` rate-limit timing flake confirmed unrelated (fails in isolation on
+  clean `main` too). Browser-verified end-to-end against the live local dev app
+  (Bali trip, real trip data): API round-trip confirmed new fields serialize
+  correctly; a synthetic photo seeded directly in the dev DB confirmed the credit
+  line renders with correct photographer/Unsplash referral links in the expanded
+  state and is absent when collapsed — dev `.env`'s `UNSPLASH_ACCESS_KEY` is
+  currently invalid (`OAuth error: The access token is invalid`, confirmed via
+  `/api/lookups/photos`), a pre-existing environment issue outside Wave 1 scope;
+  this also incidentally verified `resolvePhotoUrl`'s failure path (stop creation
+  never blocks, `photoQuery` still stored, no crash). Test/synthetic data cleaned up
+  after verification — no residual rows in the owner's trip data.
+- **W2 — NOT STARTED** (depends on W1 columns — ready to start; note the dev
+  Unsplash key needs to be refreshed before W2's selection-engine work can be
+  exercised against live search results).
 - **W3 — NOT STARTED** (3.1/3.2 can run parallel to W2; 3.3 depends on W2's
   `resolvePhotoUrl` shape)
 - **W4 — NOT STARTED** (depends on W1–W3)
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
-(2026-07-11); re-verify the suite is green before starting W1.
+(2026-07-11); re-verified before W1 at backend 442/443 (1 pre-existing flake) /
+frontend 90/90 green.

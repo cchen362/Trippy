@@ -966,3 +966,66 @@ describe('resolutionAnchor consumption (Plan 8 Wave 5 — Task 5.1)', () => {
     }));
   });
 });
+
+describe('stop photo attribution (Plan 10 Wave 1)', () => {
+  const FULL_PHOTO = {
+    id: 'photo-123',
+    url: 'https://images.unsplash.com/photo-123',
+    alt: 'A market street',
+    photographer: 'Jane Doe',
+    photographerUrl: 'https://unsplash.com/@janedoe?utm_source=trippy&utm_medium=referral',
+    unsplashUrl: 'https://unsplash.com/photos/photo-123?utm_source=trippy&utm_medium=referral',
+    downloadLocation: 'https://api.unsplash.com/photos/photo-123/download',
+  };
+
+  it('persists photo id, attribution, and query on the stop row and serializes them back (round-trip)', async () => {
+    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+
+    const stop = await createStop(user.id, dayId, {
+      title: 'Jiefangbei Night Market',
+      type: 'food',
+    });
+
+    expect(stop.unsplashPhotoUrl).toBe(FULL_PHOTO.url);
+    expect(stop.unsplashPhotoId).toBe(FULL_PHOTO.id);
+    expect(stop.photoAttribution).toEqual({
+      photographer: FULL_PHOTO.photographer,
+      photographerUrl: FULL_PHOTO.photographerUrl,
+      unsplashUrl: FULL_PHOTO.unsplashUrl,
+    });
+    expect(stop.photoQuery).toEqual(expect.any(String));
+
+    const row = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(row.unsplash_photo_id).toBe(FULL_PHOTO.id);
+    expect(JSON.parse(row.photo_attribution_json)).toEqual(stop.photoAttribution);
+  });
+
+  it('fires the Unsplash download-tracking call once when a photo is selected', async () => {
+    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    const trackSpy = vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+
+    await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
+
+    expect(trackSpy).toHaveBeenCalledOnce();
+    expect(trackSpy).toHaveBeenCalledWith(FULL_PHOTO);
+  });
+
+  it('does not re-fetch or re-track a photo when updating a stop without title/type/day changes', async () => {
+    vi.spyOn(unsplashService, 'pickPhoto').mockResolvedValue(FULL_PHOTO);
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+    const stop = await createStop(user.id, dayId, { title: 'Hongyadong', type: 'experience' });
+
+    const pickSpy = vi.spyOn(unsplashService, 'pickPhoto');
+    const trackSpy = vi.spyOn(unsplashService, 'trackDownload');
+    pickSpy.mockClear();
+    trackSpy.mockClear();
+
+    const updated = await updateStop(user.id, stop.id, { note: 'Great at night' });
+
+    expect(pickSpy).not.toHaveBeenCalled();
+    expect(trackSpy).not.toHaveBeenCalled();
+    expect(updated.unsplashPhotoId).toBe(FULL_PHOTO.id);
+    expect(updated.photoAttribution).toEqual(stop.photoAttribution);
+  });
+});

@@ -1,8 +1,17 @@
 import { getDb } from '../db/database.js';
-import { pickPhoto } from './unsplash.js';
+import { pickPhoto, trackDownload } from './unsplash.js';
 import { assertDayAccess, assertStopAccess, getDayGeo } from './trips.js';
 import { resolvePlace } from './placeResolver.js';
 import { lookupHotelDetails } from './lookups.js';
+
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
 
 function formatStop(row) {
   return {
@@ -25,6 +34,10 @@ function formatStop(row) {
     providerId: row.provider_id,
     countryCode: row.country_code,
     unsplashPhotoUrl: row.unsplash_photo_url,
+    unsplashPhotoId: row.unsplash_photo_id,
+    photoAttribution: parseJson(row.photo_attribution_json, null),
+    photoQuery: row.photo_query,
+    sceneType: row.scene_type,
     estimatedCost: row.estimated_cost,
     bookingRequired: Boolean(row.booking_required),
     bestTime: row.best_time,
@@ -315,9 +328,22 @@ function getDayIndex(tripId, dayDate) {
   return row?.count || 0;
 }
 
-async function resolvePhotoUrl({ title, type, city, dayIndex, existingUrl }) {
-  if (existingUrl !== undefined) return existingUrl;
-  if (!isPhotoEligible(type)) return null;
+const EMPTY_PHOTO = { url: null, photoId: null, attribution: null, photoQuery: null, sceneType: null };
+
+// existing, when provided, is the { url, photoId, attribution, photoQuery, sceneType }
+// to keep unchanged (explicit override from input, or the stop's own stored photo when
+// a refresh isn't warranted) — no search is performed in that case.
+async function resolvePhotoUrl({ title, type, city, dayIndex, existing }) {
+  if (existing !== undefined) {
+    return {
+      url: existing?.url ?? null,
+      photoId: existing?.photoId ?? null,
+      attribution: existing?.attribution ?? null,
+      photoQuery: existing?.photoQuery ?? null,
+      sceneType: existing?.sceneType ?? null,
+    };
+  }
+  if (!isPhotoEligible(type)) return EMPTY_PHOTO;
 
   const query = buildPhotoQuery(title, type, city);
   try {
@@ -329,13 +355,35 @@ async function resolvePhotoUrl({ title, type, city, dayIndex, existingUrl }) {
     });
     if (!photo?.url) {
       console.warn('[photo] no unsplash result', { query });
-      return null;
+      return { ...EMPTY_PHOTO, photoQuery: query };
     }
-    return photo.url;
+    trackDownload(photo);
+    return {
+      url: photo.url,
+      photoId: photo.id || null,
+      attribution: photo.photographer
+        ? { photographer: photo.photographer, photographerUrl: photo.photographerUrl, unsplashUrl: photo.unsplashUrl }
+        : null,
+      photoQuery: query,
+      sceneType: null,
+    };
   } catch (err) {
     console.warn('[photo] unsplash lookup failed', { title, city, error: err?.message });
-    return null;
+    return { ...EMPTY_PHOTO, photoQuery: query };
   }
+}
+
+// Input may carry an explicit photo (a caller-supplied override, e.g. a future swap
+// or a test suppressing the network call) — undefined means "resolve via search".
+function photoOverrideFromInput(input) {
+  if (input.unsplashPhotoUrl === undefined) return undefined;
+  return {
+    url: input.unsplashPhotoUrl,
+    photoId: input.unsplashPhotoId ?? null,
+    attribution: input.photoAttribution ?? null,
+    photoQuery: input.photoQuery ?? null,
+    sceneType: input.sceneType ?? null,
+  };
 }
 
 function nextSortOrder(dayId) {
@@ -357,23 +405,24 @@ export async function createStop(userId, dayId, input) {
   const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input });
   const dayIndex = getDayIndex(day.trip_id, day.date);
-  const unsplashPhotoUrl = await resolvePhotoUrl({
+  const photo = await resolvePhotoUrl({
     title,
     type,
     // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
     city: dayGeo.city ?? day.city,
     dayIndex,
-    existingUrl: input.unsplashPhotoUrl,
+    existing: photoOverrideFromInput(input),
   });
 
   const row = db.prepare(`
     INSERT INTO stops (
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
+      unsplash_photo_id, photo_attribution_json, photo_query, scene_type,
       estimated_cost, booking_required, best_time, duration, sort_order, is_featured,
       location_query, resolved_name, resolved_address, coordinate_system, coordinate_source,
       location_status, location_confidence, provider_id, country_code
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     dayId,
@@ -384,7 +433,11 @@ export async function createStop(userId, dayId, input) {
     input.note || null,
     location.lat,
     location.lng,
-    unsplashPhotoUrl,
+    photo.url,
+    photo.photoId,
+    photo.attribution ? JSON.stringify(photo.attribution) : null,
+    photo.photoQuery,
+    photo.sceneType,
     input.estimatedCost || null,
     input.bookingRequired ? 1 : 0,
     input.bestTime || null,
@@ -430,16 +483,22 @@ export async function updateStop(userId, stopId, input) {
   const location = await resolveLocationForStop({ day, title, input, existing });
   const shouldRefreshPhoto = isMoving || input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
   const dayIndex = getDayIndex(day.trip_id, day.date);
-  const unsplashPhotoUrl = shouldRefreshPhoto
+  const photo = shouldRefreshPhoto
     ? await resolvePhotoUrl({
       title,
       type,
       // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
       city: dayGeo.city ?? day.city,
       dayIndex,
-      existingUrl: input.unsplashPhotoUrl,
+      existing: photoOverrideFromInput(input),
     })
-    : existing.unsplash_photo_url;
+    : {
+      url: existing.unsplash_photo_url,
+      photoId: existing.unsplash_photo_id,
+      attribution: parseJson(existing.photo_attribution_json, null),
+      photoQuery: existing.photo_query,
+      sceneType: existing.scene_type,
+    };
 
   const sortOrder = isMoving ? nextSortOrder(targetDayId) : (input.sortOrder ?? existing.sort_order);
 
@@ -454,6 +513,10 @@ export async function updateStop(userId, stopId, input) {
       lat = ?,
       lng = ?,
       unsplash_photo_url = ?,
+      unsplash_photo_id = ?,
+      photo_attribution_json = ?,
+      photo_query = ?,
+      scene_type = ?,
       estimated_cost = ?,
       booking_required = ?,
       best_time = ?,
@@ -479,7 +542,11 @@ export async function updateStop(userId, stopId, input) {
     input.note ?? existing.note,
     location.lat,
     location.lng,
-    unsplashPhotoUrl,
+    photo.url,
+    photo.photoId,
+    photo.attribution ? JSON.stringify(photo.attribution) : null,
+    photo.photoQuery,
+    photo.sceneType,
     input.estimatedCost ?? existing.estimated_cost,
     input.bookingRequired !== undefined ? (input.bookingRequired ? 1 : 0) : existing.booking_required,
     input.bestTime ?? existing.best_time,
@@ -621,9 +688,20 @@ export async function backfillTripPhotos(userId, tripId) {
     const dayIndex = getDayIndex(s.trip_id, s.date);
     // Photos want broad-scope imagery, so the resolved city (not the anchor) — Plan 8 Wave 5 §5.1.
     const dayGeo = getDayGeo(s.day_id);
-    const url = await resolvePhotoUrl({ title: s.title, type: s.type, city: dayGeo.city ?? s.city, dayIndex });
-    if (url) {
-      db.prepare('UPDATE stops SET unsplash_photo_url = ? WHERE id = ?').run(url, s.id);
+    const photo = await resolvePhotoUrl({ title: s.title, type: s.type, city: dayGeo.city ?? s.city, dayIndex });
+    if (photo.url) {
+      db.prepare(`
+        UPDATE stops
+        SET unsplash_photo_url = ?, unsplash_photo_id = ?, photo_attribution_json = ?, photo_query = ?, scene_type = ?
+        WHERE id = ?
+      `).run(
+        photo.url,
+        photo.photoId,
+        photo.attribution ? JSON.stringify(photo.attribution) : null,
+        photo.photoQuery,
+        photo.sceneType,
+        s.id,
+      );
       updated.push(s.id);
     }
   }
@@ -787,12 +865,20 @@ export async function syncStopWithBooking(booking) {
   // Photos want broad-scope imagery, so the resolved city wins when present, falling
   // back to the booking's own city hint then the raw seed — Plan 8 Wave 5 §5.1.
   const dayGeo = getDayGeo(day.id);
-  const unsplashPhotoUrl = await resolvePhotoUrl({
+  const photo = await resolvePhotoUrl({
     title: inferred.title,
     type: inferred.type,
     city: dayGeo.city || inferred.cityHint || day.city,
     dayIndex,
-    existingUrl: existingStop?.unsplash_photo_url,
+    existing: existingStop
+      ? {
+        url: existingStop.unsplash_photo_url,
+        photoId: existingStop.unsplash_photo_id,
+        attribution: parseJson(existingStop.photo_attribution_json, null),
+        photoQuery: existingStop.photo_query,
+        sceneType: existingStop.scene_type,
+      }
+      : undefined,
   });
 
   if (existingStop) {
@@ -808,6 +894,10 @@ export async function syncStopWithBooking(booking) {
         lat = ?,
         lng = ?,
         unsplash_photo_url = ?,
+        unsplash_photo_id = ?,
+        photo_attribution_json = ?,
+        photo_query = ?,
+        scene_type = ?,
         booking_required = 1,
         is_featured = ?,
         location_query = ?,
@@ -830,7 +920,11 @@ export async function syncStopWithBooking(booking) {
       inferred.note,
       location.lat,
       location.lng,
-      unsplashPhotoUrl,
+      photo.url,
+      photo.photoId,
+      photo.attribution ? JSON.stringify(photo.attribution) : null,
+      photo.photoQuery,
+      photo.sceneType,
       inferred.isFeatured ? 1 : 0,
       location.locationQuery,
       location.resolvedName,
@@ -886,11 +980,12 @@ export async function syncStopWithBooking(booking) {
   const row = db.prepare(`
     INSERT INTO stops (
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
+      unsplash_photo_id, photo_attribution_json, photo_query, scene_type,
       booking_required, sort_order, is_featured, location_query, resolved_name,
       resolved_address, coordinate_system, coordinate_source, location_status,
       location_confidence, provider_id, country_code
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     day.id,
@@ -901,7 +996,11 @@ export async function syncStopWithBooking(booking) {
     inferred.note,
     location.lat,
     location.lng,
-    unsplashPhotoUrl,
+    photo.url,
+    photo.photoId,
+    photo.attribution ? JSON.stringify(photo.attribution) : null,
+    photo.photoQuery,
+    photo.sceneType,
     nextSortOrder(day.id),
     inferred.isFeatured ? 1 : 0,
     location.locationQuery,

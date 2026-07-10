@@ -17,7 +17,25 @@ function mapPhoto(photo) {
     photographer: photo.user?.name || '',
     photographerUrl: buildReferralUrl(photo.user?.links?.html || ''),
     unsplashUrl: buildReferralUrl(photo.links?.html || ''),
+    downloadLocation: photo.links?.download_location || '',
   };
+}
+
+// Unsplash API terms require a hit to this endpoint every time a photo is displayed
+// to a user (i.e. selected for a stop), separate from the search call. Non-blocking:
+// a tracking failure must never affect photo selection.
+export async function trackDownload(photo) {
+  if (!photo?.downloadLocation || !config.unsplashAccessKey) return;
+  try {
+    await fetch(photo.downloadLocation, {
+      headers: {
+        Authorization: `Client-ID ${config.unsplashAccessKey}`,
+        'Accept-Version': 'v1',
+      },
+    });
+  } catch (err) {
+    console.warn('[unsplash] download tracking failed', { error: err?.message });
+  }
 }
 
 async function search(query) {

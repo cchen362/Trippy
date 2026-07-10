@@ -270,6 +270,40 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                     </div>
                   )}
                 </div>
+
+                {stop.unsplashPhotoUrl && stop.photoAttribution && (
+                  <p
+                    style={{
+                      marginTop: '12px',
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: '9px',
+                      letterSpacing: '0.2em',
+                      textTransform: 'uppercase',
+                      color: 'rgba(240,234,216,0.35)',
+                    }}
+                  >
+                    PHOTO —{' '}
+                    <a
+                      href={stop.photoAttribution.photographerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: 'inherit' }}
+                    >
+                      {stop.photoAttribution.photographer}
+                    </a>
+                    {' / '}
+                    <a
+                      href={stop.photoAttribution.unsplashUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: 'inherit' }}
+                    >
+                      Unsplash
+                    </a>
+                  </p>
+                )}
               </div>
             )}
           </div>
