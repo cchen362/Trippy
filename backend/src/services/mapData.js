@@ -121,7 +121,9 @@ function formatMapStop(row, mapConfig, routeNumber, routeSegmentId, deepLinkProv
 // parsed detailsJson, destination) — this file otherwise works with raw snake_case rows
 // for segment-building, so it deliberately doesn't reuse trips.js's full mapBooking().
 // id/tripId are included so the hotel-city demotion warn (trips.js extractGeoFromBooking)
-// has a real booking/trip id to log rather than undefined.
+// has a real booking/trip id to log rather than undefined. createdAt feeds deriveDayGeo's
+// overlapping-hotel tie-break (Plan 9 Wave 3 D5) — the latest check-in date wins, and a
+// tie on check-in date is broken by the latest createdAt.
 function toGeoBooking(row) {
   return {
     id: row.id,
@@ -131,6 +133,7 @@ function toGeoBooking(row) {
     endDatetime: row.end_datetime,
     detailsJson: parseJson(row.details_json, {}),
     destination: row.destination,
+    createdAt: row.created_at,
   };
 }
 

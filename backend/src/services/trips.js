@@ -185,6 +185,88 @@ export function buildTripScopes(days, storedScopes = []) {
   return scopes;
 }
 
+// Distinct bad boundsJson strings already warned about in this process — keeps the
+// hygiene warn (parseScopeBounds) to once per distinct string rather than once per
+// derivation, since a trip's scopes get re-parsed on every day/booking fold.
+const warnedBadBounds = new Set();
+
+/**
+ * Parses a trip_scopes row's `boundsJson` into a usable `{low, high}` box, or null when
+ * the string is unusable (Plan 9 Wave 3 §3.3 bounds hygiene): unparseable JSON, missing
+ * or non-finite low/high lat/lng, inverted latitude (low.lat > high.lat), or zero-area
+ * (equal lats or equal lngs — a degenerate point/line box can't meaningfully "contain"
+ * anything). Longitude is allowed to wrap (low.lng > high.lng is a valid antimeridian-
+ * crossing box, handled by boundsContain/boundsArea, not rejected here). Never throws;
+ * warns once per distinct bad string (module-level warnedBadBounds Set) and returns null.
+ * @param {{label: string, boundsJson: string|null}} scope
+ * @returns {{low: {lat: number, lng: number}, high: {lat: number, lng: number}}|null}
+ */
+function parseScopeBounds(scope) {
+  const raw = scope.boundsJson;
+  if (!raw) return null;
+
+  const warnOnce = (reason) => {
+    if (warnedBadBounds.has(raw)) return;
+    warnedBadBounds.add(raw);
+    console.warn('[geo] scope bounds unusable', { label: scope.label, reason });
+  };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    warnOnce('unparseable');
+    return null;
+  }
+
+  const low = parsed?.low;
+  const high = parsed?.high;
+  const lowLat = Number(low?.lat);
+  const lowLng = Number(low?.lng);
+  const highLat = Number(high?.lat);
+  const highLng = Number(high?.lng);
+
+  if (![lowLat, lowLng, highLat, highLng].every(Number.isFinite)) {
+    warnOnce('missing or non-finite lat/lng');
+    return null;
+  }
+  if (lowLat > highLat) {
+    warnOnce('inverted latitude');
+    return null;
+  }
+  if (lowLat === highLat || lowLng === highLng) {
+    warnOnce('zero-area');
+    return null;
+  }
+
+  return { low: { lat: lowLat, lng: lowLng }, high: { lat: highLat, lng: highLng } };
+}
+
+/**
+ * True when `{lat, lng}` falls inside `bounds`. Latitude containment is a plain range
+ * check. Longitude handles antimeridian-crossing viewports: when `low.lng <= high.lng`
+ * the range is normal (lng between the two); otherwise the box wraps the 180th meridian
+ * and lng is inside when it's on either side of the wrap (`lng >= low.lng || lng <= high.lng`).
+ */
+function boundsContain(bounds, lat, lng) {
+  if (lat < bounds.low.lat || lat > bounds.high.lat) return false;
+  if (bounds.low.lng <= bounds.high.lng) {
+    return lng >= bounds.low.lng && lng <= bounds.high.lng;
+  }
+  return lng >= bounds.low.lng || lng <= bounds.high.lng;
+}
+
+// Area used only to rank overlapping containing scopes (smallest wins) — not a true
+// geodesic area, a lat/lng-degree-span product is enough for a relative comparison. A
+// wrapped (antimeridian-crossing) longitude span is `(high.lng - low.lng + 360)`.
+function boundsArea(bounds) {
+  const latSpan = bounds.high.lat - bounds.low.lat;
+  const lngSpan = bounds.low.lng <= bounds.high.lng
+    ? bounds.high.lng - bounds.low.lng
+    : bounds.high.lng - bounds.low.lng + 360;
+  return latSpan * lngSpan;
+}
+
 /**
  * Extracts a clean {city, countryCode, anchor} triple from a booking's structured
  * detailsJson. countryCode rides along from whichever extraction field matches that type
@@ -193,16 +275,20 @@ export function buildTripScopes(days, storedScopes = []) {
  * the point (Task 2.4/2.2).
  *
  * Hotel/other bookings run their raw city evidence through a promotion ladder (Task 2.2,
- * Plan 8 Wave 2, audit finding #1) instead of trusting it verbatim: structured fields
- * (locality/adminAreas.aal2/adminAreas.aal1, in that preference order) are tried first;
- * a legacy `d.city` string is the fallback only when none of those exist. The ordered
- * candidate list is evaluated in three passes — (1) does ANY candidate canonically match
- * one of the trip's destination scopes (a region-level admin area can still promote via
- * its trip chip, e.g. Bali's AAL1 matching a "Bali" chip even though the AAL2 evidence
- * doesn't); (2) does the locality candidate specifically look like a real city; (3) is
- * ANY candidate a known city name. If none of those fire, the city evidence is demoted to
- * null (never a raw, unrecognised fragment) and surfaces only via `anchor`; a console.warn
- * records the demotion for production measurement — never a throw.
+ * Plan 8 Wave 2, audit finding #1; extended Plan 9 Wave 3 D3) instead of trusting it
+ * verbatim: structured fields (locality/adminAreas.aal2/adminAreas.aal1, in that
+ * preference order) are tried first; a legacy `d.city` string is the fallback only when
+ * none of those exist. The ordered candidate list is evaluated in four passes — (1) does
+ * ANY candidate canonically match one of the trip's destination scopes (a region-level
+ * admin area can still promote via its trip chip, e.g. Bali's AAL1 matching a "Bali" chip
+ * even though the AAL2 evidence doesn't); (1.5) when rule 1 misses and the booking carries
+ * a finite lat/lng point, does that point fall inside any bounded scope's viewport — the
+ * smallest-area containing scope wins ties, so a district nested inside a wider region
+ * still promotes to the district's own chip rather than the region's; (2) does the
+ * locality candidate specifically look like a real city; (3) is ANY candidate a known city
+ * name. If none of those fire, the city evidence is demoted to null (never a raw,
+ * unrecognised fragment) and surfaces only via `anchor`; a console.warn records the
+ * demotion for production measurement — never a throw.
  */
 function extractGeoFromBooking(booking, tripScopes = []) {
   const d = booking.detailsJson || {};
@@ -230,25 +316,49 @@ function extractGeoFromBooking(booking, tripScopes = []) {
         const matchedScope = tripScopes.find((scope) => scopesMatch(scopeMatchCandidate.value, scope.label));
         city = matchedScope.label;
       } else {
-        // Rule 2: locality candidate only.
-        const localityCandidate = candidates.find((c) => c.type === 'locality');
-        if (localityCandidate) {
-          city = localityCandidate.value;
+        // Rule 1.5: geometric containment (Plan 9 Wave 3 D3) — only when rule 1 missed
+        // and the booking carries a finite point. Bounds-less scopes never participate
+        // (parseScopeBounds returns null for them); the smallest-area containing scope
+        // wins when the point falls inside more than one.
+        const lat = Number(d.lat);
+        const lng = Number(d.lng);
+        let containmentScope = null;
+        let containmentArea = Infinity;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          for (const scope of tripScopes) {
+            const bounds = parseScopeBounds(scope);
+            if (!bounds || !boundsContain(bounds, lat, lng)) continue;
+            const area = boundsArea(bounds);
+            if (area < containmentArea) {
+              containmentScope = scope;
+              containmentArea = area;
+            }
+          }
+        }
+
+        if (containmentScope) {
+          city = containmentScope.label;
         } else {
-          // Rule 3: known-city, tried against every candidate in order.
-          const knownCandidate = candidates.find((c) => knownCityLabel(c.value));
-          if (knownCandidate) {
-            city = canonicalCity(knownCandidate.value);
+          // Rule 2: locality candidate only.
+          const localityCandidate = candidates.find((c) => c.type === 'locality');
+          if (localityCandidate) {
+            city = localityCandidate.value;
           } else {
-            // Rule 4: demote — this is the production measurement instrument for plan risk #1.
-            const demoted = candidates[0].value;
-            console.warn('[geo] hotel city demoted to anchor', {
-              tripId: booking.tripId,
-              bookingId: booking.id,
-              demoted,
-              tripScopes: tripScopes.map((s) => s.label),
-            });
-            city = null;
+            // Rule 3: known-city, tried against every candidate in order.
+            const knownCandidate = candidates.find((c) => knownCityLabel(c.value));
+            if (knownCandidate) {
+              city = canonicalCity(knownCandidate.value);
+            } else {
+              // Rule 4: demote — this is the production measurement instrument for plan risk #1.
+              const demoted = candidates[0].value;
+              console.warn('[geo] hotel city demoted to anchor', {
+                tripId: booking.tripId,
+                bookingId: booking.id,
+                demoted,
+                tripScopes: tripScopes.map((s) => s.label),
+              });
+              city = null;
+            }
           }
         }
       }
@@ -288,7 +398,11 @@ function extractGeoFromBooking(booking, tripScopes = []) {
  *
  * Priority (unchanged from the original deriveDayCity):
  * 1. Manual city_override (+ city_override_country) on the day row
- * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date)
+ * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date). When
+ *    more than one hotel is active the same night (overlapping bookings, Plan 9 Wave 3
+ *    D5), the LATEST check-in date wins; a tie on check-in date is broken by the LATEST
+ *    `createdAt` (a booking with no `createdAt` compares as the empty string, so it loses
+ *    every tie).
  * 3. Last same-day transit arrival (flight/train/bus/ferry departing that day)
  * 4. Previous day's resolved pair
  * 5. Seeded day.city (+ day.city_country)
@@ -310,13 +424,28 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes = []
     ? { city: day.cityOverride, countryCode: day.cityOverrideCountry || null }
     : { city: null, countryCode: null };
 
-  // Hotel active tonight: check-in ≤ day.date < check-out
-  const activeHotel = bookings.find((b) => {
-    if (b.type !== 'hotel') return false;
+  // Hotel active tonight: check-in ≤ day.date < check-out. Overlapping hotels (Plan 9
+  // Wave 3 D5) are resolved by scanning every active hotel and keeping the one with the
+  // latest check-in date; a tie on check-in date is broken by the latest createdAt
+  // (missing createdAt sorts as '', so it never wins a tie against a real timestamp).
+  let activeHotel = null;
+  for (const b of bookings) {
+    if (b.type !== 'hotel') continue;
     const checkIn = b.startDatetime?.slice(0, 10);
     const checkOut = b.endDatetime?.slice(0, 10);
-    return checkIn && checkOut && checkIn <= day.date && day.date < checkOut;
-  });
+    if (!checkIn || !checkOut || !(checkIn <= day.date && day.date < checkOut)) continue;
+    if (!activeHotel) {
+      activeHotel = b;
+      continue;
+    }
+    const activeCheckIn = activeHotel.startDatetime?.slice(0, 10) || '';
+    if (
+      checkIn > activeCheckIn
+      || (checkIn === activeCheckIn && (b.createdAt || '') > (activeHotel.createdAt || ''))
+    ) {
+      activeHotel = b;
+    }
+  }
   const hotelExtract = activeHotel
     ? extractGeoFromBooking(activeHotel, tripScopes)
     : { city: null, countryCode: null, anchor: null };

@@ -663,6 +663,285 @@ describe('hotel city promotion ladder (Plan 8 Wave 2 — Task 2.2, audit finding
   });
 });
 
+describe('containment matching + overlap policy (Plan 9 Wave 3 — D3/D5)', () => {
+  let warnSpy;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  // Raw insert bypassing the insertHotelBooking helper's implicit created_at default —
+  // needed to control the D5 tie-break (latest createdAt wins) deterministically.
+  function insertHotelBookingWithCreatedAt(tripId, { checkIn, checkOut, detailsJson, createdAt, title = 'Hotel' }) {
+    getDb().prepare(`
+      INSERT INTO bookings (trip_id, type, title, start_datetime, end_datetime, details_json, created_at)
+      VALUES (?, 'hotel', ?, ?, ?, ?, ?)
+    `).run(tripId, title, checkIn, checkOut, JSON.stringify(detailsJson), createdAt);
+  }
+
+  it('F5: rule 1.5 promotes via a bounded scope when the point is inside it, and stamps the anchor from the finer evidence', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Hangzhou Bounds Trip',
+      destinations: [{
+        city: 'Hangzhou',
+        countryCode: 'CN',
+        kind: 'city',
+        placeId: 'place-hangzhou',
+        bounds: { low: { lat: 30.0, lng: 120.0 }, high: { lat: 30.5, lng: 120.5 } },
+      }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-09T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: {
+        locality: '杭州市', sublocality: '拱墅区', countryCode: 'CN', lat: 30.25, lng: 120.25,
+      },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day = days[0];
+    expect(day.resolvedCity).toBe('Hangzhou');
+    expect(day.resolutionAnchor).toEqual({ label: '拱墅区', countryCode: 'CN', source: 'hotel' });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F5 (no-bounds control): same evidence against a Hangzhou scope with no bounds resolves via rule 2 (locality) — today\'s behavior', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Hangzhou No-Bounds Trip',
+      destinations: [{ city: 'Hangzhou', countryCode: 'CN' }], // no placeId/bounds -> boundsJson null
+      startDate: '2026-09-10',
+      endDate: '2026-09-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-09T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: {
+        locality: '杭州市', sublocality: '拱墅区', countryCode: 'CN', lat: 30.25, lng: 120.25,
+      },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const day = days[0];
+    expect(day.resolvedCity).toBe('杭州市');
+    expect(day.resolutionAnchor).toEqual({ label: '拱墅区', countryCode: 'CN', source: 'hotel' });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F6: point inside two bounded scopes with no string match resolves to the smallest-area containing scope', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Zhejiang Nested Bounds Trip',
+      destinations: [
+        {
+          city: 'Zhejiang',
+          countryCode: 'CN',
+          kind: 'region',
+          placeId: 'place-zhejiang',
+          bounds: { low: { lat: 29.0, lng: 118.0 }, high: { lat: 31.0, lng: 121.0 } }, // area 6.0
+        },
+        {
+          city: 'Hangzhou',
+          countryCode: 'CN',
+          kind: 'city',
+          placeId: 'place-hangzhou',
+          bounds: { low: { lat: 30.0, lng: 120.0 }, high: { lat: 30.2, lng: 120.3 } }, // area 0.06, nested inside Zhejiang
+        },
+      ],
+      startDate: '2026-09-10',
+      endDate: '2026-09-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-09T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: { locality: 'Somewhere Unrelated', countryCode: 'CN', lat: 30.1, lng: 120.1 },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    expect(days[0].resolvedCity).toBe('Hangzhou');
+  });
+
+  it('F6 (rule 1 precedence): the same point also inside both scopes, but the hotel evidence string-matches the LARGER scope — rule 1 wins over containment', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Zhejiang Nested Bounds Trip 2',
+      destinations: [
+        {
+          city: 'Zhejiang',
+          countryCode: 'CN',
+          kind: 'region',
+          placeId: 'place-zhejiang-2',
+          bounds: { low: { lat: 29.0, lng: 118.0 }, high: { lat: 31.0, lng: 121.0 } },
+        },
+        {
+          city: 'Hangzhou',
+          countryCode: 'CN',
+          kind: 'city',
+          placeId: 'place-hangzhou-2',
+          bounds: { low: { lat: 30.0, lng: 120.0 }, high: { lat: 30.2, lng: 120.3 } },
+        },
+      ],
+      startDate: '2026-09-10',
+      endDate: '2026-09-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-09T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: { locality: 'Zhejiang', countryCode: 'CN', lat: 30.1, lng: 120.1 },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    expect(days[0].resolvedCity).toBe('Zhejiang');
+  });
+
+  it('F7: overlapping hotels — the later check-in date wins for the nights they both cover', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Japan Overlap Trip',
+      destinations: [{ city: 'Tokyo', countryCode: 'JP' }],
+      startDate: '2026-07-26',
+      endDate: '2026-08-01',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBooking(tripId, {
+      title: 'Hotel A (Tokyo)',
+      checkIn: '2026-07-26T15:00',
+      checkOut: '2026-08-01T11:00',
+      detailsJson: { city: 'Tokyo', countryCode: 'JP' },
+    });
+    insertHotelBooking(tripId, {
+      title: 'Hotel B (Osaka)',
+      checkIn: '2026-07-29T15:00',
+      checkOut: '2026-07-31T11:00',
+      detailsJson: { city: 'Osaka', countryCode: 'JP' },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    const byDate = (date) => days.find((d) => d.date === date);
+    expect(byDate('2026-07-29').resolvedCity).toBe('Osaka'); // both active, B's check-in is later
+    expect(byDate('2026-07-30').resolvedCity).toBe('Osaka');
+    expect(byDate('2026-07-31').resolvedCity).toBe('Tokyo'); // B checked out, only A active
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('F7 (tie-break): same check-in date — the later createdAt wins', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Japan Tie Trip',
+      destinations: [{ city: 'Sapporo', countryCode: 'JP' }],
+      startDate: '2026-07-26',
+      endDate: '2026-07-26',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    insertHotelBookingWithCreatedAt(tripId, {
+      title: 'Hotel Sapporo',
+      checkIn: '2026-07-26T15:00',
+      checkOut: '2026-07-27T11:00',
+      detailsJson: { city: 'Sapporo', countryCode: 'JP' },
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    insertHotelBookingWithCreatedAt(tripId, {
+      title: 'Hotel Nagoya',
+      checkIn: '2026-07-26T15:00',
+      checkOut: '2026-07-27T11:00',
+      detailsJson: { city: 'Nagoya', countryCode: 'JP' },
+      createdAt: '2020-02-01T00:00:00.000Z',
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days = listDaysForTrip(tripId, owner.id, bookings);
+    expect(days[0].resolvedCity).toBe('Nagoya'); // same check-in date -> later createdAt wins
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('bounds hygiene: unparseable and zero-area boundsJson never throw, warn once each, and fall through to rule 2', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Bounds Hygiene Trip',
+      destinations: [
+        {
+          city: 'BadScopeGarbage',
+          countryCode: 'CN',
+          kind: 'city',
+          placeId: 'place-bad-garbage',
+          bounds: { low: { lat: 1, lng: 1 }, high: { lat: 2, lng: 2 } }, // valid for now, clobbered below
+        },
+        {
+          city: 'BadScopeZeroArea',
+          countryCode: 'CN',
+          kind: 'city',
+          placeId: 'place-bad-zero',
+          bounds: { low: { lat: 10, lng: 10 }, high: { lat: 10, lng: 12 } }, // zero-area (equal lats)
+        },
+      ],
+      startDate: '2026-09-10',
+      endDate: '2026-09-10',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+
+    // Clobber the "garbage" scope's bounds_json to unparseable text — bounds_json is the
+    // only column touched; canonical_key was already computed correctly by the normal
+    // insertTripScope path above, so this doesn't bypass canonical_key computation.
+    const badBoundsString = `{not valid json Wave3HygieneTest-${tripId}`;
+    getDb().prepare('UPDATE trip_scopes SET bounds_json = ? WHERE trip_id = ? AND label = ?')
+      .run(badBoundsString, tripId, 'BadScopeGarbage');
+
+    insertHotelBooking(tripId, {
+      checkIn: '2026-09-09T15:00',
+      checkOut: '2026-09-11T11:00',
+      detailsJson: { locality: 'Some City', countryCode: 'CN', lat: 11, lng: 11 },
+    });
+
+    const bookings = listBookingsForTrip(tripId);
+    const days1 = listDaysForTrip(tripId, owner.id, bookings);
+    expect(days1[0].resolvedCity).toBe('Some City'); // falls through to rule 2 (locality), as if boundsJson were null
+
+    const garbageWarnCalls = () => warnSpy.mock.calls.filter(
+      (call) => call[0] === '[geo] scope bounds unusable' && call[1]?.label === 'BadScopeGarbage',
+    );
+    const zeroAreaWarnCalls = () => warnSpy.mock.calls.filter(
+      (call) => call[0] === '[geo] scope bounds unusable' && call[1]?.label === 'BadScopeZeroArea',
+    );
+    expect(garbageWarnCalls()).toHaveLength(1);
+    expect(zeroAreaWarnCalls()).toHaveLength(1);
+
+    // A second derivation against the same bad boundsJson string does not warn again.
+    listDaysForTrip(tripId, owner.id, bookings);
+    expect(garbageWarnCalls()).toHaveLength(1);
+    expect(zeroAreaWarnCalls()).toHaveLength(1);
+  });
+});
+
 describe('getSharedTrip — resolutionAnchor stamped on shared days (Plan 8 Wave 2 — Task 2.4)', () => {
   it('shared days carry resolutionAnchor and a healed resolvedCity from a hotel promotion', () => {
     const trip = createTrip(owner.id, {

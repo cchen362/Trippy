@@ -1,7 +1,7 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
 **Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
-W2 complete (2026-07-10); W3–W6 not started.**
+W2 complete (2026-07-10); W3 complete (2026-07-10); W4–W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -285,6 +285,8 @@ shown; reload after every step (state must come from storage, not echo).
 ---
 
 ## Wave 3 — Containment matching + overlapping-hotel policy
+
+**Status: COMPLETE (2026-07-10).** See §Wave status for the full result summary.
 
 **Goal:** the promotion ladder matches places geographically (D3) and picks the right
 hotel on overlapping nights (D5). Backend-only; strictly after W2.
@@ -575,7 +577,35 @@ and the manual browser pass defined in Wave 6.
   removal note in a `useEffect` diff against a ref — never by collapsing a functional update
   against a stale value. Locked by a new EditTripModal regression test. (This is a W2-surface
   instance of the same client-clobber class W4 addresses in `useTrip`.)
-- W3 containment matching + overlap policy (after W2): **NOT STARTED**
+- W3 containment matching + overlap policy (after W2): **COMPLETE** (2026-07-10) —
+  rule 1.5 added to `extractGeoFromBooking` between rules 1 and 2: when rule 1 misses and
+  the booking's `detailsJson.lat/lng` are finite, the smallest-area bounded scope containing
+  the point promotes the city to its label (rule-1-wins tie-break is structural — rule 1
+  runs first; F6's both cases verified). Anchor emission and the rule-4 demotion warn
+  untouched. Bounds hygiene per §3.3: new `parseScopeBounds`/`boundsContain`/`boundsArea`
+  helpers treat unparseable/non-finite/inverted-latitude/zero-area boundsJson as no-bounds,
+  `console.warn('[geo] scope bounds unusable')` once per distinct bad string per process,
+  never throw; longitude containment and area handle antimeridian-crossing viewports.
+  D5: `deriveDayGeo`'s active-hotel `.find` replaced by a latest-check-in-wins scan
+  (tie on check-in date → latest `createdAt`; missing `createdAt` compares as `''` and
+  loses ties); `mapData.js`'s slim `toGeoBooking` now carries `createdAt` so the Map view
+  agrees with Plan on overlaps. NO existing fixture needed its expectation changed (none
+  exercised overlapping hotels — §3.2's "one fixture may need updating" didn't materialize).
+  **Backend 416/416 (409 + 7 new: F5 + no-bounds control, F6 both cases, F7 + createdAt
+  tie, bounds hygiene warn-once), frontend 74/74 green.**
+  **Browser-verified end-to-end at 375 px** (real Google Places bounds, owner account,
+  dev DB): seeded a faithful local copy of the production Shanghai–Hangzhou trip (CJK
+  Park Hyatt Hangzhou evidence: `locality 杭州市`, `sublocality 拱墅区`, WGS-84 lat/lng) —
+  pre-chip it reproduced production exactly (Jul 29–Aug 1 = `杭州市`, summary
+  `["Shanghai","杭州市"]`); adding a "Hangzhou" chip via Edit Trip (autocomplete + bounds
+  fetch sharing one session token) healed Jul 29–Aug 1 headers to "Hangzhou" with zero
+  day-row edits, anchor `拱墅区` intact, summary `["Shanghai","Hangzhou"]`; an overlapping
+  shorter W Suzhou hotel (Jul 27–29 inside the Jul 26–29 Shanghai stay) moved Jul 27–28 to
+  Suzhou and deleting it reverted them (D5); Plan/Map/trip card verified at 375 px; backend
+  logs show no bounds-unusable warns and no new demotion warns (only the known pre-existing
+  Bali/Kaohsiung demotions). The seeded verification trip (`Shanghai - Hangzhou (W3
+  verify)`) was left in the dev DB — it's a faithful production replica useful for W5/W6
+  rehearsal.
 - W4 client state integrity (independent): **NOT STARTED**
 - W5 Discovery guard + data repair (after W1; destructive migration — backup + owner
   inventory review): **NOT STARTED**
