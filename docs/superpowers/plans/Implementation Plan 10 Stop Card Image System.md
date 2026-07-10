@@ -265,18 +265,19 @@ columns populated and credit rendering on a real stop.
   442→446 tests green (7 new), frontend 90→94 green (4 new); one pre-existing
   `auth.test.js` rate-limit timing flake confirmed unrelated (fails in isolation on
   clean `main` too). Browser-verified end-to-end against the live local dev app
-  (Bali trip, real trip data): API round-trip confirmed new fields serialize
-  correctly; a synthetic photo seeded directly in the dev DB confirmed the credit
-  line renders with correct photographer/Unsplash referral links in the expanded
-  state and is absent when collapsed — dev `.env`'s `UNSPLASH_ACCESS_KEY` is
-  currently invalid (`OAuth error: The access token is invalid`, confirmed via
-  `/api/lookups/photos`), a pre-existing environment issue outside Wave 1 scope;
-  this also incidentally verified `resolvePhotoUrl`'s failure path (stop creation
-  never blocks, `photoQuery` still stored, no crash). Test/synthetic data cleaned up
+  (Bali trip, real trip data), including a genuine live Unsplash search (not just
+  a synthetic seed): a real created stop ("Tanah Lot Temple") round-tripped a real
+  photo id, photographer, and referral-tagged URLs from Unsplash through
+  `createStop` → DB → API response; the credit line rendered correctly in the
+  StopCard expanded state (with working referral links) and was absent when
+  collapsed. (An earlier verification pass in this session read the *root*
+  `Trippy/.env` — config.js's fallback file — while the already-running dev
+  backend was loading `backend/.env`'s placeholder key; that produced a false
+  "invalid Unsplash key" reading, corrected once the owner updated
+  `backend/.env` and the backend was restarted.) Test/synthetic data cleaned up
   after verification — no residual rows in the owner's trip data.
-- **W2 — NOT STARTED** (depends on W1 columns — ready to start; note the dev
-  Unsplash key needs to be refreshed before W2's selection-engine work can be
-  exercised against live search results).
+- **W2 — NOT STARTED** (depends on W1 columns — ready to start; dev Unsplash key
+  confirmed working as of 2026-07-11).
 - **W3 — NOT STARTED** (3.1/3.2 can run parallel to W2; 3.3 depends on W2's
   `resolvePhotoUrl` shape)
 - **W4 — NOT STARTED** (depends on W1–W3)
