@@ -2,9 +2,11 @@
 
 **Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
 W2 complete (2026-07-10); W3 complete (2026-07-10); W4 complete + browser-verified
-(2026-07-10); W5 code complete + locally verified (2026-07-10) — production deploy and
-manual 5.3/5.4 runs gated on owner review of the repair inventory (see §Wave status); W6
-not started.**
+(2026-07-10); W5 complete + DEPLOYED to production (2026-07-10) — migration 024 applied
+exactly per the owner-approved inventory; 5.3 executed with a documented finding (Google
+serves no English components for the Hangzhou place — rule 1.5 is the healing path, per
+§5); 5.4 photo backfill deferred into W6 step 1 (needs the resolved English city from the
+owner's Hangzhou chip); W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -682,4 +684,24 @@ and the manual browser pass defined in Wave 6.
   live-smoke-tests W1's `languageCode=en` → server-side 5.3 dry-run then `--apply` →
   5.4 `backfillTripPhotos` for the Hangzhou trip (verify the 1.3 photo warn stays silent) →
   post-deploy read-only checks per §Wave 5 verification.
+  **DEPLOYED (2026-07-10, commit `a66f630`, owner-approved via the inventory gate):** fresh
+  pre-migration backup taken (`~/backups/trippy-pre-plan9-migrations-2026-07-10.db*`, db+wal+shm);
+  migrations 023+024 ran on container start and matched the reviewed inventory byte-for-byte
+  (6 scopes backfilled across 5 trips; 3 KL day stamps → MY; deleted `kualalumpur|''` id=15
+  173 places; deleted `杭州市|CN` id=14 83 places). Post-deploy read-only checks: catalogue
+  has no `杭州市` row and no `''` twin, `kualalumpur|MY` 160 places intact, `北京`/`南疆`
+  free-text rows preserved, KL days all `MY`, health/frontend 200, zero errors/warns in logs.
+  **5.3 executed (dry-run reviewed, then `--apply`) with a FINDING:** Google Place Details
+  returns the Park Hyatt Hangzhou's locality/sublocality/aal1 components with
+  `"languageCode": "zh"` even when `languageCode=en` is correctly sent (verified against the
+  raw API — street/country/postal DID come back English; W1's code works, Google simply has
+  no English translation for these components). The booking's evidence therefore remains CJK
+  — harmless identical-value rewrite. This is the exact case §5 anticipated: rule 1.5
+  containment healing via the owner's bounded "Hangzhou" chip (W3-verified against this data
+  shape) is the real fix; 5.3 was belt-and-braces. §Wave 5's "Park Hyatt booking fields
+  English" expectation is amended accordingly. **5.4 deferred into W6 step 1:** the photo
+  query builds from the RESOLVED day city, which is still `杭州市` until the owner adds the
+  Hangzhou chip — run `backfillTripPhotos` (POST backfill-photos route or re-run per
+  `stops.js:607`) immediately AFTER the chip is added, then confirm the stop photo and that
+  the 1.3 photo warn stays silent.
 - W6 production verification pass (last): **NOT STARTED**
