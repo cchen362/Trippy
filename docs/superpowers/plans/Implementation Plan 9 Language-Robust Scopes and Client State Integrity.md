@@ -751,7 +751,15 @@ and the manual browser pass defined in Wave 6.
   `TransitStop.test.jsx` (new file) assert resolved-city chip labels. Frontend suite
   90/90 (was 83). Browser-verified at 375px AND desktop on the dev replica trip:
   move→switch, remove→switch, rapid switches all render; chips read `Day 5 · Hangzhou`
-  etc. against Shanghai seeds. Deployed to production + re-verified same checks.
+  etc. against Shanghai seeds. Deployed to production (commit 8df3c0c, container
+  rebuilt, clean startup, health OK) and OWNER-VERIFIED on production 2026-07-10:
+  moves no longer blank the Plan tab and mixed-city trips' move chips show the day
+  header's resolved city. Ops observation (not fixed, for a future decision): fresh
+  sign-ins from clean browser profiles at http://100.94.82.35:6768 looped back to the
+  login page during this session — the auth cookie is `secure: true` in production
+  (auth.js COOKIE_OPTS) and the origin is plain HTTP, so new browsers refuse to store
+  it; the owner's established browser works. If W6 needs a fresh login, use the
+  owner's normal browser, or decide on HTTPS (e.g. Tailscale serve) later.
 - W6 production verification pass (last): **UNBLOCKED (post-W5 bugfix session complete,
   2026-07-10) — NOT STARTED; W6 step 1 additionally runs the deferred 5.4 photo backfill
   after the Hangzhou chip is added (see W5 entry).**
