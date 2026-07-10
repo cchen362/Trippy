@@ -15,6 +15,12 @@ export function useTrip(tripId) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const hasLoadedRef = useRef(false);
+  // Monotonic request id: multiple refresh() calls can be in flight at once
+  // (every stop/booking mutation triggers one via onChanged()), and network
+  // responses can resolve out of send order. Only the response whose id is
+  // still the latest issued is allowed to commit state — an older response
+  // resolving after a newer one is dropped rather than clobbering it.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     hasLoadedRef.current = false;
@@ -23,10 +29,12 @@ export function useTrip(tripId) {
   const refresh = useCallback(async () => {
     if (!tripId) return;
 
+    const requestId = (requestIdRef.current += 1);
     if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     try {
       const nextDetail = await tripsApi.detail(tripId);
+      if (requestId !== requestIdRef.current) return; // superseded — drop
       setDetail(nextDetail);
       hasLoadedRef.current = true;
       setActiveDayId((current) => {
@@ -36,9 +44,10 @@ export function useTrip(tripId) {
         return pickDefaultDay(nextDetail.days);
       });
     } catch (err) {
+      if (requestId !== requestIdRef.current) return; // superseded — drop
       setError(err);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [tripId]);
 

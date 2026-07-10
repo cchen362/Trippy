@@ -24,6 +24,7 @@ export default function PlanTab() {
     updateStop,
     discovery,
     refresh,
+    reportError,
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
@@ -41,11 +42,13 @@ export default function PlanTab() {
     }
   };
 
-  // updateStop/deleteStop rejections are already recorded on useStops.error
-  // (surfaced by TripPage's shared banner); catch here only to avoid an unhandled
-  // rejection, since these call sites (StopCard/TransitStop buttons) have no
-  // local UI to await the result into.
-  const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId }).catch(() => {});
+  // A failed move leaves the stop on its original day (no optimistic client
+  // move to roll back) — surface it explicitly via the shared error banner
+  // rather than swallowing it, so a Slow-3G drop doesn't look like a no-op.
+  const handleMove = (stopId, targetDayId) => updateStop(stopId, { dayId: targetDayId }).catch((err) => {
+    console.error('[stops] move failed:', err);
+    reportError(err, 'Could not move that stop.');
+  });
 
   const handleDeleteStop = (stopId) => deleteStop(stopId).catch(() => {});
 

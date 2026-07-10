@@ -90,7 +90,28 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
   const isInTrip = addedToDayIds.size > 0;
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
   const btnRef = useRef(null);
+
+  // Per-suggestion pending guard (Wave 4 §4.2) — not a global lock: adding a
+  // different suggestion stays available while this one's request is in
+  // flight, and out-of-order refreshes are already made safe by the
+  // useTrip.refresh id guard (§4.1). onAddToDay resolves only once the
+  // triggered refresh has landed (useStops.run awaits onChanged() before
+  // returning), so "Adding…" naturally holds until the new stop is visible.
+  const handleAddToDay = async (dayId, suggestionArg) => {
+    if (adding) return;
+    setAdding(true);
+    try {
+      await onAddToDay(dayId, suggestionArg);
+    } catch (err) {
+      // Failure is already surfaced via the shared TripPage error banner
+      // (stopActions.error) — nothing local to recover here.
+      console.error('[discovery] add to day failed:', err);
+    } finally {
+      setAdding(false);
+    }
+  };
 
   return (
     <div
@@ -288,31 +309,32 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
           <div style={{ position: 'relative' }}>
             <button
               ref={btnRef}
-              onClick={() => !isInTrip && setPickerOpen(v => !v)}
-              disabled={isInTrip}
+              onClick={() => !isInTrip && !adding && setPickerOpen(v => !v)}
+              disabled={isInTrip || adding}
               style={{
                 fontFamily: "'DM Mono', monospace",
                 fontSize: 10,
                 letterSpacing: '0.14em',
                 textTransform: 'uppercase',
-                cursor: isInTrip ? 'default' : 'pointer',
+                cursor: (isInTrip || adding) ? 'default' : 'pointer',
                 borderRadius: 3,
                 padding: '12px 16px',
                 background: isInTrip ? 'rgba(201,160,80,0.1)' : 'transparent',
-                color: isInTrip ? '#c9a050' : '#504438',
+                color: isInTrip ? '#c9a050' : (adding ? 'rgba(80,68,56,0.5)' : '#504438'),
                 border: `1px solid ${isInTrip ? 'rgba(201,160,80,0.35)' : 'rgba(201,160,80,0.12)'}`,
+                opacity: adding ? 0.6 : 1,
                 transition: 'all 150ms',
               }}
             >
-              {isInTrip ? '✓ Added' : 'Add to day'}
+              {isInTrip ? '✓ Added' : adding ? 'Adding…' : 'Add to day'}
             </button>
 
-            {!isInTrip && pickerOpen && days.length > 0 && (
+            {!isInTrip && !adding && pickerOpen && days.length > 0 && (
               <DayPicker
                 addedDayIds={addedToDayIds}
                 days={days}
                 suggestion={suggestion}
-                onAddToDay={onAddToDay}
+                onAddToDay={handleAddToDay}
                 onClose={() => setPickerOpen(false)}
                 anchorRef={btnRef}
               />

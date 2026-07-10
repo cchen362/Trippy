@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import SuggestionCard from './SuggestionCard.jsx';
 
@@ -69,5 +69,71 @@ describe('SuggestionCard — "in trip" city scoping (Wave 5 §5.4)', () => {
 
     expect(screen.queryByText('In trip')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^add to day$/i })).toBeInTheDocument();
+  });
+});
+
+describe('SuggestionCard — per-suggestion pending state (Wave 4 §4.2)', () => {
+  function deferred() {
+    let resolve;
+    const promise = new Promise((res) => { resolve = res; });
+    return { promise, resolve };
+  }
+
+  it('disables Add while its own add is in flight, then re-enables on settle', async () => {
+    const day = { id: 'day-1', dayIndex: 0, date: '2026-07-10', resolvedCity: 'Kyoto', stops: [] };
+    const pending = deferred();
+    const onAddToDay = vi.fn(() => pending.promise);
+
+    render(
+      <SuggestionCard
+        suggestion={SUGGESTION}
+        days={[day]}
+        onAddToDay={onAddToDay}
+        destination="Kyoto"
+        onReport={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^add to day$/i }));
+    fireEvent.click(screen.getByText(/Day 1/));
+
+    expect(onAddToDay).toHaveBeenCalledWith('day-1', SUGGESTION);
+    const button = await screen.findByRole('button', { name: /adding/i });
+    expect(button).toBeDisabled();
+
+    pending.resolve();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^add to day$/i })).not.toBeDisabled();
+    });
+  });
+
+  it('does not block a second Add click on the same suggestion while pending', async () => {
+    const day = { id: 'day-1', dayIndex: 0, date: '2026-07-10', resolvedCity: 'Kyoto', stops: [] };
+    const pending = deferred();
+    const onAddToDay = vi.fn(() => pending.promise);
+
+    render(
+      <SuggestionCard
+        suggestion={SUGGESTION}
+        days={[day]}
+        onAddToDay={onAddToDay}
+        destination="Kyoto"
+        onReport={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^add to day$/i }));
+    fireEvent.click(screen.getByText(/Day 1/));
+    const addingButton = await screen.findByRole('button', { name: /adding/i });
+
+    // The button is disabled and re-clicking it (or re-opening the picker)
+    // must not fire a second onAddToDay call for this same suggestion.
+    fireEvent.click(addingButton);
+    expect(onAddToDay).toHaveBeenCalledTimes(1);
+
+    pending.resolve();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^add to day$/i })).not.toBeDisabled();
+    });
   });
 });

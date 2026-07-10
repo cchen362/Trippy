@@ -1,7 +1,10 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
 **Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
-W2 complete (2026-07-10); W3 complete (2026-07-10); W4–W6 not started.**
+W2 complete (2026-07-10); W3 complete (2026-07-10); W4 code-complete + frontend tests green,
+browser verification pending (2026-07-10); W5 code complete + locally verified (2026-07-10)
+— production deploy and manual 5.3/5.4 runs gated on owner review of the repair inventory
+(see §Wave status); W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -367,6 +370,11 @@ duplicate-add temptation (buttons disabled while pending).
 
 ## Wave 5 — Discovery guard + production data repair
 
+**Status: CODE COMPLETE + LOCALLY VERIFIED (2026-07-10).** Production deploy (with fresh
+pre-migration backup) and the manual 5.3/5.4 production runs are gated on owner review of
+the repair inventory — see §Wave status for the inventory produced from a read-only
+production snapshot.
+
 **Goal:** the catalogue can't re-pollute (D6), and Plan-8-era residue is repaired.
 Runs after W1 (re-fetch needs English details). Contains this plan's destructive
 migration — owner reviews the repair inventory before deploy, same touchpoint pattern
@@ -606,7 +614,39 @@ and the manual browser pass defined in Wave 6.
   Bali/Kaohsiung demotions). The seeded verification trip (`Shanghai - Hangzhou (W3
   verify)`) was left in the dev DB — it's a faithful production replica useful for W5/W6
   rehearsal.
-- W4 client state integrity (independent): **NOT STARTED**
+- W4 client state integrity (independent): **CODE COMPLETE, BROWSER VERIFICATION PENDING**
+  (2026-07-10) — `useTrip.refresh` (§4.1) now stamps a monotonic request id per invocation;
+  `setDetail`/`setActiveDayId`/`setError`/the loading-false transition all check the id is
+  still current before committing, so an older `GET /trips/:id/detail` response that
+  resolves after a newer one is dropped rather than clobbering state (fixture F8, both the
+  success-after-success and stale-error-after-success orderings). First-load loading
+  semantics unchanged (`hasLoadedRef` gate untouched). §4.2 in-flight guards, all
+  per-suggestion/per-stop — never a global lock: `SuggestionCard.jsx` tracks its own
+  `adding` state around the Discovery add-to-day flow (button reads "Adding…" and disables
+  until the triggered refresh lands — `useStops.run` awaits `onChanged()` before resolving,
+  so the label only clears once the new stop is actually visible); `StopCard.jsx` tracks its
+  own `moving` state around move actions (all move-panel controls, including Cancel, disable
+  while in flight; a rejected move still clears the pending state via `catch`+`finally`,
+  logging to console rather than leaving the card stuck). `PlanTab.jsx`'s `handleMove`
+  `.catch(() => {})` is replaced with an explicit `console.error` + `reportError(err, 'Could
+  not move that stop.')` call (the app's existing `ErrorBanner`/`pageError` affordance from
+  `TripPage.jsx`) — fails loudly in dev, clean message in the UI, no stack shown to the user.
+  **Frontend 83/83 green** (74 baseline + 9 new: 2 `useTrip` id-guard fixtures, 2
+  `SuggestionCard` pending-state tests, 3 `StopCard` pending-state tests, 2 `PlanTab`
+  move-feedback tests). Backend untouched (W5 ran concurrently in `backend/`; its one
+  observed local test failure — a migration-count assertion — is that session's own
+  uncommitted in-progress state, confirmed via `git status`, not this wave's diff).
+  **Not yet browser-verified**: this session's dev-server ports (5174 frontend, 3002
+  backend) were held by the parallel W5 session for its own verification pass, and
+  touching `backend/.env` (even the gitignored local port value) to work around it was
+  correctly refused as an out-of-scope backend touch while W5 was live. Owner elected to
+  defer the browser pass until W5 finishes and the standard ports free up, rather than
+  reroute to alternate ports or skip verification. **Outstanding before this wave can be
+  marked done:** at 375 px with Slow-3G throttling — rapid-add three Discovery suggestions
+  to different days and confirm all three survive on return to Plan (F8 in practice); disable
+  state clearly visible on each Add button while its own request is in flight; rapid-move a
+  stop between days twice and confirm the final placement matches the last completed action;
+  force a move failure (e.g. offline) and confirm the error banner shows a clean message.
 - W5 Discovery guard + data repair (after W1; destructive migration — backup + owner
   inventory review): **NOT STARTED**
 - W6 production verification pass (last): **NOT STARTED**

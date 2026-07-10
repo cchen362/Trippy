@@ -33,6 +33,7 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
   const [action, setAction] = useState(null); // null | 'delete' | 'move'
   const [noteValue, setNoteValue] = useState(stop.note || '');
   const [noteDirty, setNoteDirty] = useState(false);
+  const [moving, setMoving] = useState(false);
   const hasNoPin = stop.type !== 'transit' && (stop.locationStatus === 'unresolved' || stop.lat == null);
 
   const handleNoPinClick = (event) => {
@@ -56,6 +57,25 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
     } catch {
       // Failed save: keep noteDirty true so the value isn't silently discarded.
       // useStops.error is already surfaced by the shared TripPage banner.
+    }
+  };
+
+  // Per-stop pending guard (Wave 4 §4.2) — disables this stop's move controls
+  // for the duration of its own move request only; other stops' move/add
+  // affordances are untouched, and out-of-order refreshes are already made
+  // safe by the useTrip.refresh id guard (§4.1).
+  const handleMoveClick = async (targetDayId) => {
+    if (moving) return;
+    setMoving(true);
+    try {
+      await onMove(stop.id, targetDayId);
+    } catch (err) {
+      // PlanTab's onMove already surfaces failures via the shared error
+      // banner and never rethrows — this catch is only a defensive guard
+      // against an unhandled rejection if a caller's contract ever changes.
+      console.error('[stops] move failed:', err);
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -215,14 +235,15 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                         color: 'rgba(240,234,216,0.35)',
                         margin: '0 0 8px 0',
                       }}>
-                        Move to
+                        {moving ? 'Moving…' : 'Move to'}
                       </p>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
                         {otherDays.map((day) => (
                           <button
                             key={day.id}
                             type="button"
-                            onClick={() => onMove(stop.id, day.id)}
+                            onClick={() => handleMoveClick(day.id)}
+                            disabled={moving}
                             style={{
                               fontFamily: "'DM Mono', monospace",
                               fontSize: '10px',
@@ -233,15 +254,16 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                               border: '1px solid rgba(240,234,216,0.15)',
                               borderRadius: '999px',
                               padding: '4px 12px',
-                              cursor: 'pointer',
+                              cursor: moving ? 'not-allowed' : 'pointer',
+                              opacity: moving ? 0.45 : 1,
                             }}
                           >
                             Day {days.indexOf(day) + 1}{day.city ? ` · ${day.city}` : ''}
                           </button>
                         ))}
                       </div>
-                      <button type="button" onClick={() => setAction(null)}
-                        style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)' }}>
+                      <button type="button" onClick={() => setAction(null)} disabled={moving}
+                        style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)', opacity: moving ? 0.45 : 1, cursor: moving ? 'not-allowed' : 'pointer' }}>
                         Cancel
                       </button>
                     </div>
