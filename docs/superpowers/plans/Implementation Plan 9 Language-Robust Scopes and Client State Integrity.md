@@ -6,7 +6,9 @@ W2 complete (2026-07-10); W3 complete (2026-07-10); W4 complete + browser-verifi
 exactly per the owner-approved inventory; 5.3 executed with a documented finding (Google
 serves no English components for the Hangzhou place — rule 1.5 is the healing path, per
 §5); 5.4 photo backfill deferred into W6 step 1 (needs the resolved English city from the
-owner's Hangzhou chip); W6 not started.**
+owner's Hangzhou chip); two client-side bugs found in owner production testing after the
+W5 deploy (see §Wave status "Post-W5 production findings") — fixed in a dedicated frontend
+session BEFORE W6; W6 not started.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -704,4 +706,27 @@ and the manual browser pass defined in Wave 6.
   Hangzhou chip — run `backfillTripPhotos` (POST backfill-photos route or re-run per
   `stops.js:607`) immediately AFTER the chip is added, then confirm the stop photo and that
   the 1.3 photo warn stays silent.
-- W6 production verification pass (last): **NOT STARTED**
+- Post-W5 production findings (2026-07-10, owner browser testing after the W5 deploy;
+  backend logs verified clean — zero errors/4xx/5xx/photo-warns, so both bugs are purely
+  client-side): **(a) Plan tab renders BLANK** (day tabs + Add Place/Discover buttons
+  visible, no day header, no timeline) after moving a stop to another day AND after
+  removing a stop; browser refresh restores it. Not yet root-caused — two precise
+  hypotheses, distinguishable in one DOM inspection: (1) `activeDay` resolves null
+  (`useTrip.js:65` find misses → `DayHeader`/`Timeline` both `return null` on falsy day —
+  `DayHeader.jsx:16`, `Timeline.jsx:107`) vs (2) framer-motion `AnimatePresence
+  mode="wait"` (`PlanTab.jsx:127-143`, `key={activeDayId || 'no-day'}`) dropping the
+  incoming child when a refresh-triggered rerender interrupts an exit animation. If the
+  `motion.div` is IN the DOM but empty → hypothesis 1; absent → hypothesis 2. W4's id
+  guard + pending states did not cover this manifestation (single non-racing move
+  reproduces it). **(b) "Move to" day chips show the raw SEED city, not the resolved
+  city** — `StopCard.jsx:261` and `TransitStop.jsx:209` render `day.city` while the day
+  header uses the resolved value; the detail response already carries `resolvedCity`
+  per day (`trips.js:1018`). Pre-existing bug, exposed now that Plan 8/9 healing makes
+  seed ≠ resolved (e.g. all-Shanghai seeds under a `杭州市` header; all-Taipei under
+  Kaohsiung). Fix: render `resolvedCity ?? city`; check `DayPicker.jsx` (Discovery
+  add-to-day) for the same pattern. **Owner decision (2026-07-10): fix both in a
+  dedicated frontend-only session BEFORE W6** — W6 is the final verification pass and
+  its step 5 (rapid adds/moves) would fail against bug (a).
+- W6 production verification pass (last): **NOT STARTED — gated on the post-W5 client
+  bugfix session above; W6 step 1 additionally runs the deferred 5.4 photo backfill
+  after the Hangzhou chip is added (see W5 entry).**
