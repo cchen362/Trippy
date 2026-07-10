@@ -1,9 +1,16 @@
 # Plan 8 Production QA — Findings (2026-07-10)
 
-**Status: CLOSED INTO PLAN 9 (2026-07-10) — findings and design decisions D1–D6 approved
-by owner and encoded in
-[Implementation Plan 9](../plans/Implementation%20Plan%209%20Language-Robust%20Scopes%20and%20Client%20State%20Integrity.md).
-Investigation only; no production data or code was modified.**
+**Status: CLOSED (2026-07-11) — Plan 9 complete and production-verified. All issues
+resolved: issue 1 (CJK headers) healed via `languageCode=en` (W1) + rule-1.5 containment
+with the owner's bounded Hangzhou chip (W3/W6); issue 3 (refetch race) fixed by the
+`useTrip` request-id guard + per-control pending states (W4); issue 4 (silent photo
+failures) fixed by warn-on-failure (W1) + the Park Hyatt backfill (W6, photo present);
+bonus finding (KL twin regeneration) fixed by day-country stamps + the D6 guard (W5).
+W6's seven-check production pass recorded in
+[Implementation Plan 9](../plans/Implementation%20Plan%209%20Language-Robust%20Scopes%20and%20Client%20State%20Integrity.md)
+§Wave status. Original close-into-plan note (2026-07-10): findings and design decisions
+D1–D6 approved by owner and encoded in Plan 9; that investigation modified no production
+data or code.**
 
 **Scope:** post-deploy validation of
 [Implementation Plan 8](../plans/Implementation%20Plan%208%20Destination%20Scopes%20and%20Geography%20Identity.md)

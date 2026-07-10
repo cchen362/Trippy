@@ -1,14 +1,13 @@
 # Implementation Plan 9 — Language-Robust Scopes and Client State Integrity
 
-**Status: IN PROGRESS — approved for implementation 2026-07-10. W1 complete (2026-07-10);
-W2 complete (2026-07-10); W3 complete (2026-07-10); W4 complete + browser-verified
-(2026-07-10); W5 complete + DEPLOYED to production (2026-07-10) — migration 024 applied
-exactly per the owner-approved inventory; 5.3 executed with a documented finding (Google
-serves no English components for the Hangzhou place — rule 1.5 is the healing path, per
-§5); 5.4 photo backfill deferred into W6 step 1 (needs the resolved English city from the
-owner's Hangzhou chip); two client-side bugs found in owner production testing after the
-W5 deploy (see §Wave status "Post-W5 production findings") — BOTH FIXED, root-caused +
-regression-tested + browser-verified + deployed (2026-07-10); W6 UNBLOCKED, not started.**
+**Status: COMPLETE (2026-07-11). All six waves done. W6 production verification pass:
+all seven checks PASS (owner browser pass at 375 px + agent ssh/DB/log evidence — see
+§Wave status W6 entry); deferred 5.4 photo backfill executed (`{updated: 1}`, Park Hyatt
+photo present); the regenerated `杭州市|CN` catalogue row (re-created by owner Discovery
+use in the post-W5, pre-chip window) was owner-approved and deleted — window structurally
+closed by the Hangzhou chip. Findings review
+[2026-07-10-plan8-production-qa-findings.md](../reviews/2026-07-10-plan8-production-qa-findings.md)
+CLOSED.**
 
 **Origin:**
 [Plan 8 Production QA Findings](../reviews/2026-07-10-plan8-production-qa-findings.md)
@@ -760,6 +759,45 @@ and the manual browser pass defined in Wave 6.
   (auth.js COOKIE_OPTS) and the origin is plain HTTP, so new browsers refuse to store
   it; the owner's established browser works. If W6 needs a fresh login, use the
   owner's normal browser, or decide on HTTPS (e.g. Tailscale serve) later.
-- W6 production verification pass (last): **UNBLOCKED (post-W5 bugfix session complete,
-  2026-07-10) — NOT STARTED; W6 step 1 additionally runs the deferred 5.4 photo backfill
-  after the Hangzhou chip is added (see W5 entry).**
+- W6 production verification pass (last): **COMPLETE (2026-07-11) — ALL SEVEN CHECKS
+  PASS.** Owner ran the browser pass (established browser, 375 px, production at
+  `8df3c0c`); agent ran ssh/DB/log evidence checks. Per check:
+  **(1)** Hangzhou chip added via picker → stored scope `Hangzhou|CN|city|picker` WITH
+  bounds; day headers Jul 29–Aug 1 read `Hangzhou`, Jul 26–28 `Shanghai`; trip card
+  `Shanghai · Hangzhou`; share view matches. Deferred 5.4 backfill then run by the owner
+  via the authenticated `POST /api/trips/:id/refresh-photos` route (devtools fetch) →
+  `{updated: 1}`; DB confirms the Park Hyatt stop's `unsplash_photo_url` is present;
+  zero `[photo]` warns in logs. **(2)** Fresh two-chip trip (Shanghai + Chengdu,
+  `4e07555d…`): card showed both cities immediately; Edit-Trip chip add/remove survived
+  reload; free-text `南疆` chip worked and Discovery served its existing 92-place CJK
+  catalogue as a pure cache hit (`generation_count` unchanged, no new row). **(3)**
+  Ritz-Carlton Chengdu hotel add: stored `details_json` fully Latin/romanized
+  (`locality "Cheng Du Shi"`, sublocality `Qing Yang Qu`, aal1 `Si Chuan Sheng`); header
+  healed to `Chengdu` via the scope; hotel stop photo present; zero `[photo]` and zero
+  bounds-unusable `[geo]` warns. **(4)** D5 overlap PASS with a recorded observation:
+  a 1-night Regent Chongqing booking inside the Chengdu stay DID win its night (latest
+  check-in wins — the header changed) and deleting it reverted the night. The header read
+  `Shanghai` (the seed), not `Chongqing`, because Google returned only a romanized
+  admin fragment (`Chong Qing Shi`, no genuine locality) and the trip had no Chongqing
+  scope — rule 1 nothing to match, rule 1.5 bounds (Shanghai/Chengdu) don't contain the
+  point, rule 2 no locality → documented demotion path (log:
+  `[geo] hotel city demoted to anchor { demoted: 'Chong Qing Shi', tripScopes:
+  [Shanghai, Chengdu, 南疆] }`). This is the §7-risk-1 residual by design; a Chongqing
+  chip would heal it via rule 1 `shi`-strip or bounds. **(5)** Rapid Discovery adds +
+  moves + day-tab switches + browser refresh: no state loss, no blank Plan tab
+  (post-W5 fix holding). **(6)** Catalogue spot-check: post-session catalogue is
+  byte-identical to the session-start baseline minus one deletion (below) — no new
+  fragment/CJK-accidental/twin keys; KL days still `MY`, `kualalumpur|MY` 160 places,
+  `北京`/`南疆` free-text rows intact. **(7)** Bali + Taipei–Kaohsiung headers still
+  healed; Chengdu↔Chongqing trip intact (owner); demotion warns count exactly the two
+  known Bali bookingIds plus the check-4 test booking explained above (since deleted).
+  **Session finding (resolved in-session, owner-approved):** a NEW `杭州市|CN` catalogue
+  row (id=16, 79 places, generated 2026-07-10 05:53 UTC) had re-appeared after W5's
+  deletion — root cause: owner Discovery use on the Hangzhou trip during post-W5 bugfix
+  testing, while days still resolved `杭州市` (chip not yet added); the D6 guard doesn't
+  apply (request carried `CN`, guard covers empty-country only). Severity low (duplicate
+  Claude spend, pennies). Fix: owner-approved re-delete executed in-session (79 places +
+  1 destination row, via node/better-sqlite3 inside the container — host `sqlite3` has
+  no write perms on the root-owned DB); recurrence structurally closed because the chip
+  now makes those days resolve `Hangzhou` → future Discovery keys `hangzhou|CN`.
+  Production untouched otherwise; health OK throughout.
