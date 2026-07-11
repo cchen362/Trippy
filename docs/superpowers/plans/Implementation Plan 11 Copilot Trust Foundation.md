@@ -1,6 +1,6 @@
 # Implementation Plan 11 — Co-pilot Trust Foundation (Action Protocol, Server Proposals, Atomic Apply)
 
-**Status: Waves 1–3 COMPLETE (2026-07-12). Wave 4 (QA/deploy) NOT STARTED.**
+**Status: COMPLETE (2026-07-12). All four waves done, deployed to production (`cdf0560`).**
 
 **Origin:** [Co-pilot Foundation and Integration Review](../reviews/2026-07-11-copilot-foundation-and-integration-review.md)
 (2026-07-11) plus the independent orchestrator assessment and owner decision session of
@@ -339,7 +339,54 @@ propose and apply → stale message.
 
 ## Wave 4 — QA, verification, deploy
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12). Deployed to production, commit `cdf0560`.**
+
+Full backend suite green (511 tests, 27 files) and frontend `npm run build` clean before
+deploy. Local dev servers (frontend :5174, backend :3002, real Anthropic key via dotenv)
+confirmed the panel renders correctly against the existing "Shanghai - Hangzhou (W3
+verify)" trip conversation history: applied add/move/update proposal cards, a D6
+booking-linked refusal (Park Hyatt → prose redirect to Logistics, no proposal card), and
+an invalid-proposal "Can't Apply" card in product-voice copy — all non-mutating render
+smoke, no new LLM calls made locally.
+
+**Net-new Wave 4 verification — newest-50 history fix:** rather than driving 50+ live LLM
+turns, inserted 60 synthetic timestamped rows directly into `copilot_messages` for the W3
+trip via a throwaway script (74 total messages), called the live history endpoint, and
+confirmed it returned exactly the newest 50 (oldest returned = message #25, newest = #74)
+in ascending order — the 14 original real messages and the first 10 synthetic ones were
+correctly excluded, confirming no frozen prefix. Synthetic rows deleted immediately after;
+trip restored to its original 14 messages.
+
+**Deploy:** SSH access confirmed first. Server was at `6760af2` (pre-Plan-11); DB backed up
+to `~/Trippy/backups/` before pulling. `git pull` fast-forwarded to `cdf0560`;
+`docker compose up -d --build` rebuilt and restarted `trippy-trippy-1` cleanly — migration
+`028_copilot_proposals.sql` applied at startup with no errors, `/api/health` returned
+`{"status":"ok","db":"connected"}`.
+
+**Post-deploy checks (all three passed):**
+1. `copilot_proposals` table exists in prod with the full expected schema (verified via
+   `docker exec` + `PRAGMA table_info`).
+2. Propose+apply exercised end-to-end against the pre-existing "Shanghai - Hangzhou (W4
+   Test)" trip (owner-confirmed target), calling the real `createProposal`/`applyProposal`
+   service functions in-container (the actual atomic-apply code path, not a bespoke SQL
+   script) — `add_stop` proposal created as `pending`, applied successfully, stop appeared
+   in the trip with `time: null`.
+3. Audit row confirmed: `copilot_proposals` row with `status: 'applied'`,
+   `resolved_at`/`resolved_by_user_id` populated, `operations_json` matching what was
+   proposed.
+
+Verification stop + proposal row deleted immediately after to leave the test trip clean.
+Production healthy after cleanup (`/api/health` ok, no error logs).
+
+**Owner click-script** for the acceptance flows that need a real browser + Anthropic calls
+(propose→refresh→apply, loss warning, booking-linked refusal, stale/concurrent-edit) is at
+[2026-07-12-plan11-wave4-owner-click-script.md](2026-07-12-plan11-wave4-owner-click-script.md)
+— per standing preference, the agent does not drive mutating prod browser sessions.
+
+**Unverified / left to the owner:** the four mutating browser flows in the click-script
+above (propose→apply, loss warning, booking-linked refusal in the live UI, staleness via a
+second concurrent edit) — these need a logged-in browser session and real Anthropic calls
+against data the owner chooses.
 
 1. Full backend test run + the new protocol/validation suites green.
 2. Agent browser verification locally (owner session flow per
