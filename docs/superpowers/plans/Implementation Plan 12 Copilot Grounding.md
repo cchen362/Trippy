@@ -173,6 +173,10 @@ Confirmed in current `main` (`7d6c904`); implementation sessions must not re-der
 ## Wave 1 — Agentic tool loop + catalogue search tool (backend)
 
 **Status: NOT STARTED.**
+**Model recommendation: Opus (or Fable) medium orchestrator + Sonnet coding subagents.**
+Restructuring the streaming loop is the plan's highest-risk change (SSE timing, abort
+handling, cache economics) — design and QA warrant the stronger model; coding is
+delegated per the standing orchestration rules.
 
 1. Restructure `streamCopilotResponse` into a streaming agent loop (fact 1):
    accumulate assistant content blocks per iteration; on `stop_reason ===
@@ -213,6 +217,10 @@ unchanged within noise.
 ## Wave 2 — Background generation + grounded adds (backend)
 
 **Status: NOT STARTED.**
+**Model recommendation: Opus medium orchestrator + Sonnet coding subagents.**
+The generation-pipeline extraction must be behavior-identical to a subtle route (merge
+semantics, error fallbacks) and grounded adds touch the proposal validation/apply path —
+parity judgment sits with the orchestrator, code with Sonnet.
 
 1. Extract the generation pipeline (fact 5) from `routes/discovery.js` into
    `services/discoveryGeneration.js`: one function owning exclusions →
@@ -252,6 +260,9 @@ catalogue row's verified identity without any client/model-supplied coordinates.
 ## Wave 3 — Deterministic trip-health checks (backend)
 
 **Status: NOT STARTED.**
+**Model recommendation: Sonnet medium solo.** Pure functions over the trip detail with
+a fully specified check set and test matrix; the only judgment call (the booking-time
+mapping trace, step 1) is bounded and documented.
 
 1. First trace fact 10's open item: how materialized booking stops get their
    `time` (in `services/bookings.js`) — the drift check compares that mapping.
@@ -276,6 +287,9 @@ arrive as ordinary proposals; booking findings point to Logistics.
 ## Wave 4 — Panel surfacing (frontend)
 
 **Status: NOT STARTED.**
+**Model recommendation: Sonnet medium solo.** Two small additive UI pieces inside an
+existing component set, with the design idioms (DM Mono badge/label) already
+established by Plan 11 Wave 3; browser-verify at 375px per standing rules.
 
 Within the existing panel only (G7):
 
@@ -296,6 +310,9 @@ panel.
 ## Wave 5 — QA, verification, deploy
 
 **Status: NOT STARTED.**
+**Model recommendation: Opus medium solo (no coding subagents).** QA judgment,
+production deploy, and the owner click-script are orchestration work, not code volume;
+any fix found here is small enough to do inline or hand to one Sonnet subagent ad hoc.
 
 1. Full backend suite + frontend build green; discovery route regression suite
    confirms Wave 2 extraction changed nothing observable.
