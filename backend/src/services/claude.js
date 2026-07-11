@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
+import { PROPOSE_ITINERARY_CHANGES_TOOL } from './copilotTools.js';
 
 let _client = null;
 
@@ -395,31 +396,38 @@ export async function streamCopilotResponse(conversationMessages, itineraryConte
     }
   };
 
-  const systemPrompt = `You are a travel co-pilot helping manage a trip itinerary.
+  const systemPrompt = `You are a travel co-pilot helping a traveller manage and improve their trip itinerary.
 
-Current itinerary:
+Current itinerary (JSON):
 ${JSON.stringify(itineraryContext, null, 2)}
 
-Guidelines:
-- Respond conversationally and helpfully
-- If the user asks you to change the itinerary, first explain your reasoning, then propose changes
-- If proposing itinerary changes, end your response with a JSON block in this exact format (use triple backticks with json):
-  \`\`\`json
-  {
-    "operations": [
-      { "action": "add_stop", "dayId": "...", "stop": { "title": "...", "type": "experience|transit|hotel|booked", "time": "HH:MM", "note": "...", "lat": null, "lng": null } },
-      { "action": "remove_stop", "stopId": "..." },
-      { "action": "move_stop", "stopId": "...", "toDayId": "...", "sortOrder": 0 },
-      { "action": "update_stop", "stopId": "...", "fields": { ... } }
-    ]
-  }
-  \`\`\`
-- Only include operations array items that are actually needed
-- Use real dayId and stopId values from the itinerary above
-- If not proposing changes, do NOT include the JSON block`;
+## What you can do
+- Explain and reason about the trip in warm, concise prose.
+- Suggest improvements to a day's flow, density, or order.
+- Propose concrete itinerary changes by calling the propose_itinerary_changes tool.
+
+## How to propose changes
+- The ONLY way to change the itinerary is to call the propose_itinerary_changes tool. Never write changes as prose, JSON, or code blocks.
+- First explain your reasoning in prose, then call the tool with the operations. If you are not proposing changes, do not call the tool.
+- Use real dayId and stopId values from the itinerary above.
+
+## Booking-linked stops are off-limits
+- Any stop marked "bookingLinked": true is tied to a confirmed booking (flight, hotel, train, and so on). Never propose to add, move, remove, or edit a booking-linked stop. If the traveller wants to change one, tell them to manage it in Logistics.
+
+## Timing rules — never fabricate times
+Stops carry one of four kinds of timing. Respect them:
+1. Booking-linked timed commitment — fixed by a real booking. You never touch these.
+2. Explicitly timed manual stop — the traveller set a specific clock time (for example a dinner reservation).
+3. Untimed flexible stop — no clock time; it happens sometime that day. This is the default and is never judged against the clock.
+4. Soft hint — a duration ("~2h") or best time of day ("morning"), NOT a clock time.
+
+- Set "time" to null unless the traveller's request is specifically about a clock time. Do NOT invent "HH:MM" values to fill a slot.
+- When discussing an untimed stop, talk in terms of order, density, and flexibility ("in the morning", "before lunch") — never a fabricated timetable.
+- A "time" value, when set, must be 24-hour "HH:MM".`;
 
   let fullText = '';
   let streamDone = false;
+  const turnStart = Date.now();
 
   try {
     console.log('[copilot] stream opened messages=%d', conversationMessages.length);
@@ -429,6 +437,7 @@ Guidelines:
       max_tokens: 4096,
       system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: conversationMessages,
+      tools: [PROPOSE_ITINERARY_CHANGES_TOOL],
     });
 
     // Abort Anthropic stream when the client drops the SSE connection.
@@ -445,26 +454,28 @@ Guidelines:
     stream.on('text', (text) => {
       if (!sawFirstDelta) {
         sawFirstDelta = true;
-        console.log('[copilot] first text delta len=%d', text.length);
+        console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, Date.now() - turnStart);
       }
       fullText += text;
       write({ type: 'text', content: text });
     });
 
-    await stream.finalMessage();
+    const finalMessage = await stream.finalMessage();
 
-    // Extract mutation JSON block — take the LAST fenced JSON block in case Claude
-    // includes illustrative examples earlier in the response
-    const mutationMatches = [...fullText.matchAll(/```json\r?\n([\s\S]*?)\r?\n?```/g)];
-    const lastMatch = mutationMatches.at(-1);
-    if (lastMatch) {
-      try {
-        const parsedMutation = JSON.parse(lastMatch[1]);
-        write({ type: 'mutation', mutation: parsedMutation });
-      } catch (e) {
-        console.error('[copilot] malformed mutation JSON block — skipping:', e.message);
-      }
+    // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
+    // above via on('text'); the tool_use block is assembled on a separate channel, so reading
+    // it here does not delay prose. Persistence + validation + proposalId + warnings are Wave 2;
+    // Wave 1 emits the validated operations so the protocol switch is complete.
+    const toolUse = finalMessage?.content?.find(
+      (block) => block.type === 'tool_use' && block.name === PROPOSE_ITINERARY_CHANGES_TOOL.name,
+    );
+    if (toolUse && Array.isArray(toolUse.input?.operations) && toolUse.input.operations.length > 0) {
+      write({ type: 'proposal', operations: toolUse.input.operations });
     }
+
+    console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s',
+      finalMessage?.usage?.input_tokens ?? -1, finalMessage?.usage?.output_tokens ?? -1,
+      JSON.stringify(itineraryContext).length, toolUse ? 'yes' : 'no');
 
     streamDone = true;
     console.log('[copilot] stream done fullText.length=%d', fullText.length);

@@ -29,7 +29,7 @@ const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coe
 
 // Build a mock stream that emits NDJSON text lines then resolves.
 // Re-used by streamCopilotResponse tests too.
-function makeMockStream(chunks, finalText) {
+function makeMockStream(chunks, finalText, finalContent) {
   const listeners = {};
   const stream = {
     on(event, cb) {
@@ -40,7 +40,10 @@ function makeMockStream(chunks, finalText) {
       for (const chunk of chunks) {
         if (listeners['text']) listeners['text'](chunk);
       }
-      return { content: [{ type: 'text', text: finalText ?? chunks.join('') }] };
+      return {
+        content: finalContent ?? [{ type: 'text', text: finalText ?? chunks.join('') }],
+        usage: { input_tokens: 10, output_tokens: 20 },
+      };
     },
   };
   return stream;
@@ -294,28 +297,35 @@ describe('streamCopilotResponse — SSE headers', () => {
   });
 });
 
-describe('streamCopilotResponse — mutation JSON block extraction', () => {
+describe('streamCopilotResponse — tool-use proposal protocol', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('extracts and emits mutation event when JSON block is present', async () => {
-    const mutation = { operations: [{ action: 'remove_stop', stopId: 'stop-1' }] };
-    const fullText = `Sure, I'll remove that stop.\n\`\`\`json\n${JSON.stringify(mutation)}\n\`\`\``;
-
-    mockStream.mockReturnValue(makeMockStream([fullText], fullText));
+  it('emits a proposal event carrying the tool_use operations', async () => {
+    const operations = [{ action: 'remove_stop', stopId: 'stop-1' }];
+    mockStream.mockReturnValue(makeMockStream(
+      ['Sure.'],
+      'Sure.',
+      [
+        { type: 'text', text: 'Sure.' },
+        { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
+      ],
+    ));
 
     const res = makeMockRes();
     await streamCopilotResponse([{ role: 'user', content: 'Remove the first stop' }], {}, res);
 
     const events = res.written.map((w) => JSON.parse(w.replace(/^data: /, '').trim()));
+    const proposalEvent = events.find((e) => e.type === 'proposal');
     const mutationEvent = events.find((e) => e.type === 'mutation');
 
-    expect(mutationEvent).toBeDefined();
-    expect(mutationEvent.mutation).toEqual(mutation);
+    expect(proposalEvent).toBeDefined();
+    expect(proposalEvent.operations).toEqual(operations);
+    expect(mutationEvent).toBeUndefined();
   });
 
-  it('does NOT emit mutation event when no JSON block present', async () => {
+  it('does NOT emit a proposal event when the model returns only text', async () => {
     const fullText = 'Here is some travel advice with no changes.';
     mockStream.mockReturnValue(makeMockStream([fullText], fullText));
 
@@ -323,9 +333,18 @@ describe('streamCopilotResponse — mutation JSON block extraction', () => {
     await streamCopilotResponse([{ role: 'user', content: 'What should I see?' }], {}, res);
 
     const events = res.written.map((w) => JSON.parse(w.replace(/^data: /, '').trim()));
-    const mutationEvent = events.find((e) => e.type === 'mutation');
+    const proposalEvent = events.find((e) => e.type === 'proposal');
 
-    expect(mutationEvent).toBeUndefined();
+    expect(proposalEvent).toBeUndefined();
+  });
+
+  it('passes the propose_itinerary_changes tool to the Anthropic stream call', async () => {
+    mockStream.mockReturnValue(makeMockStream(['done'], 'done'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([], {}, res);
+
+    expect(mockStream.mock.calls[0][0].tools.map((t) => t.name)).toContain('propose_itinerary_changes');
   });
 
   it('always ends with a done event', async () => {

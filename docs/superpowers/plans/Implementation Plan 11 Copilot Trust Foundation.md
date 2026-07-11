@@ -1,6 +1,6 @@
 # Implementation Plan 11 — Co-pilot Trust Foundation (Action Protocol, Server Proposals, Atomic Apply)
 
-**Status: NOT STARTED.**
+**Status: Wave 1 COMPLETE (2026-07-12). Waves 2–4 NOT STARTED.**
 
 **Origin:** [Co-pilot Foundation and Integration Review](../reviews/2026-07-11-copilot-foundation-and-integration-review.md)
 (2026-07-11) plus the independent orchestrator assessment and owner decision session of
@@ -146,7 +146,23 @@ Confirmed in current `main`; implementation sessions must not re-derive them.
 
 ## Wave 1 — Typed action protocol and prompt contract (backend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12).** Native tool use replaces fenced JSON; prompt rewritten
+(D6 booking-linked rule + D7 timing semantics); D9 minimized context serializer added;
+history endpoint fixed to newest-50. New module `backend/src/services/copilotTools.js`
+(`PROPOSE_ITINERARY_CHANGES_TOOL` + `copilotTripContext`). Full suite green (484 tests, 26
+files); new `copilotTools.test.js` + rewritten `claude.test.js` tool-protocol suite.
+**Live-verified** against the real Anthropic API (throwaway smoke, SDK unmocked): change
+request → prose + `proposal` event with `time: null` (no fabrication, D7); pure question →
+no proposal; "move my booked flight to 9am" → no proposal, prose redirects to Logistics
+(D6). Measurement (Wave 1.6): tiny-trip context ≈676 chars, TTFD ≈1–2s, tool use does not
+delay prose streaming.
+
+**Deviations / intermediate state:** the `proposal` SSE event carries `{ operations }` only
+— `proposalId` + `warnings` require persistence (Wave 2). `POST /apply` still on the raw
+`{ mutation }` path and the frontend still listens for the old `mutation` event
+(`useCopilot.js:40`), so the browser apply flow is **intentionally unwired until Wave 3**;
+the co-pilot chats/reasons but the apply preview will not light up between waves. This is the
+plan's owner-approved backend-first sequencing, not a regression.
 
 Replace the fenced-JSON convention with native tool use and rewrite the system prompt.
 

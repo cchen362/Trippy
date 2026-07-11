@@ -5,6 +5,7 @@ import { getDb } from '../db/database.js';
 import { getTripDetail, assertDayAccess, assertStopAccess } from '../services/trips.js';
 import { createStop, deleteStop, updateStop } from '../services/stops.js';
 import { streamCopilotResponse } from '../services/claude.js';
+import { copilotTripContext } from '../services/copilotTools.js';
 
 const router = Router();
 
@@ -30,10 +31,13 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT * FROM copilot_messages
-      WHERE trip_id = ?
-      ORDER BY created_at ASC
-      LIMIT 50
+      SELECT id, role, content, created_at FROM (
+        SELECT id, role, content, created_at
+        FROM copilot_messages
+        WHERE trip_id = ?
+        ORDER BY created_at DESC
+        LIMIT 50
+      ) ORDER BY created_at ASC
     `).all(req.params.tripId);
 
     res.json({
@@ -102,7 +106,7 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
 
   // Stream response — SSE headers are set inside streamCopilotResponse
   // Errors during streaming are handled inside the service (writes error SSE event)
-  const fullText = await streamCopilotResponse(conversationMessages, tripDetail, res, req);
+  const fullText = await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req);
 
   // Save assistant response after streaming completes
   if (fullText) {
