@@ -1,6 +1,10 @@
 # Implementation Plan 11 — Co-pilot Trust Foundation (Action Protocol, Server Proposals, Atomic Apply)
 
-**Status: COMPLETE (2026-07-12). All four waves done, deployed to production (`cdf0560`).**
+**Status: CLOSED (2026-07-12).** All four waves done and deployed to production
+(`cdf0560`); one owner-QA finding (title edits wiping map pins, pre-existing bug surfaced
+by `update_stop`) fixed and redeployed same day (`7d6c904`). Owner has verified all
+click-script flows and the pin fix directly in production. No open items on this plan —
+see "Open items deliberately NOT in this plan" below for what's next (Stage 2/3).
 
 **Origin:** [Co-pilot Foundation and Integration Review](../reviews/2026-07-11-copilot-foundation-and-integration-review.md)
 (2026-07-11) plus the independent orchestrator assessment and owner decision session of
@@ -383,10 +387,37 @@ Production healthy after cleanup (`/api/health` ok, no error logs).
 [2026-07-12-plan11-wave4-owner-click-script.md](2026-07-12-plan11-wave4-owner-click-script.md)
 — per standing preference, the agent does not drive mutating prod browser sessions.
 
-**Unverified / left to the owner:** the four mutating browser flows in the click-script
-above (propose→apply, loss warning, booking-linked refusal in the live UI, staleness via a
-second concurrent edit) — these need a logged-in browser session and real Anthropic calls
-against data the owner chooses.
+**Owner production QA (2026-07-12): all click-script flows PASS**, including the long-
+conversation history check. One finding surfaced during this pass, fixed and redeployed
+same day (see below) — no other issues.
+
+### Owner-QA finding: title-only edits wiped the map pin — fixed, commit `7d6c904`
+
+Renaming a Discovery-sourced stop via the co-pilot's `update_stop` (title field only, no
+location fields — by design, D2/Wave 1 fact 1) dropped the stop's map pin and left it
+`locationStatus: 'unresolved'`.
+
+**Root cause** (pre-existing in `resolveLocationForStop`, `backend/src/services/stops.js`,
+not introduced by Plan 11 — Plan 11's `update_stop` was just the first caller to ever send
+a title-only patch): any title change was treated as an implicit new geocode query; the
+resulting re-resolve attempt runs local-cache/curated-only (`allowNetwork: false`, by
+design — avoids turning every edit into a live Nominatim call), and when it found no match
+for a personalized title string, the failure was applied straight over the stop's already-
+resolved coordinates instead of falling back to them. The intended protection — "protected
+from normal title/note edits unless `reResolveLocation` is explicitly requested"
+(`Implementation Plan 1 Redesign Maps.md:242`) — existed in code only for
+`location_status === 'user_confirmed'` pins, not for Discovery/Places-resolved ones.
+
+**Fix:** when the caller supplies no new coordinates/locationQuery and the implicit
+re-resolve attempt fails, fall back to the stop's existing resolved location instead of
+discarding it — extending the same protection pattern already used for user-confirmed
+pins. Backend suite green (512 tests, 27 files) including a new regression test
+(`locationIntegration.test.js`: "preserves an already-resolved pin when a title-only edit
+finds no new match"). Verified live against dev DB (renamed a resolved stop, pin survived)
+and used to repair a stop left broken by this bug during earlier owner QA on the same test
+trip. Deployed same day, no migration required, health check green.
+
+**Owner-confirmed (2026-07-12): re-tested the pin fix directly in production — pass.**
 
 1. Full backend test run + the new protocol/validation suites green.
 2. Agent browser verification locally (owner session flow per
