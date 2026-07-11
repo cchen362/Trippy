@@ -232,7 +232,10 @@ columns populated and credit rendering on a real stop.
 - Trip cover imagery (`TripCard`) — it derives from stop photos and inherits quality
   improvements automatically; any dedicated cover-selection logic is a separate idea.
 - Unsplash production-tier application (revisit only if demo-tier 50/hr is ever hit;
-  W1 compliance work is a prerequisite for that application anyway).
+  W1 compliance work is a prerequisite for that application anyway). **UPDATE
+  (2026-07-11): trigger met** — the 50/hr ceiling was hit under realistic load during
+  W4 production QA (see W4 status), and W1 compliance is live, so this is now a
+  recommended follow-up, carried in a separate handoff rather than this plan.
 - Google Place Photos in any role (D1).
 
 ## 4. Open items to confirm during implementation (not blockers)
@@ -463,6 +466,43 @@ columns populated and credit rendering on a real stop.
   the swap is a net compliance improvement; owner can re-swap. **Deploy:** via `/deploy`
   (see commit); owner runs the prod browser click-script, agent verifies DB rows + logs
   via ssh.
+  **Production deploy + QA outcome (2026-07-11):** deployed commit `6760af2` to Debian
+  (`trippy-trippy-1`, host port 6768). Because prod was still at Plan 9 (`1088f1e`),
+  this shipped **all of Plan 10 (W1–W4)** as a unit; migrations 025/026/027 applied
+  cleanly, schema verified (`stops` has photo_source/photo_query/unsplash_photo_id/
+  scene_type/photo_attribution_json; `discovery_places` has photo_query/scene_type),
+  data intact (86 stops / 4 trips at deploy). WAL-consistent DB backup taken first at
+  `~/Trippy/backups/trippy.pre-plan10.20260711-034325.db{,-wal,-shm}`. **Owner browser
+  pass (prod):** a live swap on "Yu Garden" wrote `photo_source='user'` +
+  `unsplash_photo_id=C9wzlV_xfIk` + full attribution (photographer Alexey, referral
+  URLs) + `photo_query='Yu Garden'`, credit line rendered, persisted across reload —
+  W4 confirmed end-to-end in production. On a fresh owner trip ("Shanghai – Hangzhou
+  (W4 Test)") every new stop received a rich, correct Haiku/discovery descriptor
+  (e.g. "Jing'an Temple Shanghai Buddha worship incense" / `temple_shrine`; "Park Hyatt
+  Hangzhou luxury hotel West Lake" / `hotel_stay`) — W2/W3 confirmed live.
+  **Finding (not a defect): Unsplash demo-tier 50-req/hr ceiling hit under combined
+  load.** Several new stops landed photoless while their swap strips (opened later) were
+  full. Root cause proven from prod logs: 4× `[photo] unsplash lookup failed … 'Rate
+  Limit Exceeded'`, **zero** gate/empty (`no unsplash result`) failures — so the
+  descriptor + gate + dedup logic is sound; only the final Unsplash search was
+  throttled. The descriptor is generated *before* the search, so the query is stored
+  even when the image fetch 403s (→ NULL photo, non-blocking, recoverable). The 50/hr
+  budget is a **single app-wide key** shared across all users, all auto-assigns, and
+  (that day) the agent's ~20 diagnostic searches — hence the burst exhaustion. Per-action
+  cost measured: Discovery browsing **0** requests (fact #5), add-a-stop **1–2** (2 only
+  on a gate-miss fallback), open-a-swap-strip **1** (whole strip, not per thumbnail),
+  apply-a-swap **1** (download ping). **Recovery:** ran `backfillTripPhotos` on the
+  W4-Test trip (owner-approved) — 4 NULL-photo stops → 0, each filled from its stored
+  query with distinct ids (dedup holding) + attribution; the existing `refresh-photos`
+  path is the standing remedy for any future throttled misses. **Recommendation (now
+  actionable, tracked as a separate handoff):** apply for the Unsplash **production tier
+  (5,000 req/hr, 100× headroom)** — §3 scoped this as "revisit only if 50/hr is ever hit;
+  W1 compliance is a prerequisite," and both conditions are now met (ceiling hit under
+  realistic load; W1 attribution + download-tracking compliance is live). It is
+  **config-only** (new access key in the server `.env` + container restart, no code).
+  Minor optional future optimization (non-blocking): a frequent relevance-gate miss
+  doubles the request count via the country-scene fallback — production tier makes this
+  moot; revisit only if 5,000/hr is ever pressured.
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
 (2026-07-11); re-verified before W1 at backend 442/443 (1 pre-existing flake) /
