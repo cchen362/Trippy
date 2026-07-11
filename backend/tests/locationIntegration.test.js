@@ -334,6 +334,34 @@ describe('resolver-aware stops', () => {
       locationStatus: 'estimated',
     });
   });
+
+  it('preserves an already-resolved pin when a title-only edit finds no new match (Plan 11 W4 QA finding)', async () => {
+    const stop = await createStop(user.id, dayId, {
+      title: 'Raffles City Chongqing',
+      type: 'experience',
+      unsplashPhotoUrl: null,
+    });
+    expect(stop.lat).not.toBeNull();
+    expect(stop.lng).not.toBeNull();
+
+    // A personalized rename that doesn't match any curated alias or cache entry —
+    // e.g. the co-pilot's update_stop title field. No locationQuery/coordinates/
+    // reResolveLocation is supplied, so this must never wipe the existing pin just
+    // because the implicit re-resolve attempt (network disabled for this path)
+    // finds nothing for the new string.
+    const updated = await updateStop(user.id, stop.id, {
+      title: 'Raffles City Chongqing (Jiefangbei entrance)',
+    });
+
+    expect(updated).toMatchObject({
+      title: 'Raffles City Chongqing (Jiefangbei entrance)',
+      lat: stop.lat,
+      lng: stop.lng,
+      locationStatus: stop.locationStatus,
+      providerId: stop.providerId,
+      resolvedName: stop.resolvedName,
+    });
+  });
 });
 
 describe('discovery-sourced stop metrics (Plan 7 Wave 4)', () => {

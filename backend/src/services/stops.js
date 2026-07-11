@@ -233,6 +233,31 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
       };
     }
 
+    // The caller gave no new location signal (no coordinates, no explicit
+    // locationQuery) — only an implicit re-resolve off a changed title/note
+    // triggered this attempt (queryChanged, above), and it found nothing
+    // (allowNetwork is off for this path). A failed guess must never discard a
+    // pin the stop already had — same intent as protectedUserPin, just not
+    // gated to user_confirmed only (Plan 1 Redesign Maps: "protected from
+    // normal title/note edits unless reResolveLocation is explicitly
+    // requested"). Preserve the existing location untouched.
+    if (!inputHasCoordinates && existing?.lat !== null && existing?.lat !== undefined
+      && existing?.lng !== null && existing?.lng !== undefined) {
+      return {
+        lat: existing.lat,
+        lng: existing.lng,
+        locationQuery: existing.location_query,
+        resolvedName: existing.resolved_name,
+        resolvedAddress: existing.resolved_address,
+        coordinateSystem: existing.coordinate_system,
+        coordinateSource: existing.coordinate_source,
+        locationStatus: existing.location_status,
+        locationConfidence: existing.location_confidence,
+        providerId: existing.provider_id,
+        countryCode: existing.country_code,
+      };
+    }
+
     return applyResolutionFields({}, resolution, locationQuery);
   }
 
