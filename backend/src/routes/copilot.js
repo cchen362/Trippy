@@ -21,11 +21,12 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT id, role, content, created_at FROM (
-        SELECT id, role, content, created_at
-        FROM copilot_messages
-        WHERE trip_id = ?
-        ORDER BY created_at DESC
+      SELECT id, role, content, created_at, author_name FROM (
+        SELECT cm.id, cm.role, cm.content, cm.created_at, u.display_name AS author_name
+        FROM copilot_messages cm
+        LEFT JOIN users u ON u.id = cm.user_id
+        WHERE cm.trip_id = ?
+        ORDER BY cm.created_at DESC
         LIMIT 50
       ) ORDER BY created_at ASC
     `).all(req.params.tripId);
@@ -36,6 +37,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         role: r.role,
         content: r.content,
         createdAt: r.created_at,
+        authorName: r.author_name,
       })),
       // Wave 2: expose recent proposals so the panel can restore a pending preview and render
       // applied/rejected/stale states on the thread after a refresh (Wave 3 consumes this).

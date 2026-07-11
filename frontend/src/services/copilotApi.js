@@ -4,11 +4,13 @@ export const copilotApi = {
   history: (tripId) => request(`/api/trips/${tripId}/copilot/history`),
   send: (tripId, message, onChunk, signal) =>
     requestStream(`/api/trips/${tripId}/copilot`, { message }, onChunk, signal),
-  apply: (tripId, mutation) =>
+  apply: (tripId, proposalId) =>
     request(`/api/trips/${tripId}/copilot/apply`, {
       method: 'POST',
-      body: { mutation },
+      body: { proposalId },
     }),
+  reject: (tripId, proposalId) =>
+    request(`/api/trips/${tripId}/copilot/proposals/${proposalId}/reject`, { method: 'POST' }),
   clear: (tripId) =>
     request(`/api/trips/${tripId}/copilot/history`, { method: 'DELETE' }),
 };

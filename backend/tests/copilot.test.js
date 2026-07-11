@@ -173,6 +173,10 @@ describe('GET /trips/:tripId/copilot/history', () => {
     expect(Array.isArray(res._body.proposals)).toBe(true);
     const msgs = res._body.messages.filter((m) => m.id === 'msg-1' || m.id === 'msg-2');
     expect(msgs.map((m) => m.id)).toEqual(['msg-1', 'msg-2']);
+    const userMsg = msgs.find((m) => m.id === 'msg-1');
+    const assistantMsg = msgs.find((m) => m.id === 'msg-2');
+    expect(userMsg.authorName).toBe('Test User');
+    expect(assistantMsg.authorName).toBeNull();
 
     db.prepare('DELETE FROM copilot_messages WHERE id IN (?, ?)').run('msg-1', 'msg-2');
   });

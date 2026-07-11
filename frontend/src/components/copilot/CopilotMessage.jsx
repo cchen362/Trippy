@@ -81,17 +81,33 @@ function inlineRender(text) {
   return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts;
 }
 
-export default function CopilotMessage({ role, content, isStreaming }) {
+export default function CopilotMessage({ role, content, isStreaming, authorLabel }) {
   const isUser = role === 'user';
 
   return (
     <div
       style={{
         display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
+        flexDirection: 'column',
+        alignItems: isUser ? 'flex-end' : 'flex-start',
         marginBottom: 12,
       }}
     >
+      {isUser && authorLabel && (
+        <span
+          style={{
+            fontFamily: "'DM Mono', monospace",
+            fontSize: 10,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: 'rgba(240,234,216,0.4)',
+            marginBottom: 4,
+            marginRight: 2,
+          }}
+        >
+          {authorLabel}
+        </span>
+      )}
       <div
         style={{
           background: isUser ? '#232018' : '#1c1a17',

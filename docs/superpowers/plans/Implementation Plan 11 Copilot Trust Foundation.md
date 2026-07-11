@@ -1,6 +1,6 @@
 # Implementation Plan 11 — Co-pilot Trust Foundation (Action Protocol, Server Proposals, Atomic Apply)
 
-**Status: Waves 1–2 COMPLETE (2026-07-12). Waves 3–4 NOT STARTED.**
+**Status: Waves 1–3 COMPLETE (2026-07-12). Wave 4 (QA/deploy) NOT STARTED.**
 
 **Origin:** [Co-pilot Foundation and Integration Review](../reviews/2026-07-11-copilot-foundation-and-integration-review.md)
 (2026-07-11) plus the independent orchestrator assessment and owner decision session of
@@ -276,7 +276,41 @@ validation.
 
 ## Wave 3 — Proposal experience in the panel (frontend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12).** The panel is fully rewired off the pre-plan client-authored
+`mutation` model onto the server proposal model. `useCopilot.js` now holds a normalized
+`proposals` array (`{id, messageId, operations, warnings, status, statusReason}`) instead of
+`pendingMutation`; every message (history + live) carries a stable id, and proposals link to
+their assistant message via `messageId` so pending proposals **survive refresh and re-open from
+history** through one `proposalsByMessageId` lookup — no special-casing of the live turn.
+`copilotApi.apply` now posts `{ proposalId }`; new `copilotApi.reject`. `MutationPreview` is
+status-aware (`pending`/`applied`/`rejected`/`stale`/`invalid`), renders `update_stop`
+field-level before→after diffs, an `add_stop` `NO TIME · FLEXIBLE` badge (never a fabricated
+time), and a prominent loss-warning block above Apply. `CopilotMessage` gained an optional
+author label; `CopilotPanel` renders proposals inline after their message, gates Clear on
+`isOwner` (via `useAuth()` + the new `ownerId` prop from `TripPage`), and shows the author label
+only when 2+ distinct authors exist (owner decision 2026-07-12).
+
+**Backend touch (in service of §3 attribution):** the history endpoint now `LEFT JOIN users`
+and returns `authorName` per message (null for assistant rows) — Wave 2 had left this as the
+"join away" noted in fact 12; `copilot.test.js` history assertion updated accordingly.
+
+**Error surfacing (§4 / D12):** apply-time failures render **product-voice copy derived from
+`status`, never the raw server reason** (the precise reason stays in the audit record). The hook
+mirrors the server's persisted status so a live card matches a refreshed one (409 → `stale`,
+422/404 → `invalid`); `MutationPreview` shows fixed copy per status. This resolved an owner-QA
+finding where deleting the *target* stop surfaced a raw `Operation N (update_stop)…` string.
+Deleting an *unrelated* stop still yields the fingerprint `stale`/OUTDATED path; deleting the
+target yields `invalid`/Can't-Apply — both now read in plain language and are consistent
+live-vs-reload. Also fixed a spacing gap (proposal cards had top but no bottom margin).
+
+**Verified:** owner browser pass at mobile viewport, acceptance flows #1–8 (propose → refresh →
+still-pending → apply with correct order + null-time badge; update before→after; remove-with-note
+loss warning; D6 booking-linked refusal in prose with no proposal; concurrent-edit failure).
+Agent-side: full frontend `npm run build` clean, full backend suite 511 green, panel mount +
+history load + fix rendering confirmed programmatically (raw reason absent, product-voice copy
+present, card `marginBottom` applied). **Known minor:** a *creation-time* invalid proposal (model
+proposing a booking-linked change despite the prompt — not observed in QA, the model refuses in
+prose) would show the generic invalid copy; acceptable for v1.
 
 Within the existing full-screen panel and design language (no new chrome, gold stays
 accent-only):

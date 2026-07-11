@@ -165,6 +165,7 @@ export default function TripPage() {
             days={tripState.days}
             onClose={() => setCopilotOpen(false)}
             onMutationApplied={() => tripState.refresh()}
+            ownerId={tripState.trip.ownerId}
           />
         )}
         {editOpen && (

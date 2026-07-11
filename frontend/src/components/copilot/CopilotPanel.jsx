@@ -1,27 +1,48 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import CopilotMessage from './CopilotMessage.jsx';
 import MutationPreview from './MutationPreview.jsx';
+import { useAuth } from '../../context/AuthContext.jsx';
 
-export default function CopilotPanel({ copilot, days, onClose, onMutationApplied }) {
+export default function CopilotPanel({ copilot, days, onClose, onMutationApplied, ownerId }) {
   const {
     messages,
     streaming,
     streamingText,
-    pendingMutation,
+    proposals,
     error,
     send,
-    applyMutation,
-    rejectMutation,
+    applyProposal,
+    rejectProposal,
     cancel,
     clear,
   } = copilot;
 
+  const { user } = useAuth();
+  const isOwner = user?.id === ownerId;
+
   const [inputText, setInputText] = useState('');
-  const [applying, setApplying] = useState(false);
+  const [applyingId, setApplyingId] = useState(null);
   const [applyError, setApplyError] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  const showAuthors = useMemo(() => {
+    const authors = new Set(
+      messages.filter((m) => m.role === 'user' && m.authorName).map((m) => m.authorName),
+    );
+    return authors.size >= 2;
+  }, [messages]);
+
+  const proposalsByMessageId = useMemo(() => {
+    const map = new Map();
+    for (const p of proposals) {
+      if (!p.messageId) continue;
+      if (!map.has(p.messageId)) map.set(p.messageId, []);
+      map.get(p.messageId).push(p);
+    }
+    return map;
+  }, [proposals]);
 
   // Auto-focus input when panel opens
   useEffect(() => {
@@ -47,16 +68,28 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
     }
   };
 
-  const handleApply = async () => {
-    setApplying(true);
+  const handleApply = async (proposalId) => {
+    setApplyingId(proposalId);
     setApplyError(null);
     try {
-      const result = await applyMutation();
+      const result = await applyProposal(proposalId);
       if (result) onMutationApplied(result);
     } catch (err) {
-      setApplyError(err.message || 'Failed to apply changes. Please try again.');
+      // Stale/invalid outcomes are already reflected on the card via its status;
+      // only surface a transient banner for other failure modes.
+      if (err.status !== 409 && err.status !== 422 && err.status !== 404) {
+        setApplyError(err.message || 'Failed to apply changes. Please try again.');
+      }
     } finally {
-      setApplying(false);
+      setApplyingId(null);
+    }
+  };
+
+  const handleReject = async (proposalId) => {
+    try {
+      await rejectProposal(proposalId);
+    } catch (err) {
+      setApplyError(err.message || 'Failed to reject changes. Please try again.');
     }
   };
 
@@ -136,11 +169,17 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
             >
               Stop
             </button>
-          ) : messages.length > 0 ? (
+          ) : isOwner && messages.length > 0 ? (
             <button
               onClick={async () => {
                 if (!window.confirm('Clear this conversation? This cannot be undone.')) return;
-                try { await clear(); } catch {}
+                try {
+                  await clear();
+                } catch (err) {
+                  if (err.status === 403) {
+                    setApplyError('Only the trip owner can clear the conversation.');
+                  }
+                }
               }}
               aria-label="Clear conversation"
               title="Clear conversation"
@@ -196,12 +235,24 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
         )}
 
         {messages.map((msg, i) => (
-          <CopilotMessage
-            key={`${msg.role}-${msg.createdAt || i}`}
-            role={msg.role}
-            content={msg.content}
-            isStreaming={false}
-          />
+          <div key={msg.id || `${msg.role}-${msg.createdAt || i}`}>
+            <CopilotMessage
+              role={msg.role}
+              content={msg.content}
+              isStreaming={false}
+              authorLabel={showAuthors ? msg.authorName : null}
+            />
+            {(proposalsByMessageId.get(msg.id) || []).map((p) => (
+              <MutationPreview
+                key={p.id}
+                proposal={p}
+                days={days}
+                onApply={() => handleApply(p.id)}
+                onReject={() => handleReject(p.id)}
+                applying={applyingId === p.id}
+              />
+            ))}
+          </div>
         ))}
 
         {streamingText && (
@@ -212,29 +263,18 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
           />
         )}
 
-        {pendingMutation && !streaming && (
-          <>
-            <MutationPreview
-              mutation={pendingMutation}
-              days={days}
-              onApply={handleApply}
-              onReject={rejectMutation}
-              applying={applying}
-            />
-            {applyError && (
-              <div
-                style={{
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: 11,
-                  color: '#e05a5a',
-                  padding: '6px 0 0',
-                  textAlign: 'center',
-                }}
-              >
-                {applyError}
-              </div>
-            )}
-          </>
+        {applyError && (
+          <div
+            style={{
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 11,
+              color: '#e05a5a',
+              padding: '6px 0 0',
+              textAlign: 'center',
+            }}
+          >
+            {applyError}
+          </div>
         )}
 
         {error && (
