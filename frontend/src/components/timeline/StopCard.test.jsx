@@ -4,6 +4,11 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom/vitest';
 import StopCard from './StopCard.jsx';
+import { unsplashService } from '../../services/unsplashService';
+
+vi.mock('../../services/unsplashService', () => ({
+  unsplashService: { search: vi.fn() },
+}));
 
 afterEach(cleanup);
 
@@ -137,5 +142,86 @@ describe('StopCard — photo attribution (Plan 10 Wave 1 §1.4)', () => {
       stop: { ...STOP, unsplashPhotoUrl: 'https://images.unsplash.com/photo-123', photoAttribution: PHOTO_ATTRIBUTION },
     });
     expect(screen.queryByText(/photo —/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('StopCard — photo swap (Plan 10 Wave 4 §4.1)', () => {
+  afterEach(() => {
+    unsplashService.search.mockReset();
+  });
+
+  it('shows a Photo → trigger for a non-transit stop, and hides it for a transit stop', () => {
+    renderCard();
+    expect(screen.getByRole('button', { name: /photo →/i })).toBeInTheDocument();
+
+    cleanup();
+    renderCard({ stop: { ...STOP, type: 'transit' } });
+    expect(screen.queryByRole('button', { name: /photo →/i })).not.toBeInTheDocument();
+  });
+
+  it('fetches candidates by photoQuery (falling back to title), excludes the current photo, and renders thumbnails', async () => {
+    unsplashService.search.mockResolvedValue({
+      photos: [
+        { id: 'p1', url: 'https://images.unsplash.com/p1', alt: 'one', photographer: 'A', photographerUrl: 'https://unsplash.com/@a', unsplashUrl: 'https://unsplash.com/photos/p1', downloadLocation: 'https://api.unsplash.com/dl/p1' },
+        { id: 'current', url: 'https://images.unsplash.com/current', alt: 'current', photographer: 'B', photographerUrl: 'https://unsplash.com/@b', unsplashUrl: 'https://unsplash.com/photos/current', downloadLocation: 'https://api.unsplash.com/dl/current' },
+        { id: 'p2', url: 'https://images.unsplash.com/p2', alt: 'two', photographer: 'C', photographerUrl: 'https://unsplash.com/@c', unsplashUrl: 'https://unsplash.com/photos/p2', downloadLocation: 'https://api.unsplash.com/dl/p2' },
+      ],
+    });
+
+    renderCard({
+      stop: { ...STOP, photoQuery: 'fushimi inari shrine', unsplashPhotoId: 'current' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /photo →/i }));
+
+    expect(unsplashService.search).toHaveBeenCalledWith('fushimi inari shrine');
+
+    await waitFor(() => expect(screen.getByAltText('one')).toBeInTheDocument());
+    expect(screen.getByAltText('two')).toBeInTheDocument();
+    expect(screen.queryByAltText('current')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the stop title when photoQuery is absent', () => {
+    unsplashService.search.mockResolvedValue({ photos: [] });
+    renderCard({ stop: { ...STOP, photoQuery: undefined } });
+
+    fireEvent.click(screen.getByRole('button', { name: /photo →/i }));
+
+    expect(unsplashService.search).toHaveBeenCalledWith(STOP.title);
+  });
+
+  it('applies the exact wire contract when a thumbnail is clicked', async () => {
+    const photo = {
+      id: 'p1',
+      url: 'https://images.unsplash.com/p1',
+      alt: 'one',
+      photographer: 'A',
+      photographerUrl: 'https://unsplash.com/@a',
+      unsplashUrl: 'https://unsplash.com/photos/p1',
+      downloadLocation: 'https://api.unsplash.com/dl/p1',
+    };
+    unsplashService.search.mockResolvedValue({ photos: [photo] });
+    const onUpdate = vi.fn().mockResolvedValue();
+
+    renderCard({
+      stop: { ...STOP, photoQuery: 'fushimi inari shrine' },
+      onUpdate,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /photo →/i }));
+    const thumb = await screen.findByAltText('one');
+    fireEvent.click(thumb.closest('button'));
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith('stop-1', {
+      unsplashPhotoUrl: 'https://images.unsplash.com/p1',
+      unsplashPhotoId: 'p1',
+      photoAttribution: {
+        photographer: 'A',
+        photographerUrl: 'https://unsplash.com/@a',
+        unsplashUrl: 'https://unsplash.com/photos/p1',
+      },
+      photoQuery: 'fushimi inari shrine',
+      photoDownloadLocation: 'https://api.unsplash.com/dl/p1',
+    }));
   });
 });

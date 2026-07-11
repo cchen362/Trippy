@@ -1,6 +1,6 @@
 # Implementation Plan 10 — Stop Card Image System (Descriptor-Driven Imagery)
 
-**Status: Wave 3 COMPLETE (2026-07-11).**
+**Status: Wave 4 COMPLETE — PLAN COMPLETE (2026-07-11).**
 
 **Origin:** independent review of the activity-card image system, 2026-07-11 (this plan
 encodes its findings and the owner-approved design decisions from that session).
@@ -398,8 +398,73 @@ columns populated and credit rendering on a real stop.
   no stuck states. The no-image styled-tint fallback path was not exercised in the UI
   (rare — both descriptor and fallback search would need to miss) but remains covered
   by the automated Wave 2/3 test suite.
-- **W4 — NOT STARTED** (depends on W1–W3)
+- **W4 — COMPLETE (2026-07-11).** Swap-photo UI + the pin guarantee landed; plan
+  complete. **Backend:** migration `027_stop_photo_source.sql` adds `photo_source TEXT`
+  to `stops` (`'user'` = user-swapped/pinned, `'auto'` = search/descriptor-assigned,
+  `NULL` = legacy/booking-sync/backfill — all treated as auto-reroll-eligible). This
+  column exists solely to honor §4.1's *"user-chosen photos are never auto-re-rolled"*
+  requirement — the one part of W4 that couldn't reuse W1's existing override path,
+  because nothing previously distinguished a user-pinned photo from a search-derived
+  one. `updateStop`'s `shouldRefreshPhoto` rewritten to
+  `hasExplicitPhoto || ((title||type changed) && !isUserPinned)`: an explicit swap
+  always wins and re-pins (`photo_source='user'`); a title/type edit re-rolls only when
+  the current photo isn't user-pinned; a bare day-move still passes through untouched
+  (D6). `photoSource` write mirrors it (`'user'` on swap, `'auto'` on a productive
+  auto-reroll, `null` on a reroll that found nothing, existing preserved on
+  passthrough). `createStop` sets `'user'` when an explicit `unsplashPhotoUrl` is
+  supplied else `'auto'`/`null`. **Download-tracking on swap (§4.2):** the override
+  branch of `resolvePhotoUrl` deliberately skips `selectPhoto`/`trackDownload`, so
+  `updateStop` now fires `trackDownload({ downloadLocation: input.photoDownloadLocation })`
+  (non-blocking) whenever a manual swap arrives — keeping Unsplash T&C compliance the
+  swap would otherwise bypass. `photoDownloadLocation` is transient (used to fire the
+  hit, never persisted). `formatStop` serializes `photoSource`. `syncStopWithBooking`
+  and `backfillTripPhotos` intentionally untouched (NULL source = auto-eligible, the
+  correct default). **Frontend (`StopCard.jsx`):** `'photo'` added to the `action`
+  state machine; a `Photo →` trigger in the expanded action row (hidden for
+  `type==='transit'`), opening a horizontally-scrollable (`overflowX:auto`,
+  `flexShrink:0` thumbnails) `CHOOSE PHOTO` strip of ≤8 live candidates from
+  `unsplashService.search(stop.photoQuery || stop.title)` (current photo id excluded),
+  mirroring the move-chips idiom exactly — DM Mono labels, gold used once as the
+  thumbnail hover ring, Cancel button. Tapping a thumbnail PATCHes via `onUpdate` with
+  the wire contract `{ unsplashPhotoUrl, unsplashPhotoId, photoAttribution, photoQuery,
+  photoDownloadLocation }`; the W1 attribution micro-line then re-renders from the
+  refetched row. Collapsed card untouched. **The wire contract** (the one coupling
+  between the two halves) — body keys `unsplashPhotoUrl, unsplashPhotoId,
+  photoAttribution, photoQuery, photoDownloadLocation` — consumed by the existing
+  `photoOverrideFromInput` override path (no new Unsplash search on a swap).
+  **Tests:** backend 472→477 green (5 new W4 cases: swap pins + skips search,
+  trackDownload fires with the supplied downloadLocation, pin survives a title edit,
+  non-pinned still re-rolls, migration column + count 26→27); frontend 94→98 green
+  (4 new StopCard cases: trigger visibility by type, fetch + query fallback +
+  current-photo exclusion, exact `onUpdate` contract on tap, collapsed card clean).
+  Build clean. **Browser-verified end-to-end (live local app, 375px mobile, real
+  owner test-data trip):** expanded the booking-linked "Waldorf Astoria Chengdu" hotel
+  → action row rendered `REMOVE  PHOTO →` (Move correctly absent — booking-linked);
+  `PHOTO →` fired a real `GET /api/lookups/photos?q=Waldorf%20Astoria%20Chengdu → 200`
+  (title fallback, since this pre-W1 stop had `photo_query=null`); the 2 live Unsplash
+  candidates each carried id/url/downloadLocation/photographer/photographerUrl/
+  unsplashUrl; tapping one swapped the image instantly and the credit micro-line
+  updated live to `PHOTO — SHAWN LEE / UNSPLASH`; the DB row confirmed
+  `photo_source='user'`, `unsplash_photo_id='spmJzUlhZqE'`, full attribution JSON with
+  UTM referral URLs, and `photo_query='Waldorf Astoria Chengdu'`; the swap survived a
+  full page reload; the transit stop (SQ 842) showed no photo/action UI; no `unsplash`
+  failure logs (trackDownload fired silently). **Not exercised in the browser** (covered
+  by the automated suite instead, acceptable gaps): the horizontal-scroll overflow with
+  a full 8-candidate strip (this query returned only 2 — CSS `overflowX:auto` +
+  `flexShrink:0` is component-rendered), the Cancel path, the no-image styled-tint
+  fallback via a forced double-miss (rare; W2 tests cover it), and a title-edit
+  re-roll-suppression in the UI (no inline title editor readily reachable; proven by
+  backend test #3 + the confirmed `photo_source='user'`). **Deviation from §4.1 note:**
+  the pin guarantee required a new migration (027) — the plan's explore findings assumed
+  the swap might reuse W1's override path wholesale, but that path had no persisted
+  pin marker; adding `photo_source` was the clean root-cause fix (no bandaid).
+  **QA test data:** the Waldorf stop's photo was swapped as the live test and left in
+  place — it previously carried no attribution (pre-W1, technically non-compliant), so
+  the swap is a net compliance improvement; owner can re-swap. **Deploy:** via `/deploy`
+  (see commit); owner runs the prod browser click-script, agent verifies DB rows + logs
+  via ssh.
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
 (2026-07-11); re-verified before W1 at backend 442/443 (1 pre-existing flake) /
-frontend 90/90 green. W3 closes at backend 472/472, frontend 94/94, both green.
+frontend 90/90 green. W3 closes at backend 472/472, frontend 94/94, both green. W4 (plan complete) closes
+at backend 477/477, frontend 98/98, both green.

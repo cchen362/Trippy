@@ -1273,3 +1273,94 @@ describe('photo descriptors (Plan 10 Wave 3)', () => {
     expect(stop.sceneType).toBe('food_drink');
   });
 });
+
+describe('user photo swap pinning (Plan 10 Wave 4)', () => {
+  const SWAP_BODY = {
+    unsplashPhotoUrl: 'https://images.unsplash.com/photo-swap',
+    unsplashPhotoId: 'photo-swap',
+    photoAttribution: {
+      photographer: 'Swap Photographer',
+      photographerUrl: 'https://unsplash.com/@swap',
+      unsplashUrl: 'https://unsplash.com/photos/photo-swap',
+    },
+    photoQuery: 'swap query',
+    photoDownloadLocation: 'https://api.unsplash.com/photos/photo-swap/download',
+  };
+
+  it('a swap sets photo_source to user, stores the supplied photo verbatim, and skips search', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const selectSpy = vi.spyOn(unsplashService, 'selectPhoto');
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+    const stop = await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
+    selectSpy.mockClear();
+
+    const updated = await updateStop(user.id, stop.id, SWAP_BODY);
+
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(updated.unsplashPhotoUrl).toBe(SWAP_BODY.unsplashPhotoUrl);
+    expect(updated.unsplashPhotoId).toBe(SWAP_BODY.unsplashPhotoId);
+    expect(updated.photoAttribution).toEqual(SWAP_BODY.photoAttribution);
+    expect(updated.photoQuery).toBe(SWAP_BODY.photoQuery);
+
+    const row = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(row.photo_source).toBe('user');
+  });
+
+  it('fires trackDownload once with the swap photoDownloadLocation', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const trackSpy = vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+    const stop = await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
+    trackSpy.mockClear();
+
+    await updateStop(user.id, stop.id, SWAP_BODY);
+
+    expect(trackSpy).toHaveBeenCalledOnce();
+    expect(trackSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ downloadLocation: SWAP_BODY.photoDownloadLocation }),
+    );
+  });
+
+  it('a pinned photo is never auto-rerolled by a later title edit', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+    const stop = await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
+    await updateStop(user.id, stop.id, SWAP_BODY);
+
+    const selectSpy = vi.spyOn(unsplashService, 'selectPhoto');
+    selectSpy.mockClear();
+
+    const updated = await updateStop(user.id, stop.id, { title: 'Ciqikou Ancient Town (renamed)' });
+
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(updated.unsplashPhotoUrl).toBe(SWAP_BODY.unsplashPhotoUrl);
+    expect(updated.unsplashPhotoId).toBe(SWAP_BODY.unsplashPhotoId);
+    expect(updated.photoAttribution).toEqual(SWAP_BODY.photoAttribution);
+
+    const row = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(row.photo_source).toBe('user');
+  });
+
+  it('a non-pinned (auto) stop still re-rolls its photo on a title edit', async () => {
+    const rerolledPhoto = {
+      id: 'photo-rerolled',
+      url: 'https://images.unsplash.com/photo-rerolled',
+      photographer: 'Reroll Photographer',
+      photographerUrl: 'https://unsplash.com/@reroll',
+      unsplashUrl: 'https://unsplash.com/photos/photo-rerolled',
+    };
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(rerolledPhoto);
+    vi.spyOn(unsplashService, 'trackDownload').mockResolvedValue(undefined);
+    const stop = await createStop(user.id, dayId, { title: 'Ciqikou Ancient Town', type: 'experience' });
+
+    const row = getDb().prepare('SELECT photo_source FROM stops WHERE id = ?').get(stop.id);
+    expect(row.photo_source).toBe('auto');
+
+    const selectSpy = vi.spyOn(unsplashService, 'selectPhoto');
+    selectSpy.mockClear();
+
+    const updated = await updateStop(user.id, stop.id, { title: 'Ciqikou Ancient Town (renamed)' });
+
+    expect(selectSpy).toHaveBeenCalledOnce();
+    expect(updated.unsplashPhotoId).toBe('photo-rerolled');
+  });
+});

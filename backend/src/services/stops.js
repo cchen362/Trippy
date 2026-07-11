@@ -40,6 +40,7 @@ function formatStop(row) {
     photoAttribution: parseJson(row.photo_attribution_json, null),
     photoQuery: row.photo_query,
     sceneType: row.scene_type,
+    photoSource: row.photo_source,
     estimatedCost: row.estimated_cost,
     bookingRequired: Boolean(row.booking_required),
     bestTime: row.best_time,
@@ -412,16 +413,17 @@ export async function createStop(userId, dayId, input) {
     excludeIds,
     existing: photoOverrideFromInput(input),
   });
+  const photoSource = input.unsplashPhotoUrl !== undefined ? 'user' : (photo.url ? 'auto' : null);
 
   const row = db.prepare(`
     INSERT INTO stops (
       day_id, booking_id, time, title, type, note, lat, lng, unsplash_photo_url,
-      unsplash_photo_id, photo_attribution_json, photo_query, scene_type,
+      unsplash_photo_id, photo_attribution_json, photo_query, scene_type, photo_source,
       estimated_cost, booking_required, best_time, duration, sort_order, is_featured,
       location_query, resolved_name, resolved_address, coordinate_system, coordinate_source,
       location_status, location_confidence, provider_id, country_code
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
   `).get(
     dayId,
@@ -437,6 +439,7 @@ export async function createStop(userId, dayId, input) {
     photo.attribution ? JSON.stringify(photo.attribution) : null,
     photo.photoQuery,
     photo.sceneType,
+    photoSource,
     input.estimatedCost || null,
     input.bookingRequired ? 1 : 0,
     input.bestTime || null,
@@ -480,9 +483,13 @@ export async function updateStop(userId, stopId, input) {
   const type = input.type ?? existing.type;
   const dayGeo = getDayGeo(day.id);
   const location = await resolveLocationForStop({ day, title, input, existing });
+  const hasExplicitPhoto = input.unsplashPhotoUrl !== undefined;
+  const isUserPinned = existing.photo_source === 'user';
   // D6 (Plan 10 Wave 2 §2.4): a bare day move must not re-roll the photo — only a
-  // title/type/explicit-photo change warrants a refresh.
-  const shouldRefreshPhoto = input.title !== undefined || input.type !== undefined || input.unsplashPhotoUrl !== undefined;
+  // title/type/explicit-photo change warrants a refresh. A user-pinned photo (Plan 10
+  // Wave 4 §4.1) is immune to title/type auto-reroll — only an explicit new swap
+  // (hasExplicitPhoto) replaces it; "explicit choice wins until the user swaps again".
+  const shouldRefreshPhoto = hasExplicitPhoto || ((input.title !== undefined || input.type !== undefined) && !isUserPinned);
   const titleChanged = input.title !== undefined && normalizeText(title) !== normalizeText(existing.title);
   const photo = shouldRefreshPhoto
     ? await resolvePhotoUrl({
@@ -506,6 +513,13 @@ export async function updateStop(userId, stopId, input) {
       photoQuery: existing.photo_query,
       sceneType: existing.scene_type,
     };
+  const photoSource = hasExplicitPhoto ? 'user' : (shouldRefreshPhoto ? (photo.url ? 'auto' : null) : existing.photo_source);
+  // Unsplash API terms require download-tracking on every use of a photo, including a
+  // manual swap — the override branch of resolvePhotoUrl skips the search path (and its
+  // own trackDownload call), so fire it here from the transient photoDownloadLocation.
+  if (hasExplicitPhoto && input.photoDownloadLocation) {
+    trackDownload({ downloadLocation: input.photoDownloadLocation });
+  }
 
   const sortOrder = isMoving ? nextSortOrder(targetDayId) : (input.sortOrder ?? existing.sort_order);
 
@@ -524,6 +538,7 @@ export async function updateStop(userId, stopId, input) {
       photo_attribution_json = ?,
       photo_query = ?,
       scene_type = ?,
+      photo_source = ?,
       estimated_cost = ?,
       booking_required = ?,
       best_time = ?,
@@ -554,6 +569,7 @@ export async function updateStop(userId, stopId, input) {
     photo.attribution ? JSON.stringify(photo.attribution) : null,
     photo.photoQuery,
     photo.sceneType,
+    photoSource,
     input.estimatedCost ?? existing.estimated_cost,
     input.bookingRequired !== undefined ? (input.bookingRequired ? 1 : 0) : existing.booking_required,
     input.bestTime ?? existing.best_time,

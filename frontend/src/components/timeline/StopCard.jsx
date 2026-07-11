@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dayDisplayLabel } from '../../utils/dayGeo.js';
+import { unsplashService } from '../../services/unsplashService';
 
 const monoStyle = {
   fontFamily: "'DM Mono', monospace",
@@ -60,10 +61,14 @@ function noImageTint(stop) {
 
 export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps }) {
   const navigate = useNavigate();
-  const [action, setAction] = useState(null); // null | 'delete' | 'move'
+  const [action, setAction] = useState(null); // null | 'delete' | 'move' | 'photo'
   const [noteValue, setNoteValue] = useState(stop.note || '');
   const [noteDirty, setNoteDirty] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [photoCandidates, setPhotoCandidates] = useState([]);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
+  const [applyingPhotoId, setApplyingPhotoId] = useState(null);
   const hasNoPin = stop.type !== 'transit' && (stop.locationStatus === 'unresolved' || stop.lat == null);
 
   const handleNoPinClick = (event) => {
@@ -78,6 +83,33 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
   useEffect(() => {
     if (!noteDirty) setNoteValue(stop.note || '');
   }, [stop.note]);
+
+  useEffect(() => {
+    if (action !== 'photo' || !expanded) {
+      setPhotoCandidates([]);
+      setPhotoError(false);
+      setPhotoLoading(false);
+      return;
+    }
+    let ignore = false;
+    setPhotoLoading(true);
+    setPhotoError(false);
+    unsplashService.search(stop.photoQuery || stop.title)
+      .then((data) => {
+        if (ignore) return;
+        const photos = (data?.photos || []).filter((p) => p.id !== stop.unsplashPhotoId).slice(0, 8);
+        setPhotoCandidates(photos);
+      })
+      .catch(() => {
+        if (ignore) return;
+        setPhotoError(true);
+      })
+      .finally(() => {
+        if (ignore) return;
+        setPhotoLoading(false);
+      });
+    return () => { ignore = true; };
+  }, [action, expanded, stop.photoQuery, stop.title, stop.unsplashPhotoId]);
 
   const handleNoteBlur = async () => {
     if (!noteDirty) return;
@@ -108,6 +140,25 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
       setMoving(false);
     }
   };
+
+  async function handleSelectPhoto(p) {
+    if (applyingPhotoId !== null) return;
+    setApplyingPhotoId(p.id);
+    try {
+      await onUpdate(stop.id, {
+        unsplashPhotoUrl: p.url,
+        unsplashPhotoId: p.id,
+        photoAttribution: { photographer: p.photographer, photographerUrl: p.photographerUrl, unsplashUrl: p.unsplashUrl },
+        photoQuery: stop.photoQuery || stop.title,
+        photoDownloadLocation: p.downloadLocation,
+      });
+      setAction(null);
+    } catch {
+      setPhotoError(true);
+    } finally {
+      setApplyingPhotoId(null);
+    }
+  }
 
   const otherDays = days ? days.filter((d) => d.id !== stop.dayId) : [];
   const canMove = !stop.bookingId && otherDays.length > 0;
@@ -239,6 +290,12 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                           Move to →
                         </button>
                       )}
+                      {stop.type !== 'transit' && (
+                        <button type="button" onClick={() => setAction('photo')}
+                          style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)' }}>
+                          Photo →
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -294,6 +351,51 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                       </div>
                       <button type="button" onClick={() => setAction(null)} disabled={moving}
                         style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)', opacity: moving ? 0.45 : 1, cursor: moving ? 'not-allowed' : 'pointer' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
+                  {action === 'photo' && (
+                    <div>
+                      <p style={{
+                        fontFamily: "'DM Mono', monospace",
+                        fontSize: '10px',
+                        letterSpacing: '0.2em',
+                        textTransform: 'uppercase',
+                        color: 'rgba(240,234,216,0.35)',
+                        margin: '0 0 8px 0',
+                      }}>
+                        {photoLoading ? 'Loading…' : photoError ? 'No photos found' : 'Choose photo'}
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: '8px', marginBottom: '10px', paddingBottom: '4px' }}>
+                        {photoCandidates.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={applyingPhotoId !== null}
+                            onClick={(e) => { e.stopPropagation(); handleSelectPhoto(p); }}
+                            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--gold)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(240,234,216,0.15)'; }}
+                            style={{
+                              flexShrink: 0,
+                              width: '88px',
+                              height: '64px',
+                              padding: 0,
+                              border: '1px solid rgba(240,234,216,0.15)',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              background: 'none',
+                              cursor: applyingPhotoId !== null ? 'wait' : 'pointer',
+                              opacity: applyingPhotoId !== null && applyingPhotoId !== p.id ? 0.4 : 1,
+                            }}
+                          >
+                            <img src={p.url} alt={p.alt || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setAction(null)} disabled={applyingPhotoId !== null}
+                        style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)', opacity: applyingPhotoId !== null ? 0.45 : 1, cursor: applyingPhotoId !== null ? 'not-allowed' : 'pointer' }}>
                         Cancel
                       </button>
                     </div>
