@@ -382,7 +382,14 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
   }
 }
 
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req) {
+// persistTurn (optional): async callback the route owns. Called once after the model turn
+// completes with { assistantText, operations } — where operations is the tool_use payload or
+// null. It persists the assistant message + (when operations exist) the proposal record, and
+// returns the enriched proposal SSE payload ({ proposalId, operations, warnings, status,
+// statusReason }) or null. Keeping persistence in the route (not here) is why claude.js stays
+// DB-free; when persistTurn is absent (unit tests) the Wave 1 { operations }-only event is
+// emitted so the protocol still round-trips.
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn) {
   const client = getClient();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -464,13 +471,31 @@ Stops carry one of four kinds of timing. Respect them:
 
     // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
     // above via on('text'); the tool_use block is assembled on a separate channel, so reading
-    // it here does not delay prose. Persistence + validation + proposalId + warnings are Wave 2;
-    // Wave 1 emits the validated operations so the protocol switch is complete.
+    // it here does not delay prose. Wave 2: the route's persistTurn callback saves the
+    // assistant message and (when operations are present) creates the validated proposal
+    // record, returning the enriched { proposalId, operations, warnings } payload we emit.
     const toolUse = finalMessage?.content?.find(
       (block) => block.type === 'tool_use' && block.name === PROPOSE_ITINERARY_CHANGES_TOOL.name,
     );
-    if (toolUse && Array.isArray(toolUse.input?.operations) && toolUse.input.operations.length > 0) {
-      write({ type: 'proposal', operations: toolUse.input.operations });
+    const operations = (toolUse && Array.isArray(toolUse.input?.operations) && toolUse.input.operations.length > 0)
+      ? toolUse.input.operations
+      : null;
+
+    let proposalPayload = null;
+    if (persistTurn) {
+      try {
+        // persistTurn always runs (it also saves the assistant message); it returns the
+        // proposal SSE payload only when a proposal was created, else null.
+        proposalPayload = (await persistTurn({ assistantText: fullText, operations })) || null;
+      } catch (err) {
+        console.error('[copilot] persistTurn failed:', err);
+      }
+    } else if (operations) {
+      // No route callback (unit tests): fall back to the Wave 1 operations-only event.
+      proposalPayload = { operations };
+    }
+    if (proposalPayload) {
+      write({ type: 'proposal', ...proposalPayload });
     }
 
     console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s',

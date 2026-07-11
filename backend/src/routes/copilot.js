@@ -2,29 +2,19 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
-import { getTripDetail, assertDayAccess, assertStopAccess } from '../services/trips.js';
-import { createStop, deleteStop, updateStop } from '../services/stops.js';
+import { getTripDetail } from '../services/trips.js';
 import { streamCopilotResponse } from '../services/claude.js';
 import { copilotTripContext } from '../services/copilotTools.js';
+import {
+  createProposal,
+  applyProposal,
+  rejectProposal,
+  listProposalsForTrip,
+} from '../services/copilotProposals.js';
 
 const router = Router();
 
 router.use(requireAuth);
-
-// The co-pilot LLM emits stops as { title, type, time, note, lat, lng } with no
-// locationQuery. Default the query to the title so the resolver attempts a geocode,
-// and tag any model-supplied coordinates as 'copilot' so stops.js routes them through
-// the generated-coordinate verification path instead of trusting hallucinated values.
-function enrichCopilotStop(stop) {
-  const enriched = {
-    ...stop,
-    locationQuery: stop?.locationQuery ?? stop?.title,
-  };
-  if (stop?.lat != null && stop?.lng != null) {
-    enriched.coordinateSource = 'copilot';
-  }
-  return enriched;
-}
 
 // GET /trips/:tripId/copilot/history
 router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
@@ -47,15 +37,21 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         content: r.content,
         createdAt: r.created_at,
       })),
+      // Wave 2: expose recent proposals so the panel can restore a pending preview and render
+      // applied/rejected/stale states on the thread after a refresh (Wave 3 consumes this).
+      proposals: listProposalsForTrip(req.params.tripId),
     });
   } catch (error) {
     next(error);
   }
 });
 
-// DELETE /trips/:tripId/copilot/history
+// DELETE /trips/:tripId/copilot/history — owner-only (D8)
 router.delete('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
+    if (req.trip.owner_id !== req.user.id) {
+      throw Object.assign(new Error('Only the trip owner can clear the conversation.'), { status: 403 });
+    }
     const db = getDb();
     const info = db.prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(req.params.tripId);
     res.json({ ok: true, deleted: info.changes });
@@ -104,79 +100,65 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     content: r.content,
   }));
 
-  // Stream response — SSE headers are set inside streamCopilotResponse
-  // Errors during streaming are handled inside the service (writes error SSE event)
-  const fullText = await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req);
-
-  // Save assistant response after streaming completes
-  if (fullText) {
-    try {
-      db.prepare(`
+  // persistTurn — invoked once when the model turn completes, before the proposal/done SSE
+  // events. Saves the assistant message, and (when the model called the tool) creates the
+  // validated + fingerprinted proposal record linked to that message. Returns the proposal
+  // SSE payload, or null when there is nothing to propose.
+  const persistTurn = async ({ assistantText, operations }) => {
+    let messageId = null;
+    if (assistantText || operations) {
+      const msg = db.prepare(`
         INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
         VALUES (lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, datetime('now'))
-      `).run(tripId, fullText);
-    } catch (err) {
-      // SSE headers already flushed — log and continue, cannot send HTTP error
-      console.error('[copilot] failed to save assistant message:', err);
+        RETURNING id
+      `).get(tripId, assistantText || '');
+      messageId = msg.id;
     }
-  }
+    if (!operations) return null;
+
+    const proposal = createProposal({ tripId, userId, messageId, operations });
+    return {
+      proposalId: proposal.proposalId,
+      operations: proposal.operations,
+      warnings: proposal.warnings,
+      status: proposal.status,
+      statusReason: proposal.statusReason,
+    };
+  };
+
+  // Stream response — SSE headers are set inside streamCopilotResponse. Errors during
+  // streaming (and inside persistTurn) are handled there; nothing to persist afterwards.
+  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn);
 });
 
-// POST /trips/:tripId/copilot/apply
+// POST /trips/:tripId/copilot/apply — applies a persisted proposal by id (never raw ops)
 router.post('/:tripId/copilot/apply', requireTripAccess, async (req, res, next) => {
   try {
     const { tripId } = req.params;
     const userId = req.user.id;
-    const { mutation } = req.body;
+    const { proposalId } = req.body;
 
-    if (!mutation || !Array.isArray(mutation.operations)) {
-      throw Object.assign(new Error('mutation.operations must be an array'), { status: 400 });
+    // Wave 2: raw client-authored operations are no longer accepted (fact 2 / D3). The only
+    // input is a proposal id the server itself created and validated.
+    if (!proposalId || typeof proposalId !== 'string') {
+      throw Object.assign(new Error('proposalId is required'), { status: 400 });
     }
 
-    const db = getDb();
-    const ops = mutation.operations;
-
-    // Validate all operations synchronously first — fail fast before modifying anything
-    for (const op of ops) {
-      if (op.action === 'add_stop') {
-        assertDayAccess(userId, op.dayId);
-      } else if (op.action === 'remove_stop') {
-        assertStopAccess(userId, op.stopId);
-      } else if (op.action === 'move_stop') {
-        assertStopAccess(userId, op.stopId);
-        assertDayAccess(userId, op.toDayId);  // prevent moving stop into another user's trip
-      } else if (op.action === 'update_stop') {
-        assertStopAccess(userId, op.stopId);
-      }
-    }
-
-    // Execute sync operations (remove_stop, move_stop) inside a transaction
-    const syncOps = ops.filter((op) => op.action === 'remove_stop' || op.action === 'move_stop');
-    if (syncOps.length > 0) {
-      const runSyncOps = db.transaction(() => {
-        for (const op of syncOps) {
-          if (op.action === 'remove_stop') {
-            deleteStop(userId, op.stopId);
-          } else if (op.action === 'move_stop') {
-            db.prepare('UPDATE stops SET day_id = ?, sort_order = ? WHERE id = ?')
-              .run(op.toDayId, op.sortOrder ?? 0, op.stopId);
-          }
-        }
-      });
-      runSyncOps();
-    }
-
-    // Execute async operations (add_stop, update_stop) concurrently outside the transaction
-    const addOps = ops.filter((op) => op.action === 'add_stop');
-    const updateOps = ops.filter((op) => op.action === 'update_stop');
-
-    await Promise.all([
-      ...addOps.map((op) => createStop(userId, op.dayId, enrichCopilotStop(op.stop))),
-      ...updateOps.map((op) => updateStop(userId, op.stopId, op.fields)),
-    ]);
+    await applyProposal({ tripId, userId, proposalId });
 
     const updatedDetail = getTripDetail(tripId, userId);
-    res.json({ trip: updatedDetail });
+    res.json({ trip: updatedDetail, proposalId, status: 'applied' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /trips/:tripId/copilot/proposals/:id/reject — records an explicit rejection
+router.post('/:tripId/copilot/proposals/:id/reject', requireTripAccess, (req, res, next) => {
+  try {
+    const { tripId, id } = req.params;
+    rejectProposal({ tripId, userId: req.user.id, proposalId: id });
+    res.json({ ok: true, proposalId: id, status: 'rejected' });
   } catch (error) {
     next(error);
   }

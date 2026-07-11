@@ -87,8 +87,9 @@ describe('migrations', () => {
     // 001-018, 019 (fix_google_cn_coordinates), 020 (reset_bali_catalogue),
     // 021 (canonicalize_discovery_keys), 022 (drop_dead_discovery_cache),
     // 023 (trip_scopes), 024 (geo_data_repair), 025 (stop_photo_attribution),
-    // 026 (discovery_place_photo_descriptor), and 027 (stop_photo_source).
-    expect(count.c).toBe(27);
+    // 026 (discovery_place_photo_descriptor), 027 (stop_photo_source), and
+    // 028 (copilot_proposals).
+    expect(count.c).toBe(28);
   });
 
   it('adds stop photo attribution columns (Plan 10 Wave 1)', () => {

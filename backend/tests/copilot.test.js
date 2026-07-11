@@ -6,25 +6,19 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 
 // --- Mock claude.js service BEFORE importing the route ---
+// streamCopilotResponse is stubbed per-test. generatePhotoDescriptor is stubbed too because
+// stops.js (now unmocked, reached via copilotProposals) imports it — the route tests never
+// trigger photo resolution, but a defined export keeps the import safe.
 const mockStreamCopilotResponse = vi.fn();
 
 vi.mock('../src/services/claude.js', () => ({
   streamCopilotResponse: mockStreamCopilotResponse,
-}));
-
-// --- Mock stops.js service to avoid Unsplash calls ---
-const mockCreateStop = vi.fn();
-const mockDeleteStop = vi.fn();
-const mockUpdateStop = vi.fn();
-
-vi.mock('../src/services/stops.js', () => ({
-  createStop: mockCreateStop,
-  deleteStop: mockDeleteStop,
-  updateStop: mockUpdateStop,
+  generatePhotoDescriptor: vi.fn().mockResolvedValue(null),
 }));
 
 // Import route handlers after mocks are set up
 const { default: copilotRouter } = await import('../src/routes/copilot.js');
+const { createProposal } = await import('../src/services/copilotProposals.js');
 
 // ---------------------------------------------------------------------------
 // Test setup helpers
@@ -32,9 +26,9 @@ const { default: copilotRouter } = await import('../src/routes/copilot.js');
 
 let tmpDir;
 let userId;
+let otherUserId;
 let tripId;
 let dayId;
-let stopId;
 
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-copilot-test-'));
@@ -43,7 +37,6 @@ beforeAll(async () => {
 
   const db = getDb();
 
-  // Create a user
   const user = db.prepare(`
     INSERT INTO users (username, password_hash, display_name, is_admin)
     VALUES ('testuser', 'hash', 'Test User', 1)
@@ -51,7 +44,13 @@ beforeAll(async () => {
   `).get();
   userId = user.id;
 
-  // Create a trip
+  const other = db.prepare(`
+    INSERT INTO users (username, password_hash, display_name, is_admin)
+    VALUES ('collab', 'hash', 'Collaborator', 0)
+    RETURNING id
+  `).get();
+  otherUserId = other.id;
+
   const trip = db.prepare(`
     INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
     VALUES ('Test Trip', ?, '2026-05-01', '2026-05-03', 'couple', '[]', 'moderate', 'upcoming')
@@ -59,21 +58,12 @@ beforeAll(async () => {
   `).get(userId);
   tripId = trip.id;
 
-  // Create a day
   const day = db.prepare(`
     INSERT INTO days (trip_id, date, city)
     VALUES (?, '2026-05-01', 'Test City')
     RETURNING id
   `).get(tripId);
   dayId = day.id;
-
-  // Create a stop
-  const stop = db.prepare(`
-    INSERT INTO stops (day_id, title, type, sort_order)
-    VALUES (?, 'Test Stop', 'experience', 1)
-    RETURNING id
-  `).get(dayId);
-  stopId = stop.id;
 });
 
 afterAll(() => {
@@ -85,8 +75,16 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function insertStop(title = 'Test Stop', sortOrder = 1) {
+  return getDb().prepare(`
+    INSERT INTO stops (day_id, title, type, sort_order)
+    VALUES (?, ?, 'experience', ?)
+    RETURNING id
+  `).get(dayId, title, sortOrder).id;
+}
+
 // ---------------------------------------------------------------------------
-// Helper: invoke a route handler directly
+// Handler invocation harness (bypasses Express middleware; req.trip set manually)
 // ---------------------------------------------------------------------------
 
 function makeReq(overrides = {}) {
@@ -94,13 +92,13 @@ function makeReq(overrides = {}) {
     user: { id: userId },
     params: { tripId },
     body: {},
-    trip: null, // set by requireTripAccess; we bypass middleware in direct calls
+    trip: { id: tripId, owner_id: userId },
     ...overrides,
   };
 }
 
 function makeRes() {
-  const res = {
+  return {
     _status: 200,
     _body: null,
     _ended: false,
@@ -108,14 +106,10 @@ function makeRes() {
     json(body) { this._body = body; return this; },
     end() { this._ended = true; },
   };
-  return res;
 }
 
-// Invoke a route handler by finding it on the router stack.
-// Intercepts res.json() so sync handlers that call res.json() resolve the promise.
 async function callHandler(method, path, req, res) {
   return new Promise((resolve, reject) => {
-    // Wrap res.json so both sync and async handlers resolve properly
     const originalJson = res.json.bind(res);
     res.json = (body) => {
       const result = originalJson(body);
@@ -128,28 +122,21 @@ async function callHandler(method, path, req, res) {
       else resolve();
     };
 
-    // Find the matching route in the router stack
     const stack = copilotRouter.stack;
     for (const layer of stack) {
       if (!layer.route) continue;
       const routePath = layer.route.path;
       const routeMethod = Object.keys(layer.route.methods)[0];
-
       if (routeMethod !== method) continue;
 
-      // Simple path matching: replace :param with regex
       const regexPath = routePath.replace(/:([^/]+)/g, '([^/]+)');
       const match = path.match(new RegExp(`^${regexPath}$`));
       if (!match) continue;
 
-      // Extract params
       const paramNames = [...routePath.matchAll(/:([^/]+)/g)].map((m) => m[1]);
-      paramNames.forEach((name, i) => {
-        req.params = req.params || {};
-        req.params[name] = match[i + 1];
-      });
+      req.params = req.params || {};
+      paramNames.forEach((name, i) => { req.params[name] = match[i + 1]; });
 
-      // Get the last handler (after middleware)
       const handlers = layer.route.stack;
       const handler = handlers[handlers.length - 1].handle;
       const result = handler(req, res, next);
@@ -158,257 +145,201 @@ async function callHandler(method, path, req, res) {
       }
       return;
     }
-
     reject(new Error(`No handler found for ${method} ${path}`));
   });
 }
 
 // ---------------------------------------------------------------------------
-// 1. GET history returns messages in order
+// GET history
 // ---------------------------------------------------------------------------
 
 describe('GET /trips/:tripId/copilot/history', () => {
-  it('returns messages in ascending order', async () => {
+  it('returns messages in ascending order and a proposals array', async () => {
     const db = getDb();
-
-    // Insert two messages with deterministic timestamps
     db.prepare(`
       INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
       VALUES ('msg-1', ?, ?, 'user', 'Hello copilot', '2026-05-01T10:00:00')
     `).run(tripId, userId);
-
     db.prepare(`
       INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
       VALUES ('msg-2', ?, NULL, 'assistant', 'Hello traveller', '2026-05-01T10:00:01')
     `).run(tripId);
 
-    const req = makeReq({ params: { tripId } });
+    const req = makeReq();
     const res = makeRes();
-
     await callHandler('get', `/${tripId}/copilot/history`, req, res);
 
-    expect(res._body).toBeDefined();
     expect(Array.isArray(res._body.messages)).toBe(true);
-
+    expect(Array.isArray(res._body.proposals)).toBe(true);
     const msgs = res._body.messages.filter((m) => m.id === 'msg-1' || m.id === 'msg-2');
-    expect(msgs).toHaveLength(2);
-    expect(msgs[0].id).toBe('msg-1');
-    expect(msgs[0].role).toBe('user');
-    expect(msgs[0].content).toBe('Hello copilot');
-    expect(msgs[1].id).toBe('msg-2');
-    expect(msgs[1].role).toBe('assistant');
+    expect(msgs.map((m) => m.id)).toEqual(['msg-1', 'msg-2']);
 
-    // Clean up
     db.prepare('DELETE FROM copilot_messages WHERE id IN (?, ?)').run('msg-1', 'msg-2');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. POST saves user message and calls streamCopilotResponse
+// DELETE history — owner-only (D8)
+// ---------------------------------------------------------------------------
+
+describe('DELETE /trips/:tripId/copilot/history', () => {
+  it('clears the conversation for the owner', async () => {
+    const req = makeReq();
+    const res = makeRes();
+    await callHandler('delete', `/${tripId}/copilot/history`, req, res);
+    expect(res._body.ok).toBe(true);
+  });
+
+  it('rejects a non-owner with 403', async () => {
+    const req = makeReq({ user: { id: otherUserId }, trip: { id: tripId, owner_id: userId } });
+    const res = makeRes();
+    await expect(callHandler('delete', `/${tripId}/copilot/history`, req, res)).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST copilot — streaming + persistTurn
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/copilot', () => {
-  it('saves user message and calls streamCopilotResponse', async () => {
-    mockStreamCopilotResponse.mockResolvedValue('Assistant reply');
-
-    const req = makeReq({
-      params: { tripId },
-      body: { message: 'What should I see in Chengdu?' },
+  it('saves the user message and passes a persistTurn callback', async () => {
+    mockStreamCopilotResponse.mockImplementation(async (msgs, ctx, res, req, persistTurn) => {
+      await persistTurn({ assistantText: 'Assistant reply', operations: null });
+      return 'Assistant reply';
     });
-    const res = makeRes();
 
+    const req = makeReq({ body: { message: 'What should I see?' } });
+    const res = makeRes();
     await callHandler('post', `/${tripId}/copilot`, req, res);
 
     expect(mockStreamCopilotResponse).toHaveBeenCalledOnce();
-
     const db = getDb();
     const userMsg = db.prepare(
       "SELECT * FROM copilot_messages WHERE trip_id = ? AND role = 'user' AND content = ?",
-    ).get(tripId, 'What should I see in Chengdu?');
-
-    expect(userMsg).toBeDefined();
+    ).get(tripId, 'What should I see?');
     expect(userMsg.user_id).toBe(userId);
-
-    // Clean up
-    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
-      .run(tripId, 'What should I see in Chengdu?');
-  });
-
-  // 3. POST saves assistant response after streaming
-  it('saves assistant response after streaming completes', async () => {
-    const assistantText = 'Visit Jinli Ancient Street!';
-    mockStreamCopilotResponse.mockResolvedValue(assistantText);
-
-    const req = makeReq({
-      params: { tripId },
-      body: { message: 'Recommend something in Chengdu' },
-    });
-    const res = makeRes();
-
-    await callHandler('post', `/${tripId}/copilot`, req, res);
-
-    const db = getDb();
     const assistantMsg = db.prepare(
       "SELECT * FROM copilot_messages WHERE trip_id = ? AND role = 'assistant' AND content = ?",
-    ).get(tripId, assistantText);
-
+    ).get(tripId, 'Assistant reply');
     expect(assistantMsg).toBeDefined();
-    expect(assistantMsg.user_id).toBeNull();
 
-    // Clean up
-    db.prepare("DELETE FROM copilot_messages WHERE trip_id = ? AND (content = ? OR content = ?)")
-      .run(tripId, 'Recommend something in Chengdu', assistantText);
+    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content IN (?, ?)')
+      .run(tripId, 'What should I see?', 'Assistant reply');
   });
 
-  // 4. POST with missing message body returns 400
-  it('returns 400 when message is missing', async () => {
-    const req = makeReq({
-      params: { tripId },
-      body: {},
+  it('creates a proposal record when the model calls the tool', async () => {
+    const operations = [{ action: 'add_stop', dayId, stop: { title: 'Giant Panda Base', type: 'experience', time: null } }];
+    mockStreamCopilotResponse.mockImplementation(async (msgs, ctx, res, req, persistTurn) => {
+      const payload = await persistTurn({ assistantText: 'Adding it now.', operations });
+      // The route hands back the enriched proposal SSE payload for the service to emit.
+      res.json({ payload });
+      return 'Adding it now.';
     });
-    const res = makeRes();
 
+    const req = makeReq({ body: { message: 'Add the panda base' } });
+    const res = makeRes();
+    await callHandler('post', `/${tripId}/copilot`, req, res);
+
+    expect(res._body.payload.proposalId).toBeDefined();
+    expect(res._body.payload.status).toBe('pending');
+
+    const db = getDb();
+    const proposal = db.prepare('SELECT * FROM copilot_proposals WHERE id = ?').get(res._body.payload.proposalId);
+    expect(proposal.trip_id).toBe(tripId);
+    expect(proposal.status).toBe('pending');
+    expect(proposal.message_id).not.toBeNull();
+
+    db.prepare('DELETE FROM copilot_proposals WHERE id = ?').run(res._body.payload.proposalId);
+    db.prepare("DELETE FROM copilot_messages WHERE trip_id = ? AND content IN ('Add the panda base', 'Adding it now.')").run(tripId);
+  });
+
+  it('returns 400 when message is missing', async () => {
+    const req = makeReq({ body: {} });
+    const res = makeRes();
     await expect(callHandler('post', `/${tripId}/copilot`, req, res)).rejects.toMatchObject({
       status: 400,
       message: 'message is required',
     });
-
-    // streamCopilotResponse must NOT have been called
     expect(mockStreamCopilotResponse).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// 5. POST /apply with valid add_stop mutation
+// POST apply — proposal-id only (raw operations rejected)
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/copilot/apply', () => {
-  it('calls createStop for add_stop operations', async () => {
-    const newStop = { id: 'new-stop-1', dayId, title: 'Giant Panda Base', type: 'experience' };
-    mockCreateStop.mockResolvedValue(newStop);
-
-    const req = makeReq({
-      params: { tripId },
-      body: {
-        mutation: {
-          operations: [
-            { action: 'add_stop', dayId, stop: { title: 'Giant Panda Base', type: 'experience' } },
-          ],
-        },
-      },
-    });
+  it('returns 400 when proposalId is missing (raw operations rejected)', async () => {
+    const req = makeReq({ body: { mutation: { operations: [{ action: 'remove_stop', stopId: 'x' }] } } });
     const res = makeRes();
-
-    await callHandler('post', `/${tripId}/copilot/apply`, req, res);
-
-    expect(mockCreateStop).toHaveBeenCalledOnce();
-    // The apply route defaults locationQuery to the title so the resolver attempts a geocode.
-    expect(mockCreateStop).toHaveBeenCalledWith(
-      userId,
-      dayId,
-      { title: 'Giant Panda Base', type: 'experience', locationQuery: 'Giant Panda Base' },
-    );
-    expect(res._body).toBeDefined();
-    expect(res._body.trip).toBeDefined();
-  });
-
-  it('tags model-supplied coordinates as copilot-sourced for verification', async () => {
-    mockCreateStop.mockResolvedValue({ id: 'new-stop-2', dayId, title: 'Hallucinated Cafe' });
-
-    const req = makeReq({
-      params: { tripId },
-      body: {
-        mutation: {
-          operations: [
-            { action: 'add_stop', dayId, stop: { title: 'Hallucinated Cafe', type: 'food', lat: 29.5, lng: 106.5 } },
-          ],
-        },
-      },
-    });
-    const res = makeRes();
-
-    await callHandler('post', `/${tripId}/copilot/apply`, req, res);
-
-    expect(mockCreateStop).toHaveBeenCalledWith(
-      userId,
-      dayId,
-      {
-        title: 'Hallucinated Cafe',
-        type: 'food',
-        lat: 29.5,
-        lng: 106.5,
-        locationQuery: 'Hallucinated Cafe',
-        coordinateSource: 'copilot',
-      },
-    );
-  });
-
-  // 6. POST /apply with invalid operations array returns 400
-  it('returns 400 when operations is not an array', async () => {
-    const req = makeReq({
-      params: { tripId },
-      body: { mutation: { operations: 'not-an-array' } },
-    });
-    const res = makeRes();
-
     await expect(callHandler('post', `/${tripId}/copilot/apply`, req, res)).rejects.toMatchObject({
       status: 400,
     });
   });
 
-  it('returns 400 when mutation is missing entirely', async () => {
-    const req = makeReq({
-      params: { tripId },
-      body: {},
-    });
+  it('returns 404 for an unknown proposalId', async () => {
+    const req = makeReq({ body: { proposalId: 'does-not-exist' } });
     const res = makeRes();
-
-    await expect(callHandler('post', `/${tripId}/copilot/apply`, req, res)).rejects.toMatchObject({
-      status: 400,
-    });
-  });
-
-  // 7. POST /apply with unauthorized stopId returns 403/404 (from assertStopAccess)
-  it('throws when stopId does not belong to this user', async () => {
-    const req = makeReq({
-      params: { tripId },
-      body: {
-        mutation: {
-          operations: [
-            { action: 'remove_stop', stopId: 'non-existent-stop-id' },
-          ],
-        },
-      },
-    });
-    const res = makeRes();
-
-    // assertStopAccess throws 404 for stops not found/accessible
     await expect(callHandler('post', `/${tripId}/copilot/apply`, req, res)).rejects.toMatchObject({
       status: 404,
     });
-
-    // deleteStop must NOT have been called since validation failed
-    expect(mockDeleteStop).not.toHaveBeenCalled();
   });
 
-  it('executes remove_stop via deleteStop for valid stopId', async () => {
-    mockDeleteStop.mockReturnValue({ ok: true });
-
-    const req = makeReq({
-      params: { tripId },
-      body: {
-        mutation: {
-          operations: [
-            { action: 'remove_stop', stopId },
-          ],
-        },
-      },
+  it('applies a pending remove_stop proposal and marks it applied', async () => {
+    const stopId = insertStop('Stop To Remove', 5);
+    const { proposalId } = createProposal({
+      tripId,
+      userId,
+      messageId: null,
+      operations: [{ action: 'remove_stop', stopId }],
     });
-    const res = makeRes();
 
+    const req = makeReq({ body: { proposalId } });
+    const res = makeRes();
     await callHandler('post', `/${tripId}/copilot/apply`, req, res);
 
-    expect(mockDeleteStop).toHaveBeenCalledOnce();
-    expect(mockDeleteStop).toHaveBeenCalledWith(userId, stopId);
+    expect(res._body.status).toBe('applied');
+    const db = getDb();
+    expect(db.prepare('SELECT * FROM stops WHERE id = ?').get(stopId)).toBeUndefined();
+    expect(db.prepare('SELECT status FROM copilot_proposals WHERE id = ?').get(proposalId).status).toBe('applied');
+  });
+
+  it('rejects re-applying an already-applied proposal with 409', async () => {
+    const stopId = insertStop('Stop To Remove Twice', 6);
+    const { proposalId } = createProposal({
+      tripId, userId, messageId: null,
+      operations: [{ action: 'remove_stop', stopId }],
+    });
+    await callHandler('post', `/${tripId}/copilot/apply`, makeReq({ body: { proposalId } }), makeRes());
+
+    await expect(
+      callHandler('post', `/${tripId}/copilot/apply`, makeReq({ body: { proposalId } }), makeRes()),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST reject
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/copilot/proposals/:id/reject', () => {
+  it('records a rejection', async () => {
+    const stopId = insertStop('Stop For Reject', 7);
+    const { proposalId } = createProposal({
+      tripId, userId, messageId: null,
+      operations: [{ action: 'remove_stop', stopId }],
+    });
+
+    const req = makeReq({ body: {} });
+    const res = makeRes();
+    await callHandler('post', `/${tripId}/copilot/proposals/${proposalId}/reject`, req, res);
+
+    expect(res._body.status).toBe('rejected');
+    const db = getDb();
+    expect(db.prepare('SELECT status FROM copilot_proposals WHERE id = ?').get(proposalId).status).toBe('rejected');
+    // The stop is untouched by a rejection.
+    expect(db.prepare('SELECT id FROM stops WHERE id = ?').get(stopId)).toBeDefined();
   });
 });

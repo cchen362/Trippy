@@ -1,6 +1,6 @@
 # Implementation Plan 11 — Co-pilot Trust Foundation (Action Protocol, Server Proposals, Atomic Apply)
 
-**Status: Wave 1 COMPLETE (2026-07-12). Waves 2–4 NOT STARTED.**
+**Status: Waves 1–2 COMPLETE (2026-07-12). Waves 3–4 NOT STARTED.**
 
 **Origin:** [Co-pilot Foundation and Integration Review](../reviews/2026-07-11-copilot-foundation-and-integration-review.md)
 (2026-07-11) plus the independent orchestrator assessment and owner decision session of
@@ -200,7 +200,37 @@ the tool protocol; history returns newest 50.
 
 ## Wave 2 — Persisted proposals and atomic apply (backend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12).** Migration `028_copilot_proposals.sql` adds the
+`copilot_proposals` audit table. New module `backend/src/services/copilotProposals.js` holds
+the validation (schema mirror + trip-membership → closes fact 3, D6 booking-linked refusal,
+D7 `HH:MM|null`, D11/D12 all-or-nothing), the structural trip fingerprint (ordered day/stop
+ids + each stop's time + booking_id), D5 loss warnings, and atomic apply. `stops.js` is split
+per fact 11 into `resolveCreateStopData`/`writeCreateStop` and
+`resolveUpdateStopData`/`writeUpdateStop` (async external I/O vs sync DB write) with
+`createStop`/`updateStop` composing both — behaviour-identical for existing callers (full
+suite incl. locationIntegration green). Apply runs all geocode/photo resolution outside the
+transaction, then one better-sqlite3 transaction commits every insert/update/delete/move +
+the `status → applied` flip or nothing. The raw-SQL move path (fact 6) is deleted; `move_stop`
+translates `position` into 1-based `sort_order` via `reorderStops` semantics (no 0-vs-1
+collision). `POST /apply` now takes `{ proposalId }` only (raw operations → 400); the streaming
+path (`claude.js` `persistTurn` callback + `copilot.js`) creates the proposal record linked to
+the assistant `copilot_messages` row and emits `{ proposalId, operations, warnings, status,
+statusReason }`. New `POST .../proposals/:id/reject`; history exposes recent proposals;
+`DELETE .../copilot/history` is owner-only (D8).
+
+**Tests:** rewritten `copilot.test.js` (route contract: history+proposals, owner-only clear
+403, persistTurn proposal creation, apply proposalId-only/404/409, reject) + new
+`copilotProposals.test.js` (26 tests: cross-trip rejection, unknown-action, unknown/photo
+field, booking-linked refusal, time-format, loss warnings, atomic mid-proposal rollback,
+staleness 409, move ordering same-day + cross-day, fingerprint stability). Full backend suite
+green (520 tests, 27 files). **Live-verified** via throwaway temp-DB smoke (real
+Nominatim + Unsplash, no mocks): add_stop applied with resolved Kyoto coordinates + real photo
+and `status → applied`; a structural edit between propose and apply → 409 stale with the
+proposal marked `stale` and the target stop surviving rollback.
+
+**Intermediate state:** the browser apply flow stays unwired — the frontend still listens for
+the old `mutation` event and `POST /apply` from client state (Wave 3 rewires it to the server
+proposal + `proposalId`). Backend-first sequencing per D3/D10, not a regression.
 
 1. Migration `028_copilot_proposals.sql`: `copilot_proposals` (`id`, `trip_id` FK,
    `message_id` FK to the assistant `copilot_messages` row, `created_by_user_id`,

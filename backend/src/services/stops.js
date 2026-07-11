@@ -388,8 +388,11 @@ function nextSortOrder(dayId) {
   return row.nextOrder;
 }
 
-export async function createStop(userId, dayId, input) {
-  const db = getDb();
+// Plan 11 Wave 2 (fact 11): createStop is split into an async resolve phase (external
+// geocode + photo I/O) and a sync write phase (DB only), so the write can sit inside the
+// atomic-apply transaction. createStop composes both and is behaviourally identical for
+// every existing caller.
+export async function resolveCreateStopData(userId, dayId, input) {
   const day = assertDayAccess(userId, dayId);
   const title = input.title?.trim();
 
@@ -414,6 +417,13 @@ export async function createStop(userId, dayId, input) {
     existing: photoOverrideFromInput(input),
   });
   const photoSource = input.unsplashPhotoUrl !== undefined ? 'user' : (photo.url ? 'auto' : null);
+
+  return { userId, dayId, day, input, title, type, location, photo, photoSource };
+}
+
+export function writeCreateStop(resolved) {
+  const { dayId, day, input, title, type, location, photo, photoSource } = resolved;
+  const db = getDb();
 
   const row = db.prepare(`
     INSERT INTO stops (
@@ -471,8 +481,14 @@ export async function createStop(userId, dayId, input) {
   return formatStop(row);
 }
 
-export async function updateStop(userId, stopId, input) {
-  const db = getDb();
+export async function createStop(userId, dayId, input) {
+  return writeCreateStop(await resolveCreateStopData(userId, dayId, input));
+}
+
+// Plan 11 Wave 2 (fact 11): same resolve/write split as createStop. resolveUpdateStopData
+// runs every external call and computes the final field values; writeUpdateStop is pure DB
+// and transaction-safe. updateStop composes both, unchanged for existing callers.
+export async function resolveUpdateStopData(userId, stopId, input) {
   const existing = assertStopAccess(userId, stopId);
 
   const isMoving = input.dayId && input.dayId !== existing.day_id;
@@ -520,6 +536,13 @@ export async function updateStop(userId, stopId, input) {
   if (hasExplicitPhoto && input.photoDownloadLocation) {
     trackDownload({ downloadLocation: input.photoDownloadLocation });
   }
+
+  return { userId, stopId, existing, input, isMoving, targetDayId, title, type, location, photo, photoSource };
+}
+
+export function writeUpdateStop(resolved) {
+  const { stopId, existing, input, isMoving, targetDayId, title, type, location, photo, photoSource } = resolved;
+  const db = getDb();
 
   const sortOrder = isMoving ? nextSortOrder(targetDayId) : (input.sortOrder ?? existing.sort_order);
 
@@ -589,6 +612,10 @@ export async function updateStop(userId, stopId, input) {
   );
 
   return formatStop(row);
+}
+
+export async function updateStop(userId, stopId, input) {
+  return writeUpdateStop(await resolveUpdateStopData(userId, stopId, input));
 }
 
 export function deleteStop(userId, stopId) {
