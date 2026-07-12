@@ -123,6 +123,49 @@ export function rankPlaces(items, prefs) {
     .map((entry) => entry.item);
 }
 
+// Formats a parsed duration-in-hours figure for the fitLine, e.g. 2 -> "2",
+// 1.5 -> "1.5". Only ever called once parseDurationHours has already
+// succeeded and the pace-fit check has already passed.
+function formatFitHours(hours) {
+  const rounded = Math.round(hours * 10) / 10;
+  return String(rounded);
+}
+
+// Composes the deterministic, honesty-gated trip-fit line (Wave 3, review
+// doc §2.4/§6.3): "Matches food · ~2h · verified place". Each clause is only
+// included when it's actually true of this trip's declared preferences —
+// never claims an interest/pace the trip didn't declare. Empty string when
+// nothing honest applies.
+export function buildFitLine(row, prefs) {
+  const parts = [];
+
+  const interestTags = prefs.interestTags || [];
+  if (interestTags.length > 0) {
+    const mapped = new Set(
+      interestTags.map((tag) => TAG_TO_CATEGORY[String(tag).toLowerCase()]).filter(Boolean),
+    );
+    if (mapped.has(row.category)) {
+      parts.push(`Matches ${row.category}`);
+    }
+  }
+
+  if (prefs.pace === 'fast' || prefs.pace === 'relaxed') {
+    const hours = parseDurationHours(row.estimated_duration);
+    if (hours !== null) {
+      const fits = prefs.pace === 'fast' ? hours <= 2 : hours >= 3;
+      if (fits) {
+        parts.push(`~${formatFitHours(hours)}h`);
+      }
+    }
+  }
+
+  if (row.provenance === 'verified') {
+    parts.push('verified place');
+  }
+
+  return parts.join(' · ');
+}
+
 // Orders the categories present in a catalogue response for a given trip:
 //   1. 'essentials' first, if present.
 //   2. Then, for each declared interest tag in order, its mapped category

@@ -1,6 +1,6 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: READY FOR IMPLEMENTATION (finalized 2026-07-12). No waves started.**
+**Status: IN PROGRESS — Wave 1 COMPLETE (2026-07-12). Waves 2-5 not started.**
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -172,7 +172,26 @@ Confirmed in current `main` (`7d6c904`); implementation sessions must not re-der
 
 ## Wave 1 — Agentic tool loop + catalogue search tool (backend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12).** All four steps shipped: agentic loop in
+`streamCopilotResponse` (route-injected `toolExecutors` map, `tool` SSE events,
+G2 cap with budget-notice tool_result + hard-stop guard, terminal-wins rule when
+one response carries both a query and the terminal tool), `search_discovery_catalogue`
+executor in `services/copilotGrounding.js` (new read-only `findDestination` accessor —
+search never mints catalogue rows), G1/G4 system-prompt section, 548/548 backend
+tests (36 new) + clean frontend build. Live-API smoke with fictional seeded places
+proved grounding: model recommended only seeded names, declined Suzhou-on-a-Shanghai-trip
+without searching, made zero tool calls on a non-recommendation turn; TTFD 1.2-1.7s
+(unchanged within noise). Browser-verified on the QA trip (honest thin-catalogue relay,
+no console errors, `tool` events safely ignored pre-Wave-4).
+Deviations from design, all root-cause: (1) query haystack includes `why_go`
+(meal/occasion language lives there — live smoke caught "dinner" matching nothing);
+(2) tool schema steers broad needs to the `category` filter; (3) abort handler also
+flags drops that land between iterations (while an executor runs) so the loop never
+opens a stream against a dead connection; (4) `CACHE_TTL_MS`/`cacheTimestampToEpochMs`
+moved to `db/discoveryCatalogue.js` (shared with the executor) and `buildFitLine` to
+`services/discoveryRank.js` — `discovery.test.js`/`discoveryCatalogue.test.js` green
+unmodified as the parity proof. Wave 2 note: the prompt's empty-catalogue paragraph
+is deliberately hedged (no generation kick yet) — revise it when G3 states become real.
 **Model recommendation: Opus (or Fable) medium orchestrator + Sonnet coding subagents.**
 Restructuring the streaming loop is the plan's highest-risk change (SSE timing, abort
 handling, cache economics) — design and QA warrant the stronger model; coding is

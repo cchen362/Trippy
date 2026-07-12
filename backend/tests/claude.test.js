@@ -28,25 +28,39 @@ const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coe
 // ---------------------------------------------------------------------------
 
 // Build a mock stream that emits NDJSON text lines then resolves.
-// Re-used by streamCopilotResponse tests too.
-function makeMockStream(chunks, finalText, finalContent) {
+// Re-used by streamCopilotResponse tests too. stopReason is optional — when omitted it's
+// derived from finalContent (tool_use present => 'tool_use', else 'end_turn'), matching real
+// SDK behavior, so existing callers that never passed it keep working unmodified.
+function makeMockStream(chunks, finalText, finalContent, stopReason) {
   const listeners = {};
   const stream = {
     on(event, cb) {
       listeners[event] = cb;
       return stream;
     },
+    abort() {
+      // Real SDK streams expose abort(); the mock just needs to be callable
+      // without throwing for tests that don't care about abort behavior.
+    },
     async finalMessage() {
       for (const chunk of chunks) {
         if (listeners['text']) listeners['text'](chunk);
       }
+      const content = finalContent ?? [{ type: 'text', text: finalText ?? chunks.join('') }];
+      const derivedStopReason = stopReason ?? (content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn');
       return {
-        content: finalContent ?? [{ type: 'text', text: finalText ?? chunks.join('') }],
+        content,
+        stop_reason: derivedStopReason,
         usage: { input_tokens: 10, output_tokens: 20 },
       };
     },
   };
   return stream;
+}
+
+// Builds a tool_use content block for the agentic-loop tests below.
+function toolUseBlock(name, input, id = `tu_${name}`) {
+  return { type: 'tool_use', id, name, input };
 }
 
 function ndjsonChunks(categories) {
@@ -253,21 +267,36 @@ describe('discoverDestination — NDJSON streaming', () => {
 // streamCopilotResponse
 // ---------------------------------------------------------------------------
 
-// Minimal mock for Express res
+// Minimal mock for Express res. Captures 'close' handlers so abort tests can fire them; the
+// mock's destroyed/writableEnded fields mirror the real res shape write() guards against.
 function makeMockRes() {
   const headers = {};
   const written = [];
+  const closeHandlers = [];
   return {
     headers,
     written,
     flushed: false,
     ended: false,
+    destroyed: false,
+    writableEnded: false,
     setHeader(k, v) { headers[k] = v; },
     flushHeaders() { this.flushed = true; },
     write(chunk) { written.push(chunk); },
-    end() { this.ended = true; },
-    on() { return this; },
+    end() { this.ended = true; this.writableEnded = true; },
+    on(event, cb) {
+      if (event === 'close') closeHandlers.push(cb);
+      return this;
+    },
+    triggerClose() {
+      closeHandlers.forEach((cb) => cb());
+    },
   };
+}
+
+// Parses the SSE `data: {...}` chunks written to a mock res into plain event objects.
+function parseEvents(res) {
+  return res.written.map((w) => JSON.parse(w.replace(/^data: /, '').trim()));
 }
 
 describe('streamCopilotResponse — SSE headers', () => {
@@ -386,6 +415,244 @@ describe('streamCopilotResponse — return value', () => {
     const returned = await streamCopilotResponse([], {}, res);
 
     expect(returned).toBe(fullText);
+  });
+});
+
+describe('streamCopilotResponse — agentic tool loop (Plan 12 Wave 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('plain text turn: exactly one stream call, no tool SSE events, done event, text intact', async () => {
+    const fullText = 'Kyoto has some lovely temples.';
+    mockStream.mockReturnValueOnce(makeMockStream([fullText], fullText));
+
+    const res = makeMockRes();
+    const returned = await streamCopilotResponse([{ role: 'user', content: 'tell me about kyoto' }], {}, res, {}, undefined, {});
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'tool')).toBeUndefined();
+    expect(events.find((e) => e.type === 'done')).toBeDefined();
+    expect(returned).toBe(fullText);
+  });
+
+  it('multi-iteration: executes a query tool_use, feeds back a tool_result, and continues', async () => {
+    const executor = vi.fn().mockResolvedValue({ catalogueState: 'fresh', places: [] });
+    const iter1Content = [
+      { type: 'text', text: 'Let me check.' },
+      toolUseBlock('search_discovery_catalogue', { destination: 'Hangzhou' }, 'tu_1'),
+    ];
+    const iter2Content = [{ type: 'text', text: ' Here you go.' }];
+
+    mockStream
+      .mockReturnValueOnce(makeMockStream(['Let me check.'], undefined, iter1Content))
+      .mockReturnValueOnce(makeMockStream([' Here you go.'], undefined, iter2Content));
+
+    const res = makeMockRes();
+    const fullText = await streamCopilotResponse(
+      [{ role: 'user', content: 'suggestions in Hangzhou?' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: executor },
+    );
+
+    expect(mockStream).toHaveBeenCalledTimes(2);
+    expect(executor).toHaveBeenCalledOnce();
+    expect(executor).toHaveBeenCalledWith({ destination: 'Hangzhou' });
+
+    const secondCallMessages = mockStream.mock.calls[1][0].messages;
+    const assistantMsg = secondCallMessages.find((m) => m.role === 'assistant' && m.content === iter1Content);
+    expect(assistantMsg).toBeDefined();
+    const userToolResultMsg = secondCallMessages[secondCallMessages.length - 1];
+    expect(userToolResultMsg.role).toBe('user');
+    expect(userToolResultMsg.content).toEqual([{
+      type: 'tool_result',
+      tool_use_id: 'tu_1',
+      content: JSON.stringify({ catalogueState: 'fresh', places: [] }),
+    }]);
+
+    const events = parseEvents(res);
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(fullText).toBe('Let me check. Here you go.');
+  });
+
+  it('tool SSE ordering: started -> done bracket the executor, before the next iteration text', async () => {
+    const executor = vi.fn().mockResolvedValue({ catalogueState: 'fresh', places: [] });
+    mockStream
+      .mockReturnValueOnce(makeMockStream(
+        ['Let me check.'], undefined,
+        [{ type: 'text', text: 'Let me check.' }, toolUseBlock('search_discovery_catalogue', { destination: 'Hangzhou' }, 'tu_1')],
+      ))
+      .mockReturnValueOnce(makeMockStream([' Here you go.'], undefined, [{ type: 'text', text: ' Here you go.' }]));
+
+    const res = makeMockRes();
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'suggestions in Hangzhou?' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: executor },
+    );
+
+    const events = parseEvents(res);
+    const kinds = events.map((e) => (e.type === 'tool' ? `tool:${e.state}` : e.type));
+    const startedIdx = kinds.indexOf('tool:started');
+    const doneIdx = kinds.indexOf('tool:done');
+    const secondTextIdx = kinds.lastIndexOf('text');
+
+    expect(startedIdx).toBeGreaterThan(-1);
+    expect(doneIdx).toBeGreaterThan(startedIdx);
+    expect(secondTextIdx).toBeGreaterThan(doneIdx);
+  });
+
+  it('caps executed query calls at 5 per turn and sends a budget notice for the 6th', async () => {
+    const executor = vi.fn().mockResolvedValue({ ok: true });
+    for (let i = 1; i <= 6; i += 1) {
+      mockStream.mockReturnValueOnce(makeMockStream(
+        [`iter${i}`], undefined,
+        [toolUseBlock('search_discovery_catalogue', { destination: `Dest${i}` }, `tu_${i}`)],
+      ));
+    }
+    mockStream.mockReturnValueOnce(makeMockStream(['final answer'], undefined, [{ type: 'text', text: 'final answer' }]));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'go' }], {}, res, {}, undefined, {
+      search_discovery_catalogue: executor,
+    });
+
+    expect(mockStream).toHaveBeenCalledTimes(7);
+    expect(executor).toHaveBeenCalledTimes(5);
+
+    // The 7th stream call's messages carry the budget-notice tool_result for the capped tu_6.
+    const seventhCallMessages = mockStream.mock.calls[6][0].messages;
+    const lastUserMsg = seventhCallMessages[seventhCallMessages.length - 1];
+    expect(lastUserMsg.content).toEqual([{
+      type: 'tool_result',
+      tool_use_id: 'tu_6',
+      content: 'Query tool budget for this turn is used up. Answer the traveller now with the information you already have.',
+    }]);
+
+    const events = parseEvents(res);
+    const toolEvents = events.filter((e) => e.type === 'tool');
+    expect(toolEvents).toHaveLength(10); // 5 executed calls x (started + done)
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+  });
+
+  it('hard-stops when the model calls a query tool again after the budget notice', async () => {
+    const executor = vi.fn().mockResolvedValue({ ok: true });
+    for (let i = 1; i <= 6; i += 1) {
+      mockStream.mockReturnValueOnce(makeMockStream(
+        [`iter${i}`], undefined,
+        [toolUseBlock('search_discovery_catalogue', { destination: `Dest${i}` }, `tu_${i}`)],
+      ));
+    }
+    // 7th response ALSO contains only a (now over-cap) query tool_use — the model ignored the
+    // budget notice sent alongside tu_6's tool_result. This must break the loop instead of
+    // continuing forever.
+    mockStream.mockReturnValueOnce(makeMockStream(
+      ['iter7'], undefined,
+      [toolUseBlock('search_discovery_catalogue', { destination: 'Dest7' }, 'tu_7')],
+    ));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'go' }], {}, res, {}, undefined, {
+      search_discovery_catalogue: executor,
+    });
+
+    expect(mockStream).toHaveBeenCalledTimes(7);
+    expect(executor).toHaveBeenCalledTimes(5);
+    const events = parseEvents(res);
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(events[events.length - 1].type).toBe('done');
+  });
+
+  it('terminal propose_itinerary_changes wins over a query tool_use in the same response', async () => {
+    const executor = vi.fn();
+    const operations = [{ action: 'remove_stop', stopId: 'stop-1' }];
+    mockStream.mockReturnValueOnce(makeMockStream(
+      ['Sure, removing that.'], undefined,
+      [
+        { type: 'text', text: 'Sure, removing that.' },
+        toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_x'),
+        { type: 'tool_use', id: 'tu_term', name: 'propose_itinerary_changes', input: { operations } },
+      ],
+    ));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'remove it' }], {}, res, {}, undefined, {
+      search_discovery_catalogue: executor,
+    });
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(executor).not.toHaveBeenCalled();
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'tool')).toBeUndefined();
+    const proposalEvent = events.find((e) => e.type === 'proposal');
+    expect(proposalEvent).toBeDefined();
+    expect(proposalEvent.operations).toEqual(operations);
+  });
+
+  it('aborts the live stream when the client drops the SSE connection mid-iteration', async () => {
+    // finalMessage() fires the captured 'close' handler before resolving, simulating the
+    // client dropping the connection while the stream is still live.
+    const res = makeMockRes();
+    let abortCalled = false;
+    const abortableStream = {
+      on(event, cb) {
+        if (event === 'text') abortableStream._textCb = cb;
+        return abortableStream;
+      },
+      abort() { abortCalled = true; },
+      async finalMessage() {
+        if (abortableStream._textCb) abortableStream._textCb('partial');
+        res.triggerClose();
+        return { content: [{ type: 'text', text: 'partial' }], usage: { input_tokens: 1, output_tokens: 1 } };
+      },
+    };
+    mockStream.mockReturnValueOnce(abortableStream);
+
+    await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, undefined, {});
+
+    expect(abortCalled).toBe(true);
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'done')).toBeUndefined();
+  });
+
+  it('logs summed usage and iteration/query-call counts across iterations', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const executor = vi.fn().mockResolvedValue({ ok: true });
+    mockStream
+      .mockReturnValueOnce(makeMockStream(
+        ['iter1'], undefined,
+        [toolUseBlock('search_discovery_catalogue', { destination: 'X' }, 'tu_1')],
+      ))
+      .mockReturnValueOnce(makeMockStream(['iter2'], undefined, [{ type: 'text', text: 'iter2' }]));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'go' }], {}, res, {}, undefined, {
+      search_discovery_catalogue: executor,
+    });
+
+    const usageCall = logSpy.mock.calls.find((c) => typeof c[0] === 'string' && c[0].includes('turn usage'));
+    expect(usageCall).toBeDefined();
+    expect(usageCall[0]).toContain('iterations=%d');
+    expect(usageCall[0]).toContain('queryCalls=%d');
+    const [inputTokens, outputTokens, , , iterationsArg, queryCallsArg] = usageCall.slice(1);
+    expect(inputTokens).toBe(20); // 10 + 10 summed across 2 iterations
+    expect(outputTokens).toBe(40); // 20 + 20 summed across 2 iterations
+    expect(iterationsArg).toBe(2);
+    expect(queryCallsArg).toBe(1);
+
+    logSpy.mockRestore();
+  });
+
+  it('still works when called with the original 5-arg signature (no toolExecutors)', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['hi'], 'hi'));
+    const res = makeMockRes();
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    const returned = await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, persistTurn);
+
+    expect(returned).toBe('hi');
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'hi', operations: null });
+    const events = parseEvents(res);
+    expect(events[events.length - 1].type).toBe('done');
   });
 });
 

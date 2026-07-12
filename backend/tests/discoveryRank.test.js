@@ -5,6 +5,7 @@ import {
   rankPlaces,
   orderCategories,
   parseDurationHours,
+  buildFitLine,
 } from '../src/services/discoveryRank.js';
 
 function makeItem(overrides = {}) {
@@ -260,6 +261,68 @@ describe('orderCategories', () => {
     const prefs = { interestTags: [], pace: 'moderate', travellers: 'family' };
     const result = orderCategories(['essentials', 'food', 'culture'], prefs);
     expect(result).toEqual(['essentials', 'food', 'culture']);
+  });
+});
+
+describe('buildFitLine', () => {
+  it('includes "Matches <category>" when an interest tag maps to the row category', () => {
+    const row = { category: 'food', estimated_duration: null, provenance: 'unverified' };
+    const prefs = { interestTags: ['food & drink'], pace: 'moderate', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('Matches food');
+  });
+
+  it('omits the category clause when no declared interest tag maps to the row category', () => {
+    const row = { category: 'nightlife', estimated_duration: null, provenance: 'unverified' };
+    const prefs = { interestTags: ['food & drink'], pace: 'moderate', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('');
+  });
+
+  it('includes the duration clause for a fast pace with a short duration (<=2h)', () => {
+    const row = { category: 'culture', estimated_duration: '1 hour', provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'fast', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('~1h');
+  });
+
+  it('omits the duration clause for a fast pace with a long duration (>2h)', () => {
+    const row = { category: 'culture', estimated_duration: '4 hours', provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'fast', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('');
+  });
+
+  it('includes the duration clause for a relaxed pace with a long duration (>=3h)', () => {
+    const row = { category: 'culture', estimated_duration: '4 hours', provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'relaxed', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('~4h');
+  });
+
+  it('omits the duration clause for a relaxed pace with a short duration (<3h)', () => {
+    const row = { category: 'culture', estimated_duration: '1 hour', provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'relaxed', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('');
+  });
+
+  it('never includes a duration clause for moderate pace, regardless of duration', () => {
+    const row = { category: 'culture', estimated_duration: '1 hour', provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'moderate', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('');
+  });
+
+  it('includes "verified place" when the row is verified', () => {
+    const row = { category: 'culture', estimated_duration: null, provenance: 'verified' };
+    const prefs = { interestTags: [], pace: 'moderate', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('verified place');
+  });
+
+  it('joins multiple honest clauses with " · "', () => {
+    const row = { category: 'food', estimated_duration: '1 hour', provenance: 'verified' };
+    const prefs = { interestTags: ['food & drink'], pace: 'fast', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('Matches food · ~1h · verified place');
+  });
+
+  it('returns an empty string when nothing honest applies', () => {
+    const row = { category: 'nightlife', estimated_duration: null, provenance: 'unverified' };
+    const prefs = { interestTags: [], pace: 'moderate', travellers: undefined };
+    expect(buildFitLine(row, prefs)).toBe('');
   });
 });
 

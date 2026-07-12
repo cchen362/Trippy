@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
-import { PROPOSE_ITINERARY_CHANGES_TOOL } from './copilotTools.js';
+import { PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL } from './copilotTools.js';
 
 let _client = null;
 
@@ -382,6 +382,16 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
   }
 }
 
+// Query tool_use names the loop below executes server-side and feeds back as a tool_result —
+// never terminal. Wave 3 adds check_trip_health here (and to the tools array below); the loop
+// itself is already generic over this set.
+const QUERY_TOOL_NAMES = new Set([SEARCH_DISCOVERY_CATALOGUE_TOOL.name]);
+
+// Max EXECUTED query-tool calls per user turn (G2). Once hit, further query tool_use blocks
+// are answered with a budget-notice tool_result instead of being executed — the model gets one
+// post-cap response to answer with what it already has before the hard stop below kicks in.
+const QUERY_TOOL_CAP = 5;
+
 // persistTurn (optional): async callback the route owns. Called once after the model turn
 // completes with { assistantText, operations } — where operations is the tool_use payload or
 // null. It persists the assistant message + (when operations exist) the proposal record, and
@@ -389,7 +399,11 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
 // statusReason }) or null. Keeping persistence in the route (not here) is why claude.js stays
 // DB-free; when persistTurn is absent (unit tests) the Wave 1 { operations }-only event is
 // emitted so the protocol still round-trips.
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn) {
+//
+// toolExecutors (optional, Plan 12 Wave 1): { [toolName]: async (input) => resultObject },
+// injected by the route the same way as persistTurn — this file stays DB-free, the route owns
+// what a query tool actually does (catalogue reads, trip-health checks, etc).
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}) {
   const client = getClient();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -430,55 +444,164 @@ Stops carry one of four kinds of timing. Respect them:
 
 - Set "time" to null unless the traveller's request is specifically about a clock time. Do NOT invent "HH:MM" values to fill a slot.
 - When discussing an untimed stop, talk in terms of order, density, and flexibility ("in the morning", "before lunch") — never a fabricated timetable.
-- A "time" value, when set, must be 24-hour "HH:MM".`;
+- A "time" value, when set, must be 24-hour "HH:MM".
+
+## Grounding new place recommendations
+- Trippy's discovery catalogue — not your training knowledge — is the only source for concrete new-place suggestions. Before naming a specific restaurant, sight, bar, or any other place the traveller could add to the itinerary, call search_discovery_catalogue for that destination and recommend only places it returned. Never invent or recall a place from general knowledge and present it as a suggestion.
+- General destination colour (neighbourhoods, vibe, famous landmarks mentioned in passing) is fine without a tool call — the grounding rule is about concrete "add this place" recommendations.
+- search_discovery_catalogue only works for destinations already on this trip. If the traveller asks for suggestions somewhere else, do not call the tool — decline warmly and suggest adding that destination to the trip first.
+- Relay each search's catalogueState honestly. "fresh" or "stale": recommend from the returned places. "empty" or no matches: say plainly that Trippy doesn't have picks for that destination yet — do not fill the gap from your own knowledge. "out_of_scope": decline as above.
+- You may refine and re-search within a small per-turn budget. If told the budget is used up, answer with what you already have.`;
 
   let fullText = '';
   let streamDone = false;
+  let aborted = false;
+  let currentStream = null;
   const turnStart = Date.now();
+
+  // Abort Anthropic stream when the client drops the SSE connection.
+  // Must listen on res, not req — req.close fires when the request body is consumed
+  // (immediately after flushHeaders), whereas res.close fires when the response socket closes.
+  // Registered once for the whole turn; `currentStream` always points at whichever loop
+  // iteration's stream is live.
+  res.on('close', () => {
+    if (streamDone) return;
+    // Always record the drop, even between iterations (currentStream is null while a query
+    // tool executor runs) — the loop checks `aborted` before opening the next stream.
+    aborted = true;
+    if (currentStream) {
+      console.log('[copilot] client dropped SSE connection — aborting stream');
+      currentStream.abort();
+    }
+  });
+
+  let messages = [...conversationMessages];
+  const totalUsage = { input_tokens: 0, output_tokens: 0 };
+  let executedQueryCalls = 0;
+  let capNoticeSent = false;
+  let sawFirstDelta = false;
+  let iterations = 0;
+  let terminalUse = null; // the propose_itinerary_changes tool_use that ended the turn, if any
 
   try {
     console.log('[copilot] stream opened messages=%d', conversationMessages.length);
 
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-      messages: conversationMessages,
-      tools: [PROPOSE_ITINERARY_CHANGES_TOOL],
-    });
-
-    // Abort Anthropic stream when the client drops the SSE connection.
-    // Must listen on res, not req — req.close fires when the request body is consumed
-    // (immediately after flushHeaders), whereas res.close fires when the response socket closes.
-    res.on('close', () => {
-      if (!streamDone) {
-        console.log('[copilot] client dropped SSE connection — aborting stream');
-        stream.abort();
+    while (true) {
+      // Client dropped while a tool executor was running — don't open another stream
+      // against a dead connection.
+      if (aborted) {
+        streamDone = true;
+        return fullText;
       }
-    });
+      iterations += 1;
 
-    let sawFirstDelta = false;
-    stream.on('text', (text) => {
-      if (!sawFirstDelta) {
-        sawFirstDelta = true;
-        console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, Date.now() - turnStart);
+      const stream = client.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        messages,
+        tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL],
+      });
+      currentStream = stream;
+
+      stream.on('text', (text) => {
+        if (!sawFirstDelta) {
+          sawFirstDelta = true;
+          console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, Date.now() - turnStart);
+        }
+        fullText += text;
+        write({ type: 'text', content: text });
+      });
+
+      const finalMessage = await stream.finalMessage();
+      currentStream = null;
+
+      // The client dropped the connection but the SDK resolved anyway (abort() is
+      // best-effort) — end quietly, no persistTurn/proposal/done writes (write() is already a
+      // no-op on a destroyed res, but skip the DB work too).
+      if (aborted) {
+        streamDone = true;
+        return fullText;
       }
-      fullText += text;
-      write({ type: 'text', content: text });
-    });
 
-    const finalMessage = await stream.finalMessage();
+      totalUsage.input_tokens += finalMessage?.usage?.input_tokens ?? 0;
+      totalUsage.output_tokens += finalMessage?.usage?.output_tokens ?? 0;
 
-    // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
-    // above via on('text'); the tool_use block is assembled on a separate channel, so reading
-    // it here does not delay prose. Wave 2: the route's persistTurn callback saves the
-    // assistant message and (when operations are present) creates the validated proposal
-    // record, returning the enriched { proposalId, operations, warnings } payload we emit.
-    const toolUse = finalMessage?.content?.find(
-      (block) => block.type === 'tool_use' && block.name === PROPOSE_ITINERARY_CHANGES_TOOL.name,
-    );
-    const operations = (toolUse && Array.isArray(toolUse.input?.operations) && toolUse.input.operations.length > 0)
-      ? toolUse.input.operations
+      // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
+      // above via on('text'); tool_use blocks are assembled on a separate channel, so reading
+      // them here does not delay prose.
+      const content = finalMessage?.content ?? [];
+      const foundTerminalUse = content.find(
+        (block) => block.type === 'tool_use' && block.name === PROPOSE_ITINERARY_CHANGES_TOOL.name,
+      );
+      const queryUses = content.filter(
+        (block) => block.type === 'tool_use' && QUERY_TOOL_NAMES.has(block.name),
+      );
+
+      // Terminal wins: a propose_itinerary_changes call ends the turn even if the same
+      // response also contains query tool_use blocks — those are ignored outright (no
+      // execution, no SSE) rather than left dangling with no way to answer them.
+      if (foundTerminalUse) {
+        terminalUse = foundTerminalUse;
+        break;
+      }
+
+      if (queryUses.length === 0) {
+        // Plain end_turn — nothing to execute, nothing to propose.
+        break;
+      }
+
+      const capNoticeSentBefore = capNoticeSent;
+      const toolResults = [];
+      let allOverCap = true;
+
+      for (const use of queryUses) {
+        if (executedQueryCalls < QUERY_TOOL_CAP) {
+          allOverCap = false;
+          executedQueryCalls += 1;
+          write({ type: 'tool', tool: use.name, state: 'started' });
+
+          let result;
+          const executor = toolExecutors[use.name];
+          if (!executor) {
+            result = { error: `no executor registered for ${use.name}` };
+          } else {
+            try {
+              result = await executor(use.input);
+            } catch (err) {
+              console.error('[copilot] tool executor failed:', use.name, err);
+              result = { error: err.message };
+            }
+          }
+
+          write({ type: 'tool', tool: use.name, state: 'done' });
+          toolResults.push({ type: 'tool_result', tool_use_id: use.id, content: JSON.stringify(result) });
+        } else {
+          capNoticeSent = true;
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: use.id,
+            content: 'Query tool budget for this turn is used up. Answer the traveller now with the information you already have.',
+          });
+        }
+      }
+
+      // Hard stop: the model ignored a budget notice from a previous iteration and called
+      // query tools again with nothing but over-cap calls to show for it. Without this, a
+      // misbehaving model could loop forever re-requesting a budget it will never get. Every
+      // OTHER over-cap case still gets pushed back with the notice for one more chance.
+      if (allOverCap && capNoticeSentBefore) {
+        break;
+      }
+
+      messages = [...messages, { role: 'assistant', content }, { role: 'user', content: toolResults }];
+    }
+
+    // Wave 2: the route's persistTurn callback saves the assistant message and (when
+    // operations are present) creates the validated proposal record, returning the enriched
+    // { proposalId, operations, warnings } payload we emit.
+    const operations = (terminalUse && Array.isArray(terminalUse.input?.operations) && terminalUse.input.operations.length > 0)
+      ? terminalUse.input.operations
       : null;
 
     let proposalPayload = null;
@@ -498,9 +621,9 @@ Stops carry one of four kinds of timing. Respect them:
       write({ type: 'proposal', ...proposalPayload });
     }
 
-    console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s',
-      finalMessage?.usage?.input_tokens ?? -1, finalMessage?.usage?.output_tokens ?? -1,
-      JSON.stringify(itineraryContext).length, toolUse ? 'yes' : 'no');
+    console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s iterations=%d queryCalls=%d',
+      totalUsage.input_tokens, totalUsage.output_tokens,
+      JSON.stringify(itineraryContext).length, terminalUse ? 'yes' : 'no', iterations, executedQueryCalls);
 
     streamDone = true;
     console.log('[copilot] stream done fullText.length=%d', fullText.length);

@@ -36,6 +36,33 @@ export function getOrCreateDestination(db, { cityKey, countryCode, displayName }
   ).get(cityKey, normalizedCountryCode);
 }
 
+// Read-only counterpart to getOrCreateDestination — the co-pilot search tool must never
+// mint a catalogue row just by being asked about a destination. Returns undefined when
+// no row exists for (cityKey, countryCode).
+export function findDestination(db, cityKey, countryCode) {
+  return db.prepare(
+    'SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code = ?',
+  ).get(cityKey, countryCode ?? '');
+}
+
+// Catalogue freshness (Plan 7 Wave 1 / Plan 9 M6): a destination's stored places are
+// only served as a cache hit while within this TTL of their last generation.
+export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// SQLite datetime('now') writes 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker,
+// but JS `new Date(...)` on that string parses it as LOCAL time — only correct when
+// the server process itself runs in UTC. Explicitly mark the string as UTC before
+// parsing so the TTL check is correct regardless of the server's TZ. Mirrors the
+// same fix already applied to place_resolution_cache (see cacheTimestampToEpochMs
+// in services/placeResolver.js).
+export function cacheTimestampToEpochMs(value) {
+  if (!value) return null;
+  const text = String(value);
+  const iso = /[TZ]/.test(text) ? text : `${text.replace(' ', 'T')}Z`;
+  const epoch = Date.parse(iso);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
 // Backs the D6 empty-country guard (Plan 9 Wave 5): every country-coded row
 // (country_code != '') that already exists for a city_key. The route uses
 // this to decide whether an EMPTY-countryCode Discovery request can safely

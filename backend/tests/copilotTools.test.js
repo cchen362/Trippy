@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { PROPOSE_ITINERARY_CHANGES_TOOL, copilotTripContext } from '../src/services/copilotTools.js';
+import {
+  PROPOSE_ITINERARY_CHANGES_TOOL,
+  SEARCH_DISCOVERY_CATALOGUE_TOOL,
+  copilotTripContext,
+} from '../src/services/copilotTools.js';
 
 describe('PROPOSE_ITINERARY_CHANGES_TOOL', () => {
   it('is named propose_itinerary_changes with an operations array input schema', () => {
@@ -11,6 +15,19 @@ describe('PROPOSE_ITINERARY_CHANGES_TOOL', () => {
   it('restricts operation action to the four known kinds', () => {
     const actionSchema = PROPOSE_ITINERARY_CHANGES_TOOL.input_schema.properties.operations.items.properties.action;
     expect(actionSchema.enum).toEqual(['add_stop', 'remove_stop', 'move_stop', 'update_stop']);
+  });
+});
+
+describe('SEARCH_DISCOVERY_CATALOGUE_TOOL', () => {
+  it('is named search_discovery_catalogue with destination required', () => {
+    expect(SEARCH_DISCOVERY_CATALOGUE_TOOL.name).toBe('search_discovery_catalogue');
+    expect(SEARCH_DISCOVERY_CATALOGUE_TOOL.input_schema.required).toEqual(['destination']);
+  });
+
+  it('restricts category to the exact known catalogue categories', () => {
+    expect(SEARCH_DISCOVERY_CATALOGUE_TOOL.input_schema.properties.category.enum).toEqual([
+      'essentials', 'food', 'nature', 'culture', 'nightlife', 'architecture', 'wellness', 'hidden_gems',
+    ]);
   });
 });
 

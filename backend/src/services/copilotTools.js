@@ -92,6 +92,41 @@ export const PROPOSE_ITINERARY_CHANGES_TOOL = {
   },
 };
 
+// Read-only query tool (Plan 12 Wave 1, G1/G2/G8). Executed server-side via a tool_result
+// round-trip in the agentic loop (claude.js) — never terminal. destination is free text
+// matched against the trip's own scopes; anything off-trip returns out_of_scope (G4) with
+// no catalogue read and no generation.
+export const SEARCH_DISCOVERY_CATALOGUE_TOOL = {
+  name: 'search_discovery_catalogue',
+  description:
+    "Search Trippy's verified discovery catalogue for real places in a destination on this trip. " +
+    'ALWAYS call this before recommending or naming any specific new place to add to the itinerary — ' +
+    'never invent or recall places from general knowledge. Only works for destinations that are part ' +
+    "of this trip (see the itinerary's destinations and day cities); for anywhere else it returns " +
+    'catalogueState "out_of_scope" and you should suggest the traveller add that destination to the ' +
+    "trip first. Results are capped and may be thin or empty for a destination Trippy hasn't built up " +
+    'yet — always relay catalogueState honestly rather than filling gaps yourself.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      destination: {
+        type: 'string',
+        description: 'City or place name from this trip\'s itinerary, e.g. "Kyoto" or "Chengdu". Must be a destination already on the trip.',
+      },
+      query: {
+        type: 'string',
+        description: 'Optional free-text keyword filter matched against place name, local name, aliases, description, and why-go text. Use for specific keywords ("rooftop", "xiaolongbao"); for broad needs like "somewhere for dinner" prefer the category filter (e.g. category "food") so results are not over-narrowed.',
+      },
+      category: {
+        type: 'string',
+        enum: ['essentials', 'food', 'nature', 'culture', 'nightlife', 'architecture', 'wellness', 'hidden_gems'],
+        description: 'Optional category filter.',
+      },
+    },
+    required: ['destination'],
+  },
+};
+
 // D9 minimized co-pilot context. Derived from getTripDetail(); KEEPS confirmationRef and
 // marks booking-linked stops (so the model can honor the D6 off-limits rule), DROPS booking
 // document metadata, details_json, coordinates, photo/resolution noise, and everything else

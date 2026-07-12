@@ -5,6 +5,7 @@ import { getDb } from '../db/database.js';
 import { getTripDetail } from '../services/trips.js';
 import { streamCopilotResponse } from '../services/claude.js';
 import { copilotTripContext } from '../services/copilotTools.js';
+import { searchDiscoveryCatalogue } from '../services/copilotGrounding.js';
 import {
   createProposal,
   applyProposal,
@@ -128,9 +129,15 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     };
   };
 
+  // Query tools the agentic loop (claude.js) may call mid-turn — the route owns what each one
+  // actually does (DB/catalogue reads) so claude.js stays DB-free, same pattern as persistTurn.
+  const toolExecutors = {
+    search_discovery_catalogue: (input) => searchDiscoveryCatalogue(tripDetail, input),
+  };
+
   // Stream response — SSE headers are set inside streamCopilotResponse. Errors during
   // streaming (and inside persistTurn) are handled there; nothing to persist afterwards.
-  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn);
+  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn, toolExecutors);
 });
 
 // POST /trips/:tripId/copilot/apply — applies a persisted proposal by id (never raw ops)

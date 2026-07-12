@@ -15,74 +15,17 @@ import {
   getDailyGenerationCount,
   incrementDailyGenerationCount,
   listCountryCodedRows,
+  CACHE_TTL_MS,
+  cacheTimestampToEpochMs,
 } from '../db/discoveryCatalogue.js';
-import { rankPlaces, orderCategories, parseDurationHours, TAG_TO_CATEGORY } from '../services/discoveryRank.js';
+import { rankPlaces, orderCategories, buildFitLine } from '../services/discoveryRank.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const router = Router();
 
 const MAX_GENERATIONS_PER_DESTINATION_PER_DAY = 3;
 
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
 router.use(requireAuth);
-
-// SQLite datetime('now') writes 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker,
-// but JS `new Date(...)` on that string parses it as LOCAL time — only correct when
-// the server process itself runs in UTC. Explicitly mark the string as UTC before
-// parsing so the TTL check is correct regardless of the server's TZ. Mirrors the
-// same fix already applied to place_resolution_cache (see cacheTimestampToEpochMs
-// in services/placeResolver.js).
-function cacheTimestampToEpochMs(value) {
-  if (!value) return null;
-  const text = String(value);
-  const iso = /[TZ]/.test(text) ? text : `${text.replace(' ', 'T')}Z`;
-  const epoch = Date.parse(iso);
-  return Number.isFinite(epoch) ? epoch : null;
-}
-
-// Formats a parsed duration-in-hours figure for the fitLine, e.g. 2 -> "2",
-// 1.5 -> "1.5". Only ever called once parseDurationHours has already
-// succeeded and the pace-fit check has already passed.
-function formatFitHours(hours) {
-  const rounded = Math.round(hours * 10) / 10;
-  return String(rounded);
-}
-
-// Composes the deterministic, honesty-gated trip-fit line (Wave 3, review
-// doc §2.4/§6.3): "Matches food · ~2h · verified place". Each clause is only
-// included when it's actually true of this trip's declared preferences —
-// never claims an interest/pace the trip didn't declare. Empty string when
-// nothing honest applies.
-function buildFitLine(row, prefs) {
-  const parts = [];
-
-  const interestTags = prefs.interestTags || [];
-  if (interestTags.length > 0) {
-    const mapped = new Set(
-      interestTags.map((tag) => TAG_TO_CATEGORY[String(tag).toLowerCase()]).filter(Boolean),
-    );
-    if (mapped.has(row.category)) {
-      parts.push(`Matches ${row.category}`);
-    }
-  }
-
-  if (prefs.pace === 'fast' || prefs.pace === 'relaxed') {
-    const hours = parseDurationHours(row.estimated_duration);
-    if (hours !== null) {
-      const fits = prefs.pace === 'fast' ? hours <= 2 : hours >= 3;
-      if (fits) {
-        parts.push(`~${formatFitHours(hours)}h`);
-      }
-    }
-  }
-
-  if (row.provenance === 'verified') {
-    parts.push('verified place');
-  }
-
-  return parts.join(' · ');
-}
 
 // Serializes a stored discovery_places row back into the wire item shape old
 // and new clients both understand, plus the new Wave 3 additive fields.
