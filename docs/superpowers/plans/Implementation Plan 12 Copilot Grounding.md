@@ -1,6 +1,6 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: IN PROGRESS — Wave 1 COMPLETE (2026-07-12). Waves 2-5 not started.**
+**Status: IN PROGRESS — Waves 1-2 COMPLETE (2026-07-12). Waves 3-5 not started.**
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -235,7 +235,38 @@ unchanged within noise.
 
 ## Wave 2 — Background generation + grounded adds (backend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12).** All four steps shipped: generation pipeline
+extracted behavior-identically into `services/discoveryGeneration.js`
+(`runCatalogueGeneration`; route keeps all SSE/merge/fallback logic; `discovery.test.js`
+green UNMODIFIED as the parity proof; `MAX_GENERATIONS_PER_DESTINATION_PER_DAY` moved to
+`db/discoveryCatalogue.js` mirroring Wave 1's `CACHE_TTL_MS` move); G3 kick wired into the
+search executor — raw `empty`/`stale` no longer escape to the model, both resolve to
+`generating` (fire-and-forget kick, in-process single-flight Set keyed
+cityKey|countryCode) or `generation_capped` (cap checked only on an EXISTING row — a
+destination with no row can never be capped, so the capped path provably mints nothing);
+G5 grounded adds — op-level `add_stop.placeId` (schema + validation: active place whose
+destination `city_key` is among the trip's scope canonical keys, three distinct failure
+reasons), server-stamped display-only `placeVerified: true` written into `operations_json`
+at creation (model claims stripped first; the Wave 4 badge hook is therefore already
+emitted, surviving refresh via `listProposalsForTrip`), apply-time field mapping mirrors
+`DiscoveryPanel.handleAddToDay` exactly — verified rows with finite coords take the
+trusted fast path (`coordinateSource 'places'`, `wgs84`, `resolved`, zero geocode),
+anything else gets location/photo hints + the normal resolver; preview-visible fields
+(title/type/time/note) stay WYSIWYG from the model, and model lat/lng are ignored
+whenever `placeId` is present. System prompt's hedged empty-catalogue paragraph replaced
+with the real G3 states + a "include placeId on grounded adds" bullet.
+576/577 backend tests (29 new; the 1 failure is a PRE-EXISTING auth rate-limit flake that
+reproduces on a clean HEAD worktree — times out at 5s under machine load, unrelated to
+this wave), frontend build clean. Live smoke on a temp DB (real Claude + real
+verification + live Unsplash): 11/11 — empty in-scope search → `generating` → 76 places
+generated in background, daily counter exactly 1, re-ask → `fresh` grounded results,
+read-only searches never touch counters, live-verified row ("Old Town Lucerne")
+grounded-added with catalogue coordinates while model-supplied lat/lng were ignored,
+photo descriptor carried, capped stale destination → `generation_capped` with stored
+breadth and zero fires. Deviations: none from design; grounded-add scope check resolves
+the destination by the place row's FK (`destination_id`) rather than re-running free-text
+scope matching — the country-fallback idiom is unnecessary when the destination is
+already known by id.
 **Model recommendation: Opus medium orchestrator + Sonnet coding subagents.**
 The generation-pipeline extraction must be behavior-identical to a subtle route (merge
 semantics, error fallbacks) and grounded adds touch the proposal validation/apply path —

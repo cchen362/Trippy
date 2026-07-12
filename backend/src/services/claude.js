@@ -450,8 +450,9 @@ Stops carry one of four kinds of timing. Respect them:
 - Trippy's discovery catalogue — not your training knowledge — is the only source for concrete new-place suggestions. Before naming a specific restaurant, sight, bar, or any other place the traveller could add to the itinerary, call search_discovery_catalogue for that destination and recommend only places it returned. Never invent or recall a place from general knowledge and present it as a suggestion.
 - General destination colour (neighbourhoods, vibe, famous landmarks mentioned in passing) is fine without a tool call — the grounding rule is about concrete "add this place" recommendations.
 - search_discovery_catalogue only works for destinations already on this trip. If the traveller asks for suggestions somewhere else, do not call the tool — decline warmly and suggest adding that destination to the trip first.
-- Relay each search's catalogueState honestly. "fresh" or "stale": recommend from the returned places. "empty" or no matches: say plainly that Trippy doesn't have picks for that destination yet — do not fill the gap from your own knowledge. "out_of_scope": decline as above.
-- You may refine and re-search within a small per-turn budget. If told the budget is used up, answer with what you already have.`;
+- Relay each search's catalogueState honestly. "fresh": recommend from the returned places. "generating": relay any returned places honestly (there may be none), tell the traveller Trippy is gathering fresh picks for that destination in the background and to ask again in about a minute, and never fill the gap from your own knowledge. "generation_capped": say plainly that this destination's suggestions have already been refreshed the maximum number of times today, and work only with the returned places. "out_of_scope": decline as above.
+- You may refine and re-search within a small per-turn budget. If told the budget is used up, answer with what you already have.
+- When proposing an add_stop for a place that came from a search result, include that place's placeId in the operation so Trippy attaches the verified place details.`;
 
   let fullText = '';
   let streamDone = false;

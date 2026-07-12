@@ -23,6 +23,8 @@ vi.mock('../src/services/claude.js', () => ({
   generatePhotoDescriptor: vi.fn().mockResolvedValue(null),
 }));
 
+import { resolvePlace } from '../src/services/placeResolver.js';
+
 const {
   createProposal,
   applyProposal,
@@ -356,5 +358,249 @@ describe('computeTripFingerprint', () => {
     expect(computeTripFingerprint(tripId)).toBe(before);
     getDb().prepare('UPDATE stops SET time = ? WHERE id = ?').run('08:00', s);
     expect(computeTripFingerprint(tripId)).not.toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G5 grounded add_stop (Plan 12 Wave 2) — placeId, placeVerified, catalogue apply
+// ---------------------------------------------------------------------------
+
+describe('G5 grounded add_stop (placeId)', () => {
+  function seedDestination({ cityKey, countryCode = 'CN', displayName }) {
+    const db = getDb();
+    const row = db.prepare(`
+      INSERT INTO discovery_destinations (city_key, country_code, display_name, last_generated_at, generation_count)
+      VALUES (?, ?, ?, datetime('now'), 1)
+      RETURNING *
+    `).get(cityKey, countryCode, displayName);
+    return row;
+  }
+
+  function seedPlace(destinationId, {
+    name, category = 'essentials', description = `${name} description`, localName = null,
+    aliases = [], estimatedDuration = '~1h', provenance = 'unverified', lat = null, lng = null,
+    providerPlaceId = null, photoQuery = 'temple courtyard', sceneType = 'temple_shrine', status = 'active',
+  }) {
+    const db = getDb();
+    return db.prepare(`
+      INSERT INTO discovery_places (
+        destination_id, category, name, normalized_name, local_name, aliases_json,
+        description, estimated_duration, provenance, status, batch, generated_at,
+        lat, lng, provider_place_id, photo_query, scene_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), ?, ?, ?, ?, ?)
+      RETURNING *
+    `).get(
+      destinationId, category, name, name.toLowerCase(), localName, JSON.stringify(aliases),
+      description, estimatedDuration, provenance, status, lat, lng, providerPlaceId, photoQuery, sceneType,
+    );
+  }
+
+  let groundedTripId;
+  let groundedDayId;
+  let inScopeDestId;
+  let outOfScopeDestId;
+
+  beforeAll(() => {
+    const db = getDb();
+    groundedTripId = db.prepare(`
+      INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
+      VALUES ('Grounded Trip', ?, '2026-07-01', '2026-07-03', 'couple', '[]', 'moderate', 'upcoming') RETURNING id
+    `).get(userId).id;
+    groundedDayId = db.prepare(
+      "INSERT INTO days (trip_id, date, city) VALUES (?, '2026-07-01', 'Groundtown') RETURNING id",
+    ).get(groundedTripId).id;
+
+    // city_key 'groundtown' is canonicalGeoKey('Groundtown') — the day's own seeded city,
+    // so it lands in this trip's scopes via buildTripScopes' day-derived fallback with no
+    // trip_scopes row needed.
+    inScopeDestId = seedDestination({ cityKey: 'groundtown', displayName: 'Groundtown' }).id;
+    outOfScopeDestId = seedDestination({ cityKey: 'elsewhere', displayName: 'Elsewhere' }).id;
+  });
+
+  describe('validation', () => {
+    it('rejects an unknown placeId', () => {
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeId: 999999 }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/does not exist/);
+    });
+
+    it('rejects an archived (no longer active) place', () => {
+      const place = seedPlace(inScopeDestId, { name: 'Archived Temple', status: 'archived' });
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeId: place.id }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/no longer available/);
+    });
+
+    it("rejects a place whose destination is not in this trip's scopes", () => {
+      const place = seedPlace(outOfScopeDestId, { name: 'Faraway Market' });
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeId: place.id }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/outside this trip's destinations/);
+    });
+
+    it('rejects a non-integer placeId', () => {
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeId: '5' }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/must be an integer/);
+    });
+
+    it('rejects placeVerified without a placeId', () => {
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeVerified: true }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.reason).toMatch(/requires a placeId/);
+    });
+
+    it('accepts a valid placeId referencing an active, in-scope place', () => {
+      const place = seedPlace(inScopeDestId, { name: 'Good Temple' });
+      const r = validateProposalOperations(
+        [{ action: 'add_stop', dayId: groundedDayId, stop: { title: 'X', type: 'experience' }, placeId: place.id }],
+        groundedTripId,
+      );
+      expect(r.ok).toBe(true);
+    });
+  });
+
+  describe('stamping (createProposal)', () => {
+    it('stamps placeVerified: true for a verified-provenance place, and it round-trips through history', () => {
+      const place = seedPlace(inScopeDestId, {
+        name: 'Verified Pagoda', provenance: 'verified', lat: 31.2, lng: 121.4, providerPlaceId: 'osm:node/1',
+      });
+      const { operations, proposalId } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Pagoda Visit', type: 'experience', time: null }, placeId: place.id,
+        }],
+      });
+      expect(operations[0].placeVerified).toBe(true);
+      const fromHistory = listProposalsForTrip(groundedTripId).find((p) => p.id === proposalId);
+      expect(fromHistory.operations[0].placeVerified).toBe(true);
+    });
+
+    it('does not stamp placeVerified for an unverified place', () => {
+      const place = seedPlace(inScopeDestId, { name: 'Unverified Noodle Shop', provenance: 'unverified' });
+      const { operations } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Noodles', type: 'food', time: null }, placeId: place.id,
+        }],
+      });
+      expect(operations[0]).not.toHaveProperty('placeVerified');
+    });
+
+    it('strips a model-supplied placeVerified: true on an unverified place (never overstated)', () => {
+      const place = seedPlace(inScopeDestId, { name: 'Overclaimed Shop', provenance: 'unverified' });
+      const { operations, status } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Shop Visit', type: 'food', time: null }, placeId: place.id, placeVerified: true,
+        }],
+      });
+      expect(status).toBe('pending');
+      expect(operations[0]).not.toHaveProperty('placeVerified');
+    });
+  });
+
+  describe('apply', () => {
+    it('applies a verified-place add with catalogue lat/lng, never calling the geocoder', async () => {
+      const place = seedPlace(inScopeDestId, {
+        name: 'Verified Garden', provenance: 'verified', lat: 31.5, lng: 121.6,
+        providerPlaceId: 'osm:node/42', photoQuery: 'garden pond', sceneType: 'nature_outdoors',
+      });
+      const { proposalId } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Garden Visit', type: 'experience', time: null, note: 'bring camera' },
+          placeId: place.id,
+        }],
+      });
+      const callsBefore = resolvePlace.mock.calls.length;
+      await applyProposal({ tripId: groundedTripId, userId, proposalId });
+      expect(resolvePlace.mock.calls.length).toBe(callsBefore);
+
+      const stop = getDb().prepare("SELECT * FROM stops WHERE day_id = ? AND title = 'Garden Visit'").get(groundedDayId);
+      expect(stop.lat).toBe(31.5);
+      expect(stop.lng).toBe(121.6);
+      expect(stop.coordinate_source).toBe('places');
+      expect(stop.coordinate_system).toBe('wgs84');
+      expect(stop.location_status).toBe('resolved');
+      expect(stop.provider_id).toBe('osm:node/42');
+      expect(stop.photo_query).toBe('garden pond');
+      expect(stop.scene_type).toBe('nature_outdoors');
+    });
+
+    it('applies an unverified-place add via the normal resolver, with no catalogue coordinates', async () => {
+      const place = seedPlace(inScopeDestId, {
+        name: 'Unverified Market', provenance: 'unverified', photoQuery: 'street market', sceneType: 'market',
+      });
+      const { proposalId } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Market Stroll', type: 'experience', time: null }, placeId: place.id,
+        }],
+      });
+      const callsBefore = resolvePlace.mock.calls.length;
+      await applyProposal({ tripId: groundedTripId, userId, proposalId });
+      expect(resolvePlace.mock.calls.length).toBeGreaterThan(callsBefore);
+
+      const stop = getDb().prepare("SELECT * FROM stops WHERE day_id = ? AND title = 'Market Stroll'").get(groundedDayId);
+      // Coordinates come from the mocked resolver, never the catalogue (which has none stored).
+      expect(stop.lat).toBe(30.0);
+      expect(stop.lng).toBe(120.0);
+      expect(stop.photo_query).toBe('street market');
+      expect(stop.scene_type).toBe('market');
+    });
+
+    it('ignores model-supplied lat/lng on a grounded add — the catalogue identity wins', async () => {
+      const place = seedPlace(inScopeDestId, {
+        name: 'Verified Overlook', provenance: 'verified', lat: 22.1, lng: 114.2, providerPlaceId: 'osm:node/7',
+      });
+      const { proposalId } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Overlook Visit', type: 'experience', time: null, lat: 1.1, lng: 2.2 },
+          placeId: place.id,
+        }],
+      });
+      await applyProposal({ tripId: groundedTripId, userId, proposalId });
+      const stop = getDb().prepare("SELECT * FROM stops WHERE day_id = ? AND title = 'Overlook Visit'").get(groundedDayId);
+      expect(stop.lat).toBe(22.1);
+      expect(stop.lng).toBe(114.2);
+    });
+
+    it('flips a proposal invalid (422) when its place is archived after creation', async () => {
+      const place = seedPlace(inScopeDestId, { name: 'Soon Archived Spot', provenance: 'unverified' });
+      const { proposalId } = createProposal({
+        tripId: groundedTripId, userId, messageId: null,
+        operations: [{
+          action: 'add_stop', dayId: groundedDayId,
+          stop: { title: 'Doomed Stop', type: 'experience', time: null }, placeId: place.id,
+        }],
+      });
+      getDb().prepare("UPDATE discovery_places SET status = 'archived' WHERE id = ?").run(place.id);
+
+      await expect(applyProposal({ tripId: groundedTripId, userId, proposalId })).rejects.toMatchObject({ status: 422 });
+      expect(getDb().prepare('SELECT status FROM copilot_proposals WHERE id = ?').get(proposalId).status).toBe('invalid');
+    });
   });
 });

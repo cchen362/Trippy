@@ -2,28 +2,22 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
-import { discoverDestination } from '../services/claude.js';
 import { countryNameFromCode } from '../utils/countries.js';
 import { assertTripAccess } from '../services/trips.js';
-import { enqueueForVerification } from '../services/discoveryVerify.js';
+import { runCatalogueGeneration } from '../services/discoveryGeneration.js';
 import {
   getOrCreateDestination,
   listActivePlaces,
-  insertPlaces,
-  listExclusionNames,
-  enforceCategoryCap,
   getDailyGenerationCount,
-  incrementDailyGenerationCount,
   listCountryCodedRows,
   CACHE_TTL_MS,
   cacheTimestampToEpochMs,
+  MAX_GENERATIONS_PER_DESTINATION_PER_DAY,
 } from '../db/discoveryCatalogue.js';
 import { rankPlaces, orderCategories, buildFitLine } from '../services/discoveryRank.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const router = Router();
-
-const MAX_GENERATIONS_PER_DESTINATION_PER_DAY = 3;
 
 router.use(requireAuth);
 
@@ -240,14 +234,11 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const ping = setInterval(() => write({ type: 'thinking' }), 8000);
 
     try {
-      const exclusionTitles = isMerge
-        ? listExclusionNames(db, destinationRow.id, 400)
-        : [];
-
-      const accumulated = await discoverDestination(
+      const { insertedIds } = await runCatalogueGeneration(db, {
+        destinationRow,
         claudeDestination,
-        exclusionTitles,
-        (categoryObj) => {
+        useExclusions: isMerge,
+        onCategory: (categoryObj) => {
           // Both stale-refresh and append stream their post-insert, DB-derived
           // result once generation completes (see below) rather than the raw
           // mid-generation delta — a raw delta could contain items insertPlaces
@@ -269,43 +260,9 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
             items: (categoryObj.items || []).map((item) => ({ ...item, lat: null, lng: null })),
           });
         },
-      );
+      });
 
       clearInterval(ping);
-
-      const generatedAt = new Date().toISOString();
-      // Batch number for this generation: the destination's generation_count
-      // BEFORE it's incremented below — first generation is batch 0 (matching
-      // the Wave-1 backfill migration's batch=0 for pre-existing data), second
-      // generation is batch 1, etc. This gives Wave 3's future recency-based
-      // ranking a monotonically increasing "how recent is this batch" signal
-      // without needing to build ranking now.
-      const batch = destinationRow.generation_count;
-
-      const flatItems = (accumulated || []).flatMap((cat) =>
-        (cat.items || []).map((item) => ({ ...item, category: cat.category, generatedAt })),
-      );
-      const inserted = insertPlaces(db, destinationRow.id, flatItems, batch);
-      const insertedIds = inserted.map((row) => row.id);
-
-      // Bounds enforcement (decision 4): archive category surplus immediately
-      // after insert, using only provenance/batch (Wave 3's real scorer is out of
-      // scope here) — verified rows are never archived while an unverified row in
-      // the same category could be archived instead, so this is correct regardless
-      // of whether the async verification worker below has run yet.
-      enforceCategoryCap(db, destinationRow.id);
-
-      // Verification is fire-and-forget: enqueue and move on. It must never block
-      // or fail this SSE response — the queue drains after this request completes,
-      // isolated from serving (see services/discoveryVerify.js).
-      enqueueForVerification(db, destinationRow.id, insertedIds);
-
-      db.prepare(`
-        UPDATE discovery_destinations
-        SET last_generated_at = datetime('now'), generation_count = generation_count + 1
-        WHERE id = ?
-      `).run(destinationRow.id);
-      incrementDailyGenerationCount(db, destinationRow.id);
 
       if (isStaleRefresh) {
         // Re-read the full (now-merged) active set and stream it so the

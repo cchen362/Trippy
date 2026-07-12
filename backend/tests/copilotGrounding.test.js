@@ -61,7 +61,19 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import * as tripService from '../src/services/trips.js';
-import { searchDiscoveryCatalogue } from '../src/services/copilotGrounding.js';
+import { searchDiscoveryCatalogue, resetInFlightGenerations } from '../src/services/copilotGrounding.js';
+
+// --- Mock the generation pipeline: these tests care about the READ path's
+// decision (fire a kick? how many times? with what useExclusions?), not the
+// real generate/insert sequence — that's discoveryGeneration.test.js's job.
+// vi.hoisted is required (not a plain top-level const) because vi.mock
+// factories run before this file's own top-level const declarations.
+const { mockRunCatalogueGeneration } = vi.hoisted(() => ({
+  mockRunCatalogueGeneration: vi.fn().mockResolvedValue({ inserted: [], insertedIds: [] }),
+}));
+vi.mock('../src/services/discoveryGeneration.js', () => ({
+  runCatalogueGeneration: mockRunCatalogueGeneration,
+}));
 
 let tmpDir;
 let userId;
@@ -98,6 +110,8 @@ beforeEach(() => {
   getDb().prepare('DELETE FROM discovery_destinations').run();
   getDb().prepare('DELETE FROM discovery_generation_daily').run();
   getDb().prepare('DELETE FROM days WHERE trip_id = ?').run(tripId);
+  mockRunCatalogueGeneration.mockClear();
+  resetInFlightGenerations();
 });
 
 function nowSql() {
@@ -158,28 +172,96 @@ describe('searchDiscoveryCatalogue', () => {
     expect(result.places[0].name).toBe('Yu Garden');
   });
 
-  it('returns stale state (places still returned) when last_generated_at is 8+ days old', async () => {
+  it('returns generating state (places still returned) when last_generated_at is 8+ days old, and fires a background generation with useExclusions=true', async () => {
     const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: staleSql(8) });
     seedPlace(dest.id, { category: 'culture', name: 'The Bund' });
 
     const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
 
-    expect(result.catalogueState).toBe('stale');
+    expect(result.catalogueState).toBe('generating');
     expect(result.places.map((p) => p.name)).toEqual(['The Bund']);
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].useExclusions).toBe(true);
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].destinationRow.id).toBe(dest.id);
   });
 
-  it('returns empty when no destination row exists for an in-scope destination', async () => {
+  it('returns generating state and fires a background generation (useExclusions=false, creates the destination row) when no destination row exists for an in-scope destination', async () => {
     const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
 
-    expect(result).toEqual({ catalogueState: 'empty', places: [] });
+    expect(result).toEqual({ catalogueState: 'generating', places: [] });
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].useExclusions).toBe(false);
+
+    const row = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code = ?').get('shanghai', 'CN');
+    expect(row).toBeDefined();
   });
 
-  it('returns empty when a destination row exists but has zero active places', async () => {
-    seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai' });
+  it('returns generating state and fires a background generation (useExclusions=false) when a destination row exists but has zero active places', async () => {
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai' });
 
     const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
 
-    expect(result).toEqual({ catalogueState: 'empty', places: [] });
+    expect(result).toEqual({ catalogueState: 'generating', places: [] });
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].useExclusions).toBe(false);
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].destinationRow.id).toBe(dest.id);
+  });
+
+  it('returns generation_capped and fires no generation when the destination is already at today\'s generation cap', async () => {
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: staleSql(8) });
+    seedPlace(dest.id, { category: 'culture', name: 'The Bund' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(result.catalogueState).toBe('generation_capped');
+    expect(result.places.map((p) => p.name)).toEqual(['The Bund']);
+    expect(mockRunCatalogueGeneration).not.toHaveBeenCalled();
+
+    const rows = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('shanghai');
+    expect(rows).toHaveLength(1);
+  });
+
+  it('a destination with no row can never be capped — an empty catalogue always kicks generation regardless of any unrelated daily-count row', async () => {
+    // No destination row exists at all for this city/country pair — the invariant
+    // (0 generations today by construction) must hold even if a stray daily-count
+    // row somehow existed for a different destination id.
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(result.catalogueState).toBe('generating');
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+  });
+
+  it('returns generating exactly once (single fired generation) when a second search for the same destination arrives while a kick is already in flight', async () => {
+    // Simulate an in-flight kick by never resolving the mocked generation call —
+    // the second search must see the in-flight key and not fire a second one.
+    let resolveGeneration;
+    mockRunCatalogueGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveGeneration = resolve; }));
+
+    const first = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    const second = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(first.catalogueState).toBe('generating');
+    expect(second.catalogueState).toBe('generating');
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+
+    resolveGeneration({ inserted: [], insertedIds: [] });
+  });
+
+  it('fresh search fires no generation and leaves the daily counter unchanged', async () => {
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Yu Garden' });
+
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(result.catalogueState).toBe('fresh');
+    expect(mockRunCatalogueGeneration).not.toHaveBeenCalled();
+    const dailyRow = getDb().prepare(
+      `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+    ).get(dest.id);
+    expect(dailyRow).toBeUndefined();
   });
 
   it('resolves an admin-suffix near match (day-derived "Kaohsiung City" scope vs searched "Kaohsiung")', async () => {
@@ -206,7 +288,7 @@ describe('searchDiscoveryCatalogue', () => {
     expect(result.places.map((p) => p.name)).toEqual(['Kuanzhai Alley']);
   });
 
-  it('does NOT adopt a country-coded row when two exist for the same city key (empty state)', async () => {
+  it('does NOT adopt a country-coded row when two exist for the same city key (generating state, fires a fresh-row generation)', async () => {
     insertDay('Chengdu');
     const cn = seedDestination({ cityKey: 'chengdu', countryCode: 'CN', displayName: 'Chengdu', lastGeneratedAt: nowSql() });
     seedPlace(cn.id, { category: 'food', name: 'Kuanzhai Alley' });
@@ -215,7 +297,9 @@ describe('searchDiscoveryCatalogue', () => {
 
     const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Chengdu' });
 
-    expect(result).toEqual({ catalogueState: 'empty', places: [] });
+    expect(result).toEqual({ catalogueState: 'generating', places: [] });
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].useExclusions).toBe(false);
   });
 
   it('returns out_of_scope for a destination not on the trip, and creates no catalogue row', async () => {

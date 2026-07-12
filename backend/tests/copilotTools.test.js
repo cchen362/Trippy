@@ -16,6 +16,11 @@ describe('PROPOSE_ITINERARY_CHANGES_TOOL', () => {
     const actionSchema = PROPOSE_ITINERARY_CHANGES_TOOL.input_schema.properties.operations.items.properties.action;
     expect(actionSchema.enum).toEqual(['add_stop', 'remove_stop', 'move_stop', 'update_stop']);
   });
+
+  it('exposes an op-level placeId for grounding an add_stop to a catalogue place (G5)', () => {
+    const placeIdSchema = PROPOSE_ITINERARY_CHANGES_TOOL.input_schema.properties.operations.items.properties.placeId;
+    expect(placeIdSchema.type).toBe('integer');
+  });
 });
 
 describe('SEARCH_DISCOVERY_CATALOGUE_TOOL', () => {

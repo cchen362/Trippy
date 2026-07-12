@@ -241,6 +241,12 @@ export function enforceCategoryCap(db, destinationId, cap = 45) {
   }
 }
 
+// The daily generation cap (Plan 7 Wave 2, decision 4). Plan 12 Wave 2 moved it
+// here from routes/discovery.js — mirroring CACHE_TTL_MS above — so the co-pilot's
+// background generation kick (services/copilotGrounding.js) can check it without
+// importing the route.
+export const MAX_GENERATIONS_PER_DESTINATION_PER_DAY = 3;
+
 // Per-UTC-day generation counter (Plan 7 Wave 2, decision 4: max 3 generations
 // per destination per day). generation_count on discovery_destinations is a
 // LIFETIME counter (backfilled destinations start at 1, not 0 — Wave 1 handoff),

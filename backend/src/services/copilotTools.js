@@ -54,6 +54,10 @@ export const PROPOSE_ITINERARY_CHANGES_TOOL = {
               },
               required: ['title', 'type'],
             },
+            placeId: {
+              type: 'integer',
+              description: 'add_stop only: id of a catalogue place returned by search_discovery_catalogue. Always include it when the stop comes from a search result so Trippy attaches the verified place data server-side; omit it for stops that did not come from a search.',
+            },
             stopId: {
               type: 'string',
               description: 'remove_stop / move_stop / update_stop: id of the target stop (use a real stopId from the itinerary).',

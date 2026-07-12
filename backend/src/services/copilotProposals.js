@@ -7,6 +7,7 @@ import {
   writeUpdateStop,
   deleteStop,
 } from './stops.js';
+import { buildTripScopes, listTripScopes } from './trips.js';
 
 // Plan 11 Wave 2 — server-side proposal records, validation, fingerprinting, atomic apply.
 //
@@ -29,7 +30,7 @@ const ALLOWED_UPDATE_FIELDS = ['title', 'type', 'time', 'note', 'duration', 'est
 // violation. This is what enforces the "exactly one of" shape the tool schema describes in
 // prose but cannot express structurally.
 const ALLOWED_OP_KEYS = {
-  add_stop: ['dayId', 'stop'],
+  add_stop: ['dayId', 'stop', 'placeId', 'placeVerified'],
   remove_stop: ['stopId'],
   move_stop: ['stopId', 'toDayId', 'position'],
   update_stop: ['stopId', 'fields'],
@@ -83,6 +84,29 @@ function stopMeta(stopId) {
     JOIN days d ON d.id = s.day_id
     WHERE s.id = ?
   `).get(stopId) ?? null;
+}
+
+// G5 grounded-add lookup: resolves an add_stop op's placeId against the catalogue and this
+// trip's own scopes. A place is in-scope iff its discovery_destinations row's city_key is
+// among the trip's scope canonical keys (buildTripScopes — the same trip-scope idiom
+// copilotGrounding.js uses to resolve a free-text destination, applied here to a place's
+// already-known destination instead). Returns a discriminated result so the caller (both
+// validation and apply's resolve phase) gets a distinct reason per failure mode.
+function lookupGroundedPlace(placeId, tripId) {
+  const db = getDb();
+  const place = db.prepare('SELECT * FROM discovery_places WHERE id = ?').get(placeId);
+  if (!place) return { kind: 'unknown' };
+  if (place.status !== 'active') return { kind: 'inactive' };
+
+  const destinationRow = db.prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(place.destination_id);
+  if (!destinationRow) return { kind: 'unknown' };
+
+  const dayRows = db.prepare('SELECT city, city_override FROM days WHERE trip_id = ?').all(tripId);
+  const scopes = buildTripScopes(dayRows, listTripScopes(tripId));
+  const inScope = scopes.some((scope) => scope.canonicalKey === destinationRow.city_key);
+  if (!inScope) return { kind: 'out_of_scope' };
+
+  return { kind: 'ok', place, destinationRow };
 }
 
 // Validates the whole proposal against the tool schema + trip membership + D6 + D7. Returns
@@ -143,6 +167,30 @@ export function validateProposalOperations(operations, tripId) {
       }
       if (!isNullableNumber(stop.lat) || !isNullableNumber(stop.lng)) {
         return { ok: false, reason: `${label} (add_stop) coordinates must be numbers or null.` };
+      }
+      // G5: placeVerified is a server-stamped display flag — it may only ride alongside
+      // a placeId (a model claiming verification with no place to back it up is a
+      // schema violation, not a real proposal).
+      if ('placeVerified' in op && !('placeId' in op)) {
+        return { ok: false, reason: `${label} (add_stop) placeVerified requires a placeId.` };
+      }
+      if ('placeVerified' in op && typeof op.placeVerified !== 'boolean') {
+        return { ok: false, reason: `${label} (add_stop) placeVerified must be a boolean.` };
+      }
+      if ('placeId' in op) {
+        if (!Number.isInteger(op.placeId)) {
+          return { ok: false, reason: `${label} (add_stop) placeId must be an integer.` };
+        }
+        const lookup = lookupGroundedPlace(op.placeId, tripId);
+        if (lookup.kind === 'unknown') {
+          return { ok: false, reason: `${label} (add_stop) references a catalogue place that does not exist.` };
+        }
+        if (lookup.kind === 'inactive') {
+          return { ok: false, reason: `${label} (add_stop) references a catalogue place that is no longer available.` };
+        }
+        if (lookup.kind === 'out_of_scope') {
+          return { ok: false, reason: `${label} (add_stop) references a place outside this trip's destinations.` };
+        }
       }
     } else if (op.action === 'remove_stop') {
       const meta = requireInTripStop(label, 'remove_stop', op.stopId, tripId);
@@ -271,15 +319,37 @@ function proposalToJson(row) {
   };
 }
 
+// G5: sanitizes + stamps every add_stop op's placeVerified flag BEFORE validation, on
+// copies of the caller's operations (never mutated in place). The server is the only
+// authority on verification — any model-supplied placeVerified is stripped first, then
+// re-stamped true only when the placeId resolves to a provenance === 'verified' catalogue
+// row. The stamped array is what gets validated, stored in operations_json, and returned,
+// so the SSE payload and listProposalsForTrip both carry the flag with no further plumbing
+// (Wave 4's badge hook).
+function sanitizeAndStampOperations(operations, tripId) {
+  if (!Array.isArray(operations)) return operations;
+  return operations.map((op) => {
+    if (!isPlainObject(op) || op.action !== 'add_stop') return op;
+    const { placeVerified: _modelClaimedVerified, ...rest } = op;
+    if (!Number.isInteger(rest.placeId)) return rest;
+    const lookup = lookupGroundedPlace(rest.placeId, tripId);
+    if (lookup.kind === 'ok' && lookup.place.provenance === 'verified') {
+      return { ...rest, placeVerified: true };
+    }
+    return rest;
+  });
+}
+
 // Creates the audit record the instant a tool call arrives. A schema/trip/booking/time
 // violation still produces a row — status 'invalid' with the reason — so the failure is
 // visible and auditable rather than a silent no-op (D12).
 export function createProposal({ tripId, userId, messageId, operations }) {
   const db = getDb();
-  const validation = validateProposalOperations(operations, tripId);
+  const sanitizedOperations = sanitizeAndStampOperations(operations, tripId);
+  const validation = validateProposalOperations(sanitizedOperations, tripId);
   const status = validation.ok ? 'pending' : 'invalid';
   const statusReason = validation.ok ? null : validation.reason;
-  const warnings = validation.ok ? computeLossWarnings(operations, tripId) : [];
+  const warnings = validation.ok ? computeLossWarnings(sanitizedOperations, tripId) : [];
   const fingerprint = computeTripFingerprint(tripId);
 
   const row = db.prepare(`
@@ -291,7 +361,7 @@ export function createProposal({ tripId, userId, messageId, operations }) {
     tripId,
     messageId ?? null,
     userId ?? null,
-    JSON.stringify(operations),
+    JSON.stringify(sanitizedOperations),
     JSON.stringify(warnings),
     fingerprint,
     status,
@@ -300,11 +370,55 @@ export function createProposal({ tripId, userId, messageId, operations }) {
 
   return {
     proposalId: row.id,
-    operations,
+    operations: sanitizedOperations,
     warnings,
     status,
     statusReason,
   };
+}
+
+// G5 grounded-add field mapping — mirrors DiscoveryPanel.jsx's handleAddToDay exactly
+// (frontend/src/components/discovery/DiscoveryPanel.jsx:411-469), so a co-pilot add backed
+// by a catalogue place produces the identical stop input a manual Discovery add would.
+// Preview-visible fields (title, type, time, note) come ONLY from the model's proposed
+// stop — the preview the user approved must be what gets applied; lat/lng are never taken
+// from the model. Catalogue coordinates are trusted only for provenance === 'verified' rows
+// — the same line serializePlaceRow draws (routes/discovery.js:47) — because those came
+// through our own resolver pipeline; any other row gets no coordinate fields at all, so
+// resolveCreateStopData's normal resolver runs against the location hints below.
+function buildGroundedStopInput(op, place, destinationRow) {
+  const stop = op.stop;
+  const aliases = JSON.parse(place.aliases_json || '[]');
+  const base = {
+    title: stop.title,
+    type: stop.type,
+    time: stop.time ?? null,
+    note: stop.note ?? null,
+    locationQuery: place.name,
+    locationCity: destinationRow.display_name,
+    locationCountry: destinationRow.country_code || null,
+    localName: place.local_name,
+    locationAliases: [place.local_name, ...aliases].filter(Boolean),
+    duration: place.estimated_duration,
+    source: 'discovery',
+    provenance: place.provenance,
+    photoQuery: place.photo_query,
+    sceneType: place.scene_type,
+  };
+
+  if (place.provenance === 'verified' && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+    return {
+      ...base,
+      lat: place.lat,
+      lng: place.lng,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      providerId: place.provider_place_id,
+    };
+  }
+
+  return base;
 }
 
 function markStatus(proposalId, status, statusReason, userId) {
@@ -380,7 +494,13 @@ export async function applyProposal({ tripId, userId, proposalId }) {
   // transaction, producing ready-to-write row data (fact 11).
   const resolvedAdds = [];
   for (const op of addOps) {
-    resolvedAdds.push(await resolveCreateStopData(userId, op.dayId, enrichCopilotStop(op.stop)));
+    if (Number.isInteger(op.placeId)) {
+      // Re-validation above already confirmed this resolves 'ok' (active, in-scope).
+      const { place, destinationRow } = lookupGroundedPlace(op.placeId, tripId);
+      resolvedAdds.push(await resolveCreateStopData(userId, op.dayId, buildGroundedStopInput(op, place, destinationRow)));
+    } else {
+      resolvedAdds.push(await resolveCreateStopData(userId, op.dayId, enrichCopilotStop(op.stop)));
+    }
   }
   const resolvedUpdates = [];
   for (const op of updateOps) {
