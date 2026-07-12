@@ -1,6 +1,7 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: IN PROGRESS — Waves 1-4 COMPLETE (2026-07-12/13). Wave 5 not started.**
+**Status: COMPLETE — all 5 waves shipped + deployed to production 2026-07-13 (commit `d72eb2d`).**
+Post-deploy health green; owner production click-through is the final confirmation gate (in progress).
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -408,7 +409,53 @@ panel.
 
 ## Wave 5 — QA, verification, deploy
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-13) — deployed to production at commit `d72eb2d`.** No code
+changes were needed: the full backend suite is green (595/595, 30 files) and the frontend
+build is clean, and every Wave 1-4 acceptance flow was verified live against the real
+Claude API. The agent local pass was run through a throwaway harness that drives the REAL
+`streamCopilotResponse` agentic loop (fake SSE `res`/`req`, real `toolExecutors`, real dev
+DB) rather than the Browser pane — the co-pilot panel's native `window.confirm()` on Clear
+(`CopilotPanel.jsx:181`) wedges the headless renderer, and Browser-pane screenshots time
+out on long threads (`trippy-copilot-local-qa`), so the harness is the reliable local
+substitute and the owner owns the visual pass. Harness results on the "Shanghai - Hangzhou
+(W3 verify)" trip:
+- **Grounding (G1):** "places to eat in Shanghai" → model called `search_discovery_catalogue`
+  and cited only real active/verified catalogue rows ("Jia Shanghai Restaurant", "Xiahai
+  Seafood Market"), zero invention.
+- **Out-of-scope decline (G4):** "attractions in Beijing" → declined WITHOUT a tool call
+  (queryCalls=0), named no places, offered to add Beijing.
+- **Empty→generate→fresh (G3):** empty Hangzhou search → `generating` + fire-and-forget
+  kick → 66 places ~110s later, daily counter exactly 1; re-ask → `fresh` (Lingyin Temple
+  et al.); two further read-only re-searches left the counter at 1 (read-only never touches
+  counters). Freshly-generated rows are `provenance:'unverified'` (verification drains async
+  after generation) — correct, and why the G5 badge gates on `verified`, not membership.
+- **Trip audit (G6) — the Wave 3 live-turn gap, now closed:** "audit my trip" → model
+  called `check_trip_health` (agentic round-trip, iterations=2), surfaced EXACTLY the one
+  real finding (activity dated outside the trip's active range) and invented nothing;
+  product voice, warning-led.
+- **Grounded-add badge (G5):** verified `placeId` → server-stamped `placeVerified:true`;
+  unverified `placeId` carrying a MODEL-CLAIMED `placeVerified:true` → flag stripped and not
+  re-added. Server is the sole authority (anti-overstatement guarantee holds).
+
+Owner local browser pass (real device, 375px) confirmed the visual layer: grounded-add
+verified badge renders; out-of-scope decline and trip-audit read correctly; the model even
+flagged a Hangzhou-place-onto-a-Shanghai-day geographic mismatch before adding rather than
+adding blindly. **Product decision (owner, 2026-07-13):** the transient tool-activity line
+is a *latency spinner*, not a per-turn trust badge — it is correctly wired
+(`CopilotPanel.jsx:264`, blinking gold dot + DM-Mono label) but does not visibly paint for
+the current query tools because both do zero I/O (in-memory catalogue filter / pure-function
+health checks; the empty-catalogue kick is fire-and-forget) so `started`/`done` batch into
+one render. Left as-is by design (purposeful motion only — it earns its keep only under real
+latency). No minimum-display-time added.
+
+**Deploy (2026-07-13):** pre-flight green (no new migrations since 028; `.gitignore` clean;
+no real secrets in the outgoing diff — only `'test-key'` fixtures; SSH up). Pushed `main`
+(`5d158a8..d72eb2d`), server `git pull` 7d6c904→d72eb2d, fresh pre-deploy DB backup taken
+(`trippy-2026-07-12-140002.db`), `docker compose up -d --build`, clean startup
+("running on :3001 [production]"), health `200 {"status":"ok","db":"connected"}`. Prod
+baseline for the read-only-search check: Shanghai catalogue fresh (genCount=2,
+lastGen 2026-07-09) — to be re-confirmed unchanged after the owner's grounded prod search.
+
 **Model recommendation: Opus medium solo (no coding subagents).** QA judgment,
 production deploy, and the owner click-script are orchestration work, not code volume;
 any fix found here is small enough to do inline or hand to one Sonnet subagent ad hoc.
