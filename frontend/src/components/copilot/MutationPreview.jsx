@@ -72,7 +72,7 @@ function OperationRow({ op, days, muted }) {
             to {formatDayLabel(days, op.dayId)}
           </span>
         </div>
-        <div style={{ marginTop: 4 }}>
+        <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {time ? (
             <span
               style={{
@@ -101,6 +101,22 @@ function OperationRow({ op, days, muted }) {
               }}
             >
               No time · Flexible
+            </span>
+          )}
+          {op.placeVerified === true && (
+            <span
+              style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 10,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: 'rgba(201,168,76,0.75)',
+                border: '1px solid rgba(201,168,76,0.35)',
+                borderRadius: 4,
+                padding: '2px 6px',
+              }}
+            >
+              Verified Place
             </span>
           )}
         </div>

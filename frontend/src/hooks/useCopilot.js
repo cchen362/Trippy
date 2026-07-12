@@ -18,6 +18,7 @@ export function useCopilot(tripId) {
   const [messages, setMessages] = useState([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [activeTool, setActiveTool] = useState(null);
   const [proposals, setProposals] = useState([]);
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
@@ -50,6 +51,7 @@ export function useCopilot(tripId) {
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingText('');
+    setActiveTool(null);
     setError(null);
 
     const controller = new AbortController();
@@ -65,6 +67,8 @@ export function useCopilot(tripId) {
           setStreamingText(fullText);
         } else if (chunk.type === 'proposal') {
           proposalPayload = chunk;
+        } else if (chunk.type === 'tool') {
+          setActiveTool(chunk.state === 'started' ? chunk.tool : null);
         } else if (chunk.type === 'error') {
           terminated = true;
           setError(new Error(chunk.message));
@@ -115,6 +119,7 @@ export function useCopilot(tripId) {
     } finally {
       setStreaming(false);
       setStreamingText('');
+      setActiveTool(null);
       abortRef.current = null;
     }
   }, [tripId, streaming, user]);
@@ -168,7 +173,7 @@ export function useCopilot(tripId) {
   }, [tripId]);
 
   return {
-    messages, streaming, streamingText, proposals, error,
+    messages, streaming, streamingText, activeTool, proposals, error,
     send, applyProposal, rejectProposal, cancel, clear,
   };
 }

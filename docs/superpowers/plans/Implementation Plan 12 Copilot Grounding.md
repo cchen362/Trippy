@@ -1,6 +1,6 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: IN PROGRESS — Waves 1-3 COMPLETE (2026-07-12/13). Waves 4-5 not started.**
+**Status: IN PROGRESS — Waves 1-4 COMPLETE (2026-07-12/13). Wave 5 not started.**
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -361,7 +361,31 @@ arrive as ordinary proposals; booking findings point to Logistics.
 
 ## Wave 4 — Panel surfacing (frontend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-13).** Both pieces shipped exactly as designed, no backend
+changes needed (the `placeVerified` hook was already emitted per Wave 2). `useCopilot.js`
+gained `activeTool` state: set on `{ type: 'tool', state: 'started' }`, cleared on
+`'done'` and defensively in the `finally` block (abort/error safety) — mirrors the
+existing `streamingText` lifecycle exactly. `CopilotPanel.jsx` renders a DM Mono
+activity line ("Searching your Discovery picks…" / "Checking your trip…") right before
+the streaming message bubble, gated purely on `activeTool`. `MutationPreview.jsx`'s
+`add_stop` `OperationRow` gained a "VERIFIED PLACE" badge next to the existing time
+badge, copying its exact idiom (DM Mono, gold border `rgba(201,168,76,0.35)`), gated on
+`op.placeVerified === true`. `npm run build` clean. Live browser verification on the
+"Shanghai - Hangzhou (W3 verify)" QA trip against the real model (dev servers were
+already running under another session on the same working tree, so edits reached them
+via HMR — verified by pointing the Browser pane directly at `localhost:5174`): captured
+raw SSE responses via network inspection for a `search_discovery_catalogue` turn and a
+`check_trip_health` turn, both showing the exact `{"type":"tool",...started/done}` event
+pairs the frontend code parses; a grounded add of an `unverified`-provenance catalogue
+place (Wagas, confirmed via direct DB query) correctly produced no `placeVerified` flag
+and no badge; a grounded add of a `verified`-provenance place (Oriental Pearl Tower
+observation deck) produced `"placeVerified":true` in the SSE payload and the badge
+rendered in the DOM with the correct gold styling (confirmed via computed-style
+inspection). The transient activity line's own on-screen appearance could not be
+screenshotted directly — Browser-pane screenshots time out on this long-running QA
+thread (a known limitation, see `trippy-copilot-local-qa` memory) — but the SSE
+event contract it consumes is proven correct at the network level and the state-handling
+code was reviewed line by line. Nothing rendered outside the existing panel (G7 intact).
 **Model recommendation: Sonnet medium solo.** Two small additive UI pieces inside an
 existing component set, with the design idioms (DM Mono badge/label) already
 established by Plan 11 Wave 3; browser-verify at 375px per standing rules.

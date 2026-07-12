@@ -4,11 +4,17 @@ import CopilotMessage from './CopilotMessage.jsx';
 import MutationPreview from './MutationPreview.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 
+const TOOL_ACTIVITY_LABELS = {
+  search_discovery_catalogue: 'Searching your Discovery picks…',
+  check_trip_health: 'Checking your trip…',
+};
+
 export default function CopilotPanel({ copilot, days, onClose, onMutationApplied, ownerId }) {
   const {
     messages,
     streaming,
     streamingText,
+    activeTool,
     proposals,
     error,
     send,
@@ -254,6 +260,24 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
             ))}
           </div>
         ))}
+
+        {activeTool && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 11,
+              letterSpacing: '0.06em',
+              color: 'rgba(240,234,216,0.45)',
+              padding: '2px 0 8px',
+            }}
+          >
+            <span style={{ animation: 'copilot-blink 1s step-end infinite', color: '#c9a84c' }}>●</span>
+            {TOOL_ACTIVITY_LABELS[activeTool] || 'Working…'}
+          </div>
+        )}
 
         {streamingText && (
           <CopilotMessage
