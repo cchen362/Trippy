@@ -1,6 +1,6 @@
 # Implementation Plan 13 — Co-pilot Integration (Bottom Sheet, Contextual Entry Points, Seed Prompts)
 
-**Status: READY FOR IMPLEMENTATION (finalized 2026-07-12). No waves started. Wave 1 (design pass) gates all implementation waves.**
+**Status: WAVE 1 COMPLETE (2026-07-12) — mockups owner-approved, entry-point set signed off. Waves 2–4 unblocked.**
 
 **Origin:** Stage 3 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -9,7 +9,7 @@
 [Implementation Plan 11](Implementation%20Plan%2011%20Copilot%20Trust%20Foundation.md),
 CLOSED in production at `7d6c904`. Stage 2 (grounding) is
 [Implementation Plan 12](Implementation%20Plan%2012%20Copilot%20Grounding.md),
-finalized at `b538b37`, **no waves started** — see "Dependency posture" below.
+finalized at `b538b37`, Wave 1 implemented at `4abcb61` — see "Dependency posture" below.
 
 **Goal:** make the co-pilot feel like part of the product instead of a detached
 full-screen chat. Three deliverables: (1) the full-screen panel becomes a **bottom
@@ -161,7 +161,15 @@ Confirmed in current `main` (`7d6c904`); implementation sessions must not re-der
 
 ## Wave 1 — Design pass: mockups at 375px (gates all other waves)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-12). Owner approved the mockups and the v1 entry-point set (EP-1 stop
+card + EP-2 Discovery suggestion; all exclusions confirmed). Deliverable:
+`docs/superpowers/mockups/plan13-wave1-copilot-sheet-mockups.html` (self-contained, fonts inlined;
+also published as a Claude artifact). One deviation from the candidate design, owner-decided at
+sign-off: EP-1 "Ask co-pilot →" gets its OWN ROW above the Remove/Move/Photo action row — a fourth
+item wraps the row at 375px and collides visually with the Unsplash credit line directly below
+(`StopCard.jsx:405-436`); Wave 4 must implement the own-row placement. Recommendations R1–R4
+(no scrim at partial / non-modal partial with BottomNav covered / keyboard never resizes the sheet /
+structural edge: hairline + shadow + 16px radius) are ratified and bind Waves 2–4.**
 **Model recommendation: Opus (or Fable) medium solo — no coding subagents.**
 This wave is pure design taste against a strict spec with an owner sign-off gate;
 volume is tiny and delegating it to a cheaper model is where AI-slop risk lives.
