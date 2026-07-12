@@ -7,10 +7,12 @@ description: Deploy Trippy to the Debian production server. Use when the user sa
 
 OPS procedure — no app code changes in a deploy session. If the working tree has uncommitted changes, stop and resolve that first (commit or explicitly set aside with the user).
 
-## Server facts (verified 2026-07; re-verify if anything looks off)
+## Server facts (verified 2026-07-09; re-verify if anything looks off)
 - SSH: `ssh chee@100.94.82.35` (key auth works from this machine; run from `C:\Users\cchen362`)
 - Project dir on server: `~/Trippy` (capital T), a git clone of this repo
-- Container: `trippy_trippy_1`
+- Container: `trippy-trippy-1` (hyphens, `docker compose` v2 naming — not `trippy_trippy_1`)
+- Rebuild command: `docker compose up -d --build` (v2 syntax, no dash)
+- App port: host port **6768** — verify with `curl http://localhost:6768/api/health` on the server. Host port 3001 is a *different* app (medical-companion); hitting it returns a misleading "Authentication required" response that looks like Trippy but isn't.
 - DB volume: `~/Trippy/data/trippy.db` — SQLite WAL mode, `-shm`/`-wal` files present. The DB lives OUTSIDE the container; a rebuild must never touch it.
 - Daily backup cron exists on the server — confirm it's still active while you're there.
 
