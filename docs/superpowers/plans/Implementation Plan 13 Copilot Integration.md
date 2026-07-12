@@ -206,7 +206,13 @@ mockups as its visual source of truth. No app code changed.
 
 ## Wave 2 — Bottom sheet presentation (frontend)
 
-**Status: NOT STARTED. Blocked on Wave 1 approval.**
+**Status: NOT STARTED — UNBLOCKED (Wave 1 approved 2026-07-12). NOTE: Plan 12 has since
+shipped to production (2026-07-13, `d72eb2d`), so this wave lands SECOND — the coordination
+rule applies: rebase onto current `main` and PRESERVE Plan 12 Wave 4's tool-activity line
+and verified-place badge in `CopilotPanel.jsx`/`useCopilot.js`. The §0 facts were traced at
+`7d6c904` (pre-Plan-12); re-verify the `CopilotPanel.jsx`/`useCopilot.js` line numbers in
+facts 1/4/12/13 against current `main` before relying on them — Plan 12 Wave 4 edited both
+files.**
 **Model recommendation: Opus medium orchestrator + one Sonnet coding subagent.**
 Cross-form-factor gesture/motion work is the plan's highest UX-risk change and the
 exact bug class the owner has corrected before (gesture porting, uninitiated
