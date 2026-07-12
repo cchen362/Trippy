@@ -213,7 +213,7 @@ Escape closes. Plan 11 + Plan 12 flows all render inside the sheet. `CopilotPane
 rewritten as the two-state sheet; `useCopilot.js` left UNTOUCHED (the sheet is pure
 presentation — the tool-activity line and verified-place badge re-parent unchanged, which is
 the cleanest way to honor the coordination rule). Shared `useMediaQuery` hook extracted from
-`Timeline.jsx`. Commit: `33b4758`. See "Wave 2 implementation notes" below.**
+`Timeline.jsx`. Commit: `3f42a75`. See "Wave 2 implementation notes" below.**
 
 **Wave 2 implementation notes (for Waves 3–4):**
 - The sheet is TWO nested `motion.div`s, and this split is load-bearing: the OUTER owns the
