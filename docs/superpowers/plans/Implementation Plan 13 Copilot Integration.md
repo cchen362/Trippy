@@ -206,13 +206,35 @@ mockups as its visual source of truth. No app code changed.
 
 ## Wave 2 — Bottom sheet presentation (frontend)
 
-**Status: NOT STARTED — UNBLOCKED (Wave 1 approved 2026-07-12). NOTE: Plan 12 has since
-shipped to production (2026-07-13, `d72eb2d`), so this wave lands SECOND — the coordination
-rule applies: rebase onto current `main` and PRESERVE Plan 12 Wave 4's tool-activity line
-and verified-place badge in `CopilotPanel.jsx`/`useCopilot.js`. The §0 facts were traced at
-`7d6c904` (pre-Plan-12); re-verify the `CopilotPanel.jsx`/`useCopilot.js` line numbers in
-facts 1/4/12/13 against current `main` before relying on them — Plan 12 Wave 4 edited both
-files.**
+**Status: COMPLETE (2026-07-13). Owner-verified in a real browser at desktop + 375px mobile:
+partial sheet with plan readable behind, drag-up → full screen, drag-down → partial,
+drag-down-from-partial → dismiss, desktop `^`/`v` expand-collapse control (no drag handle),
+Escape closes. Plan 11 + Plan 12 flows all render inside the sheet. `CopilotPanel.jsx`
+rewritten as the two-state sheet; `useCopilot.js` left UNTOUCHED (the sheet is pure
+presentation — the tool-activity line and verified-place badge re-parent unchanged, which is
+the cleanest way to honor the coordination rule). Shared `useMediaQuery` hook extracted from
+`Timeline.jsx`. Commit: `33b4758`. See "Wave 2 implementation notes" below.**
+
+**Wave 2 implementation notes (for Waves 3–4):**
+- The sheet is TWO nested `motion.div`s, and this split is load-bearing: the OUTER owns the
+  framer y-slide (entrance/exit) + height morph; the INNER owns the mobile drag gesture
+  (`useDragControls`, handle-initiated). They MUST stay separate — `drag="y"` and
+  `animate={{ y }}` on the same element makes framer's drag swallow the entire `animate`
+  object (sheet never slides in). Also: never put a CSS `transition` string in a framer
+  element's `style` — it fights framer over the inline transform and freezes the slide.
+- Sheet height = `Math.round(window.innerHeight * ratio)` (px, not `vh`) so framer animates a
+  numeric height reliably and the keyboard (which shrinks only `visualViewport`, not
+  `innerHeight`) never changes it. Ratios: mobile 0.58/1.0, desktop 0.56/0.92.
+- R3 keyboard rule is `paddingBottom: kbInset` (from the VisualViewport API) on the inner
+  sheet with global `box-sizing: border-box`: the fixed height holds, the thread shrinks, the
+  input rides above the keyboard — the top edge never moves.
+- Form-factor split is `useMediaQuery('(min-width: 640px)')` (Tailwind `sm`, matches the
+  mockup's "Desktop ≥ sm"). `isDesktop` → no drag, always-on expand control; else → drag
+  handle, expand control only when expanded.
+- **Verification caveat:** the in-app Browser pane renders the tab as `document.hidden`, which
+  pauses `requestAnimationFrame`, so framer animations freeze at frame 0 there. Agent QA was
+  done on settled/forced states; the owner confirmed the live animations in a focused browser.
+  Future waves touching this component should expect the same and lean on owner motion checks.
 **Model recommendation: Opus medium orchestrator + one Sonnet coding subagent.**
 Cross-form-factor gesture/motion work is the plan's highest UX-risk change and the
 exact bug class the owner has corrected before (gesture porting, uninitiated
