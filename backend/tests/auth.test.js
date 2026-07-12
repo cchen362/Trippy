@@ -8,6 +8,7 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import authRoutes from '../src/routes/auth.js';
+import { AUTH_RATE_LIMIT } from '../src/middleware/rateLimit.js';
 
 let tmpDir;
 
@@ -125,7 +126,7 @@ describe('rate limiting on /api/auth', () => {
 
   it('returns 429 once the request cap is exceeded', async () => {
     let lastStatus;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < AUTH_RATE_LIMIT + 1; i++) {
       const res = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
