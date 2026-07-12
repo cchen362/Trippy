@@ -1,7 +1,9 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: COMPLETE — all 5 waves shipped + deployed to production 2026-07-13 (commit `d72eb2d`).**
-Post-deploy health green; owner production click-through is the final confirmation gate (in progress).
+**Status: CLOSED — all 5 waves shipped + deployed to production 2026-07-13 (commit `d72eb2d`), owner-verified.**
+Post-deploy health green; owner production click-through passed (grounded rec, verified-badge add,
+out-of-scope decline, trip audit); read-only-search check confirmed in prod (Shanghai genCount stayed 2,
+lastGen 2026-07-09 unchanged after a grounded search — no generation fired, counters untouched).
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
