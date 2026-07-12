@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
-import { PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL } from './copilotTools.js';
+import { PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL } from './copilotTools.js';
 
 let _client = null;
 
@@ -383,9 +383,8 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
 }
 
 // Query tool_use names the loop below executes server-side and feeds back as a tool_result —
-// never terminal. Wave 3 adds check_trip_health here (and to the tools array below); the loop
-// itself is already generic over this set.
-const QUERY_TOOL_NAMES = new Set([SEARCH_DISCOVERY_CATALOGUE_TOOL.name]);
+// never terminal. The loop itself is already generic over this set.
+const QUERY_TOOL_NAMES = new Set([SEARCH_DISCOVERY_CATALOGUE_TOOL.name, CHECK_TRIP_HEALTH_TOOL.name]);
 
 // Max EXECUTED query-tool calls per user turn (G2). Once hit, further query tool_use blocks
 // are answered with a budget-notice tool_result instead of being executed — the model gets one
@@ -452,7 +451,12 @@ Stops carry one of four kinds of timing. Respect them:
 - search_discovery_catalogue only works for destinations already on this trip. If the traveller asks for suggestions somewhere else, do not call the tool — decline warmly and suggest adding that destination to the trip first.
 - Relay each search's catalogueState honestly. "fresh": recommend from the returned places. "generating": relay any returned places honestly (there may be none), tell the traveller Trippy is gathering fresh picks for that destination in the background and to ask again in about a minute, and never fill the gap from your own knowledge. "generation_capped": say plainly that this destination's suggestions have already been refreshed the maximum number of times today, and work only with the returned places. "out_of_scope": decline as above.
 - You may refine and re-search within a small per-turn budget. If told the budget is used up, answer with what you already have.
-- When proposing an add_stop for a place that came from a search result, include that place's placeId in the operation so Trippy attaches the verified place details.`;
+- When proposing an add_stop for a place that came from a search result, include that place's placeId in the operation so Trippy attaches the verified place details.
+
+## Trip-health audits
+- When the traveller asks you to audit the trip, find gaps, or check for contradictions, call check_trip_health (optionally with a dayId to scope it to one day) rather than trying to spot these patterns yourself by reading the itinerary JSON — it runs deterministic checks you cannot replicate by eye.
+- Explain findings in warm, plain language, leading with warning-level findings over info-level ones. A result with no findings means the trip is clean — say so plainly, do not invent additional concerns.
+- Where a finding is fixable on a non-booking stop (retiming, moving, or removing it), offer to fix it through propose_itinerary_changes as usual. Never propose changes to a booking-linked stop or its time — for any finding about one, tell the traveller to manage it in Logistics.`;
 
   let fullText = '';
   let streamDone = false;
@@ -501,7 +505,7 @@ Stops carry one of four kinds of timing. Respect them:
         max_tokens: 4096,
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
-        tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL],
+        tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL],
       });
       currentStream = stream;
 

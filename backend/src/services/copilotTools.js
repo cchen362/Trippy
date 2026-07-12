@@ -131,6 +131,29 @@ export const SEARCH_DISCOVERY_CATALOGUE_TOOL = {
   },
 };
 
+// Read-only query tool (Plan 12 Wave 3, G6). Runs deterministic checks over the trip
+// (services/tripHealth.js) and returns findings only — no LLM in detection. Executed
+// server-side via the same tool_result round-trip as search_discovery_catalogue.
+export const CHECK_TRIP_HEALTH_TOOL = {
+  name: 'check_trip_health',
+  description:
+    "Run Trippy's deterministic trip-health checks: activity stops scheduled outside the " +
+    'trip\'s active date range, timed stops that collide on the same day, nights with no ' +
+    'hotel booking, stops with an unresolved map location, and booking-linked stops whose ' +
+    "displayed time has drifted from their booking. Call this when the traveller asks you " +
+    "to audit the trip, find gaps, or check for contradictions — don't try to spot these " +
+    'patterns yourself by reading the itinerary JSON.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      dayId: {
+        type: 'string',
+        description: 'Optional: limit the check to a single day (use a real dayId from the itinerary). Omit to check the whole trip.',
+      },
+    },
+  },
+};
+
 // D9 minimized co-pilot context. Derived from getTripDetail(); KEEPS confirmationRef and
 // marks booking-linked stops (so the model can honor the D6 off-limits rule), DROPS booking
 // document metadata, details_json, coordinates, photo/resolution noise, and everything else

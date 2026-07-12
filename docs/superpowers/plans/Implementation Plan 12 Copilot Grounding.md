@@ -1,6 +1,6 @@
 # Implementation Plan 12 — Co-pilot Grounding (Catalogue Search Tool, Empty-Catalogue Policy, Trip-Health Checks)
 
-**Status: IN PROGRESS — Waves 1-2 COMPLETE (2026-07-12). Waves 3-5 not started.**
+**Status: IN PROGRESS — Waves 1-3 COMPLETE (2026-07-12/13). Waves 4-5 not started.**
 
 **Origin:** Stage 2 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -309,7 +309,32 @@ catalogue row's verified identity without any client/model-supplied coordinates.
 
 ## Wave 3 — Deterministic trip-health checks (backend)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-13).** All four steps shipped: traced the booking→stop time
+mapping in `services/stops.js`'s `inferBookingStop` (hotel bookings default to 15:00 when
+the booking has a date but no time-of-day; every other type requires a full ISO datetime
+or no stop is ever materialized) before writing the drift check, so check 5 reuses that
+exact rule rather than inventing a second one. New `services/tripHealth.js`:
+`runTripHealthChecks(tripDetail, { dayId? })` — five pure functions (no DB, no model
+calls) implementing the G6 check set: activity stops outside the trip's active range
+(widened to the first/last day carrying a transit stop when any exist, else the trip's
+own dates), overlapping timed anchors (exact clock-time collisions only — no duration
+inference), hotel-night gaps (nights with no covering hotel booking span), unresolved
+stop locations, and booking-linked stop time drift. Exposed as the `check_trip_health`
+read-only query tool (`copilotTools.js` schema, optional `dayId` filter) through the
+Wave 1 agentic loop — `claude.js`'s `QUERY_TOOL_NAMES`/tools array and system prompt
+gained a "Trip-health audits" section (run the tool rather than eyeballing the itinerary
+JSON; lead with warnings over info; never edit booking-linked stops, redirect those
+findings to Logistics — D6 stays law); executor wired in `routes/copilot.js`'s
+`toolExecutors` map, same `getTripDetail()`-closure shape as `search_discovery_catalogue`.
+17 new tests in `tripHealth.test.js` (one fixture per check, positive + clean-negative,
+plus boundary cases: no bookings, single-day trip, all-untimed days, dayId scoping) +
+1 new `copilotTools.test.js` assertion for the tool schema. Full backend suite green
+595/595 (30 files) — the Wave 2 baseline flake did not reproduce this run. Deviations
+from design: none. Not verified this session: a live "audit my trip" turn through the
+real model — the shared local dev server (port 3002) was already in use by a concurrent
+session, and mutating its DB with test messages/trips risked polluting that session's
+state; the tool-calling/prompt wiring itself follows the Wave 1/2 pattern exactly and is
+otherwise untested end-to-end. Wave 5's QA pass should cover this live turn.
 **Model recommendation: Sonnet medium solo.** Pure functions over the trip detail with
 a fully specified check set and test matrix; the only judgment call (the booking-time
 mapping trace, step 1) is bounded and documented.

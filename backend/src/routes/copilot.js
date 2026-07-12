@@ -6,6 +6,7 @@ import { getTripDetail } from '../services/trips.js';
 import { streamCopilotResponse } from '../services/claude.js';
 import { copilotTripContext } from '../services/copilotTools.js';
 import { searchDiscoveryCatalogue } from '../services/copilotGrounding.js';
+import { runTripHealthChecks } from '../services/tripHealth.js';
 import {
   createProposal,
   applyProposal,
@@ -133,6 +134,7 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
   // actually does (DB/catalogue reads) so claude.js stays DB-free, same pattern as persistTurn.
   const toolExecutors = {
     search_discovery_catalogue: (input) => searchDiscoveryCatalogue(tripDetail, input),
+    check_trip_health: (input) => ({ findings: runTripHealthChecks(tripDetail, input || {}) }),
   };
 
   // Stream response — SSE headers are set inside streamCopilotResponse. Errors during

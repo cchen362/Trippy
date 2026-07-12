@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PROPOSE_ITINERARY_CHANGES_TOOL,
   SEARCH_DISCOVERY_CATALOGUE_TOOL,
+  CHECK_TRIP_HEALTH_TOOL,
   copilotTripContext,
 } from '../src/services/copilotTools.js';
 
@@ -33,6 +34,14 @@ describe('SEARCH_DISCOVERY_CATALOGUE_TOOL', () => {
     expect(SEARCH_DISCOVERY_CATALOGUE_TOOL.input_schema.properties.category.enum).toEqual([
       'essentials', 'food', 'nature', 'culture', 'nightlife', 'architecture', 'wellness', 'hidden_gems',
     ]);
+  });
+});
+
+describe('CHECK_TRIP_HEALTH_TOOL', () => {
+  it('is named check_trip_health with an optional dayId input and no required fields', () => {
+    expect(CHECK_TRIP_HEALTH_TOOL.name).toBe('check_trip_health');
+    expect(CHECK_TRIP_HEALTH_TOOL.input_schema.properties.dayId.type).toBe('string');
+    expect(CHECK_TRIP_HEALTH_TOOL.input_schema.required).toBeUndefined();
   });
 });
 
