@@ -212,6 +212,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
 
       {/* Outer: presence slide + height morph via framer. No drag, no CSS transition. */}
       <motion.div
+        data-testid="copilot-sheet"
         initial={{ y: '100%', height: currentHeight }}
         animate={{ y: 0, height: currentHeight }}
         exit={{ y: '100%' }}
@@ -222,7 +223,8 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
           right: 0,
           bottom: 0,
           zIndex: 200,
-          width: isDesktop ? 'min(640px, calc(100% - 48px))' : '100%',
+          width: isDesktop ? 'calc(100% - 48px)' : '100%',
+          maxWidth: isDesktop ? 800 : undefined,
           marginInline: isDesktop ? 'auto' : undefined,
           display: 'flex',
           flexDirection: 'column',
@@ -412,7 +414,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '20px 16px',
+            padding: isDesktop ? '24px 24px' : '20px 16px',
           }}
         >
           {isEmpty && (
@@ -450,7 +452,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                     cursor: 'pointer',
                     textAlign: 'left',
                     fontFamily: "'Cormorant Garamond', serif",
-                    fontSize: 16.5,
+                    fontSize: isDesktop ? 18 : 16.5,
                     lineHeight: 1.45,
                   }}
                 >
@@ -485,6 +487,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                 authorLabel={showAuthors ? msg.authorName : null}
                 context={msg.context}
                 days={days}
+                isDesktop={isDesktop}
               />
               {(proposalsByMessageId.get(msg.id) || []).map((p) => (
                 <MutationPreview
@@ -522,6 +525,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
               role="assistant"
               content={streamingText}
               isStreaming={true}
+              isDesktop={isDesktop}
             />
           )}
 
@@ -580,7 +584,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
               background: 'transparent',
               border: 'none',
               fontFamily: "'Cormorant Garamond', serif",
-              fontSize: 16,
+              fontSize: isDesktop ? 18 : 16,
               color: '#f0ead8',
               padding: '4px 0',
               opacity: streaming ? 0.5 : 1,

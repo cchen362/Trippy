@@ -39,4 +39,12 @@ describe('CopilotMessage context chip', () => {
     expect(screen.queryByTestId('copilot-context-chip')).not.toBeInTheDocument();
     expect(screen.getByText('Plain turn')).toBeInTheDocument();
   });
+
+  it('keeps mobile type compact and enlarges desktop conversation type', () => {
+    const { rerender } = render(<CopilotMessage role="assistant" content="Responsive response" />);
+    expect(screen.getByText('Responsive response')).toHaveStyle({ fontSize: '15px' });
+
+    rerender(<CopilotMessage role="assistant" content="Responsive response" isDesktop />);
+    expect(screen.getByText('Responsive response')).toHaveStyle({ fontSize: '18px' });
+  });
 });

@@ -8,14 +8,19 @@ vi.mock('../../context/AuthContext.jsx', () => ({
   useAuth: () => ({ user: { id: 'owner-1' } }),
 }));
 
+const { mockUseMediaQuery } = vi.hoisted(() => ({
+  mockUseMediaQuery: vi.fn(() => false),
+}));
+
 vi.mock('../../hooks/useMediaQuery.js', () => ({
-  default: () => false,
+  default: mockUseMediaQuery,
 }));
 
 afterEach(cleanup);
 
 beforeEach(() => {
   HTMLElement.prototype.scrollTo = vi.fn();
+  mockUseMediaQuery.mockReturnValue(false);
 });
 
 function makeCopilot(overrides = {}) {
@@ -82,5 +87,27 @@ describe('CopilotPanel grounded empty state', () => {
     });
     expect(screen.queryByText('Start from your trip')).not.toBeInTheDocument();
     expect(screen.getByText('Existing turn')).toBeInTheDocument();
+  });
+});
+
+describe('CopilotPanel desktop readability', () => {
+  it('uses the wider desktop sheet and larger conversation type', () => {
+    mockUseMediaQuery.mockReturnValue(true);
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{ id: 'm1', role: 'assistant', content: 'Readable desktop response', context: null }],
+      }),
+    });
+
+    expect(screen.getByTestId('copilot-sheet')).toHaveStyle({
+      width: 'calc(100% - 48px)',
+      maxWidth: '800px',
+    });
+    expect(screen.getByText('Readable desktop response')).toHaveStyle({
+      fontSize: '18px',
+    });
+    expect(screen.getByPlaceholderText('Message your co-pilot...')).toHaveStyle({
+      fontSize: '18px',
+    });
   });
 });

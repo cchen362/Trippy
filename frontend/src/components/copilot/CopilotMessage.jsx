@@ -2,7 +2,7 @@ import { formatContextChip } from '../../utils/copilotContext.js';
 
 // Renders assistant markdown (bold, italic, headings, hr, inline code) and strips
 // the trailing ```json mutation block (already shown as Proposed Changes card).
-function renderMarkdown(text) {
+function renderMarkdown(text, isDesktop) {
   // Strip the last fenced JSON block — it's surfaced as the Proposed Changes card
   const stripped = text.replace(/```json[\s\S]*?```\s*$/, '').trimEnd();
 
@@ -33,7 +33,9 @@ function renderMarkdown(text) {
     const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const fontSize = level === 1 ? 16 : level === 2 ? 14 : 13;
+      const fontSize = isDesktop
+        ? (level === 1 ? 19 : level === 2 ? 17 : 16)
+        : (level === 1 ? 16 : level === 2 ? 14 : 13);
       elements.push(
         <div key={i} style={{ fontFamily: "'DM Mono', monospace", fontSize, letterSpacing: '0.06em', color: '#f0ead8', marginTop: 10, marginBottom: 2 }}>
           {inlineRender(headingMatch[2])}
@@ -83,7 +85,7 @@ function inlineRender(text) {
   return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts;
 }
 
-export default function CopilotMessage({ role, content, isStreaming, authorLabel, context, days }) {
+export default function CopilotMessage({ role, content, isStreaming, authorLabel, context, days, isDesktop = false }) {
   const isUser = role === 'user';
   const contextLabel = isUser ? formatContextChip(context, days) : null;
 
@@ -96,12 +98,12 @@ export default function CopilotMessage({ role, content, isStreaming, authorLabel
         padding: '10px 14px',
         maxWidth: isUser ? undefined : '85%',
         fontFamily: "'Cormorant Garamond', serif",
-        fontSize: 15,
+        fontSize: isDesktop ? 18 : 15,
         lineHeight: 1.6,
         wordBreak: 'break-word',
       }}
     >
-      {isUser ? content : renderMarkdown(content)}
+      {isUser ? content : renderMarkdown(content, isDesktop)}
       {isStreaming && (
         <span
           style={{
