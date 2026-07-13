@@ -268,7 +268,14 @@ no drag handle; all Plan 11 Wave 3 acceptance flows still pass inside the sheet.
 
 ## Wave 3 — Context-aware FAB and context passing (frontend + backend)
 
-**Status: NOT STARTED. Blocked on Wave 1 approval.**
+**Status: COMPLETE (2026-07-14). Context-aware FAB, validated/resolved user-turn
+context injection, migration 029 persistence/history, and the approved context chip
+implemented at `3583398`. No code-scope deviations. QA-data note: the dedicated trip's
+current Day 3 resolves to Shanghai rather than the older Hangzhou example; browser acceptance
+passed against that live Day 3, including a grounded reply, chip persistence after refresh,
+and the unchanged no-context row. A captured real Anthropic payload confirmed the bracketed
+line was present in the user turn and absent from the ephemeral-cached system block. Backend
+600 tests and frontend 104 tests passed; frontend production build clean.**
 **Model recommendation: Sonnet medium solo.**
 Fully specified additive plumbing — the injection point, cache constraint, and
 schema are pinned in §0; no design judgment beyond the approved chip mockup.
