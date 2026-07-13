@@ -1,6 +1,6 @@
 # Implementation Plan 13 — Co-pilot Integration (Bottom Sheet, Contextual Entry Points, Seed Prompts)
 
-**Status: WAVES 1–4 COMPLETE (2026-07-14). Wave 5 final QA and deployment remain. Production is still on the pre-Plan-13 release.**
+**Status: CLOSED IN PRODUCTION (2026-07-14). Waves 1–5 complete; application release deployed at `a1d6270`. Owner-only authenticated production browser confirmation remains as the documented post-deploy handoff, not an implementation blocker.**
 
 **Origin:** Stage 3 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -358,7 +358,52 @@ object; no new UI renders anywhere when the sheet is closed.
 
 ## Wave 5 — QA, verification, deploy
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-14). Application release `a1d6270` is live in production.**
+
+**Automated and migration evidence:** backend 606/606 tests across 30 files;
+frontend 119/119 tests across 23 files; production build clean (2,233 modules,
+PWA service worker generated). Migration 029 was reapplied on a coherent copy
+of the real local database after reconstructing its pre-029 schema: all 11
+co-pilot messages survived, `context_json` was restored, and
+`PRAGMA integrity_check` returned `ok`.
+
+**Local browser evidence:** the dedicated `Shanghai - Hangzhou (W3 verify)` QA
+trip passed at 375px first and then 1280px desktop. Mobile covered the 58%
+partial sheet, plan visibility, drag expand/collapse/dismiss, input focus,
+deterministic real-trip seeds, stop and Discovery entry points, underlying
+Plan/Discovery state preservation, visible context chips, grounded replies,
+and chip persistence after refresh. A 1,511px-long reply stayed inside a
+332px scroll region while the sheet remained 471px high. Desktop covered the
+640px centred sheet, 56% partial / 92% expanded heights, explicit
+expand/collapse, no mobile drag treatment, Escape close, and Plan/Map/Logistics
+tab regressions. Plan 11 trust flows passed inside the sheet: pending proposal
+survived refresh and applied; note-loss warning rendered before Apply; a
+booking-linked flight produced prose-only refusal; a different-stop structural
+move made the pending proposal stale with product-voice copy. All temporary QA
+stop, title, photo, note, day, and session changes were restored or removed;
+browser console errors: zero.
+
+**Deployment evidence:** `main` was pushed and the production checkout
+fast-forwarded without divergence. A coherent integrity-checked pre-deploy
+backup was created at `/home/chee/backups/trippy-2026-07-13-144229.db`; the
+daily backup and healthcheck cron entries remain active. Docker Compose v2.34.0
+rebuilt and started `trippy-trippy-1`; startup logged migration 029 and no
+startup or missing-environment error. `http://localhost:6768/api/health`
+returned `{"status":"ok","db":"connected"}`; production contains migration
+`029_copilot_message_context.sql`, the `context_json` column, and an `ok`
+integrity check. The deployed browser shell loaded at 375px and desktop with
+the expected `index-6hcZ7SQe.js` / `index-Bdqqaiek.css` assets and zero console
+errors.
+
+**Deviation and owner boundary:** the planned authenticated production browser
+turn was not agent-driven because it writes conversation data and the standing
+owner-only boundary forbids mutating production browser checks. The same
+context-send/chip-refresh flow passed locally against the real model; production
+schema, runtime, assets, health, and unauthenticated shell were agent-verified
+read-only. Owner handoff: on a real phone verify partial → expanded → partial →
+dismissed, send a long Plan-context turn and confirm no auto-expand plus chip
+after refresh, open from a stop and tap a seed, then verify the explicit desktop
+expand/collapse control. No code or data issue remains open from agent QA.
 **Model recommendation: Opus medium solo (no coding subagents).**
 QA judgment, deploy, and the owner click-script are orchestration work; fixes
 found here are small enough to do inline.
