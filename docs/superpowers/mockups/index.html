@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trippy design studies</title>
+  <link rel="stylesheet" href="./trippy-revamped-system.css">
+  <style>
+    .catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+    .catalog-card { position: relative; min-height: 250px; padding: 26px; overflow: hidden; border: 1px solid var(--ink-border); border-radius: var(--radius-l); color: inherit; text-decoration: none; background: var(--ink-satin); }
+    .catalog-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(125deg, transparent 50%, rgba(201,168,76,.05)); pointer-events: none; }
+    .catalog-card:hover { border-color: var(--gold-line); }
+    .catalog-card h2 { max-width: 12ch; margin: 34px 0 12px; font-family: 'Playfair Display', serif; font-size: 34px; font-style: italic; font-weight: 400; line-height: 1.05; }
+    .catalog-card p { max-width: 42ch; margin: 0; color: var(--cream-dim); line-height: 1.55; }
+    .catalog-card .arrow { position: absolute; right: 24px; bottom: 22px; color: var(--gold); font-family: 'DM Mono', monospace; }
+    @media (max-width: 680px) { .catalog { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="study">
+    <header class="study-header">
+      <div>
+        <p class="eyebrow">Trippy · design studies</p>
+        <h1 class="study-title">Trippy UI mockup library</h1>
+        <p class="study-note">Exploratory UI studies grounded in the live Trippy palette, typography, mobile-first behavior, and a more disciplined luxury material language.</p>
+      </div>
+    </header>
+
+    <div class="catalog">
+      <a class="catalog-card" href="./discovery-panel.html">
+        <span class="ui-label">Interaction study 01</span>
+        <h2>Discovery hierarchy</h2>
+        <p>Compact destination context, result-first composition, bounded desktop cards, and natural mobile summaries.</p>
+        <span class="arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="catalog-card" href="./trip-cover-baseline.html">
+        <span class="ui-label">Identity study 02</span>
+        <h2>Trip cover baseline</h2>
+        <p>The uniform photo treatment with corrected card anatomy and an optional future personal-memory override.</p>
+        <span class="arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="catalog-card" href="./plan13-wave1-copilot-sheet-mockups.html">
+        <span class="ui-label">Existing study · preserved</span>
+        <h2>Co-pilot sheet</h2>
+        <p>The earlier Plan 13 interaction study remains in the same canonical mockup library and has not been revised in this pass.</p>
+        <span class="arrow" aria-hidden="true">→</span>
+      </a>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trippy · Discovery hierarchy study</title>
+  <link rel="stylesheet" href="./trippy-revamped-system.css">
+  <style>
+    .discovery-stage { padding: 0; }
+    .discovery-shell { width: 100%; min-height: 790px; margin: 0 auto; overflow: hidden; color: var(--cream); background: var(--ink-deep); transition: width 220ms ease, border-radius 220ms ease; }
+    .discovery-shell.mobile { width: 375px; max-width: 100%; min-height: 812px; border-left: 1px solid var(--ink-border); border-right: 1px solid var(--ink-border); }
+    .appbar { height: 56px; display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--ink-border); }
+    .appbar button { width: 44px; height: 44px; border: 0; color: var(--cream-dim); background: transparent; font-family: 'DM Mono', monospace; font-size: 19px; }
+    .appbar-title { text-align: center; color: var(--cream); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .3em; text-transform: uppercase; }
+    .destination-compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 20px; min-height: 88px; padding: 16px 20px; border-bottom: 1px solid var(--ink-border); background: linear-gradient(110deg, rgba(35,32,24,.55), rgba(13,11,9,0) 50%); }
+    .destination-line { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
+    .destination-line .display-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(31px, 4vw, 46px); line-height: 1; }
+    .destination-meta { color: var(--cream-mute); font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
+    .destination-current { position: relative; min-height: 190px; padding: 26px 20px; overflow: hidden; border-bottom: 1px solid var(--ink-border); }
+    .destination-current::after { content: 'Hangzhou'; position: absolute; right: -1%; top: -25%; color: rgba(240,234,216,.025); font-family: 'Playfair Display', serif; font-style: italic; font-size: clamp(88px, 15vw, 190px); white-space: nowrap; }
+    .destination-current .display-title { margin-top: 12px; font-size: clamp(48px, 7vw, 74px); line-height: 1; }
+    .destination-current .destination-meta { display: block; margin-top: 16px; }
+    .destination-change { color: var(--cream-dim); border-color: var(--ink-border-strong); }
+    .browse-tools { position: sticky; top: 0; z-index: 5; background: rgba(13,11,9,.97); backdrop-filter: blur(12px); }
+    .tabs { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid var(--ink-border); scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { min-height: 52px; padding: 0 20px; border: 0; border-bottom: 2px solid transparent; color: var(--cream-mute); background: transparent; font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
+    .tab[aria-selected='true'] { color: var(--cream); border-bottom-color: var(--gold); }
+    .tab-count { margin-left: 6px; color: var(--gold); font-size: 8px; }
+    .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--ink-border); }
+    .search-row input { min-width: 0; height: 44px; padding: 0 15px; border: 1px solid var(--ink-border-strong); border-radius: var(--radius-s); color: var(--cream); background: rgba(28,26,23,.72); font-size: 17px; }
+    .search-row input::placeholder { color: var(--cream-mute); }
+    .results { max-height: 610px; overflow-y: auto; scroll-behavior: smooth; padding: 18px 20px 92px; }
+    .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: stretch; }
+    .place-card { position: relative; display: flex; flex-direction: column; min-height: 360px; padding: 20px; overflow: hidden; border: 1px solid var(--ink-border); border-radius: var(--radius-m); background: var(--ink-satin); }
+    .place-card::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(125deg, rgba(240,234,216,.025), transparent 22%, transparent 75%, rgba(201,168,76,.025)); }
+    .place-card > * { position: relative; z-index: 1; }
+    .place-card .place-title { display: -webkit-box; overflow: hidden; margin: 8px 0 11px; font-size: 25px; line-height: 1.12; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .place-card .rule { width: 28px; height: 1px; margin-bottom: 14px; background: var(--gold-line); }
+    .place-description { display: -webkit-box; overflow: hidden; margin: 0; color: var(--cream-dim); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+    .insight { margin: 18px 0 0; padding: 12px 0 0 14px; border-left: 1px solid var(--gold-line); color: var(--cream-dim); font-style: italic; line-height: 1.45; }
+    .insight .ui-label { display: block; margin-bottom: 5px; color: var(--gold); font-style: normal; }
+    .card-foot { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 18px; }
+    .duration { color: var(--cream-mute); font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .1em; }
+    .add-button { min-height: 38px; padding: 0 12px; border: 1px solid var(--ink-border-strong); border-radius: var(--radius-s); color: var(--cream-dim); background: transparent; font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; }
+    .results-end { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding: 18px 0 2px; border-top: 1px solid var(--ink-border); }
+    .results-end p { margin: 0; color: var(--cream-mute); font-style: italic; }
+    .results-end .quiet-button { min-width: 180px; }
+    .reset-note { padding: 0 20px 11px; color: var(--cream-mute); font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .12em; text-align: right; }
+    .mobile .destination-compact { min-height: 76px; padding: 13px 16px; }
+    .mobile .destination-line { display: block; }
+    .mobile .destination-line .display-title { margin: 4px 0 6px; font-size: 30px; }
+    .mobile .destination-current { min-height: 182px; padding: 24px 16px; }
+    .mobile .destination-current .display-title { font-size: 46px; }
+    .mobile .destination-current::after { top: 22%; font-size: 92px; }
+    .mobile .tabs { padding-left: 4px; }
+    .mobile .tab { min-height: 50px; padding: 0 14px; }
+    .mobile .search-row { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; }
+    .mobile .search-row .gold-button { padding: 0 11px; font-size: 9px; letter-spacing: .1em; }
+    .mobile .results { max-height: 550px; padding: 14px 16px 24px; }
+    .mobile .results-grid { grid-template-columns: 1fr; }
+    .mobile .place-card { min-height: 0; padding: 18px; }
+    .mobile .place-card .place-description { -webkit-line-clamp: 3; }
+    .mobile .insight { display: none; }
+    .mobile .card-foot { margin-top: 16px; }
+    .mobile .reset-note { padding: 0 16px 9px; }
+    .mobile .results-end { align-items: stretch; flex-direction: column; }
+    .mobile .results-end .quiet-button { width: 100%; }
+
+    @media (max-width: 760px) {
+      .discovery-shell:not(.mobile) { min-width: 930px; }
+      .discovery-stage { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="study" id="discoveryStudy">
+    <header class="study-header">
+      <div>
+        <p class="eyebrow">Interaction study 01</p>
+        <h1 class="study-title">Discovery hierarchy</h1>
+        <p class="study-note">The compact version treats the destination as committed context and returns the visual weight to the places. Switch modes to compare the destination hierarchy across desktop and mobile; the bounded summary grid is now the selected card model.</p>
+      </div>
+      <div class="controls" aria-label="Mockup controls">
+        <div class="control-group" aria-label="Viewport">
+          <button class="control-button" data-device="desktop" aria-pressed="true">Desktop</button>
+          <button class="control-button" data-device="mobile" aria-pressed="false">Mobile</button>
+        </div>
+        <div class="control-group" aria-label="Header style">
+          <button class="control-button" data-header="compact" aria-pressed="true">Compact</button>
+          <button class="control-button" data-header="current" aria-pressed="false">Current hero</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="stage discovery-stage" aria-label="Interactive Discovery panel mockup">
+      <div class="stage-caption">
+        <span id="viewportLabel">Desktop · compact hierarchy</span>
+        <span id="behaviorLabel">Category changes begin at the first result</span>
+      </div>
+      <div class="discovery-shell" id="discoveryShell">
+        <div class="appbar">
+          <button type="button" aria-label="Close">×</button>
+          <div class="appbar-title">Discover</div>
+          <div aria-hidden="true"></div>
+        </div>
+
+        <div id="destinationRegion"></div>
+
+        <div class="browse-tools">
+          <div class="tabs" role="tablist" aria-label="Place categories" id="categoryTabs"></div>
+          <div class="search-row">
+            <label class="sr-only" for="placeSearch">Find a place</label>
+            <input id="placeSearch" type="search" placeholder="Find a place…">
+            <button class="gold-button" type="button">Surprise me</button>
+          </div>
+          <div class="reset-note" id="resetNote" aria-live="polite">Showing Essentials from the top</div>
+        </div>
+
+        <div class="screen-area">
+          <div class="results" id="results" tabindex="-1">
+            <div class="results-grid" id="resultsGrid"></div>
+            <div class="results-end">
+              <p>Six of 71 curated places shown.</p>
+              <button class="quiet-button" type="button">Show more places</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const data = {
+      Essentials: [
+        ['Okura Frontier Hotel East Wing Rooftop', 'A rare open-air vantage over West Lake with an unusually clear read of the city and surrounding hills.', 'The rooftop remains accessible to non-guests during daylight.', '30–45 minutes'],
+        ['West Lake', 'Causeways, gardens, temples, and long water views make this the natural orientation point for a first visit.', 'Begin early from the quieter north shore and let the lake set the pace.', '2–4 hours'],
+        ['Lingyin Temple · 灵隐寺', 'A 10th-century Buddhist complex set among forested hills and carved grottoes west of the lake.', 'Pair with Feilai Feng before tour groups arrive.', '2–3 hours'],
+        ['Broken Bridge · 断桥', 'A storied stone bridge at the north end of West Lake, best understood as part of a longer waterside walk.', 'Approach from Bai Causeway near dusk for gentler light.', '20–30 minutes'],
+        ['Longjing Tea Village · 龙井村', 'Terraced tea gardens, small family tea rooms, and a slower rural counterpoint to the lakefront.', 'Ask for a short garden walk before sitting down for tea.', '2–3 hours'],
+        ['China National Tea Museum', 'A restrained museum campus that frames tea as craft, agriculture, and social ritual.', 'The Shuangfeng grounds are as valuable as the exhibits.', '1½–2 hours']
+      ],
+      Food: [
+        ['Jiangnan Delicacies · 江南驿', 'A polished introduction to regional flavours without flattening them into a generic tasting menu.', 'Order fewer dishes and leave room for the kitchen’s seasonal recommendation.', '1½ hours'],
+        ['Zhiweiguan · 知味观', 'A long-running Hangzhou institution for xiaolongbao, noodles, and classic local snacks.', 'Use the upstairs dining room for a calmer mid-day stop.', '45–75 minutes'],
+        ['Longjing Manor', 'A destination meal built around precise local produce and tea-country restraint.', 'Reserve the earliest dinner seating and request a garden-facing room.', '2–3 hours'],
+        ['Wushan Night Market', 'A lively late-evening browse for snacks, small wares, and informal people-watching.', 'Treat it as a short atmospheric detour, not the main dinner.', '45 minutes']
+      ],
+      Nature: [
+        ['Nine Creeks · 九溪烟树', 'A shaded valley path through tea fields and shallow streams southwest of West Lake.', 'Walk downhill from Longjing for the most effortless sequence.', '2–3 hours'],
+        ['Xixi Wetland', 'Dense waterways, reed beds, and village fragments offer a quieter landscape beyond the central lake.', 'Choose one boat leg rather than trying to cover the entire reserve.', '3–4 hours'],
+        ['Prince Bay Park', 'Seasonal planting and open lawns near the southern lake shore make this an easy breathing space.', 'Best as a pause between larger anchors, not a destination by itself.', '30–60 minutes']
+      ],
+      Culture: [
+        ['Southern Song Imperial Street', 'Historic urban traces, restored shopfronts, and small courtyards running south from the old city.', 'Look beyond the main street into the quieter side lanes.', '1–2 hours'],
+        ['Liangzhu Museum', 'David Chipperfield’s low, rigorous museum gives archaeological material the space it deserves.', 'Allow time for the architecture and surrounding landscape.', '2–3 hours'],
+        ['China Academy of Art', 'A compelling campus where contemporary architecture and art education meet the city’s older texture.', 'Check current exhibition access before crossing the river.', '1½ hours']
+      ]
+    };
+
+    const shell = document.getElementById('discoveryShell');
+    const destinationRegion = document.getElementById('destinationRegion');
+    const tabs = document.getElementById('categoryTabs');
+    const results = document.getElementById('results');
+    const grid = document.getElementById('resultsGrid');
+    const resetNote = document.getElementById('resetNote');
+    const viewportLabel = document.getElementById('viewportLabel');
+    let state = { device: 'desktop', header: 'compact', category: 'Essentials' };
+
+    function setPressed(group, value) {
+      document.querySelectorAll(`[data-${group}]`).forEach(button => {
+        button.setAttribute('aria-pressed', button.dataset[group] === value ? 'true' : 'false');
+      });
+    }
+
+    function renderDestination() {
+      destinationRegion.innerHTML = state.header === 'compact'
+        ? `<div class="destination-compact">
+            <div class="destination-line">
+              <span class="ui-label">Destination</span>
+              <h2 class="display-title">Hangzhou</h2>
+              <span class="destination-meta">71 curated places</span>
+            </div>
+            <button class="quiet-button destination-change" type="button">Change</button>
+          </div>`
+        : `<div class="destination-current">
+            <span class="ui-label">Destination</span>
+            <h2 class="display-title">Hangzhou</h2>
+            <span class="destination-meta">— &nbsp;71 curated places</span>
+          </div>`;
+    }
+
+    function renderTabs() {
+      tabs.innerHTML = Object.entries(data).map(([name, items]) => `
+        <button class="tab" role="tab" data-category="${name}" aria-selected="${name === state.category}">
+          ${name}<span class="tab-count">${items.length}</span>
+        </button>`).join('');
+      tabs.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
+        state.category = button.dataset.category;
+        results.scrollTop = 0;
+        renderTabs();
+        renderCards();
+        resetNote.textContent = `Showing ${state.category} from the top`;
+      }));
+    }
+
+    function renderCards() {
+      grid.innerHTML = data[state.category].map((item, index) => `
+        <article class="place-card">
+          <span class="ui-label">${state.category} · ${String(index + 1).padStart(2, '0')}</span>
+          <h3 class="place-title">${item[0]}</h3>
+          <div class="rule"></div>
+          <p class="place-description">${item[1]}</p>
+          <p class="insight"><span class="ui-label">Local insight</span>${item[2]}</p>
+          <div class="card-foot">
+            <span class="duration">${item[3]}</span>
+            <button class="add-button" type="button">Add to day</button>
+          </div>
+        </article>`).join('');
+    }
+
+    function render() {
+      shell.classList.toggle('mobile', state.device === 'mobile');
+      setPressed('device', state.device);
+      setPressed('header', state.header);
+      viewportLabel.textContent = `${state.device === 'mobile' ? '375 px mobile' : 'Desktop'} · ${state.header === 'compact' ? 'compact hierarchy' : 'current hero'} · bounded summaries`;
+      renderDestination();
+      renderTabs();
+      renderCards();
+    }
+
+    document.querySelectorAll('[data-device]').forEach(button => button.addEventListener('click', () => { state.device = button.dataset.device; render(); }));
+    document.querySelectorAll('[data-header]').forEach(button => button.addEventListener('click', () => { state.header = button.dataset.header; render(); }));
+    render();
+  </script>
+</body>
+</html>
