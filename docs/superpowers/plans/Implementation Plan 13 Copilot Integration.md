@@ -1,6 +1,6 @@
 # Implementation Plan 13 — Co-pilot Integration (Bottom Sheet, Contextual Entry Points, Seed Prompts)
 
-**Status: CLOSED IN PRODUCTION (2026-07-14). Waves 1–5 complete; application release deployed at `a1d6270`. Owner-only authenticated production browser confirmation remains as the documented post-deploy handoff, not an implementation blocker.**
+**Status: CLOSED IN PRODUCTION (2026-07-14). Waves 1–5 complete; application release `a1d6270` and desktop readability refinement `a09a368` are deployed. The owner confirmed the original authenticated production checks; final visual confirmation of the wider desktop sheet remains as the documented post-deploy handoff, not an implementation blocker.**
 
 **Origin:** Stage 3 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -358,7 +358,7 @@ object; no new UI renders anywhere when the sheet is closed.
 
 ## Wave 5 — QA, verification, deploy
 
-**Status: COMPLETE (2026-07-14). Application release `a1d6270` is live in production.**
+**Status: COMPLETE (2026-07-14). Application release `a1d6270` and desktop readability refinement `a09a368` are live in production.**
 
 **Automated and migration evidence:** backend 606/606 tests across 30 files;
 frontend 119/119 tests across 23 files; production build clean (2,233 modules,
@@ -395,6 +395,24 @@ integrity check. The deployed browser shell loaded at 375px and desktop with
 the expected `index-6hcZ7SQe.js` / `index-Bdqqaiek.css` assets and zero console
 errors.
 
+**Post-deploy desktop readability refinement (2026-07-14):** owner production
+verification passed the original Wave 5 click-script, but the supplied desktop
+screenshots showed that the co-pilot remained constrained to a 640 px column
+with 15 px conversation type. Commit `a09a368` raises the desktop sheet cap to
+800 px, desktop conversation/input type to 18 px, and desktop message padding,
+while leaving the 375 px values and interaction model unchanged. The complete
+gate passed again: backend 606/606 tests, frontend 121/121 tests, production
+build (2,233 modules), and `git diff --check`. Local browser QA ran at 375 px
+first, then 1280 px: mobile retained 15 px message and 16 px input type with no
+horizontal overflow; desktop partial and expanded states measured exactly 800
+px with 18 px message/input type, correct scrim behavior, no horizontal
+overflow, and zero console errors. Production fast-forwarded to `a09a368`,
+rebuilt `trippy-trippy-1`, served `index-BisFRqG4.js`, and returned
+`{"status":"ok","db":"connected"}`; the served bundle contains the 800 px cap
+and 18 px desktop rules. The pre-existing untracked `~/Trippy/backups/`
+directory was unchanged and does not overlap the deployed diff; the external
+fresh backup and active backup/healthcheck cron entries remained intact.
+
 **Deviation and owner boundary:** the planned authenticated production browser
 turn was not agent-driven because it writes conversation data and the standing
 owner-only boundary forbids mutating production browser checks. The same
@@ -404,6 +422,14 @@ read-only. Owner handoff: on a real phone verify partial → expanded → partia
 dismissed, send a long Plan-context turn and confirm no auto-expand plus chip
 after refresh, open from a stop and tap a seed, then verify the explicit desktop
 expand/collapse control. No code or data issue remains open from agent QA.
+
+The owner subsequently confirmed those original production checks passed. For
+`a09a368`, the only remaining owner confirmation is read-only: refresh the
+production app on desktop, open the co-pilot in partial and expanded states,
+and confirm the wider 800 px treatment and larger type resolve the supplied
+screenshots' readability concern. No itinerary or conversation mutation is
+required. No implementation issue remains open.
+
 **Model recommendation: Opus medium solo (no coding subagents).**
 QA judgment, deploy, and the owner click-script are orchestration work; fixes
 found here are small enough to do inline.
