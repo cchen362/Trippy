@@ -1,6 +1,6 @@
 # Implementation Plan 13 — Co-pilot Integration (Bottom Sheet, Contextual Entry Points, Seed Prompts)
 
-**Status: WAVE 1 COMPLETE (2026-07-12) — mockups owner-approved, entry-point set signed off. Waves 2–4 unblocked.**
+**Status: WAVES 1–4 COMPLETE (2026-07-14). Wave 5 final QA and deployment remain. Production is still on the pre-Plan-13 release.**
 
 **Origin:** Stage 3 of the owner-approved co-pilot sequencing (decision session
 2026-07-12, following the
@@ -307,9 +307,29 @@ this day looking?" yields an answer about Day 3 without naming it in the
 message; the chip shows the context; refresh → chip persists from history; a
 turn with no context sends and renders exactly as today.
 
-## Wave 4 — Contextual entry points and seed prompts (frontend)
+## Wave 4 — Contextual entry points and seed prompts (frontend + narrow context-contract extension)
 
-**Status: NOT STARTED. Blocked on Wave 1 approval (entry-point set signed off there) + Wave 3 (context channel).**
+**Status: COMPLETE (2026-07-14) at `39ce92c`.** EP-1 and EP-2 now open the
+single `TripPage`-owned partial sheet without auto-sending, preserve the
+underlying Plan/Discovery state, and capture stop or suggestion context once.
+The empty conversation now renders up to three deterministic trip-grounded
+seeds from `utils/copilotSeeds.js`, with the approved neutral fallback.
+
+**Owner-approved deviation:** Wave 4's original "frontend" label was stale.
+The approved Discovery experience could not truthfully show and model-ground a
+suggestion through Wave 3's tab/day/stop-only contract. The owner authorized the
+smallest additive backend extension: validated `tab: 'discovery'` plus a
+trimmed, non-empty `discoveryName` of at most 160 characters with control and
+separator characters rejected. Discovery context ignores day/stop extras,
+persists in the existing `context_json` column, and is normalized identically
+for live messages, history, visible chips, and model injection. No migration or
+broader context capability was added.
+
+**Verification:** backend 606/606 tests; frontend 119/119 tests; production
+build clean; `git diff --check` clean. Local browser QA passed at 375px first
+and then desktop for EP-1, EP-2, deterministic seeds, focus/no-auto-send,
+context chips and grounded replies, Discovery/Plan state preservation, and
+sheet controls. No deployment or production mutation was performed.
 **Model recommendation: Sonnet medium solo.**
 Additive UI inside existing components against approved mockups and an
 already-built context channel; existing component tests fence regressions.
