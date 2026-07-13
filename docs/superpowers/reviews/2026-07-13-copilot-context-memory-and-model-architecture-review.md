@@ -5,10 +5,7 @@ before an implementation plan is written.
 
 **Review date:** 2026-07-13
 
-**Scope:** Review and investigation only. This document records the current LLM architecture,
-the Sonnet 4.6 versus Sonnet 5 decision context, and the co-pilot context limitations exposed by
-that review. It does not approve an implementation, prescribe a final architecture, or authorize
-source-code, configuration, migration, or deployment changes.
+**Scope:** Review and investigation only. This document records the current LLM architecture, the Sonnet 4.6 versus Sonnet 5 decision context, and the co-pilot context limitations exposed by that review. It does not approve an implementation, prescribe a final architecture, or authorize source-code, configuration, migration, or deployment changes.
 
 **Primary context:**
 
@@ -21,29 +18,19 @@ source-code, configuration, migration, or deployment changes.
 ## Executive assessment
 
 Trippy does not currently have a general reason to replace Claude Sonnet 4.6 with Sonnet 5.
-The two Sonnet workloads are booking extraction and the co-pilot. The current requirements are
-bounded, Sonnet 4.6 is already capable, and Trippy has not established workload-specific
-evaluation data that would justify a global model upgrade. Destination catalogue generation and
-photo descriptors already use Haiku 4.5 and are not part of that replacement decision.
+The two Sonnet workloads are booking extraction and the co-pilot. The current requirements are bounded, Sonnet 4.6 is already capable, and Trippy has not established workload-specific
+evaluation data that would justify a global model upgrade. Destination catalogue generation and photo descriptors already use Haiku 4.5 and are not part of that replacement decision.
 
-The model review did expose a more important architecture question: the co-pilot gives the model
-the whole minimized trip on every turn, but only the latest 20 messages. Its 4,096-token
-`max_tokens` value limits one generated response; it does not limit the input context. Raising
-that ceiling may be sensible protection for requests that fill several empty days, but it does
-not address long planning conversations, lost decisions, irrelevant full-trip payload, or
-ambiguous references such as "this day" and "this stop."
+The model review did expose a more important architecture question: the co-pilot gives the model the whole minimized trip on every turn, but only the latest 20 messages. Its 4,096-token `max_tokens` value limits one generated response; it does not limit the input context. Raising that ceiling may be sensible protection for requests that fill several empty days, but it does not address long planning conversations, lost decisions, irrelevant full-trip payload, or ambiguous references such as "this day" and "this stop."
 
 This is not a case for rewriting Plans 11–13. The revised architecture should build on them:
 
 - Plan 11 owns the validated, persisted, atomic proposal boundary.
 - Plan 12 owns the agentic query-tool loop and grounding mechanisms.
 - Plan 13 owns contextual entry points, visible turn context, and the bottom-sheet integration.
-- A later plan may add durable conversation memory, token-aware context assembly, selective trip
-  serialization, and—only if evidence supports it—additional read-only retrieval tools.
+- A later plan may add durable conversation memory, token-aware context assembly, selective trip serialization, and—only if evidence supports it—additional read-only retrieval tools.
 
-That direction is a review hypothesis, not a settled solution. The orchestrator and QA reviewer
-should independently verify the facts, challenge whether each additional layer is necessary,
-and recommend the smallest architecture that remains correct for long and collaborative trips.
+That direction is a review hypothesis, not a settled solution. The orchestrator and QA reviewer should independently verify the facts, challenge whether each additional layer is necessary, and recommend the smallest architecture that remains correct for long and collaborative trips.
 
 One product principle remains non-negotiable throughout the investigation:
 
@@ -71,31 +58,23 @@ Relevant implementation:
 - `backend/src/services/stops.js`
 - `backend/src/routes/copilot.js`
 
-The model identifiers are not centrally managed: booking extraction uses an exported constant,
-while the co-pilot and destination generation contain model literals. Current usage telemetry is
-primarily console logging rather than durable, queryable data.
+The model identifiers are not centrally managed: booking extraction uses an exported constant, while the co-pilot and destination generation contain model literals. Current usage telemetry is primarily console logging rather than durable, queryable data.
 
 ## 2. Sonnet 4.6 versus Sonnet 5
 
 ### 2.1 Verified vendor facts as of the review date
 
-Anthropic describes Sonnet 5 as a drop-in capability upgrade whose largest gains are in agentic
-reasoning, tool use, coding, and long-running work. The API model ID is `claude-sonnet-5`.
+Anthropic describes Sonnet 5 as a drop-in capability upgrade whose largest gains are in agentic reasoning, tool use, coding, and long-running work. The API model ID is `claude-sonnet-5`.
 
 Its introductory price through 2026-08-31 is $2 per million input tokens and $10 per million
-output tokens. Standard pricing from 2026-09-01 is $3/$15, matching Sonnet 4.6's per-token list
-price. Sonnet 5 uses a new tokenizer that produces approximately 30% more tokens for the same
-text, depending on workload. Equivalent requests can therefore cost more after the introductory
-period even though list prices match.
+output tokens. Standard pricing from 2026-09-01 is $3/$15, matching Sonnet 4.6's per-token list price. Sonnet 5 uses a new tokenizer that produces approximately 30% more tokens for the same text, depending on workload. Equivalent requests can therefore cost more after the introductory period even though list prices match.
 
 Sonnet 5 also changes behavior relevant to Trippy:
 
-- Adaptive thinking is on by default; Sonnet 4.6 requests without a `thinking` field run without
-  thinking.
+- Adaptive thinking is on by default; Sonnet 4.6 requests without a `thinking` field run without thinking.
 - Thinking and visible response text share the `max_tokens` allowance.
 - A 4,096-token limit tuned for Sonnet 4.6 may truncate a Sonnet 5 response.
-- Sonnet 5 does not accept non-default sampling parameters or manual thinking budgets. Trippy
-  currently sets neither, so these API changes are not immediate blockers.
+- Sonnet 5 does not accept non-default sampling parameters or manual thinking budgets. Trippy currently sets neither, so these API changes are not immediate blockers.
 - Priority Tier is not available for Sonnet 5 at launch.
 
 Primary sources:
@@ -111,41 +90,28 @@ These are vendor claims and general benchmarks, not evidence of improved Trippy 
 
 A global upgrade is not justified merely because Sonnet 5 is newer.
 
-- The co-pilot is the strongest candidate for a future Sonnet 5 canary because it uses multiple
-  tools and must follow nuanced itinerary constraints.
-- Booking extraction is a bounded structured-extraction workload. Agentic benchmark gains do not
-  establish better booking-field accuracy.
-- Haiku workloads should remain outside the Sonnet decision unless a separate evaluation exposes
-  a quality problem.
-- Any comparison should use post-introductory pricing and the new tokenizer, not only the launch
-  discount.
+- The co-pilot is the strongest candidate for a future Sonnet 5 canary because it uses multiple tools and must follow nuanced itinerary constraints.
+- Booking extraction is a bounded structured-extraction workload. Agentic benchmark gains do not establish better booking-field accuracy.
+- Haiku workloads should remain outside the Sonnet decision unless a separate evaluation exposes a quality problem.
+- Any comparison should use post-introductory pricing and the new tokenizer, not only the launch discount.
 
-Before changing either Sonnet workload, Trippy needs workload-specific evaluations and durable
-measurements for accuracy, tool behavior, latency, token use, truncation, and cost. The reviewer
-should also consider whether staying on Sonnet 4.6 creates a material lifecycle or availability
-risk that is not visible in the current repository.
+Before changing either Sonnet workload, Trippy needs workload-specific evaluations and durable measurements for accuracy, tool behavior, latency, token use, truncation, and cost. The reviewer should also consider whether staying on Sonnet 4.6 creates a material lifecycle or availability risk that is not visible in the current repository.
 
 ## 3. What the 4,096-token ceiling does—and does not do
 
-The co-pilot's `max_tokens: 4096` applies to each model response in the Plan 12 loop. It is not
-the size of the input context and does not reserve or bill 4,096 tokens in advance.
+The co-pilot's `max_tokens: 4096` applies to each model response in the Plan 12 loop. It is not the size of the input context and does not reserve or bill 4,096 tokens in advance.
 
 A request such as "fill these two empty days" can produce explanatory prose plus a terminal
-`propose_itinerary_changes` tool call containing many operations. Four thousand tokens may be
-enough in ordinary cases, but it leaves limited safety margin for larger multi-day proposals,
-additional tool iterations, or a future thinking-enabled model. An 8,192 ceiling is a reasonable
-candidate to evaluate because unused capacity is not billed.
+`propose_itinerary_changes` tool call containing many operations. Four thousand tokens may be enough in ordinary cases, but it leaves limited safety margin for larger multi-day proposals, additional tool iterations, or a future thinking-enabled model. An 8,192 ceiling is a reasonable candidate to evaluate because unused capacity is not billed.
 
 The investigation must not treat a higher ceiling as the main scaling solution:
 
 - Very large proposal cards may be technically valid but unusable on mobile.
 - A proposal with dozens of operations increases review burden and stale-plan risk.
-- A better product boundary may be to propose one or two days at a time or impose an explicit
-  maximum operation count.
+- A better product boundary may be to propose one or two days at a time or impose an explicit maximum operation count.
 - Output limits do not solve input relevance or forgotten conversation history.
 
-QA should establish realistic upper-bound scenarios rather than infer safety from token capacity
-alone.
+QA should establish realistic upper-bound scenarios rather than infer safety from token capacity alone.
 
 ## 4. Current co-pilot context assembly
 
@@ -166,9 +132,7 @@ The remaining limitations are structural:
 
 ### C1 — Fixed message count is not durable planning memory
 
-Only the latest 20 messages—roughly ten user/assistant exchanges—reach the model. Older messages
-remain in the database but silently leave the model context. This can erase decisions and
-constraints such as:
+Only the latest 20 messages—roughly ten user/assistant exchanges—reach the model. Older messages remain in the database but silently leave the model context. This can erase decisions and constraints such as:
 
 - "Keep Friday evening free."
 - "Do not add Osaka."
@@ -185,18 +149,13 @@ Every co-pilot request receives every minimized day, stop, and booking. A seven-
 unlikely to threaten Sonnet 4.6's context window, but long trips increase cost and dilute
 relevance. A question about this afternoon does not need all details from a three-week trip.
 
-The problem should not be exaggerated: full-trip injection guarantees that broad requests have
-the necessary facts and avoids extra tool round trips. Any selective replacement must prove that
-it preserves correctness for cross-day comparisons, audits, and broad replanning.
+The problem should not be exaggerated: full-trip injection guarantees that broad requests have the necessary facts and avoids extra tool round trips. Any selective replacement must prove that it preserves correctness for cross-day comparisons, audits, and broad replanning.
 
 ### C3 — Volatile UI context is being addressed by Plan 13
 
-Plan 13 Wave 3 specifies `{ tab, dayId?, stopId? }`, server-side validation, user-turn injection,
-message persistence, and a visible context chip. That is the correct layer for "this day" and
-"this stop" references and must not be duplicated by a later context system.
+Plan 13 Wave 3 specifies `{ tab, dayId?, stopId? }`, server-side validation, user-turn injection, message persistence, and a visible context chip. That is the correct layer for "this day" and "this stop" references and must not be duplicated by a later context system.
 
-At the time of this review, Plan 13 records Wave 2 as complete and Waves 3–5 as not started. The
-reviewer must verify actual branch state before relying on those status lines.
+At the time of this review, Plan 13 records Wave 2 as complete and Waves 3–5 as not started. The reviewer must verify actual branch state before relying on those status lines.
 
 ### C4 — Conversation, UI context, and trip truth have different authority
 
@@ -205,11 +164,9 @@ A future context architecture must keep these layers distinct:
 - The database is authoritative for current days, stops, bookings, and proposal state.
 - Plan 13 turn context is a validated statement of what the user is viewing now.
 - Recent messages preserve the immediate conversational thread.
-- Any durable memory is a compact record of preferences, decisions, rejections, and unresolved
-  questions—not a competing copy of the itinerary.
+- Any durable memory is a compact record of preferences, decisions, rejections, and unresolved questions—not a competing copy of the itinerary.
 
-If a memory says a museum is on Tuesday but the database now puts it on Wednesday, Wednesday must
-win. A design that cannot explain invalidation and reconciliation is not ready for planning.
+If a memory says a museum is on Tuesday but the database now puts it on Wednesday, Wednesday must win. A design that cannot explain invalidation and reconciliation is not ready for planning.
 
 ## 5. Candidate architecture directions for investigation
 
@@ -226,9 +183,7 @@ Evaluate raising the co-pilot ceiling to 8,192 and introducing durable per-turn 
 - Stop reason, truncation, refusal, abort, proposal size, and error outcome.
 - Cost per completed user job rather than cost per raw request.
 
-The reviewer should determine whether telemetry belongs in structured application logs, SQLite,
-an external platform, or some combination. Avoid building an analytics subsystem beyond current
-operational needs.
+The reviewer should determine whether telemetry belongs in structured application logs, SQLite, an external platform, or some combination. Avoid building an analytics subsystem beyond current operational needs.
 
 ### Direction B — Durable summary plus recent raw turns
 
@@ -240,8 +195,7 @@ Investigate a per-trip conversation memory that captures only durable conversati
 - Explicit rejections and reasons when they remain relevant.
 - Open questions or unresolved planning choices.
 
-Recent raw turns should still accompany the summary. Summarization could occur when messages are
-about to age out rather than on every turn. The investigation must address:
+Recent raw turns should still accompany the summary. Summarization could occur when messages are about to age out rather than on every turn. The investigation must address:
 
 - Who authors and updates the summary.
 - Model cost and cache implications.
@@ -263,9 +217,7 @@ Investigate splitting `copilotTripContext()` into tiers such as:
 - Relevant booking anchors.
 - Full-trip context for audits, whole-trip restructuring, or ambiguous requests.
 
-The reviewer should compare this against retaining the current minimized full trip. Classification
-must not add an unnecessary model call or silently omit required facts. Conservative fallback to
-full context may be preferable when scope is unclear.
+The reviewer should compare this against retaining the current minimized full trip. Classification must not add an unnecessary model call or silently omit required facts. Conservative fallback to full context may be preferable when scope is unclear.
 
 ### Direction D — Additional read-only retrieval tools
 
@@ -295,15 +247,11 @@ foundation.
 
 Coordination constraints:
 
-- Do not independently invent another active-day or active-stop request format while Plan 13 Wave
-  3 owns that contract.
-- Do not put volatile screen context or conversation memory into the cached stable-trip block
-  without measuring cache invalidation.
-- Do not modify Plan 13's migration `029_copilot_message_context.sql`; any later schema change
-  requires a new migration number after checking current repository state.
+- Do not independently invent another active-day or active-stop request format while Plan 13 Wave 3 owns that contract.
+- Do not put volatile screen context or conversation memory into the cached stable-trip block without measuring cache invalidation.
+- Do not modify Plan 13's migration `029_copilot_message_context.sql`; any later schema change requires a new migration number after checking current repository state.
 - Do not weaken the Plan 11 proposal boundary to make large multi-day generation easier.
-- Do not regress the Plan 12 rule that concrete place recommendations are grounded in Trippy's
-  catalogue.
+- Do not regress the Plan 12 rule that concrete place recommendations are grounded in Trippy's catalogue.
 
 ## 7. Investigation scenarios and evidence
 
@@ -312,8 +260,7 @@ The orchestrator and QA reviewer should test the architecture against concrete j
 1. Fill one empty day with a balanced set of flexible activities.
 2. Fill two or more empty days in one request without inventing clock times.
 3. Produce a large proposal and assess token use, validation, reviewability, and stale-plan risk.
-4. Continue a planning conversation after more than 20 messages and verify whether an older
-   explicit constraint survives.
+4. Continue a planning conversation after more than 20 messages and verify whether an older explicit constraint survives.
 5. Change a previously summarized itinerary fact outside chat and verify that database truth wins.
 6. Ask a selected-day question through Plan 13 context without naming the day in prose.
 7. Ask a whole-trip audit question that genuinely requires all days and bookings.
@@ -321,12 +268,9 @@ The orchestrator and QA reviewer should test the architecture against concrete j
 9. Exercise shared-trip conversation with different authors and conflicting preferences.
 10. Clear conversation history and verify that no invisible memory continues influencing answers.
 11. Trigger catalogue and trip-health tools in the same long conversation.
-12. Compare Sonnet 4.6 against Sonnet 5 only on representative co-pilot and extraction datasets,
-    using standard post-promotion pricing.
+12. Compare Sonnet 4.6 against Sonnet 5 only on representative co-pilot and extraction datasets, using standard post-promotion pricing.
 
-Where live model calls are used, record prompts, model configuration, token usage, latency, tool
-events, stop reasons, and the human evaluation rubric. Do not treat one successful demo as an
-evaluation.
+Where live model calls are used, record prompts, model configuration, token usage, latency, tool events, stop reasons, and the human evaluation rubric. Do not treat one successful demo as an evaluation.
 
 ## 8. Questions the implementation plan must resolve
 
@@ -357,6 +301,4 @@ The next review should produce an evidence-backed recommendation, not code. It s
 - Define acceptance criteria and an evaluation strategy, including model-comparison gates.
 - Surface owner decisions and unresolved questions explicitly.
 
-The reviewer should not implement fixes, create migrations, alter model configuration, or begin
-the implementation plan until the investigation report is complete and owner decisions are
-resolved.
+The reviewer should not implement fixes, create migrations, alter model configuration, or begin the implementation plan until the investigation report is complete and owner decisions are resolved.
