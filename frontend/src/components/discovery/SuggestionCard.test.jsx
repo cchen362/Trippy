@@ -16,6 +16,32 @@ const SUGGESTION = {
   estimatedDuration: '1h',
 };
 
+describe('SuggestionCard co-pilot entry point', () => {
+  it('preserves Add and report controls and forwards the real suggestion name without side effects', () => {
+    const onOpenCopilot = vi.fn();
+    const onAddToDay = vi.fn();
+    const onReport = vi.fn();
+    render(
+      <SuggestionCard
+        suggestion={SUGGESTION}
+        days={[{ id: 'day-1', resolvedCity: 'Kyoto', stops: [] }]}
+        onAddToDay={onAddToDay}
+        destination="Kyoto"
+        onReport={onReport}
+        onOpenCopilot={onOpenCopilot}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /^add to day$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /report this place/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
+
+    expect(onOpenCopilot).toHaveBeenCalledWith({ tab: 'discovery', discoveryName: 'Old Town' });
+    expect(onAddToDay).not.toHaveBeenCalled();
+    expect(onReport).not.toHaveBeenCalled();
+  });
+});
+
 describe('SuggestionCard — "in trip" city scoping (Wave 5 §5.4)', () => {
   it('matches a day resolved to a diacritic variant of the searched destination via canonicalGeoKey', () => {
     // The old `normalizeName` only lowercases and strips punctuation — it does

@@ -16,7 +16,8 @@ import {
 
 const router = Router();
 
-const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map']);
+const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map', 'discovery']);
+const MAX_DISCOVERY_NAME_LENGTH = 160;
 
 function dropContext(reason) {
   console.warn('[copilot] Dropping invalid message context: %s', reason);
@@ -33,6 +34,22 @@ function resolveMessageContext(rawContext, tripDetail) {
   }
 
   const resolved = { tab: rawContext.tab };
+
+  if (rawContext.tab === 'discovery') {
+    if (typeof rawContext.discoveryName !== 'string') {
+      return dropContext('discoveryName must be a string');
+    }
+    const discoveryName = rawContext.discoveryName.trim();
+    if (!discoveryName) return dropContext('discoveryName must not be empty');
+    if (discoveryName.length > MAX_DISCOVERY_NAME_LENGTH) {
+      return dropContext('discoveryName is too long');
+    }
+    if (/\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}/u.test(discoveryName)) {
+      return dropContext('discoveryName must be a single line without control characters');
+    }
+    resolved.discoveryName = discoveryName;
+    return resolved;
+  }
 
   if (rawContext.dayId != null) {
     if (typeof rawContext.dayId !== 'string') return dropContext('dayId must be a string');
@@ -58,6 +75,9 @@ function resolveMessageContext(rawContext, tripDetail) {
 }
 
 function contextLine(context) {
+  if (context.tab === 'discovery') {
+    return `[Viewing: Discovery, suggestion "${context.discoveryName}"]`;
+  }
   const tabLabel = context.tab[0].toUpperCase() + context.tab.slice(1);
   const parts = [`${tabLabel} tab`];
   if (context.dayNumber) {

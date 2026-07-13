@@ -310,6 +310,115 @@ describe('POST /trips/:tripId/copilot', () => {
       .run(tripId, "How's this day looking?");
   });
 
+  it('normalizes Discovery context identically for persistence, history, and model injection', async () => {
+    mockStreamCopilotResponse.mockResolvedValue('Done');
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({
+        body: {
+          message: 'Does this fit the trip?',
+          context: {
+            tab: 'discovery',
+            discoveryName: '  Hupao Spring  ',
+            dayId: otherDayId,
+            stopId: 'not-a-stop',
+          },
+        },
+      }),
+      makeRes(),
+    );
+
+    const [messages, systemContext] = mockStreamCopilotResponse.mock.calls[0];
+    expect(messages.find((message) => message.content.includes('Does this fit the trip?'))).toEqual({
+      role: 'user',
+      content: '[Viewing: Discovery, suggestion "Hupao Spring"]\n\nDoes this fit the trip?',
+    });
+    expect(JSON.stringify(systemContext)).not.toContain('Hupao Spring');
+
+    const stored = getDb().prepare(`
+      SELECT id, context_json FROM copilot_messages
+      WHERE trip_id = ? AND role = 'user' AND content = ?
+    `).get(tripId, 'Does this fit the trip?');
+    expect(JSON.parse(stored.context_json)).toEqual({
+      tab: 'discovery',
+      discoveryName: 'Hupao Spring',
+    });
+
+    const historyRes = makeRes();
+    await callHandler('get', `/${tripId}/copilot/history`, makeReq(), historyRes);
+    expect(historyRes._body.messages.find((message) => message.id === stored.id)?.context).toEqual({
+      tab: 'discovery',
+      discoveryName: 'Hupao Spring',
+    });
+
+    getDb().prepare('DELETE FROM copilot_messages WHERE id = ?').run(stored.id);
+  });
+
+  it.each([
+    [{ tab: 'discovery' }, 'discoveryName must be a string'],
+    [{ tab: 'discovery', discoveryName: '   ' }, 'discoveryName must not be empty'],
+    [{ tab: 'discovery', discoveryName: 'A'.repeat(161) }, 'discoveryName is too long'],
+    [{ tab: 'discovery', discoveryName: 'Hupao\nSpring' }, 'discoveryName must be a single line without control characters'],
+  ])('drops malformed Discovery context without failing the turn', async (context, reason) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockStreamCopilotResponse.mockResolvedValue('Done');
+    const message = `Malformed discovery ${reason}`;
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({ body: { message, context } }),
+      makeRes(),
+    );
+
+    const stored = getDb().prepare(`
+      SELECT context_json FROM copilot_messages WHERE trip_id = ? AND content = ?
+    `).get(tripId, message);
+    expect(stored.context_json).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      '[copilot] Dropping invalid message context: %s',
+      reason,
+    );
+
+    warn.mockRestore();
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
+      .run(tripId, message);
+  });
+
+  it('ignores discoveryName outside the Discovery surface', async () => {
+    mockStreamCopilotResponse.mockResolvedValue('Done');
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({
+        body: {
+          message: 'Plan context only',
+          context: { tab: 'plan', dayId, discoveryName: 'Injected subject' },
+        },
+      }),
+      makeRes(),
+    );
+
+    const stored = getDb().prepare(`
+      SELECT context_json FROM copilot_messages WHERE trip_id = ? AND content = ?
+    `).get(tripId, 'Plan context only');
+    expect(JSON.parse(stored.context_json)).toEqual({
+      tab: 'plan',
+      dayId,
+      dayNumber: 1,
+      dayCity: 'Test City',
+    });
+    const [messages] = mockStreamCopilotResponse.mock.calls[0];
+    expect(messages.find((message) => message.content.includes('Plan context only')).content)
+      .not.toContain('Injected subject');
+
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
+      .run(tripId, 'Plan context only');
+  });
+
   it('drops an unknown tab with a warning without failing the turn', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockStreamCopilotResponse.mockResolvedValue('Done');

@@ -59,7 +59,7 @@ function noImageTint(stop) {
   return `linear-gradient(135deg, ${top}, #0d0b09)`;
 }
 
-export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps }) {
+export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate, days, onMove, dragHandleProps, onOpenCopilot }) {
   const navigate = useNavigate();
   const [action, setAction] = useState(null); // null | 'delete' | 'move' | 'photo'
   const [noteValue, setNoteValue] = useState(stop.note || '');
@@ -278,6 +278,17 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
                 </div>
 
                 <div style={{ marginTop: '12px' }}>
+                  {stop.type !== 'transit' && onOpenCopilot && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenCopilot({ tab: 'plan', dayId: stop.dayId, stopId: stop.id })}
+                        style={{ ...monoStyle, color: 'rgba(240,234,216,0.35)' }}
+                      >
+                        Ask co-pilot →
+                      </button>
+                    </div>
+                  )}
                   {action === null && (
                     <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                       <button type="button" onClick={() => setAction('delete')}

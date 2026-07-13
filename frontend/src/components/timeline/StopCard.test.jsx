@@ -42,6 +42,24 @@ function renderCard(props = {}) {
   );
 }
 
+describe('StopCard co-pilot entry point', () => {
+  it('renders only while expanded and forwards exact stop context', () => {
+    const onOpenCopilot = vi.fn();
+    renderCard({ onOpenCopilot });
+
+    fireEvent.click(screen.getByRole('button', { name: /ask co-pilot/i }));
+    expect(onOpenCopilot).toHaveBeenCalledWith({
+      tab: 'plan',
+      dayId: 'day-1',
+      stopId: 'stop-1',
+    });
+
+    cleanup();
+    renderCard({ expanded: false, onOpenCopilot });
+    expect(screen.queryByRole('button', { name: /ask co-pilot/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('StopCard — per-stop move pending state (Wave 4 §4.2)', () => {
   it('disables move controls while its own move request is in flight, then re-enables on settle', async () => {
     const pending = deferred();

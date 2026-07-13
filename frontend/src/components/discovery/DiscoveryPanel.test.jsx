@@ -54,6 +54,52 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe('DiscoveryPanel co-pilot entry-point forwarding', () => {
+  it('forwards real suggestion context from category, search, More, and surprise card paths', () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const onOpenCopilot = vi.fn();
+    const partialResults = {
+      essentials: [{ id: 1, name: 'Essential A', description: 'Core place' }],
+      culture: [{ id: 2, name: 'Culture A', description: 'Museum place' }],
+    };
+    const discovery = makeDiscovery({
+      partialResults,
+      completedCategories: new Set(['essentials', 'culture']),
+    });
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+        onOpenCopilot={onOpenCopilot}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
+    expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Essential A' });
+
+    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: 'Culture A' } });
+    fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
+    expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Culture A' });
+
+    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /^more/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
+    expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Culture A' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^surprise me$/i }));
+    const askButtons = screen.getAllByRole('button', { name: /^ask co-pilot$/i });
+    fireEvent.click(askButtons.at(-1));
+    expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Essential A' });
+    expect(onOpenCopilot).toHaveBeenCalledTimes(4);
+
+    random.mockRestore();
+  });
+});
+
 describe('DiscoveryPanel — honest tabs and hero count (Wave 4 §4.2)', () => {
   it('surfaces a category with no matching interest tag under "More", and the hero count includes it', () => {
     // interestTags maps 'food & drink' -> 'food', so only essentials/food get

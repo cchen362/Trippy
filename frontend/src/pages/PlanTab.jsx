@@ -25,6 +25,7 @@ export default function PlanTab() {
     discovery,
     refresh,
     reportError,
+    openCopilot,
   } = useTripContext();
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
@@ -140,7 +141,7 @@ export default function PlanTab() {
           dayNumber={days.findIndex((day) => day.id === activeDayId) + 1}
           onCityOverride={handleCityOverride}
         />
-        <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={handleDeleteStop} onUpdate={updateStop} days={days} onMove={handleMove} />
+        <Timeline day={activeDay} onReorder={handleReorder} saving={saving} onDelete={handleDeleteStop} onUpdate={updateStop} days={days} onMove={handleMove} onOpenCopilot={openCopilot} />
       </motion.div>
 
       <AnimatePresence>
@@ -152,6 +153,7 @@ export default function PlanTab() {
             onAddStop={createStop}
             onClose={() => setDiscoveryOpen(false)}
             discovery={discovery}
+            onOpenCopilot={openCopilot}
           />
         )}
       </AnimatePresence>

@@ -113,7 +113,7 @@ function suggestionMatchesQuery(suggestion, query) {
 // Shared card grid: wraps each SuggestionCard in a motion.div inside
 // AnimatePresence so a successful report animates the card out (Wave 4
 // §4.3) instead of it just vanishing on the next render.
-function SuggestionGrid({ items, days, destination, onAddToDay, onReport }) {
+function SuggestionGrid({ items, days, destination, onAddToDay, onReport, onOpenCopilot }) {
   return (
     <div style={{
       display: 'grid',
@@ -138,6 +138,7 @@ function SuggestionGrid({ items, days, destination, onAddToDay, onReport }) {
               destination={destination}
               onAddToDay={onAddToDay}
               onReport={onReport}
+              onOpenCopilot={onOpenCopilot}
             />
           </motion.div>
         ))}
@@ -305,7 +306,7 @@ function PlaceResultRow({ prediction, days, onAdd }) {
   );
 }
 
-export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery }) {
+export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery, onOpenCopilot }) {
   const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
   const defaultCountry = activeDay?.resolvedCountry ?? days[0]?.resolvedCountry ?? trip.destinationCountries?.[0] ?? null;
 
@@ -749,6 +750,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     destination={committedDestination}
                     onAddToDay={handleAddToDay}
                     onReport={handleReportPlace}
+                    onOpenCopilot={onOpenCopilot}
                   />
                 ))}
               </div>
@@ -816,6 +818,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             destination={committedDestination}
             onAddToDay={handleAddToDay}
             onReport={handleReportPlace}
+            onOpenCopilot={onOpenCopilot}
           />
         )}
 
@@ -842,6 +845,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     destination={committedDestination}
                     onAddToDay={handleAddToDay}
                     onReport={handleReportPlace}
+                    onOpenCopilot={onOpenCopilot}
                   />
                 </div>
               );
@@ -900,6 +904,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     await handleReportPlace(placeId);
                     setSurprisePick(null);
                   }}
+                  onOpenCopilot={onOpenCopilot}
                 />
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>

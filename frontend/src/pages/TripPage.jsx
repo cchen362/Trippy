@@ -57,6 +57,10 @@ export default function TripPage() {
   }, [bookingActions.error]);
 
   const reportError = (err, fallback) => setPageError(err?.message || fallback);
+  const openCopilot = (context) => {
+    setCopilotContext(context ? { ...context } : null);
+    setCopilotOpen(true);
+  };
 
   // Pre-warm discovery as soon as trip loads — state lives here so it survives tab navigation.
   useEffect(() => {
@@ -152,13 +156,12 @@ export default function TripPage() {
       />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
         <ErrorBanner message={pageError} onDismiss={() => setPageError(null)} className="mb-6" />
-        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive, reportError }} />
+        <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive, reportError, openCopilot }} />
       </main>
       {!copilotOpen && (
         <CopilotFab
           onClick={() => {
-            setCopilotContext(contextForRoute(location.pathname, tripState.activeDayId));
-            setCopilotOpen(true);
+            openCopilot(contextForRoute(location.pathname, tripState.activeDayId));
           }}
         />
       )}
@@ -173,7 +176,10 @@ export default function TripPage() {
           <CopilotPanel
             copilot={copilotState}
             context={copilotContext}
+            trip={tripState.trip}
             days={tripState.days}
+            bookings={tripState.bookings}
+            activeDayId={tripState.activeDayId}
             onClose={() => setCopilotOpen(false)}
             onMutationApplied={() => tripState.refresh()}
             ownerId={tripState.trip.ownerId}

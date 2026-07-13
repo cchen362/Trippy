@@ -15,6 +15,7 @@ function TimelineItem({
   onMove,
   onReorder,
   isCoarsePointer,
+  onOpenCopilot,
 }) {
   const dragControls = useDragControls();
   const dragHandleProps = {
@@ -63,6 +64,7 @@ function TimelineItem({
             days={days}
             onMove={onMove}
             dragHandleProps={dragHandleProps}
+            onOpenCopilot={onOpenCopilot}
           />
         )}
       </motion.div>
@@ -70,7 +72,7 @@ function TimelineItem({
   );
 }
 
-export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, days, onMove }) {
+export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, days, onMove, onOpenCopilot }) {
   const [expandedId, setExpandedId] = useState(null);
   const [items, setItems] = useState(day?.stops || []);
   const itemsRef = useRef(items);
@@ -106,6 +108,7 @@ export default function Timeline({ day, onReorder, saving, onDelete, onUpdate, d
             onMove={onMove}
             onReorder={() => onReorder(itemsRef.current.map((item) => item.id))}
             isCoarsePointer={isCoarsePointer}
+            onOpenCopilot={onOpenCopilot}
           />
         ))}
       </Reorder.Group>

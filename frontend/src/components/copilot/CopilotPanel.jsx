@@ -4,6 +4,7 @@ import CopilotMessage from './CopilotMessage.jsx';
 import MutationPreview from './MutationPreview.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import useMediaQuery from '../../hooks/useMediaQuery.js';
+import { deriveCopilotSeeds } from '../../utils/copilotSeeds.js';
 
 const TOOL_ACTIVITY_LABELS = {
   search_discovery_catalogue: 'Searching your Discovery picks…',
@@ -19,7 +20,7 @@ const HEIGHT_RATIOS = {
   desktop: { partial: 0.56, expanded: 0.92 },
 };
 
-export default function CopilotPanel({ copilot, context, days, onClose, onMutationApplied, ownerId }) {
+export default function CopilotPanel({ copilot, context, trip, days, bookings, activeDayId, onClose, onMutationApplied, ownerId }) {
   const {
     messages,
     streaming,
@@ -168,6 +169,10 @@ export default function CopilotPanel({ copilot, context, days, onClose, onMutati
   };
 
   const isEmpty = messages.length === 0 && !streamingText && !streaming;
+  const seedPrompts = useMemo(
+    () => deriveCopilotSeeds({ trip, days, bookings, activeDayId }),
+    [trip, days, bookings, activeDayId],
+  );
 
   const formFactor = isDesktop ? 'desktop' : 'mobile';
   const currentHeight = Math.round(viewportH * HEIGHT_RATIOS[formFactor][sheetState]);
@@ -413,19 +418,61 @@ export default function CopilotPanel({ copilot, context, days, onClose, onMutati
           {isEmpty && (
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                fontFamily: "'DM Mono', monospace",
-                fontSize: 13,
-                color: 'rgba(240,234,216,0.28)',
-                fontStyle: 'italic',
-                textAlign: 'center',
-                padding: '0 32px',
+                padding: '10px 0 0',
               }}
             >
-              Ask me anything about your trip...
+              <p style={{
+                margin: '0 0 4px',
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 10,
+                letterSpacing: '0.24em',
+                textTransform: 'uppercase',
+                color: 'var(--gold)',
+              }}>
+                Start from your trip
+              </p>
+              {seedPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => send(prompt, context)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 14,
+                    padding: '13px 0',
+                    border: 'none',
+                    borderBottom: '1px solid var(--ink-border)',
+                    background: 'transparent',
+                    color: 'rgba(240,234,216,0.85)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: "'Cormorant Garamond', serif",
+                    fontSize: 16.5,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <span>{prompt}</span>
+                  <span aria-hidden="true" style={{
+                    flexShrink: 0,
+                    fontFamily: "'DM Mono', monospace",
+                    color: 'var(--cream-mute)',
+                  }}>
+                    →
+                  </span>
+                </button>
+              ))}
+              <p style={{
+                margin: '14px 0 0',
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 15,
+                fontStyle: 'italic',
+                color: 'var(--cream-mute)',
+              }}>
+                …or ask anything. The co-pilot reads the whole trip.
+              </p>
             </div>
           )}
 

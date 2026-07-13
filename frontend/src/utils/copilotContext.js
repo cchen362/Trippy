@@ -1,4 +1,4 @@
-const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map']);
+const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map', 'discovery']);
 
 export function contextForRoute(pathname, activeDayId) {
   const tab = pathname.split('/').filter(Boolean).at(-1);
@@ -8,6 +8,10 @@ export function contextForRoute(pathname, activeDayId) {
 
 export function formatContextChip(context, days = []) {
   if (!context?.tab) return null;
+
+  if (context.tab === 'discovery') {
+    return [context.tab, context.discoveryName].filter(Boolean).join(' · ');
+  }
 
   const parts = [context.tab];
   const dayIndex = context.dayId

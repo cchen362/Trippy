@@ -20,7 +20,7 @@ function normalizeName(str) {
     .trim();
 }
 
-export default function SuggestionCard({ suggestion, days, onAddToDay, destination, onReport }) {
+export default function SuggestionCard({ suggestion, days, onAddToDay, destination, onReport, onOpenCopilot }) {
   const { id, name, localName, description, whyItFits, whyItMatches, estimatedDuration, openingHours, provenance, fitLine } = suggestion;
   const whyText = whyItFits ?? whyItMatches;
   const isVerified = provenance === 'verified';
@@ -348,8 +348,29 @@ export default function SuggestionCard({ suggestion, days, onAddToDay, destinati
             by default (bottom-right of the row) so it doesn't compete with
             "Add to day" or read as a warning on every card in the grid;
             expands to an explicit two-choice confirm on tap. */}
+        {onOpenCopilot && name && (
+          <button
+            type="button"
+            onClick={() => onOpenCopilot({ tab: 'discovery', discoveryName: name })}
+            style={{
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#504438',
+              background: 'none',
+              border: 'none',
+              padding: '12px 0',
+              marginLeft: 'auto',
+              cursor: 'pointer',
+            }}
+          >
+            Ask co-pilot
+          </button>
+        )}
+
         {id != null && onReport && (
-          <div ref={reportRef} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          <div ref={reportRef} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {reportStage === 'idle' ? (
               <button
                 onClick={() => setReportStage('confirming')}
