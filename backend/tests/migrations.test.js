@@ -88,8 +88,16 @@ describe('migrations', () => {
     // 021 (canonicalize_discovery_keys), 022 (drop_dead_discovery_cache),
     // 023 (trip_scopes), 024 (geo_data_repair), 025 (stop_photo_attribution),
     // 026 (discovery_place_photo_descriptor), 027 (stop_photo_source), and
-    // 028 (copilot_proposals).
-    expect(count.c).toBe(28);
+    // 028 (copilot_proposals), and 029 (copilot message context).
+    expect(count.c).toBe(29);
+  });
+
+  it('adds nullable co-pilot message context storage', () => {
+    const db = getDb();
+    const contextColumn = db.prepare('PRAGMA table_info(copilot_messages)').all()
+      .find((column) => column.name === 'context_json');
+
+    expect(contextColumn).toMatchObject({ type: 'TEXT', notnull: 0 });
   });
 
   it('adds stop photo attribution columns (Plan 10 Wave 1)', () => {

@@ -13,6 +13,13 @@ function normalizeProposal(p) {
   };
 }
 
+function normalizeMessage(message) {
+  return {
+    ...message,
+    context: message.context ?? null,
+  };
+}
+
 export function useCopilot(tripId) {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -28,7 +35,7 @@ export function useCopilot(tripId) {
     if (!tripId) return;
     copilotApi.history(tripId)
       .then(data => {
-        setMessages(data.messages);
+        setMessages((data.messages || []).map(normalizeMessage));
         setProposals((data.proposals || []).map(normalizeProposal));
       })
       .catch(err => console.error('[useCopilot] history load failed:', err));
@@ -38,7 +45,7 @@ export function useCopilot(tripId) {
     setProposals(prev => prev.map(p => (p.id === id ? { ...p, status, statusReason } : p)));
   }, []);
 
-  const send = useCallback(async (text) => {
+  const send = useCallback(async (text, context = null) => {
     if (streaming) return;
 
     const userMsg = {
@@ -47,6 +54,7 @@ export function useCopilot(tripId) {
       content: text,
       createdAt: new Date().toISOString(),
       authorName: user?.display_name ?? null,
+      context,
     };
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
@@ -61,7 +69,7 @@ export function useCopilot(tripId) {
     let terminated = false;
     let proposalPayload = null;
     try {
-      await copilotApi.send(tripId, text, (chunk) => {
+      await copilotApi.send(tripId, text, context, (chunk) => {
         if (chunk.type === 'text') {
           fullText += chunk.content;
           setStreamingText(fullText);

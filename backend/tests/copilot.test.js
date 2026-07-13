@@ -29,6 +29,8 @@ let userId;
 let otherUserId;
 let tripId;
 let dayId;
+let otherTripId;
+let otherDayId;
 
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-copilot-test-'));
@@ -64,6 +66,17 @@ beforeAll(async () => {
     RETURNING id
   `).get(tripId);
   dayId = day.id;
+
+  otherTripId = db.prepare(`
+    INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
+    VALUES ('Other Trip', ?, '2026-06-01', '2026-06-02', 'solo', '[]', 'moderate', 'upcoming')
+    RETURNING id
+  `).get(userId).id;
+  otherDayId = db.prepare(`
+    INSERT INTO days (trip_id, date, city)
+    VALUES (?, '2026-06-01', 'Other City')
+    RETURNING id
+  `).get(otherTripId).id;
 });
 
 afterAll(() => {
@@ -180,6 +193,28 @@ describe('GET /trips/:tripId/copilot/history', () => {
 
     db.prepare('DELETE FROM copilot_messages WHERE id IN (?, ?)').run('msg-1', 'msg-2');
   });
+
+  it('round-trips resolved context_json on a user message', async () => {
+    const context = {
+      tab: 'plan',
+      dayId,
+      dayNumber: 1,
+      dayCity: 'Test City',
+    };
+    getDb().prepare(`
+      INSERT INTO copilot_messages
+        (id, trip_id, user_id, role, content, context_json, created_at)
+      VALUES ('msg-context', ?, ?, 'user', 'Context turn', ?, '2026-05-01T10:01:00')
+    `).run(tripId, userId, JSON.stringify(context));
+
+    const res = makeRes();
+    await callHandler('get', `/${tripId}/copilot/history`, makeReq(), res);
+
+    expect(res._body.messages.find((message) => message.id === 'msg-context')?.context)
+      .toEqual(context);
+
+    getDb().prepare('DELETE FROM copilot_messages WHERE id = ?').run('msg-context');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -231,6 +266,100 @@ describe('POST /trips/:tripId/copilot', () => {
 
     db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content IN (?, ?)')
       .run(tripId, 'What should I see?', 'Assistant reply');
+  });
+
+  it('injects resolved context into the user turn only and persists it separately', async () => {
+    const stopId = insertStop('West Lake', 2);
+    mockStreamCopilotResponse.mockImplementation(async () => 'Done');
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({
+        body: {
+          message: "How's this day looking?",
+          context: { tab: 'plan', dayId, stopId },
+        },
+      }),
+      makeRes(),
+    );
+
+    const [messages, systemContext] = mockStreamCopilotResponse.mock.calls[0];
+    const injectedTurn = messages.find((message) => message.content.includes("How's this day looking?"));
+    expect(injectedTurn).toEqual({
+      role: 'user',
+      content: `[Viewing: Plan tab, Day 1 (Test City), stop "West Lake"]\n\nHow's this day looking?`,
+    });
+    expect(JSON.stringify(systemContext)).not.toContain('[Viewing:');
+
+    const stored = getDb().prepare(`
+      SELECT content, context_json FROM copilot_messages
+      WHERE trip_id = ? AND role = 'user' AND content = ?
+    `).get(tripId, "How's this day looking?");
+    expect(stored.content).toBe("How's this day looking?");
+    expect(JSON.parse(stored.context_json)).toEqual({
+      tab: 'plan',
+      dayId,
+      dayNumber: 1,
+      dayCity: 'Test City',
+      stopId,
+      stopName: 'West Lake',
+    });
+
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
+      .run(tripId, "How's this day looking?");
+  });
+
+  it('drops an unknown tab with a warning without failing the turn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockStreamCopilotResponse.mockResolvedValue('Done');
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({ body: { message: 'Unknown tab turn', context: { tab: 'discover', dayId } } }),
+      makeRes(),
+    );
+
+    const stored = getDb().prepare(`
+      SELECT context_json FROM copilot_messages WHERE trip_id = ? AND content = ?
+    `).get(tripId, 'Unknown tab turn');
+    expect(stored.context_json).toBeNull();
+    const [messages] = mockStreamCopilotResponse.mock.calls[0];
+    expect(messages.find((message) => message.content === 'Unknown tab turn')).toBeDefined();
+    expect(warn).toHaveBeenCalledWith(
+      '[copilot] Dropping invalid message context: %s',
+      'unknown tab',
+    );
+
+    warn.mockRestore();
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
+      .run(tripId, 'Unknown tab turn');
+  });
+
+  it('drops a cross-trip id with a warning without failing the turn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockStreamCopilotResponse.mockResolvedValue('Done');
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({ body: { message: 'Cross-trip turn', context: { tab: 'plan', dayId: otherDayId } } }),
+      makeRes(),
+    );
+
+    const stored = getDb().prepare(`
+      SELECT context_json FROM copilot_messages WHERE trip_id = ? AND content = ?
+    `).get(tripId, 'Cross-trip turn');
+    expect(stored.context_json).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      '[copilot] Dropping invalid message context: %s',
+      'dayId does not belong to trip',
+    );
+
+    warn.mockRestore();
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?')
+      .run(tripId, 'Cross-trip turn');
   });
 
   it('creates a proposal record when the model calls the tool', async () => {

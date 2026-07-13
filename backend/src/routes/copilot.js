@@ -16,6 +16,67 @@ import {
 
 const router = Router();
 
+const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map']);
+
+function dropContext(reason) {
+  console.warn('[copilot] Dropping invalid message context: %s', reason);
+  return null;
+}
+
+function resolveMessageContext(rawContext, tripDetail) {
+  if (rawContext == null) return null;
+  if (typeof rawContext !== 'object' || Array.isArray(rawContext)) {
+    return dropContext('context must be an object');
+  }
+  if (!COPILOT_TABS.has(rawContext.tab)) {
+    return dropContext('unknown tab');
+  }
+
+  const resolved = { tab: rawContext.tab };
+
+  if (rawContext.dayId != null) {
+    if (typeof rawContext.dayId !== 'string') return dropContext('dayId must be a string');
+    const dayIndex = tripDetail.days.findIndex((day) => day.id === rawContext.dayId);
+    if (dayIndex === -1) return dropContext('dayId does not belong to trip');
+    const day = tripDetail.days[dayIndex];
+    resolved.dayId = day.id;
+    resolved.dayNumber = dayIndex + 1;
+    resolved.dayCity = day.resolvedCity ?? day.city ?? null;
+  }
+
+  if (rawContext.stopId != null) {
+    if (typeof rawContext.stopId !== 'string') return dropContext('stopId must be a string');
+    const stop = tripDetail.days
+      .flatMap((day) => day.stops || [])
+      .find((candidate) => candidate.id === rawContext.stopId);
+    if (!stop) return dropContext('stopId does not belong to trip');
+    resolved.stopId = stop.id;
+    resolved.stopName = stop.title;
+  }
+
+  return resolved;
+}
+
+function contextLine(context) {
+  const tabLabel = context.tab[0].toUpperCase() + context.tab.slice(1);
+  const parts = [`${tabLabel} tab`];
+  if (context.dayNumber) {
+    parts.push(`Day ${context.dayNumber}${context.dayCity ? ` (${context.dayCity})` : ''}`);
+  }
+  if (context.stopName) parts.push(`stop "${context.stopName}"`);
+  return `[Viewing: ${parts.join(', ')}]`;
+}
+
+function parseStoredContext(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    console.error('[copilot] Could not parse stored message context:', error);
+    return null;
+  }
+}
+
 router.use(requireAuth);
 
 // GET /trips/:tripId/copilot/history
@@ -23,8 +84,9 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT id, role, content, created_at, author_name FROM (
-        SELECT cm.id, cm.role, cm.content, cm.created_at, u.display_name AS author_name
+      SELECT id, role, content, context_json, created_at, author_name FROM (
+        SELECT cm.id, cm.role, cm.content, cm.context_json, cm.created_at,
+          u.display_name AS author_name
         FROM copilot_messages cm
         LEFT JOIN users u ON u.id = cm.user_id
         WHERE cm.trip_id = ?
@@ -38,6 +100,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         id: r.id,
         role: r.role,
         content: r.content,
+        context: parseStoredContext(r.context_json),
         createdAt: r.created_at,
         authorName: r.author_name,
       })),
@@ -83,26 +146,31 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     return next(error);
   }
 
+  const messageContext = resolveMessageContext(req.body.context, tripDetail);
+
   // Now save the user message (trip access confirmed above)
   db.prepare(`
-    INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
-    VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, datetime('now'))
-  `).run(tripId, userId, req.body.message);
+    INSERT INTO copilot_messages (id, trip_id, user_id, role, content, context_json, created_at)
+    VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, ?, datetime('now'))
+  `).run(tripId, userId, req.body.message, messageContext ? JSON.stringify(messageContext) : null);
 
   // Load the most recent 20 messages for conversation context, re-ordered chronologically
   const contextRows = db.prepare(`
-    SELECT role, content FROM (
-      SELECT role, content, created_at FROM copilot_messages
+    SELECT role, content, context_json FROM (
+      SELECT role, content, context_json, created_at FROM copilot_messages
       WHERE trip_id = ?
       ORDER BY created_at DESC
       LIMIT 20
     ) ORDER BY created_at ASC
   `).all(tripId);
 
-  const conversationMessages = contextRows.map((r) => ({
-    role: r.role,
-    content: r.content,
-  }));
+  const conversationMessages = contextRows.map((r) => {
+    const storedContext = r.role === 'user' ? parseStoredContext(r.context_json) : null;
+    return {
+      role: r.role,
+      content: storedContext ? `${contextLine(storedContext)}\n\n${r.content}` : r.content,
+    };
+  });
 
   // persistTurn — invoked once when the model turn completes, before the proposal/done SSE
   // events. Saves the assistant message, and (when the model called the tool) creates the

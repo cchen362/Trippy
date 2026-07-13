@@ -19,7 +19,7 @@ const HEIGHT_RATIOS = {
   desktop: { partial: 0.56, expanded: 0.92 },
 };
 
-export default function CopilotPanel({ copilot, days, onClose, onMutationApplied, ownerId }) {
+export default function CopilotPanel({ copilot, context, days, onClose, onMutationApplied, ownerId }) {
   const {
     messages,
     streaming,
@@ -117,7 +117,7 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
     const text = inputText.trim();
     if (!text || streaming) return;
     setInputText('');
-    send(text);
+    send(text, context);
   };
 
   const handleKeyDown = (e) => {
@@ -436,6 +436,8 @@ export default function CopilotPanel({ copilot, days, onClose, onMutationApplied
                 content={msg.content}
                 isStreaming={false}
                 authorLabel={showAuthors ? msg.authorName : null}
+                context={msg.context}
+                days={days}
               />
               {(proposalsByMessageId.get(msg.id) || []).map((p) => (
                 <MutationPreview

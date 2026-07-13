@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Edit2, Users } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
@@ -19,6 +19,7 @@ import { useTrip } from '../hooks/useTrip.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { tripsApi } from '../services/tripsApi.js';
 import { tripIsLive } from '../utils/tripStatus.js';
+import { contextForRoute } from '../utils/copilotContext.js';
 
 export function useTripContext() {
   return useOutletContext();
@@ -27,11 +28,13 @@ export function useTripContext() {
 export default function TripPage() {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const tripState = useTrip(tripId);
   const stopActions = useStops({ onChanged: tripState.refresh });
   const bookingActions = useBookings({ tripId, onChanged: tripState.refresh });
   const copilotState = useCopilot(tripId);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotContext, setCopilotContext] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -151,7 +154,14 @@ export default function TripPage() {
         <ErrorBanner message={pageError} onDismiss={() => setPageError(null)} className="mb-6" />
         <Outlet context={{ ...tripState, ...stopActions, ...bookingActions, discovery, live: isLive, reportError }} />
       </main>
-      {!copilotOpen && <CopilotFab onClick={() => setCopilotOpen(true)} />}
+      {!copilotOpen && (
+        <CopilotFab
+          onClick={() => {
+            setCopilotContext(contextForRoute(location.pathname, tripState.activeDayId));
+            setCopilotOpen(true);
+          }}
+        />
+      )}
       <AnimatePresence>
         {shareOpen && (
           <TripShareModal
@@ -162,6 +172,7 @@ export default function TripPage() {
         {copilotOpen && (
           <CopilotPanel
             copilot={copilotState}
+            context={copilotContext}
             days={tripState.days}
             onClose={() => setCopilotOpen(false)}
             onMutationApplied={() => tripState.refresh()}

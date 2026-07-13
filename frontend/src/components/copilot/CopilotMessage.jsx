@@ -1,3 +1,5 @@
+import { formatContextChip } from '../../utils/copilotContext.js';
+
 // Renders assistant markdown (bold, italic, headings, hr, inline code) and strips
 // the trailing ```json mutation block (already shown as Proposed Changes card).
 function renderMarkdown(text) {
@@ -81,8 +83,38 @@ function inlineRender(text) {
   return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts;
 }
 
-export default function CopilotMessage({ role, content, isStreaming, authorLabel }) {
+export default function CopilotMessage({ role, content, isStreaming, authorLabel, context, days }) {
   const isUser = role === 'user';
+  const contextLabel = isUser ? formatContextChip(context, days) : null;
+
+  const bubble = (
+    <div
+      style={{
+        background: isUser ? '#232018' : '#1c1a17',
+        color: isUser ? '#f0ead8' : 'rgba(240,234,216,0.85)',
+        borderRadius: isUser ? '12px 12px 2px 12px' : '2px 12px 12px 12px',
+        padding: '10px 14px',
+        maxWidth: isUser ? undefined : '85%',
+        fontFamily: "'Cormorant Garamond', serif",
+        fontSize: 15,
+        lineHeight: 1.6,
+        wordBreak: 'break-word',
+      }}
+    >
+      {isUser ? content : renderMarkdown(content)}
+      {isStreaming && (
+        <span
+          style={{
+            animation: 'copilot-blink 1s step-end infinite',
+            marginLeft: 2,
+            color: '#c9a84c',
+          }}
+        >
+          |
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -93,47 +125,65 @@ export default function CopilotMessage({ role, content, isStreaming, authorLabel
         marginBottom: 12,
       }}
     >
-      {isUser && authorLabel && (
-        <span
+      {isUser ? (
+        <div
           style={{
-            fontFamily: "'DM Mono', monospace",
-            fontSize: 10,
-            letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-            color: 'rgba(240,234,216,0.4)',
-            marginBottom: 4,
-            marginRight: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            maxWidth: '84%',
           }}
         >
-          {authorLabel}
-        </span>
+          {(authorLabel || contextLabel) && (
+            <div
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: authorLabel ? 'space-between' : 'flex-end',
+                gap: 8,
+                marginBottom: contextLabel ? 5 : 4,
+              }}
+            >
+              {authorLabel && (
+                <span
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 10,
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(240,234,216,0.4)',
+                  }}
+                >
+                  {authorLabel}
+                </span>
+              )}
+              {contextLabel && (
+                <span
+                  data-testid="copilot-context-chip"
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 9,
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(201,168,76,0.9)',
+                    border: '1px solid rgba(201,168,76,0.35)',
+                    background: 'transparent',
+                    borderRadius: 4,
+                    padding: '3px 7px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {contextLabel}
+                </span>
+              )}
+            </div>
+          )}
+          {bubble}
+        </div>
+      ) : (
+        bubble
       )}
-      <div
-        style={{
-          background: isUser ? '#232018' : '#1c1a17',
-          color: isUser ? '#f0ead8' : 'rgba(240,234,216,0.85)',
-          borderRadius: isUser ? '12px 12px 2px 12px' : '2px 12px 12px 12px',
-          padding: '10px 14px',
-          maxWidth: isUser ? '80%' : '85%',
-          fontFamily: "'Cormorant Garamond', serif",
-          fontSize: 15,
-          lineHeight: 1.6,
-          wordBreak: 'break-word',
-        }}
-      >
-        {isUser ? content : renderMarkdown(content)}
-        {isStreaming && (
-          <span
-            style={{
-              animation: 'copilot-blink 1s step-end infinite',
-              marginLeft: 2,
-              color: '#c9a84c',
-            }}
-          >
-            |
-          </span>
-        )}
-      </div>
     </div>
   );
 }
