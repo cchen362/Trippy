@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import DiscoveryPanel from './DiscoveryPanel.jsx';
 import { discoveryApi } from '../../services/discoveryApi.js';
+import { bookingsApi } from '../../services/bookingsApi.js';
 
 // Vitest doesn't register a global `afterEach` unless `test.globals` is set
 // (this project's vitest.config.js doesn't), so @testing-library/react's
@@ -393,5 +394,277 @@ describe('DiscoveryPanel — report flow (Wave 4 §4.3)', () => {
 
     await waitFor(() => expect(screen.queryByText('Fake Landmark')).not.toBeInTheDocument());
     expect(discoveryApi.reportPlace).toHaveBeenCalledWith(5, 'trip-1');
+  });
+});
+
+describe('DiscoveryPanel — Option 1b destination and control contract (Plan 14 Wave 1)', () => {
+  it('keeps committed results visible while editing and returns to a trimmed committed header after Go', async () => {
+    const partialResults = {
+      essentials: [{ id: 1, name: 'Essential A', description: 'Core place' }],
+    };
+    const discovery = makeDiscovery({
+      partialResults,
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^change$/i })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Destination')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
+    const destinationInput = screen.getByPlaceholderText('Destination');
+    expect(destinationInput).toHaveValue('Testville');
+
+    fireEvent.change(destinationInput, { target: { value: '  Othertown  ' } });
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(discovery.getDestination).toHaveBeenLastCalledWith('Testville', 'TV');
+
+    fireEvent.click(screen.getByRole('button', { name: /^go$/i }));
+
+    await waitFor(() => expect(discovery.discover).toHaveBeenLastCalledWith('Othertown', null));
+    expect(screen.queryByPlaceholderText('Destination')).not.toBeInTheDocument();
+    expect(screen.getByText('Othertown')).toBeInTheDocument();
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+  });
+
+  it('returns the results scroller to the top on category switch without fetching', () => {
+    const discovery = makeDiscovery({
+      partialResults: {
+        essentials: [{ id: 1, name: 'Essential A' }],
+        food: [{ id: 2, name: 'Food A' }],
+      },
+      completedCategories: new Set(['essentials', 'food']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    const results = screen.getByRole('region', { name: /discovery results/i });
+    Object.defineProperty(results, 'scrollTop', { configurable: true, writable: true, value: 480 });
+    results.scrollTo = vi.fn(({ top }) => { results.scrollTop = top; });
+    discovery.discover.mockClear();
+    discovery.showMore.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /^food/i }));
+
+    expect(results.scrollTop).toBe(0);
+    expect(discovery.discover).not.toHaveBeenCalled();
+    expect(discovery.showMore).not.toHaveBeenCalled();
+    expect(screen.getByText('Food A')).toBeInTheDocument();
+  });
+
+  it('expands and clears the mobile search control without mutating the destination', () => {
+    const discovery = makeDiscovery({
+      partialResults: {
+        essentials: [{ id: 1, name: 'Essential A' }],
+        culture: [{ id: 2, name: 'Culture A' }],
+      },
+      completedCategories: new Set(['essentials', 'culture']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    expect(screen.queryByPlaceholderText(/find a place/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
+
+    const searchInput = screen.getByPlaceholderText(/find a place/i);
+    fireEvent.change(searchInput, { target: { value: 'Culture' } });
+    expect(screen.getByText('Culture A')).toBeInTheDocument();
+    expect(screen.queryByText('Essential A')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+    expect(screen.queryByPlaceholderText(/find a place/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(screen.getByText('Testville')).toBeInTheDocument();
+    expect(discovery.discover).toHaveBeenCalledTimes(1);
+    expect(discovery.getDestination).toHaveBeenLastCalledWith('Testville', 'TV');
+  });
+
+  it('filters the loaded catalogue at two characters and adds the Google fallback at three', async () => {
+    bookingsApi.lookupPlaces.mockResolvedValue({
+      suggestions: [{ placeId: 'google-1', mainText: 'Museum Annex', secondaryText: 'Testville' }],
+    });
+    bookingsApi.lookupHotelDetails.mockResolvedValue({
+      place: {
+        placeId: 'google-1', name: 'Museum Annex', address: '1 Gallery Road', lat: 12.3, lng: 45.6,
+      },
+    });
+    const onAddStop = vi.fn().mockResolvedValue(undefined);
+    const discovery = makeDiscovery({
+      partialResults: {
+        essentials: [
+          { id: 1, name: 'Museum Quarter', description: 'A district of galleries.' },
+          { id: 2, name: 'River Walk', description: 'A waterside path.' },
+        ],
+      },
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={onAddStop}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    const searchButton = screen.queryByRole('button', { name: /^search$/i });
+    if (searchButton) fireEvent.click(searchButton);
+    const searchInput = screen.getByPlaceholderText(/find a place/i);
+
+    fireEvent.change(searchInput, { target: { value: 'Mu' } });
+    expect(screen.getByText('Museum Quarter')).toBeInTheDocument();
+    expect(screen.queryByText('River Walk')).not.toBeInTheDocument();
+    expect(bookingsApi.lookupPlaces).not.toHaveBeenCalled();
+
+    fireEvent.change(searchInput, { target: { value: 'Mus' } });
+
+    await waitFor(() => {
+      expect(bookingsApi.lookupPlaces).toHaveBeenCalledWith('Mus', expect.any(String), 'Testville');
+    });
+    expect(screen.getByText(/on the map/i)).toBeInTheDocument();
+    expect(screen.getByText('Museum Annex')).toBeInTheDocument();
+    expect(discovery.discover).toHaveBeenCalledTimes(1);
+
+    const sessionToken = bookingsApi.lookupPlaces.mock.calls[0][1];
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+    fireEvent.click(screen.getByText('Day 1'));
+    await waitFor(() => expect(bookingsApi.lookupHotelDetails).toHaveBeenCalledWith('google-1', sessionToken));
+    expect(onAddStop).toHaveBeenCalledWith('day-1', expect.objectContaining({
+      title: 'Museum Annex',
+      lat: 12.3,
+      lng: 45.6,
+      providerId: 'google:google-1',
+    }));
+  });
+});
+
+describe('DiscoveryPanel — Option 1b result-flow and detail cleanup (Plan 14 Wave 1)', () => {
+  it('renders exactly one Show more action in the scrolling result flow and preserves its working state', () => {
+    const partialResults = { essentials: [{ id: 1, name: 'Essential A' }] };
+    const completedCategories = new Set(['essentials']);
+    const discovery = makeDiscovery({ partialResults, completedCategories, loading: false });
+    const { rerender } = render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    const results = screen.getByRole('region', { name: /discovery results/i });
+    expect(within(results).getAllByRole('button', { name: /^show more$/i })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^show more$/i })).toHaveLength(1);
+
+    rerender(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({ partialResults, completedCategories, loading: true })}
+      />,
+    );
+
+    const workingButton = within(screen.getByRole('region', { name: /discovery results/i }))
+      .getByRole('button', { name: /finding more places/i });
+    expect(workingButton).toBeDisabled();
+  });
+
+  it('clears selected Details when its place is reported', async () => {
+    discoveryApi.reportPlace.mockResolvedValue({ suppressed: true });
+    const discovery = makeDiscovery({
+      partialResults: { essentials: [{ id: 5, name: 'Fake Landmark', description: 'Suspicious.' }] },
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /details/i }));
+    expect(screen.getByRole('region', { name: /details for fake landmark/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /report this place/i }));
+    fireEvent.click(screen.getByRole('button', { name: /not real/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: /details for fake landmark/i })).not.toBeInTheDocument();
+      expect(screen.queryByText('Fake Landmark')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clears selected Details when a category or search state makes the place unavailable', () => {
+    const discovery = makeDiscovery({
+      partialResults: {
+        essentials: [{ id: 1, name: 'Essential A', description: 'Core place' }],
+        food: [{ id: 2, name: 'Food A', description: 'Dining place' }],
+      },
+      completedCategories: new Set(['essentials', 'food']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /details/i }));
+    expect(screen.getByRole('region', { name: /details for essential a/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^food/i }));
+    expect(screen.queryByRole('region', { name: /details for essential a/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^essentials/i }));
+    fireEvent.click(screen.getByRole('button', { name: /details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: 'Food' } });
+    expect(screen.queryByRole('region', { name: /details for essential a/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Food A')).toBeInTheDocument();
   });
 });

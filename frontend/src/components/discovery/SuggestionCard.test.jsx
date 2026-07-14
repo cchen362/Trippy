@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import SuggestionCard from './SuggestionCard.jsx';
 
@@ -14,6 +14,18 @@ const SUGGESTION = {
   name: 'Old Town',
   description: 'A place already added to the trip.',
   estimatedDuration: '1h',
+};
+
+const DETAILED_SUGGESTION = {
+  id: 7,
+  name: 'Panda Base',
+  localName: '成都大熊猫繁育研究基地',
+  description: 'Morning feedings are the whole show, before the pandas fall asleep.',
+  whyItFits: 'Walk past the shuttle stop to reach the quieter nursery path.',
+  fitLine: 'Best on an unhurried morning.',
+  estimatedDuration: '3–4 hrs',
+  openingHours: '07:30–18:00',
+  provenance: 'verified',
 };
 
 describe('SuggestionCard co-pilot entry point', () => {
@@ -161,5 +173,133 @@ describe('SuggestionCard — per-suggestion pending state (Wave 4 §4.2)', () =>
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^add to day$/i })).not.toBeDisabled();
     });
+  });
+});
+
+describe('SuggestionCard — Option 1b Details contract (Plan 14 Wave 1)', () => {
+  const days = [
+    { id: 'day-1', dayIndex: 0, date: '2026-07-10', resolvedCity: 'Chengdu', stops: [] },
+  ];
+
+  it('exposes bounded summary content, then reveals full metadata without side effects', () => {
+    const onAddToDay = vi.fn();
+    const onReport = vi.fn();
+    const onOpenCopilot = vi.fn();
+    render(
+      <SuggestionCard
+        suggestion={DETAILED_SUGGESTION}
+        days={days}
+        onAddToDay={onAddToDay}
+        destination="Chengdu"
+        onReport={onReport}
+        onOpenCopilot={onOpenCopilot}
+      />,
+    );
+
+    expect(screen.getByText(DETAILED_SUGGESTION.description)).toBeVisible();
+    expect(screen.getByText(DETAILED_SUGGESTION.whyItFits)).toBeVisible();
+    expect(screen.getByText(DETAILED_SUGGESTION.estimatedDuration)).toBeInTheDocument();
+    expect(screen.queryByText(/07:30–18:00/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^verified$/i)).not.toBeInTheDocument();
+
+    const detailsButton = screen.getByRole('button', { name: /^details/i });
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(detailsButton);
+
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'true');
+    const details = screen.getByRole('region', { name: /details for panda base/i });
+    expect(within(details).getByText(/07:30–18:00/)).toBeInTheDocument();
+    expect(within(details).getByText(/^verified$/i)).toBeInTheDocument();
+    expect(within(details).getByText(DETAILED_SUGGESTION.fitLine)).toBeInTheDocument();
+    expect(onAddToDay).not.toHaveBeenCalled();
+    expect(onReport).not.toHaveBeenCalled();
+    expect(onOpenCopilot).not.toHaveBeenCalled();
+  });
+
+  it('preserves exact co-pilot context and the two-step report flow from Details', async () => {
+    const onAddToDay = vi.fn();
+    const onReport = vi.fn().mockResolvedValue(undefined);
+    const onOpenCopilot = vi.fn();
+    render(
+      <SuggestionCard
+        suggestion={DETAILED_SUGGESTION}
+        days={days}
+        onAddToDay={onAddToDay}
+        destination="Chengdu"
+        onReport={onReport}
+        onOpenCopilot={onOpenCopilot}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
+    expect(onOpenCopilot).toHaveBeenCalledWith({ tab: 'discovery', discoveryName: 'Panda Base' });
+    expect(onAddToDay).not.toHaveBeenCalled();
+    expect(onReport).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /report this place/i }));
+    expect(onReport).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /not real/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /closed/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /closed/i }));
+    await waitFor(() => expect(onReport).toHaveBeenCalledWith(7));
+  });
+
+  it('opens DayPicker from Details and keeps the per-card pending guard', async () => {
+    let resolveAdd;
+    const pendingAdd = new Promise((resolve) => { resolveAdd = resolve; });
+    const onAddToDay = vi.fn(() => pendingAdd);
+    render(
+      <SuggestionCard
+        suggestion={DETAILED_SUGGESTION}
+        days={days}
+        onAddToDay={onAddToDay}
+        destination="Chengdu"
+        onReport={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^add to day$/i }));
+    expect(screen.getByText(/Day 1/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Day 1/));
+
+    expect(onAddToDay).toHaveBeenCalledWith('day-1', DETAILED_SUGGESTION);
+    const addingButton = await screen.findByRole('button', { name: /adding/i });
+    expect(addingButton).toBeDisabled();
+    fireEvent.click(addingButton);
+    expect(onAddToDay).toHaveBeenCalledTimes(1);
+
+    resolveAdd();
+    await waitFor(() => expect(screen.getByRole('button', { name: /^add to day$/i })).not.toBeDisabled());
+  });
+
+  it('retains every matching day in the compact multi-day In trip display', () => {
+    const inTripDays = [
+      {
+        id: 'day-1', dayIndex: 0, date: '2026-07-10', resolvedCity: 'Chengdu',
+        stops: [{ title: 'Panda Base' }],
+      },
+      {
+        id: 'day-3', dayIndex: 2, date: '2026-07-12', resolvedCity: 'Chengdu',
+        stops: [{ title: 'Panda Base' }],
+      },
+    ];
+    render(
+      <SuggestionCard
+        suggestion={DETAILED_SUGGESTION}
+        days={inTripDays}
+        onAddToDay={vi.fn()}
+        destination="Chengdu"
+        onReport={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/in trip/i)).toBeInTheDocument();
+    expect(screen.getByText(/Day 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Day 3/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /added/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^details/i })).toBeInTheDocument();
   });
 });
