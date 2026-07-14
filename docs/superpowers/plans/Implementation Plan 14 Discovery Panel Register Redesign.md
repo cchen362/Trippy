@@ -1,6 +1,6 @@
 # Implementation Plan 14 — Discovery Panel “Register” Redesign (Option 1b)
 
-**Status: IN PROGRESS (2026-07-15). Waves 1–3 implemented; Wave 4 is next.**
+**Status: IN PROGRESS (2026-07-15). Waves 1–4 are complete locally; Wave 5 release is next.**
 
 ### Implementation progress
 
@@ -8,9 +8,9 @@
 |---|---|---|
 | 1 — Regression contract | **COMPLETE** | Committed as `c71142d` (`test: lock discovery register contract`). The focused Discovery baseline was 16/26 passing: the 10 failures were the newly locked Option 1b presentation contract. No production file changed. |
 | 2 — Compact shell and controls | **COMPLETE** | Committed as `3319dda` (`feat: implement discovery register shell`). `DiscoveryPanel.jsx` and `index.css` provide the committed/edit destination header, header Surprise action, combined category/search controls, category scroll reset, and in-flow Show more. Focused result after Wave 2: 18/26 passing. |
-| 3 — Bounded cards and Details | **COMPLETE** | `SuggestionCard.jsx`, `DiscoveryPanel.jsx`, and `index.css` now provide bounded Register summaries, always-visible insight, panel-owned Details selection, inline expansion below 1024px, the wide-desktop detail sheet, responsive one/two/three-column grids, bounded 236px desktop rows, and a matching Show more tile. All six intended Wave 3 failures pass; focused result is 24/26 with only the two documented legacy interaction-setup contradictions remaining. |
-| 4 — Hardening | **NOT STARTED** | Next wave. Reconcile the two legacy test setups through the explicit Search/Change interactions, then run the full accessibility, responsive, suite, and build matrix. |
-| 5 — Release | **NOT STARTED** | Pending Waves 3–4 and owner approval. |
+| 3 — Bounded cards and Details | **COMPLETE** | Committed as `6b2627b` (`feat: implement discovery register details`). `SuggestionCard.jsx`, `DiscoveryPanel.jsx`, and `index.css` provide bounded Register summaries, always-visible insight, panel-owned Details selection, inline expansion below 1024px, the wide-desktop detail sheet, responsive one/two/three-column grids, bounded 236px desktop rows, and a matching Show more tile. |
+| 4 — Hardening | **COMPLETE LOCALLY** | The two legacy setups now use explicit Search/Change interactions without weakening their assertions. Focused Discovery is 27/27, the full frontend suite is 133/133, the production build and `git diff --check` pass, and authenticated 375×812, 768px, and 1440×900 checks cover the full Register flow. Narrow fixes address mobile target sizing, destination focus, nested Escape/focus return, reduced motion, and safe error presentation. |
+| 5 — Release | **NOT STARTED** | Ready for the final clean-commit gate, deploy-skill run, owner authenticated click script, and agent console/container-log review. |
 
 **Origin:** owner-selected Option **1b — Register** from the committed,
 self-contained [Discovery redesign exploration](../mockups/Discovery%20Redesign.dc.html)
@@ -511,6 +511,46 @@ source-level breakpoint check as visual acceptance.
 the implementation diff against the committed Plan 14 baseline contains only the
 approved frontend component/CSS/test files.
 
+**Completion record (2026-07-15):** Wave 4 was completed from `6b2627b` with no
+backend, migration, hook, service, API, dependency, or runtime-configuration
+change. The two legacy contradictions were reconciled only in test setup: the
+co-pilot forwarding test opens Search before reading `Find a place…`, and the
+cross-city test opens Change before reading `Destination`.
+
+Hardening found and narrowly fixed four presentation/accessibility regressions:
+
+- mobile card actions and report controls now meet the 44×44 target floor;
+- Change focuses the destination input, and closing Details or nested
+  DayPicker/report Escape returns focus to the initiating control without adding
+  a conflicting panel-wide Escape handler;
+- Discovery motion respects the user's reduced-motion preference; and
+- provider error payloads/request ids are no longer rendered to the user—the
+  panel presents a clean retry message while the underlying failure remains
+  available to logs.
+
+Final local evidence:
+
+- focused Discovery: **27/27**;
+- full frontend: **133/133** across 23 files;
+- production build: **PASS** (the existing Vite large-chunk warning remains);
+- `git diff --check`: **PASS**;
+- authenticated 375×812: one-column Register, no horizontal overflow, all visible
+  Discovery actions at least 44×44, search clear reachable, category scroll reset
+  measured `536 → 0`, Add observed `Adding… → Added`, nested Escape/focus return,
+  multi-day In trip, report removal, Surprise, co-pilot, Show more, error, and
+  empty states exercised;
+- authenticated 768px: two 361px columns and inline Details;
+- authenticated 1440×900: three 448px columns with 236px rows, full search,
+  labelled Surprise, and a 440px right detail sheet. An extended-content fixture
+  measured 3142px of sheet content inside a 499px internal scroller while the
+  grid remained in place.
+
+The local browser exposed a fine pointer and no media-preference override. The
+44×44 touch contract, touch/outside handlers, `MotionConfig reducedMotion="user"`,
+and reduced-motion CSS are implemented and covered by source/test/build review;
+the final Wave 5 browser gate must still re-confirm coarse-pointer operation and
+the OS/browser reduced-motion mode on a capable surface before deployment.
+
 ---
 
 ## Wave 5 — Final QA, production deployment, and post-deploy verification
@@ -576,28 +616,48 @@ clean commit.**
 
 ### 5.3 Authenticated post-deploy product QA
 
-1. Open production and sign in as a real user. Confirm the trip list loads and one
-   representative trip’s Plan, Map, and Today views still render before focusing
-   on Discovery.
-2. On a designated test trip at 375px, verify:
-   - Discovery opens and closes with the existing spatial transition;
-   - compact committed destination, count, Change, and Surprise controls render;
-   - Change/edit/Go preserves current results while typing;
-   - category selection resets the results scroller;
-   - expanding search filters catalogue results and exposes the map fallback;
-   - collapsed cards clamp correctly and inline Details reveals the full content;
-   - Add to day opens DayPicker and its pending/Added state works on an owner-safe
-     test suggestion; remove the test stop afterward through the existing Plan UI;
-   - report reveals the two reasons but is cancelled before suppressing a real
-     place;
-   - Ask co-pilot opens with the selected discovery context without sending a
-     message;
-   - Show more is in-flow and no fixed footer obscures the last result.
-3. Repeat the presentation-specific checks at desktop width: three bounded columns,
-   236px rows, full search control, labelled Surprise, selected-card state, and the
-   internally scrolling right-side detail sheet with focus restoration.
-4. Check browser console and container logs for new errors during the exercised
-   flow. Record observations; do not patch production in place.
+The owner performs the authenticated/mutating browser pass. The deployment agent
+must not request credentials or perform those mutations on the owner's behalf.
+
+**Owner click script:**
+
+1. Open production, sign in, and keep this tab open after the pass so the agent can
+   inspect its captured browser console. Confirm Trips loads, then open one safe
+   representative trip and briefly visit Today, Plan, Map, and Logistics.
+2. At **375×812** in Plan, open Discovery and verify the compact destination,
+   count, Change, and icon-only Surprise header. Close and reopen it once.
+3. Tap Change, edit the destination without submitting, confirm current cards stay
+   visible, restore the original destination, and submit Go. Open Search, enter a
+   two-character catalogue match, extend it to three characters, confirm the map
+   fallback behaves honestly, then clear Search.
+4. Scroll the results, switch category, and confirm results return to the top.
+   Open More and Surprise; use Another once, then Dismiss.
+5. Open Details on a long/local-name card. Confirm full content is reachable and
+   closing returns focus. Open Add to day, cancel it with Escape, reopen it, add
+   one owner-safe suggestion to a chosen day, observe Adding/Added, then remove
+   that test stop through Plan before finishing.
+6. Open report on a real catalogue place, confirm `Not real` and `Closed` appear,
+   then cancel—do **not** submit either reason. Open Ask co-pilot and confirm the
+   selected place context appears without sending a message; close co-pilot.
+7. Scroll to Show more, activate it once, confirm existing cards remain while its
+   working label is shown, and verify the final result/action is not covered by
+   fixed chrome.
+8. At **768px**, confirm two columns and inline Details. At **1440×900**, confirm
+   three bounded 236px rows, full Search, labelled Surprise, stable hover, and the
+   internally scrolling 440px right-side detail sheet with useful grid context.
+9. With OS/browser **reduced motion enabled**, reopen/close Discovery and Details;
+   confirm they remain usable without spatial animation. If the browser supports
+   touch/coarse-pointer emulation, repeat Search, Details, DayPicker Escape, and
+   the last-result reachability check at 375×812.
+10. Report `PASS` or `FAIL` for each step, the trip/day used, viewport/browser,
+    approximate test time, any visible error text, and whether the test stop was
+    removed. Do not include credentials, cookies, tokens, or confirmation data.
+
+After the owner reports back, the deployment agent inspects the kept production
+tab's browser console and checks `trippy-trippy-1` logs plus the port-6768 health
+endpoint for the reported time window. Record console/log findings separately
+from the owner's product observations. Do not patch production in place; any
+abnormality returns to local root-cause analysis and the appropriate wave.
 
 ### 5.4 Completion record and rollback
 

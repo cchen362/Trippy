@@ -45,7 +45,10 @@ export default function DayPicker({ addedDayIds, days, suggestion, onAddToDay, o
       }
     }
     function onKeyDown(e) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        anchorRef.current?.focus();
+      }
     }
     document.addEventListener('mousedown', onOutsideInteraction);
     document.addEventListener('touchstart', onOutsideInteraction);

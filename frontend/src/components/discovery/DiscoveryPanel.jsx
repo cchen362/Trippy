@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { Search, Sparkles, X } from 'lucide-react';
 import SuggestionCard from './SuggestionCard.jsx';
 import DayPicker from './DayPicker.jsx';
@@ -290,6 +290,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [mobileSearchExpanded, setMobileSearchExpanded] = useState(false);
   const [placePredictions, setPlacePredictions] = useState([]);
   const [placeSearching, setPlaceSearching] = useState(false);
+  const destinationInputRef = useRef(null);
   const sessionTokenRef = useRef(null);
   const resultsScrollerRef = useRef(null);
 
@@ -328,6 +329,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     discover(defaultDestination, defaultCountry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultDestination, defaultCountry]);
+
+  useEffect(() => {
+    if (destinationEditing) destinationInputRef.current?.focus();
+  }, [destinationEditing]);
 
   const surprisePendingRef = useRef(false);
   useEffect(() => {
@@ -566,7 +571,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   ) : null;
 
   return (
-    <motion.div
+    <MotionConfig reducedMotion="user">
+      <motion.div
       initial={{ y: '100%' }}
       animate={{ y: 0 }}
       exit={{ y: '100%' }}
@@ -593,6 +599,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         {destinationEditing ? (
           <div className="discovery-destination-editor">
           <input
+            ref={destinationInputRef}
             type="text"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
@@ -787,7 +794,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             fontSize: 11, color: '#e05a5a',
             letterSpacing: '0.08em', textAlign: 'center', marginTop: 40,
           }}>
-            {error.message || 'Discovery failed. Please try again.'}
+            Couldn’t load places right now. Please try again.
           </p>
         )}
 
@@ -1004,6 +1011,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </AnimatePresence>
       </div>
 
-    </motion.div>
+      </motion.div>
+    </MotionConfig>
   );
 }

@@ -237,11 +237,18 @@ describe('SuggestionCard — Option 1b Details contract (Plan 14 Wave 1)', () =>
     expect(onAddToDay).not.toHaveBeenCalled();
     expect(onReport).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /report this place/i }));
+    const reportButton = screen.getByRole('button', { name: /report this place/i });
+    fireEvent.click(reportButton);
     expect(onReport).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /not real/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /closed/i })).toBeInTheDocument();
 
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: /not real/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /details for panda base/i })).toBeInTheDocument();
+    expect(reportButton).toHaveFocus();
+
+    fireEvent.click(reportButton);
     fireEvent.click(screen.getByRole('button', { name: /closed/i }));
     await waitFor(() => expect(onReport).toHaveBeenCalledWith(7));
   });
@@ -261,8 +268,16 @@ describe('SuggestionCard — Option 1b Details contract (Plan 14 Wave 1)', () =>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /^details/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^add to day$/i }));
+    const addButton = screen.getByRole('button', { name: /^add to day$/i });
+    fireEvent.click(addButton);
     expect(screen.getByText(/Day 1/)).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText(/Day 1/)).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /details for panda base/i })).toBeInTheDocument();
+    expect(addButton).toHaveFocus();
+
+    fireEvent.click(addButton);
     fireEvent.click(screen.getByText(/Day 1/));
 
     expect(onAddToDay).toHaveBeenCalledWith('day-1', DETAILED_SUGGESTION);

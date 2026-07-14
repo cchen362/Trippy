@@ -56,6 +56,14 @@ export default function SuggestionCard({
   const [reportStage, setReportStage] = useState('idle');
   const [reporting, setReporting] = useState(false);
   const reportRef = useRef(null);
+  const reportTriggerRef = useRef(null);
+  const wasReportConfirmingRef = useRef(false);
+
+  useEffect(() => {
+    const confirming = reportStage === 'confirming';
+    if (wasReportConfirmingRef.current && !confirming) reportTriggerRef.current?.focus();
+    wasReportConfirmingRef.current = confirming;
+  }, [reportStage]);
 
   useEffect(() => {
     if (reportStage !== 'confirming') return undefined;
@@ -63,7 +71,9 @@ export default function SuggestionCard({
       if (reportRef.current && !reportRef.current.contains(event.target)) setReportStage('idle');
     }
     function onKeyDown(event) {
-      if (event.key === 'Escape') setReportStage('idle');
+      if (event.key === 'Escape') {
+        setReportStage('idle');
+      }
     }
     document.addEventListener('mousedown', onOutsideInteraction);
     document.addEventListener('touchstart', onOutsideInteraction);
@@ -176,6 +186,7 @@ export default function SuggestionCard({
             <div ref={reportRef} className={`discovery-card-report${reportStage === 'confirming' ? ' is-confirming' : ''}`}>
               {reportStage === 'idle' ? (
                 <button
+                  ref={reportTriggerRef}
                   type="button"
                   onClick={() => setReportStage('confirming')}
                   aria-label="Report this place"

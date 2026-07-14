@@ -82,6 +82,7 @@ describe('DiscoveryPanel co-pilot entry-point forwarding', () => {
     fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
     expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Essential A' });
 
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
     fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: 'Culture A' } });
     fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
     expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Culture A' });
@@ -328,6 +329,7 @@ describe('DiscoveryPanel — cross-city country selection (Wave 5 §5.2)', () =>
     // field, so committedCountry is cleared to null rather than reusing the
     // active day's country (Wave 4 §4.1). That null must win over
     // activeDay.resolvedCountry when adding a suggestion.
+    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
     fireEvent.change(screen.getByPlaceholderText('Destination'), { target: { value: 'Othertown' } });
     fireEvent.click(screen.getByRole('button', { name: /^go$/i }));
 
@@ -425,6 +427,7 @@ describe('DiscoveryPanel — Option 1b destination and control contract (Plan 14
     fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
     const destinationInput = screen.getByPlaceholderText('Destination');
     expect(destinationInput).toHaveValue('Testville');
+    expect(destinationInput).toHaveFocus();
 
     fireEvent.change(destinationInput, { target: { value: '  Othertown  ' } });
     expect(screen.getByText('Essential A')).toBeInTheDocument();
@@ -571,6 +574,22 @@ describe('DiscoveryPanel — Option 1b destination and control contract (Plan 14
 });
 
 describe('DiscoveryPanel — Option 1b result-flow and detail cleanup (Plan 14 Wave 1)', () => {
+  it('shows a clean retry message instead of exposing provider error details', () => {
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({ error: new Error('401 invalid x-api-key request_id=secret') })}
+      />,
+    );
+
+    expect(screen.getByText('Couldn’t load places right now. Please try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/invalid x-api-key|request_id/i)).not.toBeInTheDocument();
+  });
+
   it('renders exactly one Show more action in the scrolling result flow and preserves its working state', () => {
     const partialResults = { essentials: [{ id: 1, name: 'Essential A' }] };
     const completedCategories = new Set(['essentials']);
