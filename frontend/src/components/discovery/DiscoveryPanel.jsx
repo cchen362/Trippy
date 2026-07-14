@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Sparkles, X } from 'lucide-react';
 import SuggestionCard from './SuggestionCard.jsx';
 import DayPicker from './DayPicker.jsx';
 import { bookingsApi } from '../../services/bookingsApi.js';
@@ -167,65 +168,6 @@ function TabSkeleton() {
   );
 }
 
-function DestinationHero({ city, count }) {
-  if (!city) return null;
-  return (
-    <div style={{
-      position: 'relative',
-      padding: '32px 20px 28px',
-      borderBottom: '1px solid rgba(201,160,80,0.1)',
-      overflow: 'hidden',
-      flexShrink: 0,
-    }}>
-      {/* Celadon ambient tint */}
-      <div style={{
-        position: 'absolute', top: 0, right: 0, width: '55%', height: '100%',
-        background: 'linear-gradient(135deg, transparent 40%, rgba(22,42,32,0.25) 100%)',
-        pointerEvents: 'none',
-      }} />
-      {/* Ghost city name */}
-      <div style={{
-        position: 'absolute', top: '-15%', right: '-5%',
-        fontFamily: "'Playfair Display', serif", fontStyle: 'italic', fontWeight: 500,
-        fontSize: 'clamp(80px, 28vw, 180px)',
-        color: '#f0ebe3', opacity: 0.025,
-        lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
-        letterSpacing: '-0.03em', whiteSpace: 'nowrap',
-      }}>
-        {city}
-      </div>
-      <div style={{ position: 'relative', zIndex: 1 }}>
-        <div style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 10,
-          letterSpacing: '0.22em', textTransform: 'uppercase',
-          color: '#504438', marginBottom: 12,
-        }}>
-          Destination
-        </div>
-        <div style={{
-          fontFamily: "'Playfair Display', serif", fontStyle: 'italic', fontWeight: 500,
-          fontSize: 'clamp(36px, 12vw, 64px)',
-          color: '#f0ebe3', letterSpacing: '-0.025em',
-          lineHeight: 1, marginBottom: 16,
-        }}>
-          {city}
-        </div>
-        {count > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 28, height: 1, background: 'rgba(201,160,80,0.4)', flexShrink: 0 }} />
-            <span style={{
-              fontFamily: "'DM Mono', monospace", fontSize: 10,
-              letterSpacing: '0.16em', textTransform: 'uppercase', color: '#6e5e50',
-            }}>
-              {count} curated {count === 1 ? 'place' : 'places'}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // Compact row for a Google Places prediction under "On the map". Tapping "Add"
 // opens a DayPicker; picking a day resolves place details then adds the stop.
 function PlaceResultRow({ prediction, days, onAdd }) {
@@ -321,15 +263,18 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [destination, setDestination] = useState(defaultDestination);
   const [committedDestination, setCommittedDestination] = useState(defaultDestination);
   const [committedCountry, setCommittedCountry] = useState(defaultCountry);
+  const [destinationEditing, setDestinationEditing] = useState(!defaultDestination);
   const [inputFocused, setInputFocused] = useState(false);
   const [surprisePick, setSurprisePick] = useState(null);
   const [reportedIds, setReportedIds] = useState(() => new Set());
 
   // Search-inside-Discover state
   const [searchQuery, setSearchQuery] = useState('');
+  const [mobileSearchExpanded, setMobileSearchExpanded] = useState(false);
   const [placePredictions, setPlacePredictions] = useState([]);
   const [placeSearching, setPlaceSearching] = useState(false);
   const sessionTokenRef = useRef(null);
+  const resultsScrollerRef = useRef(null);
 
   const { discover, showMore, getDestination } = discovery;
   const { partialResults: rawPartialResults, completedCategories, loading, error } = getDestination(committedDestination, committedCountry);
@@ -361,6 +306,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     setDestination(defaultDestination);
     setCommittedDestination(defaultDestination);
     setCommittedCountry(defaultCountry);
+    setDestinationEditing(false);
     discover(defaultDestination, defaultCountry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultDestination, defaultCountry]);
@@ -406,7 +352,23 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       setCommittedCountry(null);
       discover(destination.trim(), null);
       setActiveCategory(tabs[0]);
+      setDestinationEditing(false);
     }
+  };
+
+  const handleCategorySelect = (key) => {
+    setActiveCategory(key);
+    const scroller = resultsScrollerRef.current;
+    if (!scroller) return;
+    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top: 0 });
+    else scroller.scrollTop = 0;
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setPlacePredictions([]);
+    setMobileSearchExpanded(false);
+    sessionTokenRef.current = null;
   };
 
   const handleAddToDay = async (dayId, suggestion) => {
@@ -560,42 +522,18 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         flexDirection: 'column',
       }}
     >
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '16px 20px 12px',
-        borderBottom: '1px solid rgba(240,235,227,0.07)',
-        flexShrink: 0,
-      }}>
+      {/* Compact committed destination header */}
+      <div className="discovery-register-header">
         <button
           onClick={onClose}
           aria-label="Close discovery panel"
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'rgba(240,234,216,0.60)',
-            fontFamily: "'DM Mono', monospace",
-            fontSize: 18, padding: 0, lineHeight: 1,
-          }}
+          className="discovery-register-icon-button"
         >
-          ✕
+          <X size={17} aria-hidden="true" />
         </button>
 
-        <span style={{
-          fontFamily: "'DM Mono', monospace",
-          fontSize: 11, letterSpacing: '0.3em',
-          textTransform: 'uppercase', color: '#f0ebe3',
-        }}>
-          Discover
-        </span>
-
-        <div style={{ minWidth: 56 }} />
-      </div>
-
-      {/* Destination input */}
-      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
+        {destinationEditing ? (
+          <div className="discovery-destination-editor">
           <input
             type="text"
             value={destination}
@@ -604,8 +542,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
             placeholder="Destination"
+            aria-label="Destination"
             style={{
               flex: 1,
+              minWidth: 0,
               background: 'rgba(26,20,16,0.7)',
               border: `1px solid ${inputFocused ? 'rgba(201,160,80,0.45)' : 'rgba(201,160,80,0.12)'}`,
               borderRadius: 4,
@@ -637,24 +577,46 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           >
             {loading ? '...' : 'Go'}
           </button>
-        </div>
+          </div>
+        ) : (
+          <div className="discovery-committed-destination">
+            <span className="discovery-register-city">
+              {committedDestination.trim() || defaultDestination}
+            </span>
+            {totalCount > 0 && (
+              <span className="discovery-register-count">
+                {totalCount} curated {totalCount === 1 ? 'place' : 'places'}
+              </span>
+            )}
+            <button
+              type="button"
+              className="discovery-register-change"
+              onClick={() => {
+                setDestination(committedDestination);
+                setDestinationEditing(true);
+              }}
+            >
+              Change
+            </button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleSurpriseMe}
+          disabled={loading && !anyResults}
+          aria-label="Surprise me"
+          className="discovery-register-surprise"
+        >
+          <Sparkles size={15} aria-hidden="true" />
+          <span className="discovery-register-surprise-label">Surprise me</span>
+        </button>
       </div>
 
-      {/* Destination hero */}
-      {anyResults && (
-        <DestinationHero city={committedDestination.trim() || defaultDestination} count={totalCount} />
-      )}
-
-      {/* Category tabs */}
-      <div style={{
-        display: 'flex',
-        overflowX: 'auto',
-        padding: '0 20px',
-        borderBottom: '1px solid rgba(240,235,227,0.07)',
-        flexShrink: 0,
-        gap: 0,
-      }}>
-        {tabs.map((key) => {
+      {/* Category and search controls */}
+      <div className="discovery-register-controls">
+        <div className="discovery-register-tabs">
+          {tabs.map((key) => {
           const tabCategories = categoriesForTabKey(key, moreCategories);
           const isActive = activeCategory === key;
           const isLoaded = tabCategories.length > 0 && tabCategories.every((cat) => completedCategories.has(cat));
@@ -664,7 +626,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             <button
               key={key}
               className="discovery-tab-btn"
-              onClick={() => setActiveCategory(key)}
+              onClick={() => handleCategorySelect(key)}
               style={{
                 fontFamily: "'DM Mono', monospace",
                 fontSize: 11, letterSpacing: '0.16em',
@@ -696,19 +658,31 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               ) : null}
             </button>
           );
-        })}
-      </div>
+          })}
+        </div>
 
-      {/* Search inside Discover */}
-      {anyResults && (
-        <div style={{ padding: '14px 20px 0', flexShrink: 0 }}>
+        {anyResults && !mobileSearchExpanded && (
+          <button
+            type="button"
+            className="discovery-mobile-search-trigger"
+            aria-label="Search"
+            onClick={() => setMobileSearchExpanded(true)}
+          >
+            <Search size={17} aria-hidden="true" />
+          </button>
+        )}
+
+        {anyResults && mobileSearchExpanded && (
+          <div className="discovery-mobile-search-field">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Find a place…"
+            autoFocus
             style={{
               width: '100%',
+              minWidth: 0,
               background: 'rgba(26,20,16,0.5)',
               border: '1px solid rgba(240,235,227,0.1)',
               borderRadius: 4,
@@ -719,11 +693,36 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               outline: 'none',
             }}
           />
-        </div>
-      )}
+            <button type="button" aria-label="Clear search" onClick={clearSearch}>
+              <X size={15} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        {anyResults && (
+          <div className="discovery-desktop-search-field">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search places"
+            />
+            {searchQuery && !mobileSearchExpanded && (
+              <button type="button" aria-label="Clear desktop search" onClick={clearSearch}>
+                <X size={15} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Content area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 120px', position: 'relative' }}>
+      <div
+        ref={resultsScrollerRef}
+        role="region"
+        aria-label="Discovery results"
+        className="discovery-register-results"
+      >
         {error && (
           <p style={{
             fontFamily: "'DM Mono', monospace",
@@ -863,6 +862,24 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
+        {anyResults && !isSearching && (
+          <button
+            type="button"
+            onClick={handleShowMore}
+            disabled={loading}
+            className="discovery-register-show-more"
+          >
+            {loading ? (
+              <>
+                Finding more places
+                <span className="discovery-register-loading-dots" aria-hidden="true">
+                  {[0, 1, 2].map((i) => <span key={i} style={{ animationDelay: `${i * 0.2}s` }} />)}
+                </span>
+              </>
+            ) : 'Show more'}
+          </button>
+        )}
+
         {/* Surprise Me spotlight overlay */}
         <AnimatePresence>
           {surprisePick && (
@@ -943,80 +960,6 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </AnimatePresence>
       </div>
 
-      {/* Footer: Show more + Surprise me */}
-      <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        padding: '20px 20px 24px',
-        background: 'linear-gradient(transparent, rgba(13,11,9,0.98) 40%)',
-        zIndex: 5,
-        pointerEvents: 'none',
-        display: 'flex',
-        gap: 12,
-      }}>
-        {anyResults && (
-          <button
-            onClick={handleShowMore}
-            disabled={loading}
-            style={{
-              flex: 1,
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 12, letterSpacing: '0.22em',
-              textTransform: 'uppercase',
-              color: loading ? 'rgba(240,234,216,0.28)' : 'rgba(240,234,216,0.75)',
-              background: 'transparent',
-              border: '1px solid rgba(240,235,227,0.18)',
-              borderRadius: 3, padding: '14px',
-              cursor: loading ? 'default' : 'pointer',
-              transition: 'all 200ms',
-              pointerEvents: 'auto',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            }}
-          >
-            {/* Wave 4 §4.3: while a show-more is in flight (loading with results
-                already on screen — the initial load never reaches this button,
-                since it only renders once anyResults is true), swap to a
-                "still working" label. Un-dims the instant `done` lands and
-                loading flips back to false. */}
-            {loading ? (
-              <>
-                Finding more places
-                <span style={{ display: 'inline-flex', gap: 3 }}>
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      style={{
-                        width: 3, height: 3, borderRadius: '50%',
-                        background: 'currentColor', display: 'inline-block',
-                        animation: 'pulse 1.2s ease-in-out infinite',
-                        animationDelay: `${i * 0.2}s`,
-                      }}
-                    />
-                  ))}
-                </span>
-              </>
-            ) : 'Show more'}
-          </button>
-        )}
-        <button
-          onClick={handleSurpriseMe}
-          disabled={loading && !anyResults}
-          style={{
-            flex: 1,
-            fontFamily: "'DM Mono', monospace",
-            fontSize: 12, letterSpacing: '0.22em',
-            textTransform: 'uppercase',
-            color: (loading && !anyResults) ? 'rgba(201,160,80,0.40)' : '#c9a050',
-            background: 'rgba(201,160,80,0.06)',
-            border: '1px solid rgba(201,160,80,0.28)',
-            borderRadius: 3, padding: '14px',
-            cursor: (loading && !anyResults) ? 'default' : 'pointer',
-            transition: 'all 200ms',
-            pointerEvents: 'auto',
-          }}
-        >
-          Surprise me
-        </button>
-      </div>
     </motion.div>
   );
 }

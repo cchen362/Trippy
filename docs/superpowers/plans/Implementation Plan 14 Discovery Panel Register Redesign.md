@@ -1,6 +1,16 @@
 # Implementation Plan 14 — Discovery Panel “Register” Redesign (Option 1b)
 
-**Status: READY FOR IMPLEMENTATION (2026-07-15). Planning only; no application code changed.**
+**Status: IN PROGRESS (2026-07-15). Waves 1–2 implemented; Wave 3 is next.**
+
+### Implementation progress
+
+| Wave | Status | Record |
+|---|---|---|
+| 1 — Regression contract | **COMPLETE** | Committed as `c71142d` (`test: lock discovery register contract`). The focused Discovery baseline was 16/26 passing: the 10 failures were the newly locked Option 1b presentation contract. No production file changed. |
+| 2 — Compact shell and controls | **COMPLETE locally** | `DiscoveryPanel.jsx` and `index.css` now provide the committed/edit destination header, header Surprise action, combined category/search controls, category scroll reset, and in-flow Show more. Focused result: 18/26 passing; production build and `git diff --check` pass. See the Wave 2 completion note for the remaining failures and test-contract discrepancy. |
+| 3 — Bounded cards and Details | **NOT STARTED** | Next implementation wave. Six focused failures are the intended red contract for this wave. |
+| 4 — Hardening | **NOT STARTED** | Pending Wave 3. |
+| 5 — Release | **NOT STARTED** | Pending Waves 3–4 and owner approval. |
 
 **Origin:** owner-selected Option **1b — Register** from the committed,
 self-contained [Discovery redesign exploration](../mockups/Discovery%20Redesign.dc.html)
@@ -299,7 +309,7 @@ backend work of any kind.
 
 ---
 
-## Wave 1 — Lock the regression contract in frontend tests
+## Wave 1 — Lock the regression contract in frontend tests (COMPLETE 2026-07-15)
 
 **Scope: frontend tests only. No production behavior change.**
 
@@ -328,9 +338,15 @@ backend work of any kind.
 fail only on missing presentation behavior; all pre-existing behavioral tests
 still pass before production edits begin.
 
+**Completion record:** committed as `c71142d` (`test: lock discovery register
+contract`). Both existing component test files were retained and expanded without
+production changes. The focused command reported **16/26 passing, 10 failing**;
+the failures described the unimplemented committed/edit header, scroll reset,
+mobile search, in-flow Show more, bounded card summary, and Details behavior.
+
 ---
 
-## Wave 2 — Compact panel shell, destination header, and controls
+## Wave 2 — Compact panel shell, destination header, and controls (COMPLETE LOCALLY 2026-07-15)
 
 **Scope: frontend presentation only.**
 
@@ -352,6 +368,39 @@ still pass before production edits begin.
 target when results exist; destination editing never blanks committed results;
 tabs/search remain reachable; category switching returns results to top; no footer
 obscures content; all Wave 1 and existing tests pass.
+
+**Completion record:** implemented only in `DiscoveryPanel.jsx` and `index.css`.
+The old title/input/hero stack is replaced by the responsive committed header;
+Change reuses the existing draft/commit path; Surprise is in the header; mobile
+search expands within the category row while wide desktop keeps a 260px field;
+category selection synchronously resets the labelled results scroller; and Show
+more now appears once in normal result flow with its existing loading state. No
+hook, service, API, backend, navigation, catalogue, or card-detail behavior was
+changed.
+
+Focused verification after Wave 2: **18/26 passing, 8 failing**. The following
+five Wave 1 shell contracts now pass:
+
+- committed destination edit/trim/Go while results stay visible;
+- category switch resets scroll without `discover` or `showMore`;
+- mobile search expands, filters, clears, and preserves destination state;
+- two-character catalogue filtering plus three-character Google fallback;
+- exactly one in-flow Show more action with the honest working label.
+
+Six failures correctly remain for Wave 3: four `SuggestionCard` bounded-summary /
+Details cases and the two `DiscoveryPanel` selected-Details cleanup cases. Two
+additional failures expose a contradiction between retained legacy assertions and
+the new Wave 1 contract: the old co-pilot test expects `Find a place…` to exist on
+initial render while the mobile contract requires it absent until Search is
+activated; the old cross-city test expects `Destination` on initial render while
+the committed-header contract requires it absent until Change. Production was not
+branched around test identity and the tests were not weakened or rewritten. Wave 3
+must preserve the behavioral intent by exercising those legacy flows through the
+new explicit Search and Change controls.
+
+`npm run build` and `git diff --check` pass. An attempted 375px browser pass reached
+the unauthenticated login screen, so the authenticated first-card position and
+interaction check remain outstanding for Wave 4 rather than being claimed complete.
 
 ---
 
