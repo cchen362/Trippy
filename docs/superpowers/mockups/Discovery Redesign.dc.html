@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,400&family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; }
+html { color-scheme: dark; }
+body { background: #0a0806; margin: 0; }
+a { color: #c9a050; text-decoration: none; }
+a:hover { color: #f0ebe3; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+</helmet>
+<section data-screen-label="Turn 1 — Discovery redesign" style="padding: 56px 64px; display: flex; flex-direction: column; gap: 40px; font-family: 'Cormorant Garamond', serif;">
+  <div style="max-width: 900px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: #c9a050;">Discovery panel · exploration</div>
+    <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 40px; color: #f0ebe3; line-height: 1.1;">A focused browsing experience</div>
+    <div style="font-size: 19px; line-height: 1.7; color: #8a7a6a; max-width: 760px;"><a href="#1a">1a</a> recreates the current panel for reference. <a href="#1b">1b</a> Register, <a href="#1c">1c</a> Atlas, and <a href="#1d">1d</a> Broadsheet are three restrained redesigns. In all three: committed destination with Change, categories + search directly above results, clamped descriptions with one visible insight, detail on expansion, no fixed two-button footer. Category switching always returns results to the top.</div>
+  </div>
+  <div style="display: flex; gap: 96px; align-items: flex-start;">
+
+    <!-- ============ 1a CURRENT ============ -->
+    <div id="1a" style="display: flex; flex-direction: column; gap: 20px; flex-shrink: 0;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #0d0b09; background: #8a7a6a; padding: 4px 10px; border-radius: 2px;">1a</span>
+        <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 26px; color: #f0ebe3;">Current</span>
+        <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438;">Recreated from DiscoveryPanel.jsx / SuggestionCard.jsx</span>
+      </div>
+      <div style="display: flex; gap: 40px; align-items: flex-start;">
+        <!-- 1a mobile -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 375px; height: 812px; border-radius: 20px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column; position: relative;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; border-bottom: 1px solid rgba(240,235,227,0.07); flex-shrink: 0;">
+              <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 18px; line-height: 1;">✕</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: #f0ebe3;">Discover</span>
+              <span style="min-width: 56px;"></span>
+            </div>
+            <div style="padding: 16px 20px 0; flex-shrink: 0; display: flex; gap: 10px;">
+              <div style="flex: 1; background: rgba(26,20,16,0.7); border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 11px 18px; font-size: 20px; color: #f0ebe3;">Chengdu</div>
+              <div style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #c9a84c; border: 1px solid rgba(201,168,76,0.5); border-radius: 4px; padding: 10px 22px; display: flex; align-items: center;">Go</div>
+            </div>
+            <div style="position: relative; padding: 32px 20px 28px; border-bottom: 1px solid rgba(201,160,80,0.1); overflow: hidden; flex-shrink: 0;">
+              <div style="position: absolute; top: 0; right: 0; width: 55%; height: 100%; background: linear-gradient(135deg, transparent 40%, rgba(22,42,32,0.25) 100%);"></div>
+              <div style="position: absolute; top: -15%; right: -5%; font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 105px; color: #f0ebe3; opacity: 0.025; line-height: 1; letter-spacing: -0.03em; white-space: nowrap;">Chengdu</div>
+              <div style="position: relative;">
+                <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #504438; margin-bottom: 12px;">Destination</div>
+                <div style="font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 45px; color: #f0ebe3; letter-spacing: -0.025em; line-height: 1; margin-bottom: 16px;">Chengdu</div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <span style="width: 28px; height: 1px; background: rgba(201,160,80,0.4);"></span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #6e5e50;">42 curated places</span>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; overflow: hidden; padding: 0 20px; border-bottom: 1px solid rgba(240,235,227,0.07); flex-shrink: 0;">
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #f0ebe3; border-bottom: 2px solid #c9a050; padding: 16px 18px 14px; white-space: nowrap; display: flex; align-items: center; gap: 7px;">Essentials <span style="font-size: 9px; color: #c9a050;">9</span></span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px; white-space: nowrap; display: flex; align-items: center; gap: 7px;">Culture <span style="font-size: 9px; color: rgba(201,160,80,0.35);">8</span></span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px; white-space: nowrap; display: flex; align-items: center; gap: 7px;">Food <span style="font-size: 9px; color: rgba(201,160,80,0.35);">11</span></span>
+            </div>
+            <div style="padding: 14px 20px 0; flex-shrink: 0;">
+              <div style="width: 100%; background: rgba(26,20,16,0.5); border: 1px solid rgba(240,235,227,0.1); border-radius: 4px; padding: 10px 16px; font-size: 17px; color: rgba(240,234,216,0.28); box-sizing: border-box;">Find a place…</div>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 20px 20px 120px; display: flex; flex-direction: column; gap: 16px;">
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25;">Kuanzhai Alley Historic Blocks (宽窄巷子历史文化街区)</div>
+                  <div style="width: 28px; height: 1px; background: rgba(201,160,80,0.35);"></div>
+                </div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses, ear-cleaning stalls, and Sichuan snack vendors share stone walls with boutique hotels. The area rewards a slow, unplanned wander more than a checklist.</p>
+                <p style="font-style: italic; font-size: 14px; line-height: 1.5; color: #6e5e50; margin: -6px 0 0;">Fits your slow-mornings pace — best before 10:00.</p>
+                <div style="border-left: 2px solid rgba(201,160,80,0.4); padding-left: 16px; margin-top: -4px;">
+                  <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(201,160,80,0.6); margin-bottom: 7px;">Local insight</div>
+                  <p style="font-style: italic; font-size: 18px; line-height: 1.72; color: #b0a090; margin: 0;">Wide Alley is for photographs, Narrow Alley is for eating, and Well Alley is where the neighbourhood actually sits — take tea at the courtyard furthest from the gate.</p>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: auto;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">2–3 hrs</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 4px 10px;">09:00–22:00 — verify</span>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438; border: 1px solid rgba(201,160,80,0.12); border-radius: 3px; padding: 12px 16px;">Add to day</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438; margin-left: auto;">Ask co-pilot</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 13px;">⚑</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25; flex: 1;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 3px 8px; white-space: nowrap; margin-top: 3px;">In trip</span>
+                </div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">A century-old open-air teahouse where bamboo chairs spill toward the lotus pond and covered-bowl jasmine tea is refilled all afternoon.</p>
+              </div>
+            </div>
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 20px 20px 24px; background: linear-gradient(transparent, rgba(13,11,9,0.98) 40%); display: flex; gap: 12px;">
+              <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(240,234,216,0.75); border: 1px solid rgba(240,235,227,0.18); border-radius: 3px; padding: 14px; text-align: center;">Show more</span>
+              <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.06); border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 14px; text-align: center;">Surprise me</span>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 375px; line-height: 1.7;">375×812 — input + Go, hero, tabs and search consume ~430px before the first card. Cards read like articles; the fixed footer permanently obscures content.</div>
+        </div>
+        <!-- 1a desktop -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 1440px; height: 900px; border-radius: 12px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column; position: relative; flex-shrink: 0;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 12px; border-bottom: 1px solid rgba(240,235,227,0.07);">
+              <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 18px;">✕</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: #f0ebe3;">Discover</span>
+              <span style="min-width: 56px;"></span>
+            </div>
+            <div style="padding: 16px 20px 0; display: flex; gap: 10px;">
+              <div style="flex: 1; background: rgba(26,20,16,0.7); border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 11px 18px; font-size: 20px; color: #f0ebe3;">Chengdu</div>
+              <div style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #c9a84c; border: 1px solid rgba(201,168,76,0.5); border-radius: 4px; padding: 10px 22px; display: flex; align-items: center;">Go</div>
+            </div>
+            <div style="position: relative; padding: 32px 20px 28px; border-bottom: 1px solid rgba(201,160,80,0.1); overflow: hidden;">
+              <div style="position: absolute; top: -20%; right: -2%; font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 180px; color: #f0ebe3; opacity: 0.025; line-height: 1; white-space: nowrap;">Chengdu</div>
+              <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #504438; margin-bottom: 12px;">Destination</div>
+              <div style="font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 64px; color: #f0ebe3; letter-spacing: -0.025em; line-height: 1; margin-bottom: 16px;">Chengdu</div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="width: 28px; height: 1px; background: rgba(201,160,80,0.4);"></span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #6e5e50;">42 curated places</span>
+              </div>
+            </div>
+            <div style="display: flex; padding: 0 20px; border-bottom: 1px solid rgba(240,235,227,0.07);">
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #f0ebe3; border-bottom: 2px solid #c9a050; padding: 16px 18px 14px; display: flex; gap: 7px; align-items: center;">Essentials <span style="font-size: 9px; color: #c9a050;">9</span></span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px;">Culture</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px;">Food</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px;">Nature</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px;">Hidden Gems</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 16px 18px 14px;">More</span>
+            </div>
+            <div style="padding: 14px 20px 0;">
+              <div style="background: rgba(26,20,16,0.5); border: 1px solid rgba(240,235,227,0.1); border-radius: 4px; padding: 10px 16px; font-size: 17px; color: rgba(240,234,216,0.28);">Find a place…</div>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 20px 20px 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: stretch;">
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25;">Kuanzhai Alley Historic Blocks (宽窄巷子历史文化街区)</div>
+                <div style="width: 28px; height: 1px; background: rgba(201,160,80,0.35);"></div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses, ear-cleaning stalls, and Sichuan snack vendors share stone walls with boutique hotels. The area rewards a slow, unplanned wander more than a checklist.</p>
+                <p style="font-style: italic; font-size: 14px; color: #6e5e50; margin: -6px 0 0;">Fits your slow-mornings pace — best before 10:00.</p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: auto;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">2–3 hrs</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438; border: 1px solid rgba(201,160,80,0.12); border-radius: 3px; padding: 12px 16px;">Add to day</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 13px;">⚑</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</div>
+                <div style="width: 28px; height: 1px; background: rgba(201,160,80,0.35);"></div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">A century-old open-air teahouse by the lotus pond.</p>
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: auto;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">1–2 hrs</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438; border: 1px solid rgba(201,160,80,0.12); border-radius: 3px; padding: 12px 16px;">Add to day</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 13px;">⚑</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25;">Jinli Ancient Street Historical and Cultural District (锦里古街)</div>
+                <div style="width: 28px; height: 1px; background: rgba(201,160,80,0.35);"></div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">A reconstructed Shu-era market street beside Wuhou Shrine — lanterns, shadow-puppet stalls, sugar painting, and every Chengdu street snack in one covered lane. Evening is when the lanterns earn the trip; daytime is souvenir crowds. Pair it with the shrine next door for contrast.</p>
+                <p style="font-style: italic; font-size: 14px; color: #6e5e50; margin: -6px 0 0;">Pairs with Wuhou Shrine on the same evening.</p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: auto;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">2 hrs</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 4px 10px;">10:00–22:30 — verify</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438; border: 1px solid rgba(201,160,80,0.12); border-radius: 3px; padding: 12px 16px;">Add to day</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 13px;">⚑</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.25; flex: 1;">Wenshu Monastery (文殊院)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 3px 8px; margin-top: 3px;">In trip</span>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; background: rgba(201,160,80,0.08); border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 10px;">Day 2 · 14 Oct</span>
+                </div>
+                <div style="width: 28px; height: 1px; background: rgba(201,160,80,0.35);"></div>
+                <p style="font-size: 17px; line-height: 1.72; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse.</p>
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: auto;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.32);">Unverified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">1–2 hrs</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.1); border: 1px solid rgba(201,160,80,0.35); border-radius: 3px; padding: 12px 16px;">✓ Added</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 13px;">⚑</span>
+                </div>
+              </div>
+            </div>
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 20px 20px 24px; background: linear-gradient(transparent, rgba(13,11,9,0.98) 40%); display: flex; gap: 12px;">
+              <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(240,234,216,0.75); border: 1px solid rgba(240,235,227,0.18); border-radius: 3px; padding: 14px; text-align: center;">Show more</span>
+              <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.06); border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 14px; text-align: center;">Surprise me</span>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 1440px; line-height: 1.7;">1440×900 — hero and inputs stretch full-width; cards of different text lengths stretch to the tallest in the row, leaving large dead zones (see Heming Teahouse). Only one row of results is visible.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1b REGISTER ============ -->
+    <div id="1b" style="display: flex; flex-direction: column; gap: 20px; flex-shrink: 0;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #0d0b09; background: #c9a050; padding: 4px 10px; border-radius: 2px;">1b</span>
+        <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 26px; color: #f0ebe3;">Register</span>
+        <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438;">Compact committed header · bounded summary cards · inline expansion</span>
+      </div>
+      <div style="display: flex; gap: 40px; align-items: flex-start;">
+        <!-- 1b mobile -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 375px; height: 812px; border-radius: 20px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid rgba(240,235,227,0.07); flex-shrink: 0;">
+              <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 17px; line-height: 1;">✕</span>
+              <div style="flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; color: #f0ebe3; white-space: nowrap;">Chengdu</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; color: #6e5e50; text-transform: uppercase;">42 places</span>
+              </div>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">Change</span>
+              <span style="color: #c9a050; font-size: 14px;">✦</span>
+            </div>
+            <div style="display: flex; align-items: center; border-bottom: 1px solid rgba(240,235,227,0.07); flex-shrink: 0;">
+              <div style="flex: 1; display: flex; overflow: hidden; padding: 0 4px 0 8px;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #f0ebe3; border-bottom: 2px solid #c9a050; padding: 13px 10px 11px; white-space: nowrap;">Essentials</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 13px 10px 11px; white-space: nowrap;">Culture</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 13px 10px 11px; white-space: nowrap;">Food</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 13px 10px 11px; white-space: nowrap;">Natu…</span>
+              </div>
+              <span style="padding: 0 14px; color: #6e5e50; font-size: 14px; border-left: 1px solid rgba(240,235,227,0.07); align-self: stretch; display: flex; align-items: center;">⌕</span>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 16px 18px; display: flex; flex-direction: column; gap: 9px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; margin-top: 4px;">2–3 hrs</span>
+                </div>
+                <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses, ear-cleaning stalls, and Sichuan snack vendors share stone walls with boutique hotels.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 15px; line-height: 1.5; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Wide Alley for photos, Narrow for food, Well Alley is where locals sit.</p>
+                <div style="display: flex; align-items: center; gap: 10px; padding-top: 2px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details ↓</span>
+                </div>
+              </div>
+              <!-- expanded card -->
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.3); border-radius: 4px; padding: 16px 18px; display: flex; flex-direction: column; gap: 11px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; margin-top: 4px;">3–4 hrs</span>
+                </div>
+                <p style="font-size: 16px; line-height: 1.6; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge. Morning feedings are the whole show — pandas eat at 08:30 and are asleep by 11:00.</p>
+                <div style="border-left: 2px solid rgba(201,160,80,0.4); padding-left: 14px;">
+                  <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(201,160,80,0.6); margin-bottom: 6px;">Local insight</div>
+                  <p style="font-style: italic; font-size: 16px; line-height: 1.65; color: #b0a090; margin: 0;">Skip the shuttle carts — the walking path past the Moon Delivery Room reaches the cub nursery most visitors never see, and it clears out entirely once the tour buses leave at noon.</p>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 4px 10px;">07:30–18:00 — verify</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Ask co-pilot</span>
+                  <span style="color: rgba(240,235,227,0.28); font-size: 12px; margin-left: auto;">⚑</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #504438;">↑</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 16px 18px; display: flex; flex-direction: column; gap: 9px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3; flex: 1;">Wenshu Monastery (文殊院)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 3px 8px; margin-top: 4px;">In trip · Day 2</span>
+                </div>
+                <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse shaded by ginkgo trees.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30 — arrive before noon.</p>
+                <div style="display: flex; align-items: center; gap: 10px; padding-top: 2px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.1); border: 1px solid rgba(201,160,80,0.35); border-radius: 3px; padding: 9px 14px;">✓ Added</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details ↓</span>
+                </div>
+              </div>
+              <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 16px 18px; display: flex; flex-direction: column; gap: 9px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                  <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</div>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; margin-top: 4px;">1–2 hrs</span>
+                </div>
+                <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">A century-old open-air teahouse where bamboo chairs spill toward the lotus pond and covered-bowl jasmine tea is refilled all afternoon.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Wave down the ear-cleaner with the tuning forks — it's the ritual.</p>
+                <div style="display: flex; align-items: center; gap: 10px; padding-top: 2px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details ↓</span>
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px; padding-top: 4px;">
+                <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(240,234,216,0.6); border: 1px solid rgba(240,235,227,0.14); border-radius: 3px; padding: 12px; text-align: center;">Show more</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 375px; line-height: 1.7;">First card lands at ~110px. Header commits the destination — Change swaps back to the input. ✦ = Surprise me. ⌕ expands into a search field pushing the tab row aside. Details expands hours, provenance, report and full insight inline. Show more scrolls with the list.</div>
+        </div>
+        <!-- 1b desktop -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 1440px; height: 900px; border-radius: 12px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column;">
+            <div style="display: flex; align-items: center; gap: 16px; padding: 18px 32px; border-bottom: 1px solid rgba(240,235,227,0.07);">
+              <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 17px;">✕</span>
+              <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 28px; color: #f0ebe3;">Chengdu</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #6e5e50;">42 curated places</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 7px 14px;">Change</span>
+              <span style="margin-left: auto; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">✦ Surprise me</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 0 32px; border-bottom: 1px solid rgba(240,235,227,0.07);">
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #f0ebe3; border-bottom: 2px solid #c9a050; padding: 15px 16px 13px;">Essentials <span style="font-size: 9px; color: #c9a050;"> 9</span></span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 15px 16px 13px;">Culture 8</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 15px 16px 13px;">Food 11</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 15px 16px 13px;">Nature 6</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 15px 16px 13px;">Hidden Gems 5</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 15px 16px 13px;">More 3</span>
+              <span style="margin-left: auto; width: 260px; background: rgba(26,20,16,0.5); border: 1px solid rgba(240,235,227,0.1); border-radius: 4px; padding: 8px 14px; font-size: 16px; color: rgba(240,234,216,0.28);">⌕&nbsp; Find a place…</span>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 24px 32px;">
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 236px; gap: 16px;">
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子历史文化街区)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; height: fit-content; margin-top: 4px;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses, ear-cleaning stalls, and Sichuan snack vendors share stone walls with boutique hotels.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Wide Alley for photos, Narrow for food, Well Alley is where locals sit.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; height: fit-content; margin-top: 4px;">1–2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">A century-old open-air teahouse where bamboo chairs spill toward the lotus pond and covered-bowl jasmine tea is refilled all afternoon.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Wave down the ear-cleaner with the tuning forks — it's the ritual.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3; flex: 1;">Wenshu Monastery (文殊院)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 3px 8px; margin-top: 4px; white-space: nowrap;">In trip · Day 2</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse shaded by ginkgo trees.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30 — arrive before noon.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.1); border: 1px solid rgba(201,160,80,0.35); border-radius: 3px; padding: 9px 14px;">✓ Added</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; height: fit-content; margin-top: 4px;">3–4 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge. Morning feedings are the whole show.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Skip the shuttle carts — walk past the Moon Delivery Room to the cub nursery.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Jinli Ancient Street Historical and Cultural District (锦里古街)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; height: fit-content; margin-top: 4px;">2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">A reconstructed Shu-era market street beside Wuhou Shrine — lanterns, shadow-puppet stalls, sugar painting, and every Chengdu street snack in one covered lane.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Come after dark — the lanterns are the point; daytime is souvenir crowds.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 20px 22px; display: flex; flex-direction: column; gap: 9px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Du Fu Thatched Cottage Museum (杜甫草堂博物馆)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 3px 8px; white-space: nowrap; height: fit-content; margin-top: 4px;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">The garden estate where the Tang poet Du Fu wrote 240 poems in exile — bamboo groves, red-walled walkways, and quiet pavilions west of the centre.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The red wall and bamboo corridor photographs best before 09:30.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 9px 14px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Details</span>
+                  </div>
+                </div>
+                <div style="border: 1px dashed rgba(240,235,227,0.14); border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(240,234,216,0.6);">Show more</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.12em; color: #504438;">36 more in Essentials</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 1440px; line-height: 1.7;">Three-column grid, fixed 236px rows — every card bounded, no dead zones. Titles clamp to 2 lines, descriptions to 2, insight to 1; the rest lives behind Details (opens a right-side detail sheet). Show more is a tile at the grid's end. Switching category scrolls the grid to top.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c ATLAS ============ -->
+    <div id="1c" style="display: flex; flex-direction: column; gap: 20px; flex-shrink: 0;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #0d0b09; background: #c9a050; padding: 4px 10px; border-radius: 2px;">1c</span>
+        <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 26px; color: #f0ebe3;">Atlas</span>
+        <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438;">Split index on desktop · list rows + detail sheet on mobile</span>
+      </div>
+      <div style="display: flex; gap: 40px; align-items: flex-start;">
+        <!-- 1c mobile -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 375px; height: 812px; border-radius: 20px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column; position: relative;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid rgba(240,235,227,0.07); flex-shrink: 0;">
+              <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 17px;">✕</span>
+              <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; color: #f0ebe3;">Chengdu <span style="font-size: 16px; color: #8a7a6a;">成都</span></span>
+              <span style="margin-left: auto; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">Change</span>
+            </div>
+            <div style="display: flex; gap: 8px; padding: 12px 16px; overflow: hidden; flex-shrink: 0; align-items: center;">
+              <span style="color: #6e5e50; font-size: 14px; flex-shrink: 0;">⌕</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #0d0b09; background: #c9a050; border-radius: 2px; padding: 8px 14px; white-space: nowrap;">Essentials</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(240,234,216,0.55); border: 1px solid rgba(240,235,227,0.12); border-radius: 2px; padding: 8px 14px; white-space: nowrap;">Culture</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(240,234,216,0.55); border: 1px solid rgba(240,235,227,0.12); border-radius: 2px; padding: 8px 14px; white-space: nowrap;">Food</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 8px 14px; white-space: nowrap;">✦</span>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 0 16px;">
+              <div style="padding: 14px 2px; border-bottom: 1px solid rgba(240,235,227,0.06); display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+                  <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子)</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">2–3 hrs</span>
+                </div>
+                <p class="clamp2" style="font-size: 15px; line-height: 1.5; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes where courtyard teahouses and snack vendors share stone walls with boutique hotels.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Well Alley is where locals actually sit.</p>
+              </div>
+              <div style="padding: 14px 2px; border-bottom: 1px solid rgba(240,235,227,0.06); display: flex; flex-direction: column; gap: 5px; background: rgba(201,160,80,0.03); margin: 0 -16px; padding-left: 18px; padding-right: 18px; border-left: 2px solid #c9a050;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+                  <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">3–4 hrs</span>
+                </div>
+                <p class="clamp2" style="font-size: 15px; line-height: 1.5; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Morning feedings at 08:30 are the whole show.</p>
+              </div>
+              <div style="padding: 14px 2px; border-bottom: 1px solid rgba(240,235,227,0.06); display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+                  <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Wenshu Monastery (文殊院) <span style="font-family: 'DM Mono', monospace; font-style: normal; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 2px 6px; vertical-align: middle;">In trip</span></span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">1–2 hrs</span>
+                </div>
+                <p class="clamp2" style="font-size: 15px; line-height: 1.5; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse.</p>
+                <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30.</p>
+              </div>
+            </div>
+            <!-- detail sheet -->
+            <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 56%; background: rgba(26,20,16,0.97); backdrop-filter: blur(16px); border-top: 1px solid rgba(201,160,80,0.25); border-radius: 12px 12px 0 0; padding: 14px 20px 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 -20px 60px rgba(0,0,0,0.6);">
+              <div style="width: 36px; height: 3px; border-radius: 2px; background: rgba(240,235,227,0.18); align-self: center;"></div>
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 22px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</div>
+                <span style="color: rgba(240,234,216,0.5); font-family: 'DM Mono', monospace; font-size: 15px;">✕</span>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">3–4 hrs</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 4px 10px;">07:30–18:00 — verify</span>
+              </div>
+              <p style="font-size: 16px; line-height: 1.65; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley. Morning feedings are the whole show — pandas eat at 08:30 and are asleep by 11:00.</p>
+              <div style="border-left: 2px solid rgba(201,160,80,0.4); padding-left: 14px;">
+                <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(201,160,80,0.6); margin-bottom: 6px;">Local insight</div>
+                <p style="font-style: italic; font-size: 16px; line-height: 1.6; color: #b0a090; margin: 0;">Skip the shuttle carts — the walking path past the Moon Delivery Room reaches the cub nursery most visitors never see.</p>
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px; margin-top: auto;">
+                <span style="flex: 1; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #0d0b09; background: #c9a050; border-radius: 3px; padding: 13px; text-align: center;">Add to day</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Ask co-pilot</span>
+                <span style="color: rgba(240,235,227,0.28); font-size: 12px;">⚑</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 375px; line-height: 1.7;">Rows, not cards — hairline dividers, no chrome. First result at ~106px; ~5 rows per screen. Tapping a row opens the detail sheet (shown) with hours, provenance, full insight, report, and the primary Add to day. ✦ pill = Surprise me; ⌕ expands in place.</div>
+        </div>
+        <!-- 1c desktop -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 1440px; height: 900px; border-radius: 12px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex;">
+            <div style="width: 280px; border-right: 1px solid rgba(240,235,227,0.07); padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;">
+              <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #504438;">Destination</div>
+              <div style="font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 34px; color: #f0ebe3; line-height: 1.1; margin-bottom: 2px;">Chengdu</div>
+              <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #6e5e50;">42 places</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Change</span>
+              </div>
+              <div style="background: rgba(26,20,16,0.5); border: 1px solid rgba(240,235,227,0.1); border-radius: 4px; padding: 9px 14px; font-size: 16px; color: rgba(240,234,216,0.28); margin-bottom: 18px;">⌕&nbsp; Find a place…</div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; background: rgba(201,160,80,0.07); border-left: 2px solid #c9a050; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: #f0ebe3;">Essentials</span><span style="color: #c9a050;">9</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; border-left: 2px solid transparent; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: rgba(240,234,216,0.5);">Culture</span><span style="color: #504438;">8</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; border-left: 2px solid transparent; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: rgba(240,234,216,0.5);">Food</span><span style="color: #504438;">11</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; border-left: 2px solid transparent; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: rgba(240,234,216,0.5);">Nature</span><span style="color: #504438;">6</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; border-left: 2px solid transparent; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: rgba(240,234,216,0.5);">Hidden Gems</span><span style="color: #504438;">5</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 10px 12px; border-left: 2px solid transparent; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;"><span style="color: rgba(240,234,216,0.5);">More</span><span style="color: #504438;">3</span></div>
+              <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.06); border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 12px; text-align: center;">✦ Surprise me</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(240,234,216,0.6); border: 1px solid rgba(240,235,227,0.14); border-radius: 3px; padding: 12px; text-align: center;">Show more</span>
+              </div>
+            </div>
+            <div style="flex: 1; padding: 24px 28px; overflow: hidden;">
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 200px; gap: 14px;">
+                <div style="background: #1a1410; border: 1px solid #c9a050; border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap; margin-top: 4px;">3–4 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.55; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Morning feedings at 08:30 are the whole show.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 8px 13px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438; margin-left: auto;">Selected →</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子历史文化街区)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap; margin-top: 4px;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.55; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses and snack vendors share stone walls with boutique hotels.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Well Alley is where locals actually sit.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 8px 13px;">Add to day</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3; flex: 1;">Wenshu Monastery (文殊院)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 2px 7px; margin-top: 4px; white-space: nowrap; height: fit-content;">In trip · Day 2</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.55; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse shaded by ginkgo trees.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; background: rgba(201,160,80,0.1); border: 1px solid rgba(201,160,80,0.35); border-radius: 3px; padding: 8px 13px;">✓ Added</span>
+                  </div>
+                </div>
+                <div style="background: #1a1410; border: 1px solid rgba(201,160,80,0.12); border-radius: 4px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px;">
+                    <div class="clamp2" style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 19px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Jinli Ancient Street Historical and Cultural District (锦里古街)</div>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap; margin-top: 4px;">2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.55; color: #8a7a6a; margin: 0;">A reconstructed Shu-era market street beside Wuhou Shrine — lanterns, shadow-puppet stalls, and every Chengdu street snack in one lane.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Come after dark — the lanterns are the point.</p>
+                  <div style="display: flex; align-items: center; gap: 10px; margin-top: auto;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 3px; padding: 8px 13px;">Add to day</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="width: 380px; border-left: 1px solid rgba(201,160,80,0.15); background: #12100c; padding: 28px 26px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0;">
+              <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: #504438;">Detail</div>
+              <div style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 24px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; border: 1px solid rgba(201,160,80,0.28); border-radius: 2px; padding: 4px 10px;">3–4 hrs</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 4px 10px;">07:30–18:00 — verify</span>
+              </div>
+              <p style="font-size: 16px; line-height: 1.7; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge. Morning feedings are the whole show — pandas eat at 08:30 and are asleep by 11:00, so this anchors a morning, not an afternoon.</p>
+              <div style="border-left: 2px solid rgba(201,160,80,0.4); padding-left: 14px;">
+                <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(201,160,80,0.6); margin-bottom: 6px;">Local insight</div>
+                <p style="font-style: italic; font-size: 16px; line-height: 1.7; color: #b0a090; margin: 0;">Skip the shuttle carts — the walking path past the Moon Delivery Room reaches the cub nursery most visitors never see, and it clears out entirely once the tour buses leave at noon.</p>
+              </div>
+              <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #0d0b09; background: #c9a050; border-radius: 3px; padding: 13px; text-align: center;">Add to day</span>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Ask co-pilot</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(224,90,90,0.55);">⚑ Report</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 1440px; line-height: 1.7;">Three panes: index rail (destination, search, categories, Surprise me / Show more), a 2-col bounded grid (200px rows), and a persistent detail pane — depth without leaving the grid. Selecting a category resets the grid scroll and keeps the last detail.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1d BROADSHEET ============ -->
+    <div id="1d" style="display: flex; flex-direction: column; gap: 20px; flex-shrink: 0;">
+      <div style="display: flex; align-items: baseline; gap: 14px;">
+        <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #0d0b09; background: #c9a050; padding: 4px 10px; border-radius: 2px;">1d</span>
+        <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 26px; color: #f0ebe3;">Broadsheet</span>
+        <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #504438;">Numbered index · accordion detail · two-column newsprint on desktop</span>
+      </div>
+      <div style="display: flex; gap: 40px; align-items: flex-start;">
+        <!-- 1d mobile -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 375px; height: 812px; border-radius: 20px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column;">
+            <div style="padding: 16px 18px 0; flex-shrink: 0;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 17px;">✕</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: #504438; margin-left: auto;">Discover</span>
+              </div>
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0 4px; border-bottom: 1px solid rgba(201,160,80,0.2);">
+                <span style="font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 30px; color: #f0ebe3;">Chengdu <span style="font-size: 19px; color: #8a7a6a;">成都</span></span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">Change</span>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 0 0;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: #6e5e50;">Essentials · 9 of 42 places</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">✦ Surprise me</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; padding: 12px 18px; overflow: hidden; flex-shrink: 0; align-items: center; border-bottom: 1px solid rgba(240,235,227,0.07);">
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #f0ebe3; border-bottom: 1px solid #c9a050; padding: 4px 2px; white-space: nowrap;">Essentials</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 6px; white-space: nowrap;">Culture</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 6px; white-space: nowrap;">Food</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 6px; white-space: nowrap;">Nature</span>
+              <span style="margin-left: auto; color: #6e5e50; font-size: 14px;">⌕</span>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 4px 18px;">
+              <div style="display: flex; gap: 14px; padding: 15px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(201,160,80,0.55); padding-top: 5px;">01</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; justify-content: space-between; gap: 10px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.5; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes where courtyard teahouses and snack vendors share stone walls with boutique hotels.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Well Alley is where locals actually sit.</p>
+                </div>
+              </div>
+              <!-- expanded accordion row -->
+              <div style="display: flex; gap: 14px; padding: 15px 0; border-bottom: 1px solid rgba(240,235,227,0.06); background: rgba(201,160,80,0.03); margin: 0 -18px; padding-left: 18px; padding-right: 18px;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #c9a050; padding-top: 5px;">02</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 9px;">
+                  <div style="display: flex; justify-content: space-between; gap: 10px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">1–2 hrs</span>
+                  </div>
+                  <p style="font-size: 15px; line-height: 1.6; color: #8a7a6a; margin: 0;">A century-old open-air teahouse where bamboo chairs spill toward the lotus pond and covered-bowl jasmine tea is refilled all afternoon for a few yuan.</p>
+                  <div style="border-left: 2px solid rgba(201,160,80,0.4); padding-left: 12px;">
+                    <div style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(201,160,80,0.6); margin-bottom: 5px;">Local insight</div>
+                    <p style="font-style: italic; font-size: 15px; line-height: 1.6; color: #b0a090; margin: 0;">Wave down the ear-cleaner with the tuning forks — the ritual is half the visit. Mahjong tables at the back welcome watchers.</p>
+                  </div>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,235,227,0.5);">Verified</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #6e5e50; font-style: italic; border: 1px dashed rgba(240,235,227,0.1); border-radius: 2px; padding: 3px 8px;">06:30–21:00 — verify</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(224,90,90,0.5); margin-left: auto;">⚑</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #0d0b09; background: #c9a050; border-radius: 3px; padding: 9px 16px;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Ask co-pilot</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #504438; margin-left: auto;">↑</span>
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 14px; padding: 15px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(201,160,80,0.55); padding-top: 5px;">03</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; justify-content: space-between; gap: 10px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Wenshu Monastery (文殊院) <span style="font-family: 'DM Mono', monospace; font-style: normal; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 2px 6px; vertical-align: middle;">In trip</span></span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">1–2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 15px; line-height: 1.5; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 14px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30.</p>
+                </div>
+              </div>
+              <div style="padding: 16px 0;">
+                <span style="display: block; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(240,234,216,0.6); border: 1px solid rgba(240,235,227,0.14); border-radius: 3px; padding: 12px; text-align: center;">Show more</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 375px; line-height: 1.7;">A numbered index — the destination stays as a masthead but shrinks to one line; first row at ~150px. Tapping a row expands it in place (row 02) with full insight, hours, provenance, report, and Add to day. Nothing floats; nothing is obscured.</div>
+        </div>
+        <!-- 1d desktop -->
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="width: 1440px; height: 900px; border-radius: 12px; border: 1px solid rgba(240,235,227,0.14); overflow: hidden; background: #0d0b09; display: flex; flex-direction: column;">
+            <div style="padding: 26px 48px 0; flex-shrink: 0;">
+              <div style="display: flex; align-items: baseline; gap: 20px; padding-bottom: 8px; border-bottom: 1px solid rgba(201,160,80,0.2);">
+                <span style="color: rgba(240,234,216,0.6); font-family: 'DM Mono', monospace; font-size: 17px;">✕</span>
+                <span style="font-family: 'Playfair Display', serif; font-style: italic; font-weight: 500; font-size: 40px; color: #f0ebe3;">Chengdu <span style="font-size: 24px; color: #8a7a6a;">成都</span></span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">Change</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #6e5e50;">42 curated places</span>
+                <span style="margin-left: auto; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #c9a050;">✦ Surprise me</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; padding: 12px 0;">
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #f0ebe3; border-bottom: 1px solid #c9a050; padding: 4px 6px;">Essentials 9</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 10px;">Culture 8</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 10px;">Food 11</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 10px;">Nature 6</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 10px;">Hidden Gems 5</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(240,234,216,0.45); padding: 4px 10px;">More 3</span>
+                <span style="margin-left: auto; width: 280px; background: rgba(26,20,16,0.5); border: 1px solid rgba(240,235,227,0.1); border-radius: 4px; padding: 8px 14px; font-size: 16px; color: rgba(240,234,216,0.28);">⌕&nbsp; Find a place…</span>
+              </div>
+            </div>
+            <div style="flex: 1; overflow: hidden; padding: 8px 48px 24px; column-gap: 56px; column-count: 2; column-rule: 1px solid rgba(240,235,227,0.06);">
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">01</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Kuanzhai Alley Historic Blocks (宽窄巷子历史文化街区)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Three restored Qing-dynasty lanes — Wide, Narrow, and Well — where courtyard teahouses and Sichuan snack vendors share stone walls with boutique hotels.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Well Alley is where locals actually sit.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">02</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Chengdu Research Base of Giant Panda Breeding (成都大熊猫繁育研究基地)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">3–4 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">The world's foremost panda conservation centre, set in a moss-lined bamboo valley on the city's northern edge.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Morning feedings at 08:30 are the whole show.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">03</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Wenshu Monastery (文殊院) <span style="font-family: 'DM Mono', monospace; font-style: normal; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a050; border: 1px solid rgba(201,160,80,0.35); border-radius: 2px; padding: 2px 6px; vertical-align: middle;">In trip · Day 2</span></span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">1–2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">Chengdu's calmest Tang-dynasty monastery, with a famous vegetarian restaurant and a garden teahouse shaded by ginkgo trees.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The vegetarian lunch sells out by 12:30.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(201,160,80,0.5);">✓ Added</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">04</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">People's Park Heming Teahouse (人民公园鹤鸣茶社)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">1–2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">A century-old open-air teahouse where bamboo chairs spill toward the lotus pond and covered-bowl jasmine tea is refilled all afternoon.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Wave down the ear-cleaner with the tuning forks.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">05</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Jinli Ancient Street Historical and Cultural District (锦里古街)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">2 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">A reconstructed Shu-era market street beside Wuhou Shrine — lanterns, shadow-puppet stalls, and every Chengdu street snack in one covered lane.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> Come after dark — the lanterns are the point.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid rgba(240,235,227,0.06);">
+                <span style="font-family: 'DM Mono', monospace; font-size: 12px; color: rgba(201,160,80,0.55); padding-top: 5px;">06</span>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  <div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline;">
+                    <span style="font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; font-weight: 500; color: #f0ebe3; line-height: 1.3;">Du Fu Thatched Cottage Museum (杜甫草堂博物馆)</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; color: #c9a050; white-space: nowrap;">2–3 hrs</span>
+                  </div>
+                  <p class="clamp2" style="font-size: 16px; line-height: 1.55; color: #8a7a6a; margin: 0;">The garden estate where the Tang poet Du Fu wrote 240 poems in exile — bamboo groves, red-walled walkways, and quiet pavilions.</p>
+                  <p class="clamp1" style="font-style: italic; font-size: 15px; color: #b0a090; margin: 0;"><span style="color: rgba(201,160,80,0.7); font-style: normal;">✦</span> The red wall corridor photographs best before 09:30.</p>
+                  <div style="display: flex; gap: 12px; align-items: center; padding-top: 3px;">
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #c9a050;">Add to day</span>
+                    <span style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #504438;">Details ↓</span>
+                  </div>
+                </div>
+              </div>
+              <div style="break-inside: avoid; padding: 20px 0;">
+                <span style="display: block; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(240,234,216,0.6); border: 1px solid rgba(240,235,227,0.14); border-radius: 3px; padding: 13px; text-align: center;">Show more · 36 remaining</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.1em; color: #504438; max-width: 1440px; line-height: 1.7;">Newsprint two-column index under a masthead — twelve places visible at once, the highest scan density of the three. Rows are natural-height (no dead zones by construction); Details expands the row in place. Atmosphere carried entirely by typography.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>
