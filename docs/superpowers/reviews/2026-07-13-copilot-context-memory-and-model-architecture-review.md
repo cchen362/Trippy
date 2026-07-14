@@ -9,11 +9,7 @@ and model evaluation; Plan 13 integration work is no longer part of the open sco
 **Last reconciled with live code:** 2026-07-14 (`main` at `cd35e74`; Plan 13 application
 release `a1d6270` plus deployed desktop refinement `a09a368`)
 
-**Scope:** Review and investigation only. This document records the current LLM architecture,
-the Sonnet 4.6 versus Sonnet 5 decision context, the context channel now delivered by Plan 13,
-and the co-pilot limitations that remain after deployment. It does not approve a follow-on
-implementation, prescribe a final architecture, or authorize source-code, configuration,
-migration, or deployment changes.
+**Scope:** Review and investigation only. This document records the current LLM architecture, the Sonnet 4.6 versus Sonnet 5 decision context, the context channel now delivered by Plan 13, and the co-pilot limitations that remain after deployment. It does not approve a follow-on implementation, prescribe a final architecture, or authorize source-code, configuration, migration, or deployment changes.
 
 **Primary context:**
 
@@ -30,19 +26,15 @@ The two Sonnet workloads are booking extraction and the co-pilot. The current re
 evaluation data that would justify a global model upgrade. Destination catalogue generation and photo descriptors already use Haiku 4.5 and are not part of that replacement decision.
 
 The model review did expose a more important architecture question: the co-pilot gives the
-model the whole minimized trip on every turn, but only the latest 20 messages. Its 4,096-token
-`max_tokens` value limits one model iteration's output; it does not limit the input context.
+model the whole minimized trip on every turn, but only the latest 20 messages. Its 4,096-token `max_tokens` value limits one model iteration's output; it does not limit the input context.
 Plan 13 has now solved the volatile-reference problem for the current screen, day, stop, and
-Discovery suggestion through validated, persisted turn context. Raising the output ceiling may
-still be sensible protection for requests that fill several empty days, but it does not address
-long planning conversations, lost decisions, or irrelevant full-trip payload.
+Discovery suggestion through validated, persisted turn context. Raising the output ceiling may still be sensible protection for requests that fill several empty days, but it does not address long planning conversations, lost decisions, or irrelevant full-trip payload.
 
 This is not a case for rewriting Plans 11–13. The revised architecture should build on them:
 
 - Plan 11 owns the validated, persisted, atomic proposal boundary.
 - Plan 12 owns the agentic query-tool loop and grounding mechanisms.
-- Plan 13 now provides the deployed bottom sheet, contextual entry points, deterministic seed
-  prompts, and visible/persisted turn context.
+- Plan 13 now provides the deployed bottom sheet, contextual entry points, deterministic seed prompts, and visible/persisted turn context.
 - A later plan may add durable conversation memory, token-aware context assembly, selective trip serialization, and—only if evidence supports it—additional read-only retrieval tools.
 
 That direction is a review hypothesis, not a settled solution. The orchestrator and QA reviewer should independently verify the facts, challenge whether each additional layer is necessary, and recommend the smallest architecture that remains correct for long and collaborative trips.
@@ -50,8 +42,7 @@ That direction is a review hypothesis, not a settled solution. The orchestrator 
 One product principle remains non-negotiable throughout the investigation:
 
 > Trippy itineraries are flexible by default. Untimed activities are ordered intentions, not
-> calendar appointments. Context or memory improvements must not cause the co-pilot to invent
-> schedules or treat every stop as a timed event.
+> calendar appointments. Context or memory improvements must not cause the co-pilot to invent schedules or treat every stop as a timed event.
 
 ## 1. Current LLM workload map
 
@@ -73,12 +64,7 @@ Relevant implementation:
 - `backend/src/services/stops.js`
 - `backend/src/routes/copilot.js`
 
-The model identifiers are not centrally managed: booking extraction uses an exported constant,
-while the co-pilot and destination generation contain model literals. Co-pilot logging now
-captures aggregate input/output tokens, serialized context characters, proposal presence,
-iteration count, query-call count, and first-text-delta latency. It still does not retain
-durable, queryable per-turn telemetry, cache token detail, stop reasons, truncation outcomes,
-or cost/job evaluation data.
+The model identifiers are not centrally managed: booking extraction uses an exported constant, while the co-pilot and destination generation contain model literals. Co-pilot logging now captures aggregate input/output tokens, serialized context characters, proposal presence, iteration count, query-call count, and first-text-delta latency. It still does not retain durable, queryable per-turn telemetry, cache token detail, stop reasons, truncation outcomes, or cost/job evaluation data.
 
 ## 2. Sonnet 4.6 versus Sonnet 5
 
@@ -176,28 +162,18 @@ The problem should not be exaggerated: full-trip injection guarantees that broad
 
 ### C3 — Volatile UI context is now a deployed Plan 13 capability
 
-Plan 13 Waves 3–5 are complete and deployed. The normal context contract is
-`{ tab, dayId?, stopId? }`; the approved Discovery extension is
-`{ tab: 'discovery', discoveryName }`. The backend validates known tabs and day/stop trip
-membership, bounds and sanitizes the Discovery name, resolves ids to display names, persists
-resolved context in migration 029's `context_json`, and injects a compact line only into the
-user conversation turn. The frontend renders the same context as a chip for live and restored
-history.
+Plan 13 Waves 3–5 are complete and deployed. The normal context contract is `{ tab, dayId?, stopId? }`; the approved Discovery extension is `{ tab: 'discovery', discoveryName }`. The backend validates known tabs and day/stop trip membership, bounds and sanitizes the Discovery name, resolves ids to display names, persists resolved context in migration 029's `context_json`, and injects a compact line only into the user conversation turn. The frontend renders the same context as a chip for live and restored history.
 
 The sheet now opens with route/day context from the FAB, stop context from non-transit stop
 cards, or bounded suggestion-name context from Discovery. These entry points do not auto-send.
-The empty thread also offers up to three deterministic prompts derived from the active day and
-next booking, with a neutral fallback. This shipped channel is now the baseline for "this day,"
-"this stop," and "this suggestion" references; a later context system should consume or
-carefully extend it rather than create a competing request format.
+The empty thread also offers up to three deterministic prompts derived from the active day and next booking, with a neutral fallback. This shipped channel is now the baseline for "this day," "this stop," and "this suggestion" references; a later context system should consume or carefully extend it rather than create a competing request format.
 
 ### C4 — Conversation, UI context, and trip truth have different authority
 
 A future context architecture must keep these layers distinct:
 
 - The database is authoritative for current days, stops, bookings, and proposal state.
-- Plan 13 turn context is a validated, persisted statement of what the user was viewing for
-  that specific turn. It is not durable preference memory.
+- Plan 13 turn context is a validated, persisted statement of what the user was viewing for that specific turn. It is not durable preference memory.
 - Recent messages preserve the immediate conversational thread.
 - Any durable memory is a compact record of preferences, decisions, rejections, and unresolved questions—not a competing copy of the itinerary.
 
@@ -211,8 +187,7 @@ These are options to evaluate, not approved requirements.
 
 Evaluate raising the co-pilot ceiling to 8,192 and extending the current console-only
 measurement into durable per-turn metrics. Preserve the already logged usage totals,
-context-character count, first-text-delta latency, iterations, query calls, and proposal flag,
-then close the remaining gaps:
+context-character count, first-text-delta latency, iterations, query calls, and proposal flag, then close the remaining gaps:
 
 - Model and effort configuration.
 - Input, output, cache-write, and cache-read tokens across all loop iterations.
@@ -251,8 +226,7 @@ Do not assume that an LLM-written free-form summary is automatically trustworthy
 Investigate splitting `copilotTripContext()` into tiers such as:
 
 - A compact trip overview always included.
-- Full detail for the active or explicitly referenced day, selected from the deployed Plan 13
-  turn context when present.
+- Full detail for the active or explicitly referenced day, selected from the deployed Plan 13 turn context when present.
 - Relevant booking anchors.
 - Full-trip context for audits, whole-trip restructuring, or ambiguous requests.
 
@@ -279,8 +253,7 @@ Do not introduce retrieval tools solely because they are architecturally fashion
 
 ## 6. Relationship to Plans 11–13
 
-Plans 11–13 are complete and deployed. Any follow-on implementation plan must treat their live
-contracts as the foundation.
+Plans 11–13 are complete and deployed. Any follow-on implementation plan must treat their live contracts as the foundation.
 
 | Existing plan | Ownership that should remain intact | Possible later extension |
 |---|---|---|
@@ -290,11 +263,9 @@ contracts as the foundation.
 
 Coordination constraints:
 
-- Do not independently invent another active-day, active-stop, or Discovery-suggestion request
-  format; extend Plan 13's deployed contract only when evidence requires it.
+- Do not independently invent another active-day, active-stop, or Discovery-suggestion request format; extend Plan 13's deployed contract only when evidence requires it.
 - Do not put volatile screen context or conversation memory into the cached stable-trip block without measuring cache invalidation.
-- Do not modify Plan 13's migration `029_copilot_message_context.sql`. Migration 030 is the
-  next free sequence as of this reconciliation; re-check repository state before adding it.
+- Do not modify Plan 13's migration `029_copilot_message_context.sql`. Migration 030 is the next free sequence as of this reconciliation; re-check repository state before adding it.
 - Do not weaken the Plan 11 proposal boundary to make large multi-day generation easier.
 - Do not regress the Plan 12 rule that concrete place recommendations are grounded in Trippy's catalogue.
 
@@ -307,8 +278,7 @@ The orchestrator and QA reviewer should test the architecture against concrete j
 3. Produce a large proposal and assess token use, validation, reviewability, and stale-plan risk.
 4. Continue a planning conversation after more than 20 messages and verify whether an older explicit constraint survives.
 5. Change a previously summarized itinerary fact outside chat and verify that database truth wins.
-6. Re-run the deployed selected-day, stop, and Discovery-context flows as regression baselines,
-   then ask each question without naming the subject in prose.
+6. Re-run the deployed selected-day, stop, and Discovery-context flows as regression baselines, then ask each question without naming the subject in prose.
 7. Ask a whole-trip audit question that genuinely requires all days and bookings.
 8. Ask a narrow on-trip question in a long itinerary and measure irrelevant payload.
 9. Exercise shared-trip conversation with different authors and conflicting preferences.
@@ -327,8 +297,7 @@ Where live model calls are used, record prompts, model configuration, token usag
 5. What exact trip summary is sufficient for every turn?
 6. When is full-trip context mandatory, and how is that decision made without another LLM call?
 7. Does selective serialization reduce real cost or latency enough to justify added complexity?
-8. Are retrieval tools necessary after the deployed Plan 13 context and tiered serialization
-   are measured?
+8. Are retrieval tools necessary after the deployed Plan 13 context and tiered serialization are measured?
 9. Where should operational LLM telemetry live, and what retention is appropriate?
 10. What evaluation threshold would justify Sonnet 5 for either Sonnet workload?
 11. What rollback or compatibility posture is needed if model behavior changes?
