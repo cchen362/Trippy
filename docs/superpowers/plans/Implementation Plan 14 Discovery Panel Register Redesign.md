@@ -1,6 +1,6 @@
 # Implementation Plan 14 — Discovery Panel “Register” Redesign (Option 1b)
 
-**Status: IN PROGRESS (2026-07-15). Waves 1–4 are complete locally; Wave 5 release is next.**
+**Status: COMPLETE — DEPLOYED (2026-07-15). All five waves, owner-authenticated production QA, and agent console/log/health verification passed. Non-blocking follow-up observations are recorded in §5.4.**
 
 ### Implementation progress
 
@@ -10,7 +10,7 @@
 | 2 — Compact shell and controls | **COMPLETE** | Committed as `3319dda` (`feat: implement discovery register shell`). `DiscoveryPanel.jsx` and `index.css` provide the committed/edit destination header, header Surprise action, combined category/search controls, category scroll reset, and in-flow Show more. Focused result after Wave 2: 18/26 passing. |
 | 3 — Bounded cards and Details | **COMPLETE** | Committed as `6b2627b` (`feat: implement discovery register details`). `SuggestionCard.jsx`, `DiscoveryPanel.jsx`, and `index.css` provide bounded Register summaries, always-visible insight, panel-owned Details selection, inline expansion below 1024px, the wide-desktop detail sheet, responsive one/two/three-column grids, bounded 236px desktop rows, and a matching Show more tile. |
 | 4 — Hardening | **COMPLETE LOCALLY** | The two legacy setups now use explicit Search/Change interactions without weakening their assertions. Focused Discovery is 27/27, the full frontend suite is 133/133, the production build and `git diff --check` pass, and authenticated 375×812, 768px, and 1440×900 checks cover the full Register flow. Narrow fixes address mobile target sizing, destination focus, nested Escape/focus return, reduced motion, and safe error presentation. |
-| 5 — Release | **NOT STARTED** | Ready for the final clean-commit gate, deploy-skill run, owner authenticated click script, and agent console/container-log review. |
+| 5 — Release | **COMPLETE** | Released and deployed exact commit `85f9102`. The clean local gate, owner-authenticated production matrix, kept-tab console inspection, production log review, and port-6768 health check all passed; see §5.4. |
 
 **Origin:** owner-selected Option **1b — Register** from the committed,
 self-contained [Discovery redesign exploration](../mockups/Discovery%20Redesign.dc.html)
@@ -671,6 +671,97 @@ abnormality returns to local root-cause analysis and the appropriate wave.
    actually migrated or damaged; this frontend-only release should never require a
    database restore. Report the failure and root-cause it locally before attempting
    another deployment.
+
+### Wave 5 completion record (2026-07-15)
+
+**Commits and scope**
+
+- Implementation commits: `c71142d` (regression contract), `3319dda` (Register
+  shell), `6b2627b` (bounded cards and Details), and `85f9102` (hardening).
+- Release and deployed commit: `85f91021726f62271cbcfea0d201fd36e7acc5ab`
+  on `main`. There was no merge commit.
+- The audited Plan 14 release range was `835b74d..85f9102`. Production changes
+  were confined to the approved Discovery components and `index.css`; test and
+  Plan/mockup documentation files were the only other changes. No backend,
+  migration, hook-business-logic, service, runtime configuration, dependency
+  lock, database, `.env`, log, secret, or generated-file change shipped.
+
+**Final local gate**
+
+- Working tree clean at the exact release commit; release-range scope, secret,
+  tracked-artifact, and `git diff --check` reviews passed.
+- Focused Discovery tests: **27/27 PASS**.
+- Full frontend suite: **133/133 PASS** across 23 files.
+- Frontend production build: **PASS**; only the existing large-chunk advisory was
+  emitted.
+- Full backend suite: **PASS**.
+- Authenticated 375×812, 768px, and 1440×900 passes covered keyboard/focus,
+  search, categories and reset-to-top, More, Surprise, Details, DayPicker,
+  Show more append/loading, report cancellation, co-pilot context entry, long
+  local content, one/two/three-column layout, the wide detail sheet, and stable
+  hover. The owner separately enabled Chrome coarse-pointer emulation and
+  `prefers-reduced-motion: reduce` against localhost; both media queries and the
+  required interaction subset passed before deployment.
+
+**Deployment evidence**
+
+- SSH access was verified before push. Previous production commit:
+  `cd35e74894ded8f66e5db13791ab5ff9a0aab2c8`.
+- Pre-update container: `trippy-trippy-1`, up on
+  `0.0.0.0:6768->3001/tcp`. Daily backup and backup-health crons were active.
+- Fresh integrity-checked backup:
+  `/home/chee/backups/trippy-2026-07-14-132328.db` (server timezone `-06:00`).
+- `~/Trippy` fast-forwarded to exact commit `85f9102`; the release contained no
+  migration. `docker compose up -d --build` completed and recreated the container
+  without a production hotfix.
+- Startup log: `Trippy backend running on :3001 [production]`. Final server-local
+  health on port 6768: `{"status":"ok","db":"connected"}`.
+
+**Owner-authenticated production observations**
+
+- Owner reported the complete §5.3 matrix **PASS** using trip
+  `Shanghai - Hangzhou (W4 Test)`, including mobile, intermediate, desktop,
+  reduced-motion, and coarse-pointer passes. The temporary Add-to-day stop was
+  removed, report was cancelled without submission, and no co-pilot message was
+  sent.
+- The kept production tab was last active at approximately
+  `2026-07-14T19:38:30Z`. Agent inspection found **no browser console warnings or
+  errors**.
+
+**Agent production log and health evidence**
+
+- Logs were inspected separately for the complete post-deploy window from
+  `2026-07-14T19:24:00Z` through approximately `19:41:28Z`. They showed the
+  owner-safe Discovery add, Shanghai Show more generation, catalogue insert
+  de-duplication, and asynchronous verification. There were no startup,
+  migration, missing-environment, request, or unhandled runtime errors.
+- At inspection, production remained at exact commit `85f9102`,
+  `trippy-trippy-1` was up on port 6768, and the health response remained
+  `{"status":"ok","db":"connected"}`.
+
+**Deviations and remaining issues**
+
+- The first local browser surface could not emulate coarse pointer or reduced
+  motion, so deployment stopped. After the Chrome plugin became available, the
+  owner performed those two localhost gates directly and reported both PASS;
+  deployment resumed only afterward.
+- Production had not yet pulled two already-pushed documentation-only commits
+  (`f21a997`, `835b74d`). They arrived in the same fast-forward as Plan 14 but did
+  not alter the audited Plan 14 release range or production runtime.
+- Three non-blocking presentation follow-ups were observed in production and are
+  deliberately not hotfixed in this ops-only wave: the desktop search input has
+  an accessible name but no visible placeholder; destination Change mode has Go
+  but no Cancel/Escape-to-cancel action; and at a narrowed desktop width the
+  horizontally overflowing category strip hides its scrollbar while the fixed
+  search field consumes 260px, leaving Architecture clipped and Wellness offscreen
+  without an obvious pointer affordance. Search, destination submission, and the
+  prescribed 375px/768px/1440px category gates still passed. These findings belong
+  in a separately scoped presentation follow-up.
+
+**Final status:** Plan 14 is closed in production. Every required local,
+deployment, authenticated product, console, log, and health gate passed; the
+remaining observations above are documented non-blocking follow-ups rather than
+unreviewed production changes.
 
 **Acceptance:** verified `main` is pushed and deployed; `trippy-trippy-1` is healthy
 on port 6768; authenticated baseline and Option 1b checks pass at mobile and
