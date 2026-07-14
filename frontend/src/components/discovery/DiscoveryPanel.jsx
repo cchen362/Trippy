@@ -111,20 +111,33 @@ function suggestionMatchesQuery(suggestion, query) {
   return haystacks.some((h) => typeof h === 'string' && h.toLowerCase().includes(q));
 }
 
+function suggestionDetailKey(suggestion) {
+  if (suggestion?.id != null) return `id:${suggestion.id}`;
+  return `name:${canonicalGeoKey(suggestion?.name ?? '')}`;
+}
+
 // Shared card grid: wraps each SuggestionCard in a motion.div inside
 // AnimatePresence so a successful report animates the card out (Wave 4
 // §4.3) instead of it just vanishing on the next render.
-function SuggestionGrid({ items, days, destination, onAddToDay, onReport, onOpenCopilot }) {
+function SuggestionGrid({
+  items,
+  days,
+  destination,
+  onAddToDay,
+  onReport,
+  onOpenCopilot,
+  selectedDetailKey,
+  onDetailSelection,
+  showMore,
+  scopeKey,
+}) {
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
-      gap: 16,
-    }}>
-      <AnimatePresence>
+    <div className="discovery-register-grid">
+      <AnimatePresence key={scopeKey}>
         {items.map((suggestion, idx) => (
           <motion.div
             key={suggestion.id ?? suggestion.name ?? idx}
+            className="discovery-register-grid-item"
             layout
             exit={{ opacity: 0, scale: 0.92 }}
             transition={{ duration: 0.2 }}
@@ -140,10 +153,13 @@ function SuggestionGrid({ items, days, destination, onAddToDay, onReport, onOpen
               onAddToDay={onAddToDay}
               onReport={onReport}
               onOpenCopilot={onOpenCopilot}
+              detailsOpen={selectedDetailKey === suggestionDetailKey(suggestion)}
+              onDetailsChange={(open) => onDetailSelection(open ? suggestionDetailKey(suggestion) : null)}
             />
           </motion.div>
         ))}
       </AnimatePresence>
+      {showMore}
     </div>
   );
 }
@@ -267,6 +283,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [inputFocused, setInputFocused] = useState(false);
   const [surprisePick, setSurprisePick] = useState(null);
   const [reportedIds, setReportedIds] = useState(() => new Set());
+  const [selectedDetailKey, setSelectedDetailKey] = useState(null);
 
   // Search-inside-Discover state
   const [searchQuery, setSearchQuery] = useState('');
@@ -295,6 +312,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const handleReportPlace = async (placeId) => {
     await discoveryApi.reportPlace(placeId, trip.id);
     setReportedIds((prev) => new Set(prev).add(placeId));
+    setSelectedDetailKey((selected) => selected === `id:${placeId}` ? null : selected);
   };
 
   // Recompute the default destination whenever the active day changes (the
@@ -357,6 +375,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   };
 
   const handleCategorySelect = (key) => {
+    setSelectedDetailKey(null);
     setActiveCategory(key);
     const scroller = resultsScrollerRef.current;
     if (!scroller) return;
@@ -365,10 +384,16 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   };
 
   const clearSearch = () => {
+    setSelectedDetailKey(null);
     setSearchQuery('');
     setPlacePredictions([]);
     setMobileSearchExpanded(false);
     sessionTokenRef.current = null;
+  };
+
+  const handleSearchQueryChange = (event) => {
+    setSelectedDetailKey(null);
+    setSearchQuery(event.target.value);
   };
 
   const handleAddToDay = async (dayId, suggestion) => {
@@ -506,6 +531,39 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     : [];
   const showPlaceResults = searchQuery.trim().length >= 3;
   const noSearchResults = isSearching && searchMatches.length === 0 && (!showPlaceResults || (!placeSearching && placePredictions.length === 0));
+  const visibleSuggestions = isSearching ? searchMatches : activeItems;
+  const visibleDetailKeys = [
+    ...visibleSuggestions.map(suggestionDetailKey),
+    ...(surprisePick ? [suggestionDetailKey(surprisePick)] : []),
+  ];
+  const visibleDetailKeySignature = visibleDetailKeys.join('|');
+  const lastMoreCategory = [...moreCategories].reverse().find((cat) => (partialResults[cat]?.length ?? 0) > 0);
+
+  useEffect(() => {
+    if (selectedDetailKey && !visibleDetailKeys.includes(selectedDetailKey)) setSelectedDetailKey(null);
+    // The signature intentionally tracks availability across category, search,
+    // report, streaming, and Surprise without making the effect depend on a
+    // freshly allocated array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDetailKey, visibleDetailKeySignature]);
+
+  const showMoreTile = anyResults && !isSearching ? (
+    <button
+      type="button"
+      onClick={handleShowMore}
+      disabled={loading}
+      className="discovery-register-show-more"
+    >
+      {loading ? (
+        <>
+          Finding more places
+          <span className="discovery-register-loading-dots" aria-hidden="true">
+            {[0, 1, 2].map((i) => <span key={i} style={{ animationDelay: `${i * 0.2}s` }} />)}
+          </span>
+        </>
+      ) : 'Show more'}
+    </button>
+  ) : null;
 
   return (
     <motion.div
@@ -677,7 +735,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={handleSearchQueryChange}
             placeholder="Find a place…"
             autoFocus
             style={{
@@ -704,7 +762,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={handleSearchQueryChange}
               aria-label="Search places"
             />
             {searchQuery && !mobileSearchExpanded && (
@@ -736,23 +794,17 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         {!error && isSearching && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {searchMatches.length > 0 && (
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
-                gap: 16,
-              }}>
-                {searchMatches.map((suggestion, idx) => (
-                  <SuggestionCard
-                    key={suggestion.id ?? suggestion.name ?? idx}
-                    suggestion={suggestion}
-                    days={days}
-                    destination={committedDestination}
-                    onAddToDay={handleAddToDay}
-                    onReport={handleReportPlace}
-                    onOpenCopilot={onOpenCopilot}
-                  />
-                ))}
-              </div>
+              <SuggestionGrid
+                items={searchMatches}
+                days={days}
+                destination={committedDestination}
+                onAddToDay={handleAddToDay}
+                onReport={handleReportPlace}
+                onOpenCopilot={onOpenCopilot}
+                selectedDetailKey={selectedDetailKey}
+                onDetailSelection={setSelectedDetailKey}
+                scopeKey={`search:${searchQuery.trim().toLowerCase()}`}
+              />
             )}
 
             {showPlaceResults && (
@@ -818,6 +870,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             onAddToDay={handleAddToDay}
             onReport={handleReportPlace}
             onOpenCopilot={onOpenCopilot}
+            selectedDetailKey={selectedDetailKey}
+            onDetailSelection={setSelectedDetailKey}
+            showMore={showMoreTile}
+            scopeKey={`category:${activeCategory}`}
           />
         )}
 
@@ -845,6 +901,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     onAddToDay={handleAddToDay}
                     onReport={handleReportPlace}
                     onOpenCopilot={onOpenCopilot}
+                    selectedDetailKey={selectedDetailKey}
+                    onDetailSelection={setSelectedDetailKey}
+                    showMore={cat === lastMoreCategory ? showMoreTile : null}
+                    scopeKey={`more:${cat}`}
                   />
                 </div>
               );
@@ -860,24 +920,6 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           }}>
             Enter a destination and tap Go to find things to do.
           </p>
-        )}
-
-        {anyResults && !isSearching && (
-          <button
-            type="button"
-            onClick={handleShowMore}
-            disabled={loading}
-            className="discovery-register-show-more"
-          >
-            {loading ? (
-              <>
-                Finding more places
-                <span className="discovery-register-loading-dots" aria-hidden="true">
-                  {[0, 1, 2].map((i) => <span key={i} style={{ animationDelay: `${i * 0.2}s` }} />)}
-                </span>
-              </>
-            ) : 'Show more'}
-          </button>
         )}
 
         {/* Surprise Me spotlight overlay */}
@@ -922,6 +964,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     setSurprisePick(null);
                   }}
                   onOpenCopilot={onOpenCopilot}
+                  detailsOpen={selectedDetailKey === suggestionDetailKey(surprisePick)}
+                  onDetailsChange={(open) => setSelectedDetailKey(open ? suggestionDetailKey(surprisePick) : null)}
                 />
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>

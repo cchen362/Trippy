@@ -1,15 +1,15 @@
 # Implementation Plan 14 — Discovery Panel “Register” Redesign (Option 1b)
 
-**Status: IN PROGRESS (2026-07-15). Waves 1–2 implemented; Wave 3 is next.**
+**Status: IN PROGRESS (2026-07-15). Waves 1–3 implemented; Wave 4 is next.**
 
 ### Implementation progress
 
 | Wave | Status | Record |
 |---|---|---|
 | 1 — Regression contract | **COMPLETE** | Committed as `c71142d` (`test: lock discovery register contract`). The focused Discovery baseline was 16/26 passing: the 10 failures were the newly locked Option 1b presentation contract. No production file changed. |
-| 2 — Compact shell and controls | **COMPLETE locally** | `DiscoveryPanel.jsx` and `index.css` now provide the committed/edit destination header, header Surprise action, combined category/search controls, category scroll reset, and in-flow Show more. Focused result: 18/26 passing; production build and `git diff --check` pass. See the Wave 2 completion note for the remaining failures and test-contract discrepancy. |
-| 3 — Bounded cards and Details | **NOT STARTED** | Next implementation wave. Six focused failures are the intended red contract for this wave. |
-| 4 — Hardening | **NOT STARTED** | Pending Wave 3. |
+| 2 — Compact shell and controls | **COMPLETE** | Committed as `3319dda` (`feat: implement discovery register shell`). `DiscoveryPanel.jsx` and `index.css` provide the committed/edit destination header, header Surprise action, combined category/search controls, category scroll reset, and in-flow Show more. Focused result after Wave 2: 18/26 passing. |
+| 3 — Bounded cards and Details | **COMPLETE** | `SuggestionCard.jsx`, `DiscoveryPanel.jsx`, and `index.css` now provide bounded Register summaries, always-visible insight, panel-owned Details selection, inline expansion below 1024px, the wide-desktop detail sheet, responsive one/two/three-column grids, bounded 236px desktop rows, and a matching Show more tile. All six intended Wave 3 failures pass; focused result is 24/26 with only the two documented legacy interaction-setup contradictions remaining. |
+| 4 — Hardening | **NOT STARTED** | Next wave. Reconcile the two legacy test setups through the explicit Search/Change interactions, then run the full accessibility, responsive, suite, and build matrix. |
 | 5 — Release | **NOT STARTED** | Pending Waves 3–4 and owner approval. |
 
 **Origin:** owner-selected Option **1b — Register** from the committed,
@@ -428,6 +428,48 @@ interaction check remain outstanding for Wave 4 rather than being claimed comple
 In trip days do not change desktop row height; no information is lost; opening or
 closing Details has no data side effect; all actions retain their exact callbacks
 and pending/report semantics.
+
+**Completion record (2026-07-15):** implemented only in
+`frontend/src/components/discovery/SuggestionCard.jsx`,
+`frontend/src/components/discovery/DiscoveryPanel.jsx`, and
+`frontend/src/index.css`. Collapsed cards use two-line title/description clamps and
+a one-line, always-visible insight while full description, insight, fit line,
+provenance, duration, hours, and matched trip days remain available in Details.
+`DiscoveryPanel` owns one selected detail identity and passes the same controlled
+behavior through category, More, filtered search, and Surprise paths. Details are
+inline below 1024px and become an internally scrolling right-side sheet at the
+wide breakpoint without resizing the three-column, 236px-row grid. The existing
+Add/Added, DayPicker, per-card pending guard, report confirmation, co-pilot
+context, city-scoped multi-day In trip, and report-removal behavior remain intact.
+
+The six intended Wave 3 failures now pass:
+
+- bounded summary content and expanded metadata without side effects;
+- exact co-pilot context and two-step report behavior after opening Details;
+- DayPicker and per-card pending behavior after opening Details;
+- compact multi-day In trip rendering;
+- selected Details cleanup after reporting the place;
+- selected Details cleanup when category or search state makes it unavailable.
+
+Focused verification is **24/26 passing** with
+`npm test -- DiscoveryPanel.test.jsx SuggestionCard.test.jsx`. The two remaining
+failures are the previously documented legacy interaction-setup contradictions,
+not Wave 3 behavior failures:
+
+1. The co-pilot forwarding test reads `Find a place…` on initial mobile render,
+   while the Wave 1 contract requires Search to be collapsed initially. Wave 4
+   must click the explicit `Search` control before entering the query.
+2. The cross-city country test reads `Destination` on initial render, while the
+   committed-header contract requires the editor to be closed initially. Wave 4
+   must click `Change` before entering and committing the other city.
+
+Those are interaction-setup reconciliations only: do not restore initially visible
+inputs, branch production behavior for tests, remove assertions, or weaken the
+payload/context expectations. `git diff --check` passes and Vite successfully
+compiled and served the updated production CSS. An authenticated responsive pass
+remains blocked at the login screen; Wave 4 must complete the 375px, 768px, and
+1440px interaction matrix with an authenticated session rather than treating the
+source-level breakpoint check as visual acceptance.
 
 ---
 
