@@ -5,6 +5,11 @@ data, or deployment changes were made. This report answers the brief in
 [2026-07-13-copilot-context-memory-and-model-architecture-review.md](2026-07-13-copilot-context-memory-and-model-architecture-review.md)
 §9 and is the input to a future implementation plan; it does not authorize one.
 
+**Outcome (2026-07-15):** the accepted, scoped subset of this report's recommendations shipped as
+[Implementation Plan 15 — Co-pilot Observability and Output Safety](../plans/Implementation%20Plan%2015%20Copilot%20Observability%20and%20Output%20Safety.md),
+COMPLETE + DEPLOYED to production at commit `1e6de07`. The Directions B/C/D and Sonnet-5 items in §6
+remain deliberately gated behind the telemetry that Plan 15 now makes durable.
+
 **Reconciled with live code:** `main` at `235b568` (post Plan 14 closure).
 
 **Method:** direct code reconciliation of `backend/src/routes/copilot.js`,

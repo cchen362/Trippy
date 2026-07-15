@@ -1,6 +1,10 @@
 # Implementation Plan 15 — Co-pilot Observability and Output Safety (Truncation Handling, Durable Telemetry, Window Alignment)
 
-**Status: NOT STARTED.** All owner decisions are resolved (2026-07-15); waves may begin in order.
+**Status: COMPLETE + DEPLOYED (2026-07-15).** All four waves shipped and deployed to production at
+commit `1e6de07` (migration 030 applied); all four deliverables verified live. One pre-existing,
+out-of-scope `move_stop` apply bug was surfaced during Wave 4 prod verification and is recorded as a
+[post-deployment follow-up](#post-deployment-follow-up-discovered-2026-07-15-during-wave-4-prod-verification)
+for its own session. All owner decisions (D1–D5) were resolved 2026-07-15.
 
 **Origin:** The
 [Co-pilot Context, Memory, and Model Architecture Investigation](../reviews/2026-07-15-copilot-context-investigation.md)
@@ -183,7 +187,31 @@ envelope.
 
 ## Wave 4 — QA, deploy, production verification
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-15).** Full regression exercised locally on the "Shanghai - Hangzhou
+(W3 verify)" trip at desktop and 375px (owner-driven login; agent drove the pass via the Chrome
+extension): grounded recommendation (cited `West Lake placeId 892`), proposal generate + **apply**
+(`✓ APPLIED`), out-of-scope decline (flight booking + weather both refused, no fabrication), trip
+audit (deterministic health checks ran; flagged the pre-existing date-range config issue; confirmed
+no unresolved map locations), contextual seed prompts (referenced the real day-1 stops and the
+SIN→PVG flight), clear-history (owner-only; `copilot_messages` → 0), history restore, and
+per-message `[Viewing: …]` context badges — all pass. No truncation notice appeared on any ordinary
+reply. **§2 cache observability fully confirmed** across 5 real local telemetry rows: cache *write*
+(4189) → *read* on a consecutive turn (pure hit, `cw=0, cr=4189`) → one-turn *re-write* after a
+mid-conversation itinerary edit (`cw=4296, cr=0`; the block grew 4189→4296 tokens as the added stop
+entered the trip JSON — the first time this invalidation is observable). Every field sane, zero
+error flags. Deploy: pushed `1e6de07`; named pre-deploy DB backup `trippy-pre-plan15-…` taken and
+integrity-checked (`ok`); prod pulled + rebuilt + restarted; **migration 030 applied at boot with
+zero startup errors**; health `{"status":"ok","db":"connected"}`; `copilot_turn_metrics` present
+with all 15 columns + both indexes (`idx_..._trip`, `idx_..._created_at`). Owner ran the production
+click-script: normal turn, proposal turn, history restore, and truncation glance — Plan 15's four
+deliverables all verified live (no "Reply cut short" on normal replies; prior messages restored in
+order). §4: sampled prod `copilot_turn_metrics` via node in-container (`docker exec -w /app/backend
+… node -e`, the read path since the host cannot write the root-owned prod DB) — 6 rows from the
+owner's pass, all sane (`model=claude-sonnet-4-6` from the constant, `error=0`, `stop_reason`
+`tool_use`/`end_turn` matching proposal vs prose, consecutive-turn cache hits `cw=0, cr=4973`
+reconfirming §2 in production). The owner's pass also surfaced a pre-existing, out-of-scope
+`move_stop` apply bug — recorded below as a post-deployment follow-up; it did **not** warrant a
+rollback (fails safe, unrelated to Plan 15's changes).
 
 **Model recommendation: Opus medium solo (no coding subagents).**
 
@@ -205,6 +233,48 @@ envelope.
 
 **Verification:** production turn metrics visible and sane; owner click-script passed;
 plan doc updated.
+
+---
+
+## Post-deployment follow-up (discovered 2026-07-15 during Wave 4 prod verification)
+
+**Not part of Plan 15's scope — pre-existing bug surfaced by the owner's production click-script.**
+Recorded here for traceability; the fix is handed off to its own session.
+
+### Finding: co-pilot `move_stop` proposals are created `invalid` and can never apply
+
+**Severity:** Medium. The "move a stop to another day" capability via the co-pilot is effectively
+broken whenever the model omits a positional index. It **fails safely** — honest "Can't Apply"
+copy, no data corruption, no silent misapplication — and `add_stop` / `remove_stop` / `update_stop`
+proposals apply correctly (three `applied` rows in prod confirm the apply pipeline is healthy).
+
+**Evidence (prod `copilot_proposals`, 2026-07-15 owner pass):**
+- `883fd3c1` / `6135b3ee`: `{action:move_stop, stopId, toDayId:"…f1e99d3"}` — **no `position`** →
+  status `invalid`, reason "Operation 1 (move_stop) position must be a non-negative integer." The
+  `toDayId` here is a valid 32-char day id; the move would have succeeded had `position` been present.
+- `de0082fb`: `{…, toDayId:"b0279cec52413b4aede7273c8f15c4213f36c", position:1}` — has `position`
+  but a **malformed/hallucinated 37-char `toDayId`** → "targets a day that is not part of this trip."
+  (This is also why one proposal card rendered the raw string "day b0279…": `MutationPreview.formatDayLabel`
+  falls back to `day ${dayId}` when the id matches no loaded day.)
+
+**Root cause:**
+1. `validateProposalOperations` (`backend/src/services/copilotProposals.js`) requires `position`
+   (integer ≥ 0) for `move_stop`, but the tool's JSON schema (`backend/src/services/copilotTools.js`)
+   cannot structurally require it — every operation field is optional because the tool is a single
+   polymorphic op object with the "exactly one of" shape enforced only in prose. On a natural-language
+   "move X to day Y" with no positional intent, the model omits `position` and the server hard-rejects.
+2. Independently, the model occasionally emits a malformed `toDayId` (grounding failure). The server
+   correctly rejects this; it is a lower-frequency, harder case.
+
+**Proposed fix (root-cause, ~1 small wave; not yet implemented):**
+- **Primary:** default a missing `move_stop.position` to append-to-end of the target day (position =
+  current stop count) inside `sanitizeAndStampOperations`, rather than failing validation. NL moves
+  rarely carry positional intent; appending is the sane default and makes the common case work.
+- **Secondary:** tighten the `move_stop` tool description to reinforce copying a **real** day id from
+  the serialized trip, reducing the hallucinated-`toDayId` case. The server already rejects bad ids
+  safely, so this is hardening, not a correctness gate.
+- Add backend tests for the missing-`position` and malformed-`toDayId` paths; re-verify a live
+  move-apply at desktop + 375px, then redeploy.
 
 ---
 
