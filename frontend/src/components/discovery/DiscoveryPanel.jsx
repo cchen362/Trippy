@@ -293,6 +293,8 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const destinationInputRef = useRef(null);
   const sessionTokenRef = useRef(null);
   const resultsScrollerRef = useRef(null);
+  const changeButtonRef = useRef(null);
+  const pendingChangeFocusRef = useRef(false);
 
   const { discover, showMore, getDestination } = discovery;
   const { partialResults: rawPartialResults, completedCategories, loading, error } = getDestination(committedDestination, committedCountry);
@@ -332,6 +334,13 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
 
   useEffect(() => {
     if (destinationEditing) destinationInputRef.current?.focus();
+  }, [destinationEditing]);
+
+  useEffect(() => {
+    if (!destinationEditing && pendingChangeFocusRef.current) {
+      pendingChangeFocusRef.current = false;
+      changeButtonRef.current?.focus();
+    }
   }, [destinationEditing]);
 
   const surprisePendingRef = useRef(false);
@@ -377,6 +386,19 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
       setActiveCategory(tabs[0]);
       setDestinationEditing(false);
     }
+  };
+
+  // Discards the in-progress destination draft and returns to the committed
+  // header without touching committedDestination/committedCountry or firing
+  // a new lookup — results are keyed on committedDestination, so they stay
+  // intact automatically. Only meaningful when there's a committed
+  // destination to return to (the initial no-destination state has no
+  // committed header, so there's nothing to cancel back to).
+  const handleCancelEdit = () => {
+    if (!committedDestination.trim()) return;
+    setDestination(committedDestination);
+    setDestinationEditing(false);
+    pendingChangeFocusRef.current = true;
   };
 
   const handleCategorySelect = (key) => {
@@ -603,7 +625,13 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             type="text"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleDiscover()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleDiscover();
+              else if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancelEdit();
+              }
+            }}
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
             placeholder="Destination"
@@ -642,6 +670,27 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           >
             {loading ? '...' : 'Go'}
           </button>
+          {committedDestination.trim() && (
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              aria-label="Cancel"
+              style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 11, letterSpacing: '0.18em',
+                textTransform: 'uppercase',
+                color: 'rgba(240,234,216,0.55)',
+                background: 'transparent',
+                border: '1px solid rgba(240,234,216,0.18)',
+                borderRadius: 4,
+                padding: '10px 22px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Cancel
+            </button>
+          )}
           </div>
         ) : (
           <div className="discovery-committed-destination">
@@ -654,6 +703,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               </span>
             )}
             <button
+              ref={changeButtonRef}
               type="button"
               className="discovery-register-change"
               onClick={() => {
@@ -744,6 +794,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
             value={searchQuery}
             onChange={handleSearchQueryChange}
             placeholder="Find a place…"
+            aria-label="Find a place"
             autoFocus
             style={{
               width: '100%',
@@ -770,6 +821,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
               type="text"
               value={searchQuery}
               onChange={handleSearchQueryChange}
+              placeholder="Find a place…"
               aria-label="Search places"
             />
             {searchQuery && !mobileSearchExpanded && (

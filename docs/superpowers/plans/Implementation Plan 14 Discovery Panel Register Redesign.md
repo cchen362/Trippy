@@ -1,6 +1,6 @@
 # Implementation Plan 14 — Discovery Panel “Register” Redesign (Option 1b)
 
-**Status: COMPLETE — DEPLOYED (2026-07-15). All five waves, owner-authenticated production QA, and agent console/log/health verification passed. Non-blocking follow-up observations are recorded in §5.4.**
+**Status: COMPLETE — DEPLOYED (2026-07-15). All five waves, owner-authenticated production QA, and agent console/log/health verification passed. The three non-blocking follow-up observations recorded in §5.4 were subsequently resolved in the Wave 6 presentation follow-up.**
 
 ### Implementation progress
 
@@ -767,6 +767,86 @@ unreviewed production changes.
 on port 6768; authenticated baseline and Option 1b checks pass at mobile and
 desktop widths; no production-only hotfix was made; the plan contains an auditable
 release and verification record.
+
+---
+
+## Wave 6 — Post-release presentation follow-up (COMPLETE 2026-07-15)
+
+**Scope: frontend presentation only, same hard boundary as the original plan —
+Discovery components and production CSS plus their tests. No backend, hook,
+service, API, catalogue, provider, or navigation change.** This wave clears the
+three non-blocking presentation observations recorded in §5.4.
+
+### Observations, root causes, and fixes
+
+1. **Desktop search field rendered visually empty.** Root cause: the desktop
+   search `<input>` in `DiscoveryPanel.jsx` carried `aria-label="Search places"`
+   but no `placeholder`, while the mobile field had `placeholder="Find a place…"`.
+   Fix: added a visible placeholder to the desktop input. Per owner request the
+   desktop hint matches the mobile copy exactly — both read **"Find a place…"** —
+   while the desktop input keeps its descriptive `aria-label="Search places"`. The
+   previously unlabeled mobile input was also given `aria-label="Find a place"`,
+   closing a real accessible-name gap and keeping the two same-placeholder inputs
+   uniquely addressable.
+
+2. **Destination Change mode had no cancel path.** Root cause: the
+   `destinationEditing` editor exposed only Go and an Enter handler, so the only
+   exits were committing or closing the whole panel. Fix: added an explicit
+   **Cancel** button (rendered only when a committed destination exists, never
+   disabled while loading) and **Escape-to-cancel** scoped to the destination
+   input's `onKeyDown` (no panel-wide handler, so nested DayPicker/report Escape
+   and panel close are unaffected). Cancelling discards the draft, restores the
+   committed destination, leaves committed results untouched (they are keyed on
+   `committedDestination`, which cancel never mutates), fires no new lookup, and
+   returns focus to the Change button via a deferred-focus effect that runs after
+   the committed header re-mounts.
+
+3. **Category strip clipped at intermediate desktop widths.** Root cause: at
+   ≥1024px the fixed 260px `.discovery-desktop-search-field` (`flex-shrink:0`)
+   plus the 32px horizontal insets squeezed the flex track, overflowing the ~9
+   tabs between roughly 1024px and ~1350px; the strip kept the mobile touch idiom
+   (`overflow-x:auto` with a hidden scrollbar), so a mouse user had no affordance
+   to reach Architecture/Wellness. Fix (CSS only, desktop breakpoint): revealed a
+   thin gold-tinted horizontal scrollbar on the tab strip so mouse users get a
+   visible, draggable affordance (coarse pointer still swipes; keyboard focus
+   still scrolls a focused tab into view), and made the desktop search field
+   `width: clamp(200px, 18vw, 260px)` so it yields room to the tab strip at
+   intermediate widths while restoring ~260px at wide desktop. No tab was removed,
+   reordered, or wrapped; the compact single-row Register hierarchy is preserved.
+
+### Files changed
+
+- `frontend/src/components/discovery/DiscoveryPanel.jsx`
+- `frontend/src/index.css`
+- `frontend/src/components/discovery/DiscoveryPanel.test.jsx`
+
+### Regression coverage added
+
+- Desktop input shows the `"Find a place…"` placeholder and retains its
+  `aria-label="Search places"`.
+- Cancel restores the committed header and results without refetching and returns
+  focus to Change.
+- Escape in the destination input cancels the edit identically to Cancel.
+- Every named category tab — including Architecture and Wellness — renders.
+- Seven pre-existing mobile-search assertions were migrated from
+  `getByPlaceholderText(/find a place/i)` to `getByRole('textbox', { name:
+  /find a place/i })` because, once the two inputs share a placeholder, the mobile
+  input is disambiguated by its accessible name rather than its placeholder. No
+  existing assertion intent was weakened.
+
+### Verification
+
+- Focused Discovery (`DiscoveryPanel.test.jsx SuggestionCard.test.jsx`): **31/31
+  PASS**.
+- Full frontend suite: **137/137 PASS** across 23 files.
+- Frontend production build: **PASS** (only the pre-existing large-chunk advisory).
+- `git diff --check`: clean.
+- Local dev servers recompiled with no console or server errors; the diff touches
+  only the three approved frontend files.
+- Owner-authenticated browser QA at 375×812, 768px, ~1243px, and 1440×900:
+  reported **PASS** for placeholder visibility, Cancel/Escape with focus return,
+  category reachability via mouse/keyboard/coarse pointer, horizontal overflow,
+  reduced motion, and no layout regression.
 
 ---
 

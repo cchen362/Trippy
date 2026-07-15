@@ -83,11 +83,11 @@ describe('DiscoveryPanel co-pilot entry-point forwarding', () => {
     expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Essential A' });
 
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
-    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: 'Culture A' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /find a place/i }), { target: { value: 'Culture A' } });
     fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
     expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Culture A' });
 
-    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: '' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /find a place/i }), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /^more/i }));
     fireEvent.click(screen.getByRole('button', { name: /^ask co-pilot$/i }));
     expect(onOpenCopilot).toHaveBeenLastCalledWith({ tab: 'discovery', discoveryName: 'Culture A' });
@@ -495,16 +495,16 @@ describe('DiscoveryPanel — Option 1b destination and control contract (Plan 14
       />,
     );
 
-    expect(screen.queryByPlaceholderText(/find a place/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /find a place/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
-    const searchInput = screen.getByPlaceholderText(/find a place/i);
+    const searchInput = screen.getByRole('textbox', { name: /find a place/i });
     fireEvent.change(searchInput, { target: { value: 'Culture' } });
     expect(screen.getByText('Culture A')).toBeInTheDocument();
     expect(screen.queryByText('Essential A')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
-    expect(screen.queryByPlaceholderText(/find a place/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /find a place/i })).not.toBeInTheDocument();
     expect(screen.getByText('Essential A')).toBeInTheDocument();
     expect(screen.getByText('Testville')).toBeInTheDocument();
     expect(discovery.discover).toHaveBeenCalledTimes(1);
@@ -544,7 +544,7 @@ describe('DiscoveryPanel — Option 1b destination and control contract (Plan 14
 
     const searchButton = screen.queryByRole('button', { name: /^search$/i });
     if (searchButton) fireEvent.click(searchButton);
-    const searchInput = screen.getByPlaceholderText(/find a place/i);
+    const searchInput = screen.getByRole('textbox', { name: /find a place/i });
 
     fireEvent.change(searchInput, { target: { value: 'Mu' } });
     expect(screen.getByText('Museum Quarter')).toBeInTheDocument();
@@ -682,8 +682,136 @@ describe('DiscoveryPanel — Option 1b result-flow and detail cleanup (Plan 14 W
     fireEvent.click(screen.getByRole('button', { name: /^essentials/i }));
     fireEvent.click(screen.getByRole('button', { name: /details/i }));
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
-    fireEvent.change(screen.getByPlaceholderText(/find a place/i), { target: { value: 'Food' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /find a place/i }), { target: { value: 'Food' } });
     expect(screen.queryByRole('region', { name: /details for essential a/i })).not.toBeInTheDocument();
     expect(screen.getByText('Food A')).toBeInTheDocument();
+  });
+});
+
+describe('DiscoveryPanel — presentation follow-up', () => {
+  it('shows the same "Find a place…" placeholder on desktop as mobile while preserving its aria-label', () => {
+    const discovery = makeDiscovery({
+      partialResults: { essentials: [{ id: 1, name: 'Essential A' }] },
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    // The desktop input keeps its descriptive accessible name ("Search
+    // places") while showing the same visible hint as the mobile field so the
+    // two read consistently. Because aria-label wins the accessible-name
+    // computation over placeholder, this is also what lets tests target the
+    // desktop vs mobile input unambiguously once both share a placeholder.
+    const desktopInput = screen.getByRole('textbox', { name: 'Search places' });
+    expect(desktopInput).toHaveAttribute('placeholder', 'Find a place…');
+    expect(desktopInput).toHaveAttribute('aria-label', 'Search places');
+  });
+
+  it('cancel restores the committed header and results without refetching, and returns focus to Change', async () => {
+    const discovery = makeDiscovery({
+      partialResults: { essentials: [{ id: 1, name: 'Essential A' }] },
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
+    const destinationInput = screen.getByPlaceholderText('Destination');
+    fireEvent.change(destinationInput, { target: { value: 'Zzz Draft' } });
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    expect(screen.queryByPlaceholderText('Destination')).not.toBeInTheDocument();
+    expect(screen.getByText('Testville')).toBeInTheDocument();
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(discovery.discover).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /^change$/i })).toHaveFocus();
+  });
+
+  it('Escape in the destination input cancels edit the same way as clicking Cancel', () => {
+    const discovery = makeDiscovery({
+      partialResults: { essentials: [{ id: 1, name: 'Essential A' }] },
+      completedCategories: new Set(['essentials']),
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
+    const destinationInput = screen.getByPlaceholderText('Destination');
+    fireEvent.change(destinationInput, { target: { value: 'Zzz Draft' } });
+
+    fireEvent.keyDown(destinationInput, { key: 'Escape' });
+
+    expect(screen.queryByPlaceholderText('Destination')).not.toBeInTheDocument();
+    expect(screen.getByText('Testville')).toBeInTheDocument();
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(discovery.discover).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps every named category tab reachable, including Architecture and Wellness', () => {
+    // buildTabs only fills in every named category when the trip's mapped
+    // categories collapse to just 'essentials' (categories.length === 1) —
+    // an empty interestTags list guarantees that here.
+    const partialResults = {
+      essentials: [{ id: 1, name: 'Essentials Item' }],
+      culture: [{ id: 2, name: 'Culture Item' }],
+      food: [{ id: 3, name: 'Food Item' }],
+      nature: [{ id: 4, name: 'Nature Item' }],
+      nightlife: [{ id: 5, name: 'Nightlife Item' }],
+      hidden_gems: [{ id: 6, name: 'Hidden Item' }],
+      architecture: [{ id: 7, name: 'Architecture Item' }],
+      wellness: [{ id: 8, name: 'Wellness Item' }],
+    };
+    const completedCategories = new Set(Object.keys(partialResults));
+    const discovery = makeDiscovery({ partialResults, completedCategories });
+    const trip = { ...TRIP, interestTags: [] };
+
+    render(
+      <DiscoveryPanel
+        trip={trip}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /^essentials/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^culture/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^food/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^nature/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^nightlife/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^hidden gems/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^architecture/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^wellness/i })).toBeInTheDocument();
   });
 });

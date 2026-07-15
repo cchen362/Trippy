@@ -623,11 +623,30 @@ select {
   .discovery-mobile-search-field { display: none; }
 
   .discovery-desktop-search-field {
-    width: 260px;
+    width: clamp(200px, 18vw, 260px);
     display: flex;
     align-items: center;
     flex-shrink: 0;
     padding-left: 12px;
+  }
+
+  .discovery-register-tabs {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(201, 168, 76, 0.35) transparent;
+  }
+
+  .discovery-register-tabs::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .discovery-register-tabs::-webkit-scrollbar-thumb {
+    background: rgba(201, 168, 76, 0.35);
+    border-radius: 3px;
+  }
+
+  .discovery-register-tabs::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   .discovery-desktop-search-field input {
