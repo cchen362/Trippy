@@ -19,6 +19,10 @@ const router = Router();
 const COPILOT_TABS = new Set(['today', 'plan', 'logistics', 'map', 'discovery']);
 const MAX_DISCOVERY_NAME_LENGTH = 160;
 
+// Wave 3 (Plan 15, D4): the model's conversation window and the history endpoint's display
+// limit are a single contract — the panel must never show an exchange the model has forgotten.
+const COPILOT_MESSAGE_WINDOW = 50;
+
 function dropContext(reason) {
   console.warn('[copilot] Dropping invalid message context: %s', reason);
   return null;
@@ -111,7 +115,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         LEFT JOIN users u ON u.id = cm.user_id
         WHERE cm.trip_id = ?
         ORDER BY cm.created_at DESC
-        LIMIT 50
+        LIMIT ${COPILOT_MESSAGE_WINDOW}
       ) ORDER BY created_at ASC
     `).all(req.params.tripId);
 
@@ -174,13 +178,14 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, ?, datetime('now'))
   `).run(tripId, userId, req.body.message, messageContext ? JSON.stringify(messageContext) : null);
 
-  // Load the most recent 20 messages for conversation context, re-ordered chronologically
+  // Load the most recent COPILOT_MESSAGE_WINDOW messages for conversation context,
+  // re-ordered chronologically. This must match the history endpoint's display limit (D4).
   const contextRows = db.prepare(`
     SELECT role, content, context_json FROM (
       SELECT role, content, context_json, created_at FROM copilot_messages
       WHERE trip_id = ?
       ORDER BY created_at DESC
-      LIMIT 20
+      LIMIT ${COPILOT_MESSAGE_WINDOW}
     ) ORDER BY created_at ASC
   `).all(tripId);
 

@@ -152,7 +152,17 @@ row whose token fields match the console line.
 
 ## Wave 3 — Conversation window 20 → 50 (D4)
 
-**Status: NOT STARTED.**
+**Status: COMPLETE (2026-07-15).** Added a shared `COPILOT_MESSAGE_WINDOW = 50` constant in
+`backend/src/routes/copilot.js`, used by both the model-context query (previously `LIMIT 20`)
+and the history endpoint's existing `LIMIT 50` query, so the two limits can no longer drift
+apart silently (D4). New test seeds 55 messages plus one live user turn and asserts the model
+receives exactly the newest 50 in chronological order (oldest 6 dropped), with stored
+`[Viewing: …]` context lines still injected only on user turns (existing coverage unchanged).
+Verified: backend suite 619/619 green (1 new test in `copilot.test.js`); no frontend change
+(the SSE contract and history endpoint were already aligned at 50, per fact 5). Not separately
+browser-verified — this is a single backend query bound change with no visible UI surface; a
+short thread is provably identical before/after by construction, and the long-thread behavior
+is covered by the new test.
 
 **Model recommendation: Sonnet low solo.**
 

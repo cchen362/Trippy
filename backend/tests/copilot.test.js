@@ -268,6 +268,46 @@ describe('POST /trips/:tripId/copilot', () => {
       .run(tripId, 'What should I see?', 'Assistant reply');
   });
 
+  it('feeds the model exactly the newest 50 messages in chronological order (Wave 3, D4)', async () => {
+    const db = getDb();
+    // Seed 55 alternating messages, all timestamped strictly before "now" so the new user
+    // turn (inserted at "now" by the route) is always the newest. seed-0 is oldest.
+    for (let i = 0; i < 55; i += 1) {
+      const role = i % 2 === 0 ? 'user' : 'assistant';
+      const secondsAgo = 55 - i;
+      db.prepare(`
+        INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
+        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now', '-' || ? || ' seconds'))
+      `).run(tripId, role === 'user' ? userId : null, role, `seed-${i}`, secondsAgo);
+    }
+
+    mockStreamCopilotResponse.mockImplementation(async (msgs, ctx, res, req, persistTurn) => {
+      await persistTurn({ assistantText: 'window reply', operations: null });
+      return 'window reply';
+    });
+
+    await callHandler(
+      'post',
+      `/${tripId}/copilot`,
+      makeReq({ body: { message: 'window probe' } }),
+      makeRes(),
+    );
+
+    const [messages] = mockStreamCopilotResponse.mock.calls[0];
+    expect(messages).toHaveLength(50);
+    // Pool is 55 seeded + 1 new = 56 messages; newest 50 drops the oldest 6 (seed-0..seed-5),
+    // keeping seed-6..seed-54 (49 messages) plus the new user turn, chronologically ordered.
+    expect(messages[0].content).toBe('seed-6');
+    expect(messages[48].content).toBe('seed-54');
+    expect(messages[49].content).toBe('window probe');
+    expect(messages.some((m) => m.content === 'seed-0')).toBe(false);
+    expect(messages.some((m) => m.content === 'seed-5')).toBe(false);
+
+    db.prepare("DELETE FROM copilot_messages WHERE trip_id = ? AND content LIKE 'seed-%'").run(tripId);
+    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content IN (?, ?)')
+      .run(tripId, 'window probe', 'window reply');
+  });
+
   it('injects resolved context into the user turn only and persists it separately', async () => {
     const stopId = insertStop('West Lake', 2);
     mockStreamCopilotResponse.mockImplementation(async () => 'Done');
