@@ -15,6 +15,10 @@ export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
 
 export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001';
 
+export const COPILOT_MODEL = 'claude-sonnet-4-6';
+
+export const DISCOVERY_MODEL = 'claude-haiku-4-5-20251001';
+
 // Closed D8 scene-type vocabulary (Plan 10 §1) — used by both discovery-authored
 // and Haiku-authored photo descriptors, and by the fallback query builder in
 // unsplash.js. Never persist a value outside this set.
@@ -242,7 +246,7 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   const systemPrompt = existingLine ? `${DISCOVER_SYSTEM}${existingLine}` : DISCOVER_SYSTEM;
 
   const stream = client.messages.stream({
-    model: 'claude-haiku-4-5-20251001',
+    model: DISCOVERY_MODEL,
     // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
     // across 8 categories (~40-50k output tokens) — a smaller budget silently
     // truncates the tail of the response, which is why production generations
@@ -487,6 +491,8 @@ Stops carry one of four kinds of timing. Respect them:
   let sawFirstDelta = false;
   let iterations = 0;
   let terminalUse = null; // the propose_itinerary_changes tool_use that ended the turn, if any
+  let truncated = false;
+  let lastStopReason = null;
 
   try {
     console.log('[copilot] stream opened messages=%d', conversationMessages.length);
@@ -501,8 +507,8 @@ Stops carry one of four kinds of timing. Respect them:
       iterations += 1;
 
       const stream = client.messages.stream({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        model: COPILOT_MODEL,
+        max_tokens: 8192,
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
         tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL],
@@ -531,6 +537,16 @@ Stops carry one of four kinds of timing. Respect them:
 
       totalUsage.input_tokens += finalMessage?.usage?.input_tokens ?? 0;
       totalUsage.output_tokens += finalMessage?.usage?.output_tokens ?? 0;
+      lastStopReason = finalMessage?.stop_reason ?? null;
+
+      // A max_tokens cut can land mid-prose or mid-tool_use. Either way the response is
+      // incomplete: end the turn now, before the terminal-tool check below, so a
+      // partially-parsed propose_itinerary_changes block never becomes terminalUse and
+      // never becomes a proposal (D5 — surfaced honestly, never silently re-run or discarded).
+      if (lastStopReason === 'max_tokens') {
+        truncated = true;
+        break;
+      }
 
       // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
       // above via on('text'); tool_use blocks are assembled on a separate channel, so reading
@@ -602,6 +618,10 @@ Stops carry one of four kinds of timing. Respect them:
       messages = [...messages, { role: 'assistant', content }, { role: 'user', content: toolResults }];
     }
 
+    if (truncated) {
+      write({ type: 'notice', notice: 'truncated' });
+    }
+
     // Wave 2: the route's persistTurn callback saves the assistant message and (when
     // operations are present) creates the validated proposal record, returning the enriched
     // { proposalId, operations, warnings } payload we emit.
@@ -626,9 +646,9 @@ Stops carry one of four kinds of timing. Respect them:
       write({ type: 'proposal', ...proposalPayload });
     }
 
-    console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s iterations=%d queryCalls=%d',
+    console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s iterations=%d queryCalls=%d stopReason=%s',
       totalUsage.input_tokens, totalUsage.output_tokens,
-      JSON.stringify(itineraryContext).length, terminalUse ? 'yes' : 'no', iterations, executedQueryCalls);
+      JSON.stringify(itineraryContext).length, terminalUse ? 'yes' : 'no', iterations, executedQueryCalls, lastStopReason);
 
     streamDone = true;
     console.log('[copilot] stream done fullText.length=%d', fullText.length);

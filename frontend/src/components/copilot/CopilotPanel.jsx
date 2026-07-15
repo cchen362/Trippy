@@ -489,6 +489,19 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                 days={days}
                 isDesktop={isDesktop}
               />
+              {msg.notice === 'truncated' && (
+                <div
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 11,
+                    letterSpacing: '0.06em',
+                    color: 'rgba(240,234,216,0.45)',
+                    padding: '2px 0 8px',
+                  }}
+                >
+                  Reply cut short — ask me to continue.
+                </div>
+              )}
               {(proposalsByMessageId.get(msg.id) || []).map((p) => (
                 <MutationPreview
                   key={p.id}

@@ -656,6 +656,71 @@ describe('streamCopilotResponse — agentic tool loop (Plan 12 Wave 1)', () => {
   });
 });
 
+describe('streamCopilotResponse — max_tokens truncation (Plan 15 Wave 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('truncated prose: emits notice, no proposal, persists partial text, single iteration', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(
+      ['some partial prose chunk'],
+      'some partial prose chunk',
+      [{ type: 'text', text: 'some partial prose chunk' }],
+      'max_tokens',
+    ));
+
+    const res = makeMockRes();
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    const returned = await streamCopilotResponse(
+      [{ role: 'user', content: 'tell me more' }], {}, res, {}, persistTurn, {},
+    );
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'notice' && e.notice === 'truncated')).toBeDefined();
+    expect(events.find((e) => e.type === 'proposal')).toBeUndefined();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'some partial prose chunk', operations: null });
+    expect(returned).toBe('some partial prose chunk');
+  });
+
+  it('truncated tool_use: emits notice, discards the cut proposal, persists operations: null', async () => {
+    const operations = [{ action: 'remove_stop', stopId: 'stop-1' }];
+    mockStream.mockReturnValueOnce(makeMockStream(
+      ['Sure.'],
+      'Sure.',
+      [
+        { type: 'text', text: 'Sure.' },
+        { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
+      ],
+      'max_tokens',
+    ));
+
+    const res = makeMockRes();
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'remove the first stop' }], {}, res, {}, persistTurn, {},
+    );
+
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'notice' && e.notice === 'truncated')).toBeDefined();
+    expect(events.find((e) => e.type === 'proposal')).toBeUndefined();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Sure.', operations: null });
+  });
+
+  it('a normal end_turn reply does not emit a notice event', async () => {
+    const fullText = 'Kyoto has some lovely temples.';
+    mockStream.mockReturnValueOnce(makeMockStream([fullText], fullText));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'tell me about kyoto' }], {}, res, {}, undefined, {});
+
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'notice')).toBeUndefined();
+  });
+});
+
 describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
   beforeEach(() => {
     mockCreate.mockReset();

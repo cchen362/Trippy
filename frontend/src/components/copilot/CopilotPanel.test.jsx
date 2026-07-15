@@ -111,3 +111,36 @@ describe('CopilotPanel desktop readability', () => {
     });
   });
 });
+
+describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
+  it('renders the cut-short notice under a message flagged as truncated', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{
+          id: 'm1',
+          role: 'assistant',
+          content: 'Some cut-off reply',
+          createdAt: new Date().toISOString(),
+          notice: 'truncated',
+        }],
+      }),
+    });
+
+    expect(screen.getByText('Reply cut short — ask me to continue.')).toBeInTheDocument();
+  });
+
+  it('does not render the notice for a message without a notice field', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{
+          id: 'm1',
+          role: 'assistant',
+          content: 'A normal complete reply',
+          createdAt: new Date().toISOString(),
+        }],
+      }),
+    });
+
+    expect(screen.queryByText('Reply cut short — ask me to continue.')).not.toBeInTheDocument();
+  });
+});

@@ -68,6 +68,7 @@ export function useCopilot(tripId) {
     let fullText = '';
     let terminated = false;
     let proposalPayload = null;
+    let noticeFlag = null;
     try {
       await copilotApi.send(tripId, text, context, (chunk) => {
         if (chunk.type === 'text') {
@@ -75,6 +76,8 @@ export function useCopilot(tripId) {
           setStreamingText(fullText);
         } else if (chunk.type === 'proposal') {
           proposalPayload = chunk;
+        } else if (chunk.type === 'notice' && chunk.notice === 'truncated') {
+          noticeFlag = 'truncated';
         } else if (chunk.type === 'tool') {
           setActiveTool(chunk.state === 'started' ? chunk.tool : null);
         } else if (chunk.type === 'error') {
@@ -97,6 +100,7 @@ export function useCopilot(tripId) {
               role: 'assistant',
               content: fullText,
               createdAt: new Date().toISOString(),
+              notice: noticeFlag,
             }]);
             if (proposalPayload) {
               setProposals(prev => [...prev, normalizeProposal({
