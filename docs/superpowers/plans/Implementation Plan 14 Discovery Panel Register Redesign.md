@@ -862,6 +862,14 @@ three non-blocking presentation observations recorded in §5.4.
   [production]`. Server-local health on port 6768:
   `{"status":"ok","db":"connected"}`. Container up on
   `0.0.0.0:6768->3001/tcp`.
+- Owner-authenticated **production** browser pass reported **PASS** across the
+  full follow-up matrix (placeholder copy, Change Cancel/Escape with focus
+  return, category reachability, overflow, reduced motion, no layout
+  regression). No production-only hotfix was made.
+
+**Final status:** Plan 14 is fully closed in production, including the Wave 6
+presentation follow-up. Every required local, deployment, and owner-authenticated
+production gate passed.
 
 ---
 
