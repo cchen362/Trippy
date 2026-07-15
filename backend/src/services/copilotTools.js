@@ -64,12 +64,17 @@ export const PROPOSE_ITINERARY_CHANGES_TOOL = {
             },
             toDayId: {
               type: 'string',
-              description: 'move_stop only: id of the day to move the stop to.',
+              description:
+                'move_stop only: id of the day to move the stop to. Copy this verbatim from a real ' +
+                "dayId in the itinerary's days array — never guess or construct one.",
             },
             position: {
               type: 'integer',
               minimum: 0,
-              description: "move_stop only: 0-based index for where the stop should sit within the target day's ordered stops.",
+              description:
+                "move_stop only: 0-based index for where the stop should sit within the target day's " +
+                "ordered stops. Optional — omit it when the user just says to move a stop to another " +
+                "day with no positional intent; Trippy appends it to the end of that day.",
             },
             fields: {
               type: 'object',

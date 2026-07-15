@@ -326,6 +326,58 @@ describe('applyProposal', () => {
 });
 
 // ---------------------------------------------------------------------------
+// move_stop position defaulting (post-deployment follow-up, 2026-07-15) — a NL "move X to
+// day Y" carries no positional intent, so createProposal defaults a missing position to
+// append-to-end via sanitizeAndStampOperations, rather than the raw validator ever accepting
+// an unpositioned move.
+// ---------------------------------------------------------------------------
+
+describe('move_stop position defaulting', () => {
+  it('validateProposalOperations still rejects a raw move_stop with no position', () => {
+    const stopId = insertStop({ title: 'Raw No Position' });
+    const r = validateProposalOperations([{ action: 'move_stop', stopId, toDayId: day2Id }], tripId);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/position must be a non-negative integer/);
+  });
+
+  it('createProposal defaults a missing position to append-to-end and the proposal is pending', async () => {
+    const existing1 = insertStop({ dayId: day2Id, title: 'Existing 1', sortOrder: 1 });
+    const existing2 = insertStop({ dayId: day2Id, title: 'Existing 2', sortOrder: 2 });
+    const moving = insertStop({ dayId, title: 'To Be Moved' });
+
+    const { proposalId, operations, status } = createProposal({
+      tripId, userId, messageId: null,
+      operations: [{ action: 'move_stop', stopId: moving, toDayId: day2Id }],
+    });
+
+    expect(status).toBe('pending');
+    expect(operations[0].position).toBe(2);
+
+    await applyProposal({ tripId, userId, proposalId });
+    expect(stopOrder(day2Id)).toEqual([existing1, existing2, moving]);
+  });
+
+  it('honors an explicit position instead of defaulting', () => {
+    const stopId = insertStop({ title: 'Explicit Position Stop' });
+    const { operations } = createProposal({
+      tripId, userId, messageId: null,
+      operations: [{ action: 'move_stop', stopId, toDayId: day2Id, position: 0 }],
+    });
+    expect(operations[0].position).toBe(0);
+  });
+
+  it('leaves a malformed/hallucinated toDayId alone — still correctly invalid', () => {
+    const stopId = insertStop({ title: 'Bad Day Target' });
+    const { status, statusReason } = createProposal({
+      tripId, userId, messageId: null,
+      operations: [{ action: 'move_stop', stopId, toDayId: 'b0279cec52413b4aede7273c8f15c4213f36c' }],
+    });
+    expect(status).toBe('invalid');
+    expect(statusReason).toMatch(/not part of this trip/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rejectProposal
 // ---------------------------------------------------------------------------
 

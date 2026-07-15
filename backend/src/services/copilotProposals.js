@@ -319,17 +319,36 @@ function proposalToJson(row) {
   };
 }
 
+// Post-deployment follow-up (2026-07-15): a natural-language "move X to day Y" carries no
+// positional intent, so the model routinely omits move_stop.position — which
+// validateProposalOperations then hard-rejects, even though the tool schema can't
+// structurally require it (a single polymorphic op object, "exactly one of" enforced only
+// in prose). Defaulting to append-to-end here — rather than loosening the validator — keeps
+// the position contract intact for callers who do supply one, while making the common
+// no-position case work. Only defaults when toDayId already resolves to a real day of this
+// trip; a malformed/hallucinated toDayId is left alone so it still fails validation honestly.
+function defaultMoveStopPosition(op, tripId) {
+  if (Number.isInteger(op.position) && op.position >= 0) return op;
+  if (typeof op.toDayId !== 'string' || !op.toDayId) return op;
+  if (dayTripId(op.toDayId) !== tripId) return op;
+  const count = getDb().prepare('SELECT COUNT(*) AS count FROM stops WHERE day_id = ?').get(op.toDayId).count;
+  return { ...op, position: count };
+}
+
 // G5: sanitizes + stamps every add_stop op's placeVerified flag BEFORE validation, on
 // copies of the caller's operations (never mutated in place). The server is the only
 // authority on verification — any model-supplied placeVerified is stripped first, then
 // re-stamped true only when the placeId resolves to a provenance === 'verified' catalogue
 // row. The stamped array is what gets validated, stored in operations_json, and returned,
 // so the SSE payload and listProposalsForTrip both carry the flag with no further plumbing
-// (Wave 4's badge hook).
+// (Wave 4's badge hook). Also defaults a missing move_stop.position — see
+// defaultMoveStopPosition above.
 function sanitizeAndStampOperations(operations, tripId) {
   if (!Array.isArray(operations)) return operations;
   return operations.map((op) => {
-    if (!isPlainObject(op) || op.action !== 'add_stop') return op;
+    if (!isPlainObject(op)) return op;
+    if (op.action === 'move_stop') return defaultMoveStopPosition(op, tripId);
+    if (op.action !== 'add_stop') return op;
     const { placeVerified: _modelClaimedVerified, ...rest } = op;
     if (!Number.isInteger(rest.placeId)) return rest;
     const lookup = lookupGroundedPlace(rest.placeId, tripId);

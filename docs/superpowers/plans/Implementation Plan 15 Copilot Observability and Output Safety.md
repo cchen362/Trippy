@@ -238,6 +238,9 @@ plan doc updated.
 
 ## Post-deployment follow-up (discovered 2026-07-15 during Wave 4 prod verification)
 
+**Status: RESOLVED 2026-07-15.** Fixed in its own session per the proposed fix below — see the
+verification note at the end of this section.
+
 **Not part of Plan 15's scope — pre-existing bug surfaced by the owner's production click-script.**
 Recorded here for traceability; the fix is handed off to its own session.
 
@@ -275,6 +278,20 @@ proposals apply correctly (three `applied` rows in prod confirm the apply pipeli
   safely, so this is hardening, not a correctness gate.
 - Add backend tests for the missing-`position` and malformed-`toDayId` paths; re-verify a live
   move-apply at desktop + 375px, then redeploy.
+
+**Verification (2026-07-15):** implemented exactly as proposed — `sanitizeAndStampOperations`
+defaults a missing `move_stop.position` to append-to-end only when `toDayId` already resolves to a
+real day of the trip; a malformed `toDayId` is left alone and still fails validation honestly. The
+`move_stop` tool description was tightened to reinforce copying a real `dayId`/making `position`
+explicitly optional. 4 new backend tests added (omitted position → applies with append ordering;
+explicit position → honored; malformed `toDayId` → still correctly `invalid`; raw
+`validateProposalOperations` still rejects an unpositioned move, confirming the default lives in
+sanitize, not the validator); full suite 623/623 green (was 619). Browser-verified live on the dev
+"Shanghai - Hangzhou (W3 verify)" trip at desktop and 375px: "Move the Oriental Pearl Tower stop to
+day 2" (no positional intent) produced a `pending` proposal that applied and landed the stop at the
+end of day 2; a follow-up "move it back to day 1, as the first stop" applied and landed it at
+position 0. DB check confirmed the stored proposal carries a concrete `position` and `status:
+applied`. Deployed to prod — see `git log` for the deploy commit.
 
 ---
 
