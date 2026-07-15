@@ -18,7 +18,7 @@ When documents disagree, use this order:
 4. Completed implementation plans for decision history and feature-specific detail.
 5. Open implementation plans for intended future behavior only.
 
-Do not describe planned work as shipped. Plans 1–12 are historical implementation records; always read their status headers. Plan 13 currently has Waves 1–2 implemented, while its context channel, contextual entry points, seed prompts, and final deployment waves remain future work.
+Do not describe planned work as shipped. Plans 1–14 are historical implementation records; always read their status headers.
 
 ---
 
@@ -88,7 +88,7 @@ Always use parameterised queries (never string interpolation). Run migrations in
 - It can query the discovery catalogue and deterministic trip-health checks through a bounded server-side tool loop.
 - It never mutates the itinerary directly from prose. Claude proposes typed operations; the server validates and persists a `copilot_proposals` record; the user explicitly applies or rejects it. Apply is atomic and protected by a trip fingerprint against stale changes.
 - The UI is a partial/expanded bottom sheet. Preserve manual expand/dismiss behavior, internal scrolling, and the distinct mobile-drag versus desktop-control interaction.
-- Current conversation context is the most recent 20 messages plus the serialized trip in an ephemeral-cached system block. Durable message context and selective trip serialization are reviewed future work, not current behavior.
+- Current conversation context is the most recent 20 messages plus the serialized trip in an ephemeral-cached system block. Per-message UI context is persisted and injected into user turns; durable conversation summaries and selective trip serialization remain reviewed future work.
 
 ---
 
