@@ -82,20 +82,7 @@ sessions must not re-derive them.
 
 ## Wave 1 — Output safety: stop_reason handling, 8,192 ceiling, model-id constants
 
-**Status: COMPLETE (2026-07-15).** `COPILOT_MODEL`/`DISCOVERY_MODEL` exported constants added
-beside `EXTRACTION_MODEL`/`PHOTO_DESCRIPTOR_MODEL` in `claude.js`, replacing the two inline
-literals; co-pilot `max_tokens` raised 4096 → 8192; `finalMessage.stop_reason` is now read each
-iteration and a `max_tokens` result breaks the loop before the terminal-tool check (so a
-partially-parsed `propose_itinerary_changes` block never becomes a proposal — D5), emits SSE
-`{ type: 'notice', notice: 'truncated' }`, and still runs `persistTurn` so the partial prose is
-saved; console telemetry line gained a `stopReason=` field. Frontend (`useCopilot.js` +
-`CopilotPanel.jsx`) renders the notice inline under the affected assistant message in the
-established muted DM Mono style, no new chrome. Verified: backend 609/609 and frontend 141/141
-tests green (3 new backend cases — truncated-prose, truncated-tool_use, end_turn regression
-guard — plus 2 new frontend hook tests and 2 new panel tests); production build clean; live
-local browser exercise on the "Shanghai - Hangzhou (W3 verify)" trip confirmed a normal turn
-unaffected, then a real `max_tokens: 12` truncation (temporarily forced, reverted immediately,
-never committed) produced the exact notice at both desktop and 375px mobile widths.
+**Status: COMPLETE (2026-07-15).** `COPILOT_MODEL`/`DISCOVERY_MODEL` exported constants added beside `EXTRACTION_MODEL`/`PHOTO_DESCRIPTOR_MODEL` in `claude.js`, replacing the two inline literals; co-pilot `max_tokens` raised 4096 → 8192; `finalMessage.stop_reason` is now read each iteration and a `max_tokens` result breaks the loop before the terminal-tool check (so a partially-parsed `propose_itinerary_changes` block never becomes a proposal — D5), emits SSE `{ type: 'notice', notice: 'truncated' }`, and still runs `persistTurn` so the partial prose is saved; console telemetry line gained a `stopReason=` field. Frontend (`useCopilot.js` + `CopilotPanel.jsx`) renders the notice inline under the affected assistant message in the established muted DM Mono style, no new chrome. Verified: backend 609/609 and frontend 141/141 tests green (3 new backend cases — truncated-prose, truncated-tool_use, end_turn regression guard — plus 2 new frontend hook tests and 2 new panel tests); production build clean; live local browser exercise on the "Shanghai - Hangzhou (W3 verify)" trip confirmed a normal turn unaffected, then a real `max_tokens: 12` truncation (temporarily forced, reverted immediately, never committed) produced the exact notice at both desktop and 375px mobile widths.
 
 **Model recommendation: Sonnet medium solo.**
 
