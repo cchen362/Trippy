@@ -497,6 +497,91 @@ describe('POST /trips/:tripId/copilot', () => {
     db.prepare("DELETE FROM copilot_messages WHERE trip_id = ? AND content IN ('Add the panda base', 'Adding it now.')").run(tripId);
   });
 
+  it('inserts a copilot_turn_metrics row when the service reports turn metrics', async () => {
+    mockStreamCopilotResponse.mockImplementation(async (msgs, ctx, res, req, persistTurn, toolExecutors, reportTurnMetrics) => {
+      await reportTurnMetrics({
+        model: 'claude-sonnet-4-6',
+        inputTokens: 120,
+        outputTokens: 45,
+        cacheWriteTokens: 500,
+        cacheReadTokens: 0,
+        ttfdMs: 300,
+        totalMs: 1500,
+        iterations: 1,
+        queryCalls: 0,
+        stopReason: 'end_turn',
+        proposalOps: 0,
+        error: 0,
+      });
+      return 'Done';
+    });
+
+    const req = makeReq({ body: { message: 'Metrics turn' } });
+    const res = makeRes();
+    await callHandler('post', `/${tripId}/copilot`, req, res);
+
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM copilot_turn_metrics WHERE trip_id = ?').get(tripId);
+    expect(row).toBeDefined();
+    expect(row.trip_id).toBe(tripId);
+    expect(row.model).toBe('claude-sonnet-4-6');
+    expect(row.input_tokens).toBe(120);
+    expect(row.output_tokens).toBe(45);
+    expect(row.cache_write_tokens).toBe(500);
+    expect(row.cache_read_tokens).toBe(0);
+    expect(row.ttfd_ms).toBe(300);
+    expect(row.total_ms).toBe(1500);
+    expect(row.iterations).toBe(1);
+    expect(row.query_calls).toBe(0);
+    expect(row.stop_reason).toBe('end_turn');
+    expect(row.proposal_ops).toBe(0);
+    expect(row.error).toBe(0);
+
+    db.prepare('DELETE FROM copilot_turn_metrics WHERE id = ?').run(row.id);
+    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?').run(tripId, 'Metrics turn');
+  });
+
+  it('prunes copilot_turn_metrics rows older than 90 days on write, keeping the new row', async () => {
+    const db = getDb();
+    const stale = db.prepare(`
+      INSERT INTO copilot_turn_metrics (
+        trip_id, created_at, model, input_tokens, output_tokens, cache_write_tokens,
+        cache_read_tokens, ttfd_ms, total_ms, iterations, query_calls, stop_reason,
+        proposal_ops, error
+      ) VALUES (?, datetime('now', '-100 days'), 'claude-sonnet-4-6', 1, 1, 0, 0, 100, 200, 1, 0, 'end_turn', 0, 0)
+      RETURNING id
+    `).get(tripId);
+
+    mockStreamCopilotResponse.mockImplementation(async (msgs, ctx, res, req, persistTurn, toolExecutors, reportTurnMetrics) => {
+      await reportTurnMetrics({
+        model: 'claude-sonnet-4-6',
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        ttfdMs: 100,
+        totalMs: 500,
+        iterations: 1,
+        queryCalls: 0,
+        stopReason: 'end_turn',
+        proposalOps: 0,
+        error: 0,
+      });
+      return 'Done';
+    });
+
+    await callHandler('post', `/${tripId}/copilot`, makeReq({ body: { message: 'Retention turn' } }), makeRes());
+
+    expect(db.prepare('SELECT id FROM copilot_turn_metrics WHERE id = ?').get(stale.id)).toBeUndefined();
+    const fresh = db.prepare(
+      "SELECT id FROM copilot_turn_metrics WHERE trip_id = ? AND total_ms = 500",
+    ).get(tripId);
+    expect(fresh).toBeDefined();
+
+    db.prepare('DELETE FROM copilot_turn_metrics WHERE id = ?').run(fresh.id);
+    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ? AND content = ?').run(tripId, 'Retention turn');
+  });
+
   it('returns 400 when message is missing', async () => {
     const req = makeReq({ body: {} });
     const res = makeRes();

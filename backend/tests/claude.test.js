@@ -721,6 +721,169 @@ describe('streamCopilotResponse — max_tokens truncation (Plan 15 Wave 1)', () 
   });
 });
 
+describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Custom inline stream objects (not makeMockStream) so each iteration can carry its own
+  // cache token fields, which makeMockStream's hardcoded usage does not support.
+  function makeUsageStream(text, finalContent, usage, stopReason) {
+    const listeners = {};
+    return {
+      on(event, cb) { listeners[event] = cb; return this; },
+      abort() {},
+      async finalMessage() {
+        if (listeners['text'] && text) listeners['text'](text);
+        const content = finalContent ?? [{ type: 'text', text: text ?? '' }];
+        const derivedStopReason = stopReason ?? (content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn');
+        return { content, stop_reason: derivedStopReason, usage };
+      },
+    };
+  }
+
+  it('sums usage across iterations (including cache fields) and reports a non-proposing turn', async () => {
+    const executor = vi.fn().mockResolvedValue({ ok: true });
+    mockStream
+      .mockReturnValueOnce(makeUsageStream(
+        'checking', [toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')],
+        { input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 500, cache_read_input_tokens: 0 },
+      ))
+      .mockReturnValueOnce(makeUsageStream(
+        'here you go', [{ type: 'text', text: 'here you go' }],
+        { input_tokens: 50, output_tokens: 30, cache_creation_input_tokens: 0, cache_read_input_tokens: 500 },
+        'end_turn',
+      ));
+
+    const res = makeMockRes();
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'suggestions?' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: executor }, reportTurnMetrics,
+    );
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    const summary = reportTurnMetrics.mock.calls[0][0];
+    expect(summary.inputTokens).toBe(150);
+    expect(summary.outputTokens).toBe(40);
+    expect(summary.cacheWriteTokens).toBe(500);
+    expect(summary.cacheReadTokens).toBe(500);
+    expect(summary.iterations).toBe(2);
+    expect(summary.queryCalls).toBe(1);
+    expect(summary.stopReason).toBe('end_turn');
+    expect(summary.proposalOps).toBe(0);
+    expect(summary.error).toBe(0);
+    expect(typeof summary.totalMs).toBe('number');
+  });
+
+  it('reports proposalOps matching the operations count on a proposing turn', async () => {
+    const operations = [{ action: 'remove_stop', stopId: 'stop-1' }, { action: 'remove_stop', stopId: 'stop-2' }];
+    mockStream.mockReturnValueOnce(makeUsageStream(
+      'Sure.',
+      [
+        { type: 'text', text: 'Sure.' },
+        { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
+      ],
+      { input_tokens: 20, output_tokens: 15, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    ));
+
+    const res = makeMockRes();
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'remove the first two stops' }], {}, res, {}, undefined, {}, reportTurnMetrics,
+    );
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    const summary = reportTurnMetrics.mock.calls[0][0];
+    expect(summary.proposalOps).toBe(2);
+    expect(summary.error).toBe(0);
+  });
+
+  it('reports stopReason: max_tokens on a truncated turn', async () => {
+    mockStream.mockReturnValueOnce(makeUsageStream(
+      'partial',
+      [{ type: 'text', text: 'partial' }],
+      { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      'max_tokens',
+    ));
+
+    const res = makeMockRes();
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'tell me more' }], {}, res, {}, undefined, {}, reportTurnMetrics,
+    );
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0].stopReason).toBe('max_tokens');
+  });
+
+  it('reports error: 1 when the stream throws, and the turn still completes normally', async () => {
+    const brokenStream = {
+      on() { return brokenStream; },
+      async finalMessage() { throw new Error('stream failed'); },
+    };
+    mockStream.mockReturnValueOnce(brokenStream);
+
+    const res = makeMockRes();
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, undefined, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    const summary = reportTurnMetrics.mock.calls[0][0];
+    expect(summary.error).toBe(1);
+    expect(summary.proposalOps).toBe(0);
+
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'error')).toEqual({ type: 'error', message: 'stream failed' });
+    expect(events.find((e) => e.type === 'done')).toBeDefined();
+    expect(res.ended).toBe(true);
+  });
+
+  it('reportTurnMetrics rejecting does not throw out of streamCopilotResponse or prevent done/res.end()', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['hi'], 'hi'));
+    const res = makeMockRes();
+    const reportTurnMetrics = vi.fn().mockRejectedValue(new Error('db write failed'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, undefined, {}, reportTurnMetrics),
+    ).resolves.toBe('hi');
+
+    const events = parseEvents(res);
+    expect(events.find((e) => e.type === 'done')).toBeDefined();
+    expect(res.ended).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith('[copilot] reportTurnMetrics failed:', expect.any(Error));
+
+    errorSpy.mockRestore();
+  });
+
+  it('does NOT call reportTurnMetrics on the aborted-connection early-return path', async () => {
+    const res = makeMockRes();
+    const abortableStream = {
+      on(event, cb) {
+        if (event === 'text') abortableStream._textCb = cb;
+        return abortableStream;
+      },
+      abort() {},
+      async finalMessage() {
+        if (abortableStream._textCb) abortableStream._textCb('partial');
+        res.triggerClose();
+        return { content: [{ type: 'text', text: 'partial' }], usage: { input_tokens: 1, output_tokens: 1 } };
+      },
+    };
+    mockStream.mockReturnValueOnce(abortableStream);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, undefined, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics).not.toHaveBeenCalled();
+  });
+});
+
 describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
   beforeEach(() => {
     mockCreate.mockReset();

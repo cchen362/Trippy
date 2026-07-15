@@ -225,9 +225,26 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
     check_trip_health: (input) => ({ findings: runTripHealthChecks(tripDetail, input || {}) }),
   };
 
+  // reportTurnMetrics (Plan 15 Wave 2) — invoked once after the model turn completes (success
+  // or error) with a durable per-turn telemetry summary. The route owns the write (same pattern
+  // as persistTurn) so claude.js stays DB-free. No message text, no user id, no prompt content.
+  const reportTurnMetrics = async (summary) => {
+    db.prepare(`
+      INSERT INTO copilot_turn_metrics (
+        trip_id, model, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
+        ttfd_ms, total_ms, iterations, query_calls, stop_reason, proposal_ops, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tripId, summary.model, summary.inputTokens, summary.outputTokens,
+      summary.cacheWriteTokens, summary.cacheReadTokens, summary.ttfdMs, summary.totalMs,
+      summary.iterations, summary.queryCalls, summary.stopReason, summary.proposalOps, summary.error,
+    );
+    db.prepare(`DELETE FROM copilot_turn_metrics WHERE created_at < datetime('now', '-90 days')`).run();
+  };
+
   // Stream response — SSE headers are set inside streamCopilotResponse. Errors during
   // streaming (and inside persistTurn) are handled there; nothing to persist afterwards.
-  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn, toolExecutors);
+  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn, toolExecutors, reportTurnMetrics);
 });
 
 // POST /trips/:tripId/copilot/apply — applies a persisted proposal by id (never raw ops)

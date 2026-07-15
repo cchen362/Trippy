@@ -88,8 +88,9 @@ describe('migrations', () => {
     // 021 (canonicalize_discovery_keys), 022 (drop_dead_discovery_cache),
     // 023 (trip_scopes), 024 (geo_data_repair), 025 (stop_photo_attribution),
     // 026 (discovery_place_photo_descriptor), 027 (stop_photo_source), and
-    // 028 (copilot_proposals), and 029 (copilot message context).
-    expect(count.c).toBe(29);
+    // 028 (copilot_proposals), 029 (copilot message context), and
+    // 030 (copilot_turn_metrics).
+    expect(count.c).toBe(30);
   });
 
   it('adds nullable co-pilot message context storage', () => {
@@ -160,5 +161,20 @@ describe('migrations', () => {
     // The normalized catalogue tables that replaced it stay present.
     expect(tables).toContain('discovery_destinations');
     expect(tables).toContain('discovery_places');
+  });
+
+  it('creates the copilot_turn_metrics table (Plan 15 Wave 2)', () => {
+    const db = getDb();
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all().map((r) => r.name);
+    expect(tables).toContain('copilot_turn_metrics');
+
+    const columns = db.prepare('PRAGMA table_info(copilot_turn_metrics)').all().map((r) => r.name);
+    expect(columns).toEqual(expect.arrayContaining([
+      'id', 'trip_id', 'created_at', 'model', 'input_tokens', 'output_tokens',
+      'cache_write_tokens', 'cache_read_tokens', 'ttfd_ms', 'total_ms', 'iterations',
+      'query_calls', 'stop_reason', 'proposal_ops', 'error',
+    ]));
   });
 });

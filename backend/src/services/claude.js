@@ -406,7 +406,7 @@ const QUERY_TOOL_CAP = 5;
 // toolExecutors (optional, Plan 12 Wave 1): { [toolName]: async (input) => resultObject },
 // injected by the route the same way as persistTurn — this file stays DB-free, the route owns
 // what a query tool actually does (catalogue reads, trip-health checks, etc).
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}) {
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics) {
   const client = getClient();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -485,10 +485,16 @@ Stops carry one of four kinds of timing. Respect them:
   });
 
   let messages = [...conversationMessages];
-  const totalUsage = { input_tokens: 0, output_tokens: 0 };
+  const totalUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  };
   let executedQueryCalls = 0;
   let capNoticeSent = false;
   let sawFirstDelta = false;
+  let ttfdMs = null;
   let iterations = 0;
   let terminalUse = null; // the propose_itinerary_changes tool_use that ended the turn, if any
   let truncated = false;
@@ -518,7 +524,8 @@ Stops carry one of four kinds of timing. Respect them:
       stream.on('text', (text) => {
         if (!sawFirstDelta) {
           sawFirstDelta = true;
-          console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, Date.now() - turnStart);
+          ttfdMs = Date.now() - turnStart;
+          console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, ttfdMs);
         }
         fullText += text;
         write({ type: 'text', content: text });
@@ -537,6 +544,8 @@ Stops carry one of four kinds of timing. Respect them:
 
       totalUsage.input_tokens += finalMessage?.usage?.input_tokens ?? 0;
       totalUsage.output_tokens += finalMessage?.usage?.output_tokens ?? 0;
+      totalUsage.cache_creation_input_tokens += finalMessage?.usage?.cache_creation_input_tokens ?? 0;
+      totalUsage.cache_read_input_tokens += finalMessage?.usage?.cache_read_input_tokens ?? 0;
       lastStopReason = finalMessage?.stop_reason ?? null;
 
       // A max_tokens cut can land mid-prose or mid-tool_use. Either way the response is
@@ -650,6 +659,28 @@ Stops carry one of four kinds of timing. Respect them:
       totalUsage.input_tokens, totalUsage.output_tokens,
       JSON.stringify(itineraryContext).length, terminalUse ? 'yes' : 'no', iterations, executedQueryCalls, lastStopReason);
 
+    const proposalOps = operations ? operations.length : 0;
+    if (reportTurnMetrics) {
+      try {
+        await reportTurnMetrics({
+          model: COPILOT_MODEL,
+          inputTokens: totalUsage.input_tokens,
+          outputTokens: totalUsage.output_tokens,
+          cacheWriteTokens: totalUsage.cache_creation_input_tokens,
+          cacheReadTokens: totalUsage.cache_read_input_tokens,
+          ttfdMs,
+          totalMs: Date.now() - turnStart,
+          iterations,
+          queryCalls: executedQueryCalls,
+          stopReason: lastStopReason,
+          proposalOps,
+          error: 0,
+        });
+      } catch (err) {
+        console.error('[copilot] reportTurnMetrics failed:', err);
+      }
+    }
+
     streamDone = true;
     console.log('[copilot] stream done fullText.length=%d', fullText.length);
     write({ type: 'done' });
@@ -658,6 +689,26 @@ Stops carry one of four kinds of timing. Respect them:
     streamDone = true;
     console.error('[copilot] stream error:', err);
     write({ type: 'error', message: err.message });
+    if (reportTurnMetrics) {
+      try {
+        await reportTurnMetrics({
+          model: COPILOT_MODEL,
+          inputTokens: totalUsage.input_tokens,
+          outputTokens: totalUsage.output_tokens,
+          cacheWriteTokens: totalUsage.cache_creation_input_tokens,
+          cacheReadTokens: totalUsage.cache_read_input_tokens,
+          ttfdMs,
+          totalMs: Date.now() - turnStart,
+          iterations,
+          queryCalls: executedQueryCalls,
+          stopReason: lastStopReason,
+          proposalOps: 0,
+          error: 1,
+        });
+      } catch (metricsErr) {
+        console.error('[copilot] reportTurnMetrics failed:', metricsErr);
+      }
+    }
     write({ type: 'done' });
     res.end();
   }
