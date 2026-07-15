@@ -848,6 +848,21 @@ three non-blocking presentation observations recorded in §5.4.
   category reachability via mouse/keyboard/coarse pointer, horizontal overflow,
   reduced motion, and no layout regression.
 
+### Deployment
+
+- Release commit `ff222a7` ("fix(discovery): resolve Plan 14 presentation
+  follow-ups"), fast-forwarded onto `main` from the prior production commit
+  `f605788`. No merge commit.
+- Server `~/Trippy` pulled to exact `ff222a7`; the release contained no
+  migration and did not touch `~/Trippy/data/trippy.db*`. A fresh pre-deploy DB
+  backup (with `-wal`/`-shm` sidecars) was taken before pulling, and the daily
+  backup/health crons were confirmed active.
+- `docker compose up -d --build` rebuilt and recreated `trippy-trippy-1` without
+  a production hotfix. Startup log: `Trippy backend running on :3001
+  [production]`. Server-local health on port 6768:
+  `{"status":"ok","db":"connected"}`. Container up on
+  `0.0.0.0:6768->3001/tcp`.
+
 ---
 
 ## 4. Mandatory verification commands
