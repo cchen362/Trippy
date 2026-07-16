@@ -1122,7 +1122,9 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .logistics-card-grid-standard > .logistics-card:last-child:nth-child(odd) {
+  /* A section's sole card spans the row at a comfortable cap; sections with
+     multiple cards keep pure column geometry so odd cards stay grid-aligned. */
+  .logistics-card-grid-standard > .logistics-card:only-child {
     grid-column: 1 / -1;
     max-width: 560px;
   }
