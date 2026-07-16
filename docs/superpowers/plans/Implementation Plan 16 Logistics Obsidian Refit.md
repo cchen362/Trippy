@@ -1,6 +1,8 @@
 # Implementation Plan 16 — Logistics Tab Obsidian Refit
 
 **Status: COMPLETE — implemented 2026-07-16, single wave, D1–D5 defaults. Verified locally: 141 frontend tests + build green; browser-verified at 375px / 900px / 1280px (all four card types, lone-card rule, forced hover + real focus-visible states, notch geometry checked via computed styles). Deviation from §5: notch pseudo-elements are anchored to `.logistics-footer-line` (not the card at `top: 58%`) — the percentage anchor missed the perforation line on real card proportions; line-anchored notches self-align at any card height and correctly vanish on footerless tickets. Not exercised: real-device touch feel and motion (Browser pane rAF limitation) — owner pass recommended before deploy.**
+
+**DEPLOYED 2026-07-16 at 374132e** (includes follow-up fix scoping the lone-card span rule to `:only-child` after owner QA caught odd-card misalignment in 3-card sections). Owner browser QA passed pre-deploy; production container rebuilt cleanly, `/api/health` ok, deployed bundle verified to contain the final CSS.
 **Date:** 2026-07-16
 **Baseline:** `docs/superpowers/mockups/booking-card-material-study.html`, Direction 3 ("Obsidian ink, warm concierge detail") — owner-selected.
 **Scope:** Frontend only. No backend, no data-shape, no route changes.
