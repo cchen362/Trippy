@@ -136,22 +136,22 @@ export default function LogisticsTab() {
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <button
             type="button"
             onClick={() => setCaptureOpen(true)}
             className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase"
-            style={{ background: 'var(--gold)', color: 'var(--ink-deep)' }}
+            style={{ background: 'transparent', color: 'var(--gold)', border: '1px solid rgba(201,168,76,0.45)' }}
           >
-            + Add bookings
+            Import confirmations
           </button>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="font-mono text-[11px] tracking-[0.22em] uppercase"
-            style={{ color: 'var(--cream-dim)' }}
+            className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase"
+            style={{ background: 'transparent', color: 'var(--cream-dim)', border: '1px solid rgba(240,234,216,0.14)' }}
           >
-            enter manually
+            Enter manually
           </button>
         </div>
       </section>
@@ -160,13 +160,11 @@ export default function LogisticsTab() {
       {['flight', 'hotel', 'other', 'train'].map((section) => (
         grouped[section].length > 0 && (
           <section key={section}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4">
               <h3 className="font-mono text-[11px] tracking-[0.28em] uppercase" style={{ color: 'var(--cream-mute)' }}>
                 {section === 'other' ? 'Other' : `${section}s`}
+                <span style={{ color: 'var(--cream-dim)' }}> &middot; {grouped[section].length}</span>
               </h3>
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>
-                {grouped[section].length}
-              </span>
             </div>
             <div className={sectionGridClass(section)}>
               {grouped[section].map((booking) => {

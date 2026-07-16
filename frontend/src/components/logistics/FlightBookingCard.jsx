@@ -39,8 +39,13 @@ export default function FlightBookingCard({ booking, onOpen }) {
   // Graceful degradation: no times from lookup → show departure date instead.
   const hasTimes = leftTime || rightTime;
 
+  const routeLabel = originIata && destIata
+    ? `${originIata} to ${destIata}`
+    : booking.title;
+
   return (
     <TicketStubCard
+      ariaLabel={`Flight booking: ${routeLabel}. Opens details.`}
       eyebrow={eyebrow}
       leftCode={originIata || '—'}
       rightCode={destIata || '—'}

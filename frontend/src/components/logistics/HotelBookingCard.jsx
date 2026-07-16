@@ -36,8 +36,11 @@ export default function HotelBookingCard({ booking, onOpen }) {
     <button
       type="button"
       onClick={() => onOpen(booking)}
+      aria-label={`Hotel booking: ${booking.title}. Opens details.`}
       className="logistics-card w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]"
     >
+      <span className="logistics-keyline" aria-hidden="true" />
+      <span className="logistics-card-affordance" aria-hidden="true">&rsaquo;</span>
       <div className="logistics-card-top flex items-start justify-between gap-2">
         <div>
           <p className="logistics-eyebrow">

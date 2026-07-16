@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trippy booking cards · material study</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Mono:wght@400;500&family=Playfair+Display:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink-deep: #0d0b09;
+      --ink-mid: #1c1a17;
+      --ink-surface: #232018;
+      --cream: #f0ead8;
+      --cream-dim: rgba(240, 234, 216, .68);
+      --cream-mute: rgba(240, 234, 216, .46);
+      --cream-faint: rgba(240, 234, 216, .12);
+      --gold: #c6a357;
+      --gold-dim: #8b7038;
+      --gold-line: rgba(198, 163, 87, .34);
+      --foil: linear-gradient(90deg, #6f592c 0%, #aa8b49 14%, #d0b774 31%, #8c7138 46%, #c4a25b 69%, #78602f 86%, #b0904b 100%);
+      --font-display: 'Playfair Display', serif;
+      --font-body: 'Cormorant Garamond', serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--ink-deep);
+      color: var(--cream);
+      font-family: var(--font-body);
+      font-size: 18px;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, a { font: inherit; }
+    a { color: inherit; }
+
+    .study {
+      width: min(1500px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 40px 0 88px;
+    }
+    .study-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr);
+      gap: 48px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--cream-faint);
+    }
+    .eyebrow, .ui-label, .section-index, .score-label, .token-name {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .19em;
+      line-height: 1.45;
+      text-transform: uppercase;
+    }
+    .eyebrow { color: var(--gold); }
+    .ui-label, .score-label, .token-name { color: var(--cream-mute); }
+    h1, h2, h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; }
+    h1 { max-width: 17ch; margin: 10px 0 12px; font-size: clamp(38px, 5vw, 68px); line-height: .99; }
+    .intro { max-width: 66ch; margin: 0; color: var(--cream-dim); font-size: 20px; line-height: 1.55; }
+    .guardrail {
+      align-self: end;
+      padding: 20px 0 2px 20px;
+      border-left: 1px solid var(--gold-line);
+      color: var(--cream-dim);
+      line-height: 1.55;
+    }
+    .guardrail strong { display: block; margin-bottom: 6px; color: var(--cream); font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: .17em; text-transform: uppercase; }
+    .jump-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; }
+    .jump-nav a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 15px; border: 1px solid var(--cream-faint); border-radius: 6px; color: var(--cream-dim); font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; text-decoration: none; text-transform: uppercase; }
+    .jump-nav a:hover { border-color: var(--gold-line); color: var(--cream); }
+
+    .direction { padding: 78px 0 14px; }
+    .direction-head { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(280px, 430px); gap: 22px; align-items: end; margin-bottom: 24px; }
+    .section-index { color: var(--gold-dim); align-self: start; padding-top: 12px; }
+    .direction h2 { margin: 0; font-size: clamp(34px, 4vw, 52px); line-height: 1; }
+    .direction-thesis { margin: 9px 0 0; max-width: 62ch; color: var(--cream-dim); line-height: 1.45; }
+    .material-note { margin: 0; padding-left: 18px; border-left: 1px solid var(--cream-faint); color: var(--cream-mute); font-size: 16px; line-height: 1.45; }
+
+    .comparison-stage { border: 1px solid var(--cream-faint); border-radius: 16px; overflow: hidden; background: #080706; }
+    .stage-label { display: flex; justify-content: space-between; gap: 16px; padding: 11px 14px; border-bottom: 1px solid var(--cream-faint); background: #12100d; }
+    .stage-label span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .15em; text-transform: uppercase; color: var(--cream-mute); }
+    .examples { display: grid; grid-template-columns: 375px minmax(0, 1fr); gap: 1px; background: var(--cream-faint); }
+    .device { min-width: 0; background: #0b0a08; }
+    .device-head { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--cream-faint); background: #0f0d0b; }
+    .device-head span { font-family: var(--font-mono); font-size: 9px; letter-spacing: .15em; text-transform: uppercase; color: var(--cream-mute); }
+    .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 22px; }
+    .mobile .card-grid { grid-template-columns: minmax(0, 1fr); padding: 16px 12px 22px; }
+
+    .booking-card {
+      --surface: #171410;
+      --surface-top: #1d1913;
+      --border: rgba(240, 234, 216, .13);
+      --divider: rgba(240, 234, 216, .10);
+      --shadow: 0 16px 38px rgba(0, 0, 0, .28);
+      position: relative;
+      isolation: isolate;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .booking-card::before, .booking-card::after { pointer-events: none; }
+    .card-top { position: relative; min-height: 92px; padding: 24px 18px 17px; background: var(--surface-top); }
+    .type-line { margin: 0 0 9px; color: var(--cream-mute); font-family: var(--font-mono); font-size: 9px; font-weight: 500; letter-spacing: .21em; line-height: 1.35; text-transform: uppercase; overflow-wrap: anywhere; }
+    .card-title { margin: 0; color: var(--cream); font-size: 25px; line-height: 1.06; overflow-wrap: anywhere; }
+    .route { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, .65fr) minmax(0, 1fr); align-items: center; gap: 9px; }
+    .route-code { min-width: 0; color: var(--cream); font-family: var(--font-display); font-size: clamp(25px, 4vw, 34px); font-style: italic; line-height: 1; overflow-wrap: anywhere; }
+    .route-code:last-child { text-align: right; }
+    .route-code.station { font-size: clamp(17px, 2.2vw, 25px); line-height: 1.05; }
+    .route-rail { display: flex; align-items: center; gap: 6px; color: var(--cream-mute); font-family: var(--font-mono); font-size: 9px; letter-spacing: .07em; text-align: center; white-space: nowrap; }
+    .route-rail::before, .route-rail::after { content: ''; min-width: 6px; height: 1px; flex: 1; background: var(--divider); }
+    .ticket-body { position: relative; padding: 18px 18px 15px; border-top: 1px solid var(--divider); }
+    .time-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .time-side:last-child { text-align: right; }
+    .time { margin: 0; color: var(--cream); font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1; }
+    .tz { color: var(--cream-mute); font-size: 9px; letter-spacing: .12em; }
+    .time-label, .date { margin: 5px 0 0; font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; line-height: 1.35; text-transform: uppercase; }
+    .time-label { color: var(--cream-mute); }
+    .date { margin-top: 2px; color: var(--cream-dim); letter-spacing: .05em; }
+    .perforation { position: relative; height: 1px; margin: 15px 0 12px; background: repeating-linear-gradient(90deg, var(--divider) 0 6px, transparent 6px 11px); }
+    .ticket::before, .ticket::after { content: ''; position: absolute; z-index: 3; top: 58%; width: 13px; height: 13px; border-radius: 50%; background: #0b0a08; border: 1px solid var(--border); }
+    .ticket::before { left: -8px; }
+    .ticket::after { right: -8px; }
+    .footer-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .footer-label, .confirmation { font-family: var(--font-mono); font-size: 9px; font-weight: 500; line-height: 1.35; text-transform: uppercase; }
+    .footer-label { color: var(--cream-mute); letter-spacing: .18em; }
+    .confirmation { color: var(--gold); letter-spacing: .08em; text-align: right; overflow-wrap: anywhere; }
+    .data-rows { padding: 13px 18px 14px; }
+    .data-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 16px; min-height: 38px; border-bottom: 1px solid var(--divider); }
+    .data-row:last-child { border-bottom: 0; }
+    .data-label, .data-value { font-family: var(--font-mono); font-size: 10px; line-height: 1.3; }
+    .data-label { color: var(--cream-mute); letter-spacing: .15em; text-transform: uppercase; }
+    .data-value { min-width: 0; color: var(--cream); font-size: 12px; letter-spacing: .01em; text-align: right; overflow-wrap: anywhere; }
+    .data-value.ref { color: var(--gold); font-weight: 500; }
+    .subline { margin: 8px 0 0; color: var(--cream-dim); font-size: 16px; line-height: 1.3; }
+
+    /* 01 · Satin: a textile-like directional weave, no specular patch. */
+    .satin .booking-card { --surface: #161410; --surface-top: #1c1914; --border: rgba(198, 163, 87, .22); --divider: rgba(198, 163, 87, .16); --shadow: 0 12px 32px rgba(0, 0, 0, .24); }
+    .satin .booking-card { background-image: repeating-linear-gradient(112deg, rgba(255,255,255,.012) 0 1px, transparent 1px 5px), linear-gradient(155deg, #211e18, #151310 46%, #1b1813); }
+    .satin .card-top { background: rgba(22, 20, 16, .64); }
+    .satin .card-top::after { content: ''; position: absolute; left: 18px; right: 18px; bottom: 0; height: 1px; background: var(--foil); opacity: .8; }
+    .satin .ticket-body { border-top: 0; }
+
+    /* 02 · Lacquer: one reflection, parked away from data. */
+    .lacquer .booking-card { --surface: #0f0d0b; --surface-top: #15120f; --border: rgba(240, 234, 216, .16); --divider: rgba(240, 234, 216, .09); --shadow: 0 22px 50px rgba(0, 0, 0, .42), inset 0 1px rgba(255,255,255,.04); background: linear-gradient(148deg, #1c1813 0%, #0d0b09 54%, #17130f 100%); }
+    .lacquer .booking-card::before { content: ''; position: absolute; z-index: 0; width: 62%; height: 48%; top: -31%; right: -17%; transform: rotate(-12deg); border-radius: 50%; background: rgba(240, 234, 216, .055); filter: blur(12px); }
+    .lacquer .card-top, .lacquer .ticket-body, .lacquer .data-rows { z-index: 1; background: transparent; }
+    .lacquer .card-top::after { content: ''; position: absolute; left: 18px; bottom: 0; width: 42px; height: 2px; background: var(--foil); opacity: .76; }
+
+    /* 03 · Obsidian concierge: mineral depth with warm paper-edge detailing. */
+    .obsidian .booking-card { --surface: #14110e; --surface-top: #191510; --border: rgba(145, 115, 60, .34); --divider: rgba(198, 163, 87, .13); --shadow: 0 15px 42px rgba(0,0,0,.35), inset 3px 0 rgba(120,92,43,.13); border-radius: 9px; background: radial-gradient(circle at 18% 8%, rgba(79,65,45,.16), transparent 31%), linear-gradient(163deg, #191510, #100e0c 65%, #181410); }
+    .obsidian .booking-card::before { content: ''; position: absolute; z-index: 2; inset: 7px; border: 1px solid rgba(198,163,87,.09); border-radius: 4px; }
+    .obsidian .card-top { background: rgba(24,20,15,.56); }
+    .obsidian .type-line::before { content: '— '; color: var(--gold-dim); }
+    .obsidian .perforation { background: linear-gradient(90deg, transparent, rgba(198,163,87,.24) 16%, rgba(198,163,87,.24) 84%, transparent); }
+    .obsidian .ticket::before, .obsidian .ticket::after { border-radius: 2px; transform: rotate(45deg); width: 10px; height: 10px; }
+
+    .evaluation { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin-top: 14px; border: 1px solid var(--cream-faint); border-radius: 10px; overflow: hidden; background: var(--cream-faint); }
+    .score { min-width: 0; padding: 13px 14px 14px; background: #12100d; }
+    .score-value { display: block; margin: 4px 0 3px; color: var(--cream); font-family: var(--font-display); font-size: 25px; font-style: italic; }
+    .score-note { display: block; color: var(--cream-mute); font-size: 14px; line-height: 1.3; }
+
+    .recommendation { margin-top: 74px; padding: clamp(24px, 5vw, 58px); border: 1px solid rgba(198,163,87,.29); border-radius: 10px; background: radial-gradient(circle at 90% 0, rgba(198,163,87,.055), transparent 30%), #13100d; }
+    .recommendation-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 64px; }
+    .recommendation h2 { margin: 8px 0 14px; font-size: clamp(36px, 5vw, 58px); line-height: 1; }
+    .recommendation p { margin: 0; color: var(--cream-dim); line-height: 1.55; }
+    .verdict { margin-top: 18px !important; padding-top: 18px; border-top: 1px solid var(--gold-line); color: var(--cream) !important; }
+    .tokens { border: 1px solid var(--cream-faint); border-radius: 8px; overflow: hidden; }
+    .token { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; padding: 14px; border-bottom: 1px solid var(--cream-faint); }
+    .token:last-child { border-bottom: 0; }
+    .token-code { min-width: 0; color: var(--cream); font-family: var(--font-mono); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+
+    @media (max-width: 980px) {
+      .study-header, .recommendation-grid { grid-template-columns: 1fr; gap: 24px; }
+      .direction-head { grid-template-columns: 54px minmax(0, 1fr); }
+      .material-note { grid-column: 2; }
+      .examples { grid-template-columns: 375px minmax(540px, 1fr); overflow-x: auto; }
+      .evaluation { grid-template-columns: repeat(5, minmax(155px, 1fr)); overflow-x: auto; }
+    }
+    @media (max-width: 560px) {
+      .study { width: min(100% - 18px, 520px); padding-top: 20px; }
+      .study-header { padding: 0 7px 22px; }
+      .direction { padding-top: 56px; }
+      .direction-head { display: block; padding: 0 7px; }
+      .section-index { margin-bottom: 9px; }
+      .material-note { margin-top: 14px; }
+      .comparison-stage { border-radius: 11px; }
+      .examples { display: block; overflow: visible; }
+      .desktop { border-top: 1px solid var(--cream-faint); }
+      .desktop .card-grid { grid-template-columns: 1fr; padding: 16px 12px 22px; }
+      .mobile .device-head::after { content: '375 PX'; }
+      .desktop .device-head::after { content: 'STACKED PREVIEW'; }
+      .device-head span:last-child { display: none; }
+      .evaluation { grid-template-columns: 1fr 1fr; overflow: visible; }
+      .score:last-child { grid-column: 1 / -1; }
+      .recommendation { margin-top: 54px; padding: 24px 18px; }
+      .token { grid-template-columns: 78px minmax(0, 1fr); }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <main class="study">
+    <header class="study-header">
+      <div>
+        <p class="eyebrow">Trippy · logistics material exploration</p>
+        <h1>One anatomy, three material voices</h1>
+        <p class="intro">A comparative study for the existing flight, train, hotel, and flexible booking cards. Structure, hierarchy, notches, times, dates, and references remain intact; only the material expression changes.</p>
+        <nav class="jump-nav" aria-label="Study directions">
+          <a href="#satin">01 Satin black</a>
+          <a href="#lacquer">02 Black lacquer</a>
+          <a href="#obsidian">03 Obsidian ink</a>
+          <a href="#recommendation">Recommendation</a>
+        </nav>
+      </div>
+      <aside class="guardrail">
+        <strong>Material discipline</strong>
+        Antique foil is confined to hairlines and edge catches. Small labels and confirmation references use flat, contrast-safe color. No metallic body copy, glow, or full-card reflection.
+      </aside>
+    </header>
+
+    <div id="directions"></div>
+
+    <section class="recommendation" id="recommendation">
+      <div class="recommendation-grid">
+        <div>
+          <p class="eyebrow">Recommended direction · 03</p>
+          <h2>Obsidian ink with concierge detailing</h2>
+          <p>It feels authored for Trippy rather than borrowed from a luxury checkout flow. The inset keyline, warmer mineral surface, and restrained paper-edge cues distinguish the family while leaving dense data calm.</p>
+          <p class="verdict">Use satin as the quiet fallback for dense secondary panels. Reserve lacquer for one hero-level booking state, if it is used at all. The booking family itself should adopt obsidian.</p>
+        </div>
+        <div class="tokens" aria-label="Recommended reusable tokens">
+          <div class="token"><span class="token-name">Surface</span><span class="token-code">radial-gradient(circle at 18% 8%, rgba(79,65,45,.16), transparent 31%), linear-gradient(163deg, #191510, #100e0c 65%, #181410)</span></div>
+          <div class="token"><span class="token-name">Border</span><span class="token-code">1px solid rgba(145,115,60,.34) · inset keyline rgba(198,163,87,.09)</span></div>
+          <div class="token"><span class="token-name">Highlight</span><span class="token-code">Localized mineral lift rgba(79,65,45,.16) at top-left; never beneath data</span></div>
+          <div class="token"><span class="token-name">Foil</span><span class="token-code">#6f592c → #d0b774 irregular hairline spectrum · max 1–2px · no glow</span></div>
+          <div class="token"><span class="token-name">Shadow</span><span class="token-code">0 15px 42px rgba(0,0,0,.35), inset 3px 0 rgba(120,92,43,.13)</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const directions = [
+      {
+        id: 'satin', className: 'satin', index: '01', title: 'Satin black with foil hairlines',
+        thesis: 'Quiet, tailored, and highly durable. The directional weave registers only at close range; the single foil rule gives each card a precise ceremonial edge.',
+        note: 'Best when logistics should recede into the wider interface. Lowest glare, but also the least ownable from a distance.',
+        scores: [['Luxury & distinctiveness','4.1 / 5','Tailored, not theatrical'],['Legibility','4.8 / 5','Calmest data field'],['Visual noise','4.8 / 5','Near-zero interference'],['Mobile durability','4.9 / 5','Strong at 375px'],['Trippy consistency','4.5 / 5','Close to core ink surfaces']]
+      },
+      {
+        id: 'lacquer', className: 'lacquer', index: '02', title: 'Restrained black lacquer',
+        thesis: 'A deeper, more formal surface with one parked reflection. It gives tickets a premium object quality while refusing the casino gloss usually associated with lacquer.',
+        note: 'Strongest first impression. The reflection must remain surgically placed; repeated across a long logistics list, it risks becoming decorative noise.',
+        scores: [['Luxury & distinctiveness','4.7 / 5','Immediate premium read'],['Legibility','4.3 / 5','Good with reflection parked'],['Visual noise','3.7 / 5','Repetition is the risk'],['Mobile durability','4.0 / 5','Needs careful clipping'],['Trippy consistency','4.0 / 5','A little more formal than app']]
+      },
+      {
+        id: 'obsidian', className: 'obsidian', index: '03', title: 'Obsidian ink, warm concierge detail',
+        thesis: 'Mineral depth meets the quiet precision of a private concierge folio. The squared keyline and warm inset edge make the family feel collected, not merely styled.',
+        note: 'The best balance of bespoke character and data restraint. Type-specific anatomy stays dominant while the common keyline makes the family cohere.',
+        scores: [['Luxury & distinctiveness','4.8 / 5','Most authored for Trippy'],['Legibility','4.6 / 5','Warm, stable contrast'],['Visual noise','4.5 / 5','Detail lives at edges'],['Mobile durability','4.7 / 5','Keyline survives compression'],['Trippy consistency','4.9 / 5','Private-club, warm-dark']]
+      }
+    ];
+
+    const flight = () => `
+      <article class="booking-card ticket flight-card">
+        <div class="card-top">
+          <p class="type-line">Singapore Airlines · SQ 638 · Premium Economy Flex</p>
+          <div class="route"><span class="route-code">SIN</span><span class="route-rail">SQ 638</span><span class="route-code">NRT</span></div>
+        </div>
+        <div class="ticket-body">
+          <div class="time-grid">
+            <div class="time-side"><p class="time">23:55 <span class="tz">SGT</span></p><p class="time-label">Depart · Changi T3</p><p class="date">Wed 17 September 2026</p></div>
+            <div class="time-side"><p class="time"><span class="tz">JST</span> 08:00</p><p class="time-label">Arrive · Narita T1</p><p class="date">Thu 18 September 2026</p></div>
+          </div>
+          <div class="perforation"></div>
+          <div class="footer-row"><span class="footer-label">Booking reference</span><span class="confirmation">K8W4QZ · 2 documents</span></div>
+        </div>
+      </article>`;
+
+    const train = () => `
+      <article class="booking-card ticket train-card">
+        <div class="card-top">
+          <p class="type-line">Tokyo → Kyoto · Tokaido Shinkansen · Nozomi 217</p>
+          <div class="route"><span class="route-code station">Tokyo Station</span><span class="route-rail">N217</span><span class="route-code station">Kyoto Station</span></div>
+        </div>
+        <div class="ticket-body">
+          <div class="time-grid">
+            <div class="time-side"><p class="time">09:12 <span class="tz">JST</span></p><p class="time-label">Depart · Platform 16</p><p class="date">Mon 21 September 2026</p></div>
+            <div class="time-side"><p class="time"><span class="tz">JST</span> 11:26</p><p class="time-label">Arrive · Platform 13</p><p class="date">Mon 21 September 2026</p></div>
+          </div>
+          <div class="perforation"></div>
+          <div class="footer-row"><span class="footer-label">Green Car · 9A / 9B</span><span class="confirmation">JR-CENTRAL-9482-7716</span></div>
+        </div>
+      </article>`;
+
+    const hotel = () => `
+      <article class="booking-card hotel-card">
+        <div class="card-top"><p class="type-line">Accommodation · Higashiyama, Kyoto</p><h3 class="card-title">Suiran, a Luxury Collection Hotel, Kyoto</h3><p class="subline">Tsukinone river-view room · breakfast included</p></div>
+        <div class="data-rows">
+          <div class="data-row"><span class="data-label">Check-in</span><span class="data-value">Mon 21 Sep · after 15:00</span></div>
+          <div class="data-row"><span class="data-label">Check-out</span><span class="data-value">Fri 25 Sep · 4 nights · before 12:00</span></div>
+          <div class="data-row"><span class="data-label">Booked via</span><span class="data-value">Marriott Bonvoy · Member rate</span></div>
+          <div class="data-row"><span class="data-label">Confirmation</span><span class="data-value ref">9874-ACQW-118390</span></div>
+        </div>
+      </article>`;
+
+    const other = () => `
+      <article class="booking-card other-card">
+        <div class="card-top"><p class="type-line">Private experience · Tea ceremony</p><h3 class="card-title">Urasenke chadō with seasonal kaiseki</h3><p class="subline">Hosted by Kyoto Maikoya · bilingual private session</p></div>
+        <div class="data-rows">
+          <div class="data-row"><span class="data-label">When</span><span class="data-value">Wed 23 Sep · 14:30–17:15 JST</span></div>
+          <div class="data-row"><span class="data-label">Where</span><span class="data-value">Ninenzaka, Higashiyama Ward, Kyoto</span></div>
+          <div class="data-row"><span class="data-label">Guests</span><span class="data-value">2 adults · dietary notes attached</span></div>
+          <div class="data-row"><span class="data-label">Confirmation</span><span class="data-value ref">MAIKOYA-PRIVATE-66291</span></div>
+        </div>
+      </article>`;
+
+    const cards = () => flight() + train() + hotel() + other();
+    const renderDirection = d => `
+      <section class="direction ${d.className}" id="${d.id}">
+        <header class="direction-head">
+          <p class="section-index">Direction ${d.index}</p>
+          <div><h2>${d.title}</h2><p class="direction-thesis">${d.thesis}</p></div>
+          <p class="material-note">${d.note}</p>
+        </header>
+        <div class="comparison-stage">
+          <div class="stage-label"><span>Same content · same anatomy</span><span>Flight · train · hotel · other</span></div>
+          <div class="examples">
+            <section class="device mobile" aria-label="Mobile examples"><div class="device-head"><span>Mobile specimen</span><span>375 px</span></div><div class="card-grid">${cards()}</div></section>
+            <section class="device desktop" aria-label="Desktop examples"><div class="device-head"><span>Desktop specimen</span><span>1280 px · two-column logistics grid</span></div><div class="card-grid">${cards()}</div></section>
+          </div>
+        </div>
+        <div class="evaluation">${d.scores.map(s => `<div class="score"><span class="score-label">${s[0]}</span><strong class="score-value">${s[1]}</strong><span class="score-note">${s[2]}</span></div>`).join('')}</div>
+      </section>`;
+
+    document.getElementById('directions').innerHTML = directions.map(renderDirection).join('');
+  </script>
+</body>
+</html>

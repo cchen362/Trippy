@@ -23,9 +23,14 @@ export default function TrainBookingCard({ booking, onOpen }) {
   const originTz = booking.originTz || null;
   const destTz   = booking.destinationTz || null;
 
+  const routeLabel = originStation && destStation
+    ? `${formatStationName(originStation)} to ${formatStationName(destStation)}`
+    : booking.title;
+
   return (
     <TicketStubCard
       cardClassName="logistics-transit-card-wide"
+      ariaLabel={`Train booking: ${routeLabel}. Opens details.`}
       eyebrow={eyebrow}
       leftCode={formatStationName(originStation)}
       leftCodeClassName="logistics-route-code-station"

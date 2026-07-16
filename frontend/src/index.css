@@ -15,6 +15,18 @@
   --cream:       #f0ead8;
   --cream-dim:   rgba(240,234,216,0.60);
   --cream-mute:  rgba(240,234,216,0.28);
+
+  /* Obsidian material (booking cards) — Direction 3, re-based on --gold #c9a84c */
+  --obsidian-surface: radial-gradient(circle at 18% 8%, rgba(79,65,45,0.16), transparent 31%),
+                      linear-gradient(163deg, #191510, #100e0c 65%, #181410);
+  --obsidian-surface-top: rgba(24,20,15,0.56);
+  --obsidian-border: rgba(145,115,60,0.34);
+  --obsidian-keyline: rgba(201,168,76,0.09);        /* inset 7px, radius 4px */
+  --obsidian-keyline-active: rgba(201,168,76,0.16);
+  --obsidian-divider: rgba(201,168,76,0.13);
+  --obsidian-shadow: 0 15px 42px rgba(0,0,0,0.35), inset 3px 0 rgba(120,92,43,0.13);
+  --foil: linear-gradient(90deg, #6f592c 0%, #aa8b49 14%, #d0b774 31%, #8c7138 46%,
+                                 #c4a25b 69%, #78602f 86%, #b0904b 100%);
 }
 
 * {
@@ -747,36 +759,106 @@ select {
 }
 
 
-/* Refined logistics card system. */
+/* Refined logistics card system — Obsidian material (Plan 16). */
 .logistics-card {
+  position: relative;
   overflow: hidden;
   width: 100%;
-  border: 1px solid rgba(255,255,255,0.11);
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(36,31,20,0.98), rgba(15,13,10,0.99) 44%, rgba(9,8,6,0.99));
-  box-shadow: 0 22px 50px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+  border: 1px solid var(--obsidian-border);
+  border-radius: 10px;
+  background: var(--obsidian-surface);
+  box-shadow: var(--obsidian-shadow);
+  transition: border-color 160ms, box-shadow 160ms, transform 160ms;
+}
+
+.logistics-card:hover,
+.logistics-card:focus-visible {
+  border-color: rgba(201,168,76,0.30);
+  box-shadow: 0 18px 46px rgba(0,0,0,0.4), inset 3px 0 rgba(120,92,43,0.13);
+  transform: translateY(-1px);
+}
+
+.logistics-card:hover .logistics-keyline,
+.logistics-card:focus-visible .logistics-keyline {
+  border-color: var(--obsidian-keyline-active);
+}
+
+.logistics-card:hover .logistics-card-affordance,
+.logistics-card:focus-visible .logistics-card-affordance {
+  color: var(--cream-dim);
+}
+
+.logistics-card:active {
+  transform: translateY(0);
+}
+
+.logistics-keyline {
+  position: absolute;
+  z-index: 2;
+  inset: 7px;
+  border: 1px solid var(--obsidian-keyline);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: border-color 160ms;
+}
+
+.logistics-card-affordance {
+  position: absolute;
+  z-index: 3;
+  right: 14px;
+  bottom: 10px;
+  color: var(--cream-mute);
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+  transition: color 160ms;
+}
+
+@media (hover: none) {
+  .logistics-card-affordance {
+    color: var(--cream-mute);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logistics-card,
+  .logistics-keyline,
+  .logistics-card-affordance {
+    transition: none;
+  }
+  .logistics-card:hover,
+  .logistics-card:focus-visible,
+  .logistics-card:active {
+    transform: none;
+  }
 }
 
 .logistics-card-top {
   min-height: 88px;
   padding: 28px 18px 16px;
-  background: radial-gradient(circle at 18% 0%, rgba(201,168,76,0.12), transparent 48%), rgba(31,28,20,0.82);
+  background: var(--obsidian-surface-top);
 }
 
 .logistics-transit-top {
   min-height: auto;
-  background: radial-gradient(circle at 95% 0%, rgba(201,168,76,0.11), transparent 46%), rgba(16,14,11,0.94);
+  background: var(--obsidian-surface-top);
 }
 
 .logistics-eyebrow {
   margin: 0 0 8px;
-  color: var(--gold);
+  color: var(--cream-mute);
   font-family: 'DM Mono', monospace;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.32em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.logistics-eyebrow::before {
+  content: '\2014 ';
+  color: rgba(201,168,76,0.55);
 }
 
 .logistics-card-title {
@@ -787,7 +869,6 @@ select {
   font-style: italic;
   font-weight: 500;
   line-height: 1.08;
-  text-shadow: 1px 1px 0 rgba(201,168,76,0.45);
 }
 
 .logistics-card-rows {
@@ -830,6 +911,10 @@ select {
   overflow-wrap: anywhere;
 }
 
+.logistics-card-rows .logistics-data-row:last-child .logistics-row-value {
+  padding-right: 28px;
+}
+
 .logistics-route-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(84px, 0.75fr) minmax(0, 1fr);
@@ -845,7 +930,6 @@ select {
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
-  text-shadow: 2px 1px 0 rgba(201,168,76,0.42);
   overflow-wrap: anywhere;
 }
 
@@ -890,6 +974,30 @@ select {
   background: rgba(24,22,18,0.95);
 }
 
+/* Die-cut notches straddle the perforation line; anchored to the line itself so
+   they stay aligned regardless of card height, and vanish on footerless cards.
+   Offset = body horizontal padding + card border + half the notch width. */
+.logistics-footer-line {
+  --notch-offset: -24px;
+}
+
+.logistics-footer-line::before,
+.logistics-footer-line::after {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--ink-deep);
+  border: 1px solid var(--obsidian-border);
+}
+
+.logistics-footer-line::before { left: var(--notch-offset); }
+.logistics-footer-line::after { right: var(--notch-offset); }
+
 .logistics-time-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -903,7 +1011,6 @@ select {
   font-size: 21px;
   font-weight: 700;
   line-height: 1;
-  text-shadow: 1px 1px 0 rgba(201,168,76,0.28);
 }
 
 .logistics-time-label {
@@ -934,28 +1041,15 @@ select {
   position: relative;
   height: 1px;
   margin-bottom: 12px;
-  background: rgba(201,168,76,0.13);
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.24) 16%, rgba(201,168,76,0.24) 84%, transparent);
 }
-
-.logistics-footer-line::before,
-.logistics-footer-line::after {
-  content: '';
-  position: absolute;
-  top: -2px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--gold);
-}
-
-.logistics-footer-line::before { left: 0; }
-.logistics-footer-line::after { right: 0; }
 
 .logistics-footer-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-right: 28px;
 }
 
 .logistics-footer-label,
@@ -1017,11 +1111,20 @@ select {
   .logistics-route-code-station {
     font-size: 26px;
   }
+
+  .logistics-footer-line {
+    --notch-offset: -26px;
+  }
 }
 
 @media (min-width: 760px) {
   .logistics-card-grid-standard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .logistics-card-grid-standard > .logistics-card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    max-width: 560px;
   }
 }
 

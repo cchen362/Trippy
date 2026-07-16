@@ -23,13 +23,17 @@ export default function TicketStubCard({
   connector = false,
   hasDocuments = false,
   onClick,
+  ariaLabel,
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       className={`logistics-card logistics-transit-card relative ${cardClassName} w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]`}
     >
+      <span className="logistics-keyline" aria-hidden="true" />
+      <span className="logistics-card-affordance" aria-hidden="true">&rsaquo;</span>
       {hasDocuments && (
         <Paperclip
           size={16}
