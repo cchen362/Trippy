@@ -231,11 +231,11 @@ columns populated and credit rendering on a real stop.
   pressure).
 - Trip cover imagery (`TripCard`) — it derives from stop photos and inherits quality
   improvements automatically; any dedicated cover-selection logic is a separate idea.
-- Unsplash production-tier application (revisit only if demo-tier 50/hr is ever hit;
-  W1 compliance work is a prerequisite for that application anyway). **UPDATE
-  (2026-07-11): trigger met** — the 50/hr ceiling was hit under realistic load during
-  W4 production QA (see W4 status), and W1 compliance is live, so this is now a
-  recommended follow-up, carried in a separate handoff rather than this plan.
+- Unsplash production-tier application. **COMPLETE (2026-07-17):** after the demo-tier
+  50/hr ceiling was hit during W4 production QA, the owner applied with the W1
+  compliance evidence and Unsplash approved the existing key for 1,000 requests/hour.
+  The live response header confirmed the new ceiling; no application-code or key change
+  was required.
 - Google Place Photos in any role (D1).
 
 ## 4. Open items to confirm during implementation (not blockers)
@@ -494,15 +494,16 @@ columns populated and credit rendering on a real stop.
   apply-a-swap **1** (download ping). **Recovery:** ran `backfillTripPhotos` on the
   W4-Test trip (owner-approved) — 4 NULL-photo stops → 0, each filled from its stored
   query with distinct ids (dedup holding) + attribution; the existing `refresh-photos`
-  path is the standing remedy for any future throttled misses. **Recommendation (now
-  actionable, tracked as a separate handoff):** apply for the Unsplash **production tier
-  (5,000 req/hr, 100× headroom)** — §3 scoped this as "revisit only if 50/hr is ever hit;
-  W1 compliance is a prerequisite," and both conditions are now met (ceiling hit under
-  realistic load; W1 attribution + download-tracking compliance is live). It is
-  **config-only** (new access key in the server `.env` + container restart, no code).
+  path is the standing remedy for any future throttled misses. **Production-tier
+  follow-up complete (2026-07-17):** Unsplash approved the existing access key for
+  **1,000 req/hr (20× the demo-tier headroom)** after the owner submitted the W1
+  compliance evidence. An in-container request returned HTTP 200 with
+  `x-ratelimit-limit: 1000` and `x-ratelimit-remaining: 999`. Because approval upgraded
+  the existing key account-side, no key replacement, container rebuild, or app-code
+  change was required; only the server `.env` description was updated.
   Minor optional future optimization (non-blocking): a frequent relevance-gate miss
   doubles the request count via the country-scene fallback — production tier makes this
-  moot; revisit only if 5,000/hr is ever pressured.
+  moot; revisit only if 1,000/hr is ever pressured.
 
 Test baseline at plan writing: Plan 9 closed at backend 387 / frontend 66 all green
 (2026-07-11); re-verified before W1 at backend 442/443 (1 pre-existing flake) /
