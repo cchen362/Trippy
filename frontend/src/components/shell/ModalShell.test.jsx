@@ -137,6 +137,24 @@ describe('ModalShell — scroll lock', () => {
 });
 
 describe('ModalShell — stacking', () => {
+  it('uses zBase for the first shell while keeping the default at 40', () => {
+    const { rerender } = render(
+      <ModalShell open onRequestClose={() => {}} eyebrow="Default" headline="Default shell">
+        <button type="button">Default content</button>
+      </ModalShell>,
+    );
+
+    expect(screen.getByRole('dialog').parentElement).toHaveStyle({ zIndex: '40' });
+
+    rerender(
+      <ModalShell open onRequestClose={() => {}} eyebrow="Custom" headline="Custom shell" zBase={220}>
+        <button type="button">Custom content</button>
+      </ModalShell>,
+    );
+
+    expect(screen.getByRole('dialog').parentElement).toHaveStyle({ zIndex: '220' });
+  });
+
   it('routes Escape only to the topmost shell and raises its z-index', () => {
     const onRequestCloseA = vi.fn();
     const onRequestCloseB = vi.fn();

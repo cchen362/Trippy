@@ -1,11 +1,48 @@
+import { useEffect, useRef } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 
 export default function DocumentViewer({ document, onClose }) {
+  const closeButtonRef = useRef(null);
+
+  // Held in a ref so the open/close effect below doesn't re-run (and yank focus back
+  // to the close button) every time a parent re-render recreates the onClose arrow.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const hasDocument = Boolean(document);
+
+  useEffect(() => {
+    if (!hasDocument) return undefined;
+
+    const pageDocument = globalThis.document;
+    const previousFocus = pageDocument.activeElement;
+    const previousOverflow = pageDocument.body.style.overflow;
+    pageDocument.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    pageDocument.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      pageDocument.removeEventListener('keydown', handleKeyDown);
+      pageDocument.body.style.overflow = previousOverflow;
+      previousFocus?.focus?.();
+    };
+  }, [hasDocument]);
+
   if (!document) return null;
   const isPdf = document.mediaType === 'application/pdf';
 
   return (
-    <div className="fixed inset-0 z-[210] flex flex-col" style={{ background: 'var(--ink-deep)' }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={document.filename || 'Document viewer'}
+      className="fixed inset-0 z-[210] flex flex-col"
+      style={{ background: 'var(--ink-deep)' }}
+    >
       <div className="flex items-center justify-between px-5 py-4 flex-shrink-0">
         <p className="font-mono text-[11px] tracking-[0.28em] uppercase truncate pr-4" style={{ color: 'var(--cream-dim)' }}>
           {document.filename || (isPdf ? 'Document' : 'Photo')}
@@ -23,7 +60,14 @@ export default function DocumentViewer({ document, onClose }) {
               Open in New Tab
             </a>
           )}
-          <button type="button" onClick={onClose} aria-label="Close" style={{ color: 'var(--cream)' }}>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-11 h-11 inline-flex items-center justify-center rounded-full"
+            style={{ color: 'var(--cream)' }}
+          >
             <X size={22} />
           </button>
         </div>

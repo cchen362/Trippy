@@ -178,7 +178,7 @@ export default function LogisticsTab() {
 
       {/* Detail sheet */}
       {liveSelected && (
-        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
           <div className="w-full max-w-xl rounded-[22px] border p-6 max-h-[85vh] overflow-y-auto" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
@@ -223,11 +223,11 @@ export default function LogisticsTab() {
             )}
 
             {attachError && (
-              <p className="mt-3 font-body text-sm" style={{ color: '#f8b4b4' }}>{attachError}</p>
+              <p className="mt-3 font-body text-sm" style={{ color: '#e05a5a' }}>{attachError}</p>
             )}
 
             {deleteError && (
-              <p className="mt-3 font-body text-sm" style={{ color: '#f8b4b4' }}>{deleteError}</p>
+              <p className="mt-3 font-body text-sm" style={{ color: '#e05a5a' }}>{deleteError}</p>
             )}
 
             <input
@@ -238,7 +238,7 @@ export default function LogisticsTab() {
               className="sr-only"
             />
 
-            <div className="mt-6 flex justify-between gap-3">
+            <div className="mt-6 flex flex-wrap justify-between gap-3">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -274,7 +274,7 @@ export default function LogisticsTab() {
                     onClick={handleDeleteBooking}
                     disabled={saving}
                     className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-                    style={{ color: '#f8b4b4', borderColor: 'rgba(248,180,180,0.22)', opacity: saving ? 0.6 : 1 }}
+                    style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)', opacity: saving ? 0.6 : 1 }}
                   >
                     {saving ? 'Deleting…' : 'Confirm?'}
                   </button>
@@ -284,7 +284,7 @@ export default function LogisticsTab() {
                   type="button"
                   onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
                   className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-                  style={{ color: '#f8b4b4', borderColor: 'rgba(248,180,180,0.22)' }}
+                  style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)' }}
                 >
                   Delete Booking
                 </button>

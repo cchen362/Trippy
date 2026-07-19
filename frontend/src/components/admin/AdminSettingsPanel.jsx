@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
-import { RefreshCcw, Settings, Trash2, X } from 'lucide-react';
+import { RefreshCcw, Settings, Trash2 } from 'lucide-react';
 import { adminApi } from '../../services/api.js';
 import { useAuth } from '../../context/AuthContext.jsx';
+import ModalShell from '../shell/ModalShell.jsx';
 
 export default function AdminSettingsPanel() {
   const { user } = useAuth();
@@ -80,43 +79,7 @@ export default function AdminSettingsPanel() {
         <Settings size={18} />
       </button>
 
-      {open && createPortal(
-        <motion.div
-          className="fixed inset-0 z-[230] flex items-end sm:items-center justify-center px-0 sm:px-4"
-          style={{ background: 'rgba(0,0,0,0.68)' }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
-          <motion.div
-            className="w-full sm:max-w-xl max-h-[88vh] overflow-y-auto border rounded-t-2xl sm:rounded-2xl p-5 sm:p-6"
-            style={{ background: 'var(--ink-mid)', borderColor: 'var(--ink-border)' }}
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
-            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-          >
-            <div className="flex items-center justify-between gap-3 mb-6">
-              <div>
-                <p className="font-mono text-[10px] tracking-[0.3em] uppercase" style={{ color: 'var(--gold)' }}>
-                  Admin
-                </p>
-                <h1 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                  App settings
-                </h1>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="w-10 h-10 inline-flex items-center justify-center rounded-full border"
-                style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
-                aria-label="Close admin settings"
-                title="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
+      <ModalShell open={open} onRequestClose={() => setOpen(false)} zBase={230} eyebrow="Admin" headline="App settings" maxWidth="xl">
             {loading ? (
               <p className="font-mono text-[11px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>
                 Loading settings...
@@ -179,8 +142,8 @@ export default function AdminSettingsPanel() {
                                 type="button"
                                 onClick={() => removeUser(item.id)}
                                 disabled={saving}
-                                className="px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase"
-                                style={{ borderColor: 'rgba(224,90,90,0.35)', color: '#e05a5a', opacity: saving ? 0.45 : 1 }}
+                                className="modal-danger-text modal-danger-border px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase"
+                                style={{ opacity: saving ? 0.45 : 1 }}
                               >
                                 {saving ? 'Removing…' : 'Confirm?'}
                               </button>
@@ -190,10 +153,10 @@ export default function AdminSettingsPanel() {
                               type="button"
                               onClick={() => setConfirmUserId(item.id)}
                               disabled={saving || isSelf}
-                              className="w-9 h-9 inline-flex items-center justify-center rounded-full border"
+                              className={`w-9 h-9 inline-flex items-center justify-center rounded-full border ${isSelf ? '' : 'modal-danger-text modal-danger-border'}`}
                               style={{
-                                borderColor: isSelf ? 'var(--ink-border)' : 'rgba(224,90,90,0.35)',
-                                color: isSelf ? 'var(--cream-mute)' : '#e05a5a',
+                                borderColor: isSelf ? 'var(--ink-border)' : undefined,
+                                color: isSelf ? 'var(--cream-mute)' : undefined,
                                 opacity: saving || isSelf ? 0.45 : 1,
                               }}
                               aria-label={isSelf ? 'Cannot remove yourself' : `Remove ${item.username}`}
@@ -209,16 +172,13 @@ export default function AdminSettingsPanel() {
                 </section>
 
                 {error && (
-                  <p className="font-mono text-[11px]" style={{ color: '#e05a5a' }}>
+                  <p className="modal-danger-text font-mono text-[11px]">
                     {error}
                   </p>
                 )}
               </div>
             )}
-          </motion.div>
-        </motion.div>,
-        document.body,
-      )}
+      </ModalShell>
     </>
   );
 }

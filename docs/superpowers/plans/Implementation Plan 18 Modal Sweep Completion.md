@@ -1,6 +1,7 @@
 # Implementation Plan 18 — Modal Sweep Completion: Share/Admin/Account Sheets, DocumentViewer, ErrorBanner
 
-**Status: OPEN — scoped 2026-07-19 (post-Plan-17 session), not started**
+**Status: W1 COMPLETE 2026-07-19 — all five items shipped + browser-verified locally (375px + desktop); awaiting deploy + owner prod QA.**
+**W1 deviations/additions:** (1) ModalShell now renders via `createPortal(document.body)` — required because the sticky `backdrop-blur-md` header hosting the admin/account triggers becomes the containing block for `position: fixed` descendants (this is why the old code portaled); orchestrator-reviewed. (2) ModalShell's body gets `pb-6 sm:pb-7` when no footer is passed — footer-less content sheets (share/admin/account) otherwise ended flush at the panel edge; footered Plan 17 modals unchanged. (3) DocumentViewer holds `onClose` in a ref so parent re-renders don't re-run the focus/scroll-lock effect. (4) Owner-flagged during QA: LogisticsTab booking detail sheet action row now wraps (`flex-wrap`) and the sheet moved z-40 → z-[110] so the CopilotFab (z-100) no longer floats over it (co-pilot panel at 199–200 still wins).
 **Date:** 2026-07-19
 **Baseline:** Plan 17 (CLOSED, deployed 43f83d7) built `ModalShell` and migrated the five form flows. This plan finishes the sweep for design coherence: the remaining hand-rolled overlays and the last off-palette `#f8b4b4` reds.
 **Scope:** Frontend only. No backend, no data-shape changes, no new dependencies. No behavior changes beyond dialog semantics, palette, and one owner-approved affordance removal.

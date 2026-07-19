@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 // --- Module-level open-shell stack ------------------------------------------------
@@ -81,6 +82,7 @@ export default function ModalShell({
   headline,
   headerAccessory,
   maxWidth = '2xl',
+  zBase = 40,
   footer,
   initialFocusRef,
   children,
@@ -111,7 +113,7 @@ export default function ModalShell({
   const stack = useSyncExternalStore(subscribeStack, getStackSnapshot, getStackSnapshot);
   const stackIndex = stack.indexOf(shellId);
   const isTopmost = stackIndex !== -1 && stackIndex === stack.length - 1;
-  const zIndex = 40 + 10 * Math.max(stackIndex, 0);
+  const zIndex = zBase + 10 * Math.max(stackIndex, 0);
 
   // Register/unregister this shell in the open stack and hold the scroll lock for as
   // long as it is mounted-and-open.
@@ -178,7 +180,10 @@ export default function ModalShell({
 
   const maxWidthClass = MAX_WIDTH_CLASSES[maxWidth] ?? MAX_WIDTH_CLASSES['2xl'];
 
-  return (
+  // Portaled to <body>: an ancestor with transform/filter/backdrop-filter (e.g. the
+  // sticky backdrop-blur header that hosts the admin/account triggers) would otherwise
+  // become the containing block for this fixed overlay and trap it in-flow.
+  return createPortal(
     <div
       className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm"
       style={{ zIndex }}
@@ -219,12 +224,15 @@ export default function ModalShell({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7">
+        {/* Footer-less content sheets need their own bottom inset; footered modals get
+            that spacing from .modal-shell-footer instead. */}
+        <div className={`flex-1 min-h-0 overflow-y-auto px-5 sm:px-7${footer ? '' : ' pb-6 sm:pb-7'}`}>
           {children}
         </div>
 
         {footer && <div className="modal-shell-footer">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
