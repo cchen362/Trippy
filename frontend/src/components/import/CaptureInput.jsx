@@ -12,6 +12,7 @@ export default function CaptureInput({
   onExtract,
   extracting,
   error,
+  showExtractAction = true,
 }) {
   const totalCount = inputs.length + (pastedText.trim() ? 1 : 0);
   const canExtract = totalCount > 0 && !extracting;
@@ -103,18 +104,20 @@ export default function CaptureInput({
         </p>
       )}
 
-      <div className="sticky bottom-0 pt-4 mt-6 border-t" style={{ borderColor: 'var(--ink-border)', background: 'var(--ink-surface)' }}>
-        <button
-          type="button"
-          onClick={onExtract}
-          disabled={!canExtract}
-          className="w-full sm:w-auto px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
-          style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: canExtract ? 1 : 0.5 }}
-        >
-          {extracting && <Loader2 size={14} className="animate-spin" />}
-          {extracting ? 'Reading...' : 'Extract'}
-        </button>
-      </div>
+      {showExtractAction && (
+        <div className="sticky bottom-0 pt-4 mt-6 border-t" style={{ borderColor: 'var(--ink-border)', background: 'var(--ink-surface)' }}>
+          <button
+            type="button"
+            onClick={onExtract}
+            disabled={!canExtract}
+            className="w-full sm:w-auto px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
+            style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: canExtract ? 1 : 0.5 }}
+          >
+            {extracting && <Loader2 size={14} className="animate-spin" />}
+            {extracting ? 'Reading...' : 'Extract'}
+          </button>
+        </div>
+      )}
     </>
   );
 }

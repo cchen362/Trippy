@@ -44,10 +44,13 @@ function TzSelect({ label, value, onChange }) {
 }
 import CityInput from './CityInput.jsx';
 import { stripComponentSuffix } from './hotelName.js';
+import ModalShell from '../shell/ModalShell.jsx';
 
 // train/bus/ferry share one form (route + station + departure/arrival + seat/class);
 // this just relabels the section for whichever type is active.
 const TRANSIT_LABEL = { train: 'Train', bus: 'Bus', ferry: 'Ferry' };
+
+const FORM_ID = 'add-booking-form';
 
 export default function AddBookingModal({
   open,
@@ -107,8 +110,6 @@ export default function AddBookingModal({
     }, 300);
     return () => clearTimeout(timer);
   }, [form.hotelName, form.type, hotelSessionToken, lookupHotels, open, selectedHotelText]);
-
-  if (!open) return null;
 
   const handleFlightLookup = async () => {
     setSearchingFlight(true);
@@ -274,25 +275,37 @@ export default function AddBookingModal({
   const showInItinerary = showInItineraryValue(form);
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-3xl rounded-[22px] border" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
-        <form onSubmit={handleSubmit} className="p-5 sm:p-7 max-h-[85vh] overflow-y-auto">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div>
-              <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                {isEditing ? 'Edit Booking' : 'Add Booking'}
-              </p>
-              <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                {isEditing ? 'Update the details.' : 'Keep the logistics elegant.'}
-              </h2>
-            </div>
-            <button type="button" onClick={onClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
-              Close
-            </button>
-          </div>
-
+    <ModalShell
+      open={open}
+      onRequestClose={onClose}
+      eyebrow={isEditing ? 'Edit Booking' : 'Add Booking'}
+      headline={isEditing ? 'Update the details.' : 'Keep the logistics elegant.'}
+      maxWidth="3xl"
+      footer={(
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+            style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form={FORM_ID}
+            disabled={saving}
+            className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
+            style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? 'Saving...' : isEditing ? 'Save Changes' : 'Save Booking'}
+          </button>
+        </div>
+      )}
+    >
+      <form id={FORM_ID} onSubmit={handleSubmit} className="pb-5 sm:pb-7">
           {/* Type selector — locked in edit mode to prevent reshaping detailsJson */}
-          <div className="flex flex-wrap gap-2 mb-6">
+          <div className="flex flex-wrap gap-2 mb-1">
             {['hotel', 'flight', 'train', 'bus', 'ferry', 'other'].map((type) => (
               <button
                 key={type}
@@ -311,6 +324,12 @@ export default function AddBookingModal({
               </button>
             ))}
           </div>
+          {isEditing && (
+            <p className="font-mono text-[10px] tracking-[0.14em] mt-1" style={{ color: 'rgba(240,234,216,0.35)' }}>
+              Type is fixed for saved bookings
+            </p>
+          )}
+          <div className="mb-6" />
 
           {/* ── Hotel ── */}
           {form.type === 'hotel' && (
@@ -380,12 +399,16 @@ export default function AddBookingModal({
                 <input type="datetime-local" {...field('checkOut')} />
               </label>
 
-              <label className="block">
+              <div className="sm:col-span-2 pt-4" style={{ borderTop: '1px solid var(--ink-border)' }}>
+                <span className="modal-section-label">Reference</span>
+              </div>
+
+              <label className="block opacity-70">
                 <span className="modal-label">Confirmation Ref</span>
                 <input {...field('confirmationRef')} />
               </label>
 
-              <label className="block">
+              <label className="block opacity-70">
                 <span className="modal-label">Booked Via</span>
                 <input {...field('bookingSource')} />
               </label>
@@ -456,12 +479,16 @@ export default function AddBookingModal({
                 <input {...field('terminalOrigin')} placeholder="e.g. Terminal 3" />
               </label>
 
-              <label className="block">
+              <div className="sm:col-span-2 pt-4" style={{ borderTop: '1px solid var(--ink-border)' }}>
+                <span className="modal-section-label">Reference</span>
+              </div>
+
+              <label className="block opacity-70">
                 <span className="modal-label">Confirmation Ref</span>
                 <input {...field('confirmationRef')} />
               </label>
 
-              <label className="block">
+              <label className="block opacity-70">
                 <span className="modal-label">Booked Via</span>
                 <input {...field('bookingSource')} />
               </label>
@@ -514,29 +541,37 @@ export default function AddBookingModal({
                 <input type="datetime-local" {...field('trainArrival')} />
               </label>
 
-              <TzSelect
-                label="Departure Timezone"
-                value={form.originTz}
-                onChange={(v) => setForm((c) => ({ ...c, originTz: v }))}
-              />
-
-              <TzSelect
-                label="Arrival Timezone"
-                value={form.destinationTz}
-                onChange={(v) => setForm((c) => ({ ...c, destinationTz: v }))}
-              />
-
               <label className="block sm:col-span-2">
                 <span className="modal-label">Seat Class</span>
                 <input {...field('seatClass')} placeholder="e.g. Business / 商务座, Second / 二等座" />
               </label>
 
-              <label className="block">
+              <div className="sm:col-span-2 pt-4" style={{ borderTop: '1px solid var(--ink-border)' }}>
+                <span className="modal-section-label">Reference</span>
+              </div>
+
+              <div className="opacity-70">
+                <TzSelect
+                  label="Departure Timezone"
+                  value={form.originTz}
+                  onChange={(v) => setForm((c) => ({ ...c, originTz: v }))}
+                />
+              </div>
+
+              <div className="opacity-70">
+                <TzSelect
+                  label="Arrival Timezone"
+                  value={form.destinationTz}
+                  onChange={(v) => setForm((c) => ({ ...c, destinationTz: v }))}
+                />
+              </div>
+
+              <label className="block opacity-70">
                 <span className="modal-label">Confirmation Ref</span>
                 <input {...field('confirmationRef')} />
               </label>
 
-              <label className="block">
+              <label className="block opacity-70">
                 <span className="modal-label">Booked Via</span>
                 <input {...field('bookingSource')} />
               </label>
@@ -571,18 +606,24 @@ export default function AddBookingModal({
                 <input {...field('notes')} placeholder="Any additional details" />
               </label>
 
-              <TzSelect
-                label="Timezone"
-                value={form.originTz}
-                onChange={(v) => setForm((c) => ({ ...c, originTz: v, destinationTz: v }))}
-              />
+              <div className="sm:col-span-2 pt-4" style={{ borderTop: '1px solid var(--ink-border)' }}>
+                <span className="modal-section-label">Reference</span>
+              </div>
 
-              <label className="block">
+              <div className="opacity-70">
+                <TzSelect
+                  label="Timezone"
+                  value={form.originTz}
+                  onChange={(v) => setForm((c) => ({ ...c, originTz: v, destinationTz: v }))}
+                />
+              </div>
+
+              <label className="block opacity-70">
                 <span className="modal-label">Confirmation Ref</span>
                 <input {...field('confirmationRef')} />
               </label>
 
-              <label className="block">
+              <label className="block opacity-70">
                 <span className="modal-label">Booked Via</span>
                 <input {...field('bookingSource')} />
               </label>
@@ -602,27 +643,7 @@ export default function AddBookingModal({
           </label>
 
           {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
-
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-              style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
-              style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: saving ? 0.7 : 1 }}
-            >
-              {saving ? 'Saving...' : isEditing ? 'Save Changes' : 'Save Booking'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </ModalShell>
   );
 }

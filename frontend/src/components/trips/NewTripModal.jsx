@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
 import DestinationChipPicker from './DestinationChipPicker';
 import CaptureInput from '../import/CaptureInput.jsx';
+import ModalShell from '../shell/ModalShell.jsx';
 import { importApi, fileToInput, textToInput, MAX_INPUTS } from '../../services/importApi.js';
 import { toBookingConfirmPayload } from '../../services/bookingPayload.js';
 
@@ -15,6 +16,8 @@ const EMPTY_FORM = {
 };
 
 const TRANSIT_TYPES = ['flight', 'train', 'bus'];
+
+const FORM_ID = 'new-trip-form';
 
 // Chips = unique {city, country} pairs in chronological booking order; dates = the
 // span across every extracted booking; title = "{firstCity} {Month YYYY}".
@@ -71,7 +74,23 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
     form.title && form.startDate && form.endDate && destinationChips.length > 0
   ), [form, destinationChips]);
 
-  if (!open) return null;
+  // ModalShell keeps the parent mounted while closed (unlike the old early-return-null
+  // panel, which unmounted and therefore always remounted with fresh state). Reset every
+  // field whenever the modal transitions to open so a stale capture/details session never
+  // leaks into the next one.
+  useEffect(() => {
+    if (!open) return;
+    setPhase('capture');
+    setForm(EMPTY_FORM);
+    setDestinationChips([]);
+    setError(null);
+    setInputs([]);
+    setPastedText('');
+    setInputError(null);
+    setExtracting(false);
+    setEmptySummary(null);
+    setCaptureResult(null);
+  }, [open]);
 
   const resetAll = () => {
     setPhase('capture');
@@ -193,154 +212,170 @@ export default function NewTripModal({ open, onClose, onSubmit, saving, lookupCi
 
   const isDetails = phase === 'details';
 
-  return (
-    <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-[22px] border" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
-        <div className="p-5 sm:p-7 max-h-[85vh] overflow-y-auto">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div>
-              <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                New Trip
-              </p>
-              <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                {isDetails ? 'Sketch the journey.' : 'Dump your travel chaos here.'}
-              </h2>
-            </div>
-            <button type="button" onClick={handleClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
-              Close
-            </button>
-          </div>
-
-          {!isDetails && (
-            <>
-              <CaptureInput
-                inputs={inputs}
-                pastedText={pastedText}
-                onPastedTextChange={setPastedText}
-                onAddFiles={handleAddFiles}
-                onRemoveInput={handleRemoveInput}
-                onExtract={handleExtract}
-                extracting={extracting}
-                error={inputError}
-              />
-
-              {emptySummary && (
-                <p className="mt-3 font-body text-base" style={{ color: 'var(--cream-dim)' }}>
-                  {emptySummary}
-                </p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setPhase('details')}
-                className="mt-4 font-mono text-xs tracking-[0.24em] uppercase underline underline-offset-4"
-                style={{ color: 'var(--cream-dim)' }}
-              >
-                Skip — start from scratch
-              </button>
-            </>
-          )}
-
-          {isDetails && (
-            <form onSubmit={handleSubmit}>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <label className="block sm:col-span-2">
-                  <span className="modal-label">Trip Title</span>
-                  <input
-                    value={form.title}
-                    onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-                    className="modal-input"
-                  />
-                </label>
-
-                <DestinationChipPicker
-                  chips={destinationChips}
-                  onChange={setDestinationChips}
-                  lookupCities={lookupCities}
-                />
-
-                <label className="block">
-                  <span className="modal-label">Start Date</span>
-                  <input
-                    type="date"
-                    value={form.startDate}
-                    onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
-                    className="modal-input"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="modal-label">End Date</span>
-                  <input
-                    type="date"
-                    value={form.endDate}
-                    onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))}
-                    className="modal-input"
-                  />
-                </label>
-
-                <InterestTagPicker
-                  selected={form.interestTags}
-                  onChange={(tags) => setForm((current) => ({ ...current, interestTags: tags }))}
-                />
-
-                <label className="block">
-                  <span className="modal-label">Travellers</span>
-                  <select
-                    value={form.travellers}
-                    onChange={(event) => setForm((current) => ({ ...current, travellers: event.target.value }))}
-                    className="modal-input"
-                  >
-                    <option value="solo">Solo</option>
-                    <option value="couple">Couple</option>
-                    <option value="family">Family</option>
-                    <option value="friends">Friends</option>
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="modal-label">Pace</span>
-                  <select
-                    value={form.pace}
-                    onChange={(event) => setForm((current) => ({ ...current, pace: event.target.value }))}
-                    className="modal-input"
-                  >
-                    <option value="slow">Slow</option>
-                    <option value="moderate">Moderate</option>
-                    <option value="fast">Fast</option>
-                  </select>
-                </label>
-              </div>
-
-              {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
-
-              <div className="mt-6 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPhase('capture')}
-                  className="font-mono text-xs tracking-[0.22em] uppercase"
-                  style={{ color: 'var(--cream-dim)' }}
-                >
-                  ‹ Back
-                </button>
-                <div className="flex items-center gap-3">
-                  <button type="button" onClick={handleClose} className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border" style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}>
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!canSubmit || saving}
-                    className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
-                    style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !canSubmit || saving ? 0.6 : 1 }}
-                  >
-                    {saving ? 'Creating...' : 'Create Trip'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          )}
-        </div>
+  const footer = isDetails ? (
+    <div className="flex items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => setPhase('capture')}
+        className="font-mono text-xs tracking-[0.22em] uppercase min-h-[44px]"
+        style={{ color: 'var(--cream-dim)' }}
+      >
+        ‹ Back
+      </button>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleClose}
+          className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+          style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          form={FORM_ID}
+          disabled={!canSubmit || saving}
+          className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
+          style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !canSubmit || saving ? 0.6 : 1 }}
+        >
+          {saving ? 'Creating...' : 'Create Trip'}
+        </button>
       </div>
     </div>
+  ) : (
+    <div className="flex justify-end gap-3">
+      <button
+        type="button"
+        onClick={() => setPhase('details')}
+        className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border min-h-[44px]"
+        style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+      >
+        Skip — start from scratch
+      </button>
+      <button
+        type="button"
+        onClick={handleExtract}
+        disabled={totalInputCount === 0 || extracting}
+        className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase inline-flex items-center justify-center gap-2"
+        style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: totalInputCount === 0 || extracting ? 0.6 : 1 }}
+      >
+        {extracting && (
+          <span className="modal-loading-dots">
+            <span />
+            <span />
+            <span />
+          </span>
+        )}
+        {extracting ? 'Reading...' : 'Extract'}
+      </button>
+    </div>
+  );
+
+  return (
+    <ModalShell
+      open={open}
+      onRequestClose={handleClose}
+      eyebrow="New Trip"
+      headline={isDetails ? 'Sketch the journey.' : 'Dump your travel chaos here.'}
+      maxWidth="2xl"
+      footer={footer}
+    >
+      {!isDetails && (
+        <div className="pb-5 sm:pb-7">
+          <CaptureInput
+            inputs={inputs}
+            pastedText={pastedText}
+            onPastedTextChange={setPastedText}
+            onAddFiles={handleAddFiles}
+            onRemoveInput={handleRemoveInput}
+            onExtract={handleExtract}
+            extracting={extracting}
+            error={inputError}
+            showExtractAction={false}
+          />
+
+          {emptySummary && (
+            <p className="mt-3 font-body text-base" style={{ color: 'var(--cream-dim)' }}>
+              {emptySummary}
+            </p>
+          )}
+        </div>
+      )}
+
+      {isDetails && (
+        <form id={FORM_ID} onSubmit={handleSubmit} className="pb-5 sm:pb-7">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <label className="block sm:col-span-2">
+              <span className="modal-label">Trip Title</span>
+              <input
+                value={form.title}
+                onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+                className="modal-input"
+              />
+            </label>
+
+            <DestinationChipPicker
+              chips={destinationChips}
+              onChange={setDestinationChips}
+              lookupCities={lookupCities}
+            />
+
+            <label className="block">
+              <span className="modal-label">Start Date</span>
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
+                className="modal-input"
+              />
+            </label>
+
+            <label className="block">
+              <span className="modal-label">End Date</span>
+              <input
+                type="date"
+                value={form.endDate}
+                onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))}
+                className="modal-input"
+              />
+            </label>
+
+            <InterestTagPicker
+              selected={form.interestTags}
+              onChange={(tags) => setForm((current) => ({ ...current, interestTags: tags }))}
+            />
+
+            <label className="block">
+              <span className="modal-label">Travellers</span>
+              <select
+                value={form.travellers}
+                onChange={(event) => setForm((current) => ({ ...current, travellers: event.target.value }))}
+                className="modal-input"
+              >
+                <option value="solo">Solo</option>
+                <option value="couple">Couple</option>
+                <option value="family">Family</option>
+                <option value="friends">Friends</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="modal-label">Pace</span>
+              <select
+                value={form.pace}
+                onChange={(event) => setForm((current) => ({ ...current, pace: event.target.value }))}
+                className="modal-input"
+              >
+                <option value="slow">Slow</option>
+                <option value="moderate">Moderate</option>
+                <option value="fast">Fast</option>
+              </select>
+            </label>
+          </div>
+
+          {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
+        </form>
+      )}
+    </ModalShell>
   );
 }

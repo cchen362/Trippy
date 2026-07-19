@@ -1,6 +1,6 @@
 # Implementation Plan 17 — Modal System: Dossier Sheet Primitive & Five-Flow Refit
 
-**Status: W1 COMPLETE (2026-07-19) — ModalShell primitive + AddPlaceModal/EditTripModal migrated; W2, W3 pending**
+**Status: W2 COMPLETE (2026-07-19) — NewTripModal + AddBookingModal migrated; W3 (CaptureFlow + full matrix) pending**
 **Date:** 2026-07-19
 **Baseline:** Independent design/QA review of the five modal flows (2026-07-19 session), Luxury Dark Design System archive (AUDIT.md is the reconciled token authority where it agrees with `frontend/src/index.css`), spec §12.
 **Scope:** Frontend only. No backend, no data-shape, no route changes. No changes to extraction, provider lookup, session-token, or payload logic — presentation, semantics, and shell structure only.
@@ -81,6 +81,8 @@ Shared CSS in `index.css`: retoken `.modal-input`/`.modal-action` radius to 12px
 3. CTA radius normalization (D2) across both flows.
 
 **Exit:** tests + build green; 375px verification of both flows including flight and train forms with the keyboard open (reference group reachable, sticky footer never obscured by the keyboard).
+
+**W2 COMPLETE 2026-07-19.** Both flows migrated per spec; suite 165/165, build green. NewTripModal: shell adoption with phase-dynamic headline and phase-switched sticky footer (capture: Skip promoted to bordered 44px secondary + gold Extract with `modal-loading-dots` while reading; details: Back / Cancel / Create via `form=` attribute); reset-on-open effect added (old flow reset by unmounting). CaptureInput gained one opt-out prop (`showExtractAction`, default true) so NewTrip's footer owns Extract while CaptureFlow (W3) keeps its inline button unchanged. AddBookingModal: shell adoption across all three modes; D3 Reference group (hairline + `REFERENCE` eyebrow, `opacity-70` dimming) at the end of each of the four type grids — TzSelects included for train/bus/ferry and other; edit-mode pill explainer "Type is fixed for saved bookings"; D2 CTAs at rounded-xl, no 22px/2xl remain in either file. Logic untouched: prefill, extraction, bookingForm.js, lookups, session tokens, draft remapping. Browser-verified in dev at 375px and desktop: sheet flush-bottom 16px top corners / centered 16px dialog, Escape → close + focus return + scroll-lock release, reset-on-reopen (details → capture), 30-Tab trap wrap inside panel, hotel/flight/train Reference groups above the always-visible sticky footer, edit-mode footer Save via `form=` (PATCH 200), Extract disabled↔enabled on pasted text. Deferred to owner/W3 (Browser-pane rAF freeze): motion feel, real software-keyboard inset, notched safe-area.
 
 ### W3 — CaptureFlow + full verification pass
 
