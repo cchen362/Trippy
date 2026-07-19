@@ -1,6 +1,6 @@
 # Implementation Plan 17 — Modal System: Dossier Sheet Primitive & Five-Flow Refit
 
-**Status: W2 COMPLETE (2026-07-19) — NewTripModal + AddBookingModal migrated; W3 (CaptureFlow + full matrix) pending**
+**Status: COMPLETE (2026-07-19) — all three waves done; W3 (CaptureFlow + verification matrix) closed. Not yet deployed.**
 **Date:** 2026-07-19
 **Baseline:** Independent design/QA review of the five modal flows (2026-07-19 session), Luxury Dark Design System archive (AUDIT.md is the reconciled token authority where it agrees with `frontend/src/index.css`), spec §12.
 **Scope:** Frontend only. No backend, no data-shape, no route changes. No changes to extraction, provider lookup, session-token, or payload logic — presentation, semantics, and shell structure only.
@@ -94,6 +94,8 @@ Shared CSS in `index.css`: retoken `.modal-input`/`.modal-action` radius to 12px
 4. **Verification matrix** (final gate): all five flows × 375px + desktop; software keyboard open on every text-entry step; Tab-cycle + Escape on each; stacked CaptureFlow→AddBooking (trap on top, lock persists, Escape closes top only); reduced-motion (instant, state still legible); safe-area padding on a notched viewport. Motion feel is owner-verified (Browser-pane rAF limitation) — provide a short owner click-script.
 
 **Exit:** matrix green, owner click-script delivered, plan status updated, committed.
+
+**W3 COMPLETE 2026-07-19.** CaptureFlow migrated onto ModalShell (maxWidth 3xl, phase-dynamic eyebrow/headline, reset-on-open effect); AddBookingModal (mode="draft") renders as a sibling after the shell, so the W1 stack registry supplies z-order and topmost Escape/trap scoping with zero coordination props. Discard protection is now an in-body confirm bar (`modal-danger-border`/`modal-danger-text` #e05a5a, 44px+ targets, "Keep Working" / "Discard & Close"); Escape routes through `onRequestClose` — first Escape arms the bar, Escape/X while armed backs out to safety (orchestrator call: discard requires the explicit red button, never a second Escape). Loader2 spinners in CaptureInput/ExtractionReview replaced with `.modal-loading-dots` ("Reading..."/"Adding..." copy verbatim); their CTAs normalized to rounded-xl (D2). Leftover sweep clean: no `rounded-[22px]`/`#f8b4b4`/`#c0392b`/raw `fixed inset-0` in the five flows (remaining hits are out-of-scope §4 components: ErrorBanner, admin/account sheets, TripShareModal, DocumentViewer). Suite 165/165, build green. Browser-verified in dev against a live extraction (real Claude call, review phase with extend-trip warning intact): 375px sheet flush-bottom 16px top corners; desktop centered 768px dialog 16px; Escape-no-work closes + lock release + focus return; Escape-with-work → confirm bar → back-out → discard → reopen fully reset; stacked pair z 40/50, Tab wraps in topmost, Escape closes top only, scroll lock persists until both close; all five flows spot-checked (semantics, 44px close, sticky footer, D5 autofocus). Reduced-motion CSS block confirmed (transitions and dot pulse collapse). Deferred to owner: motion feel, real software-keyboard inset, notched safe-area (click-script delivered). Plan 17 is fully implemented and undeployed (W1–W3: ce88dbd, 7edd321, this commit).
 
 ---
 

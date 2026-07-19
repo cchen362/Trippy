@@ -1,4 +1,4 @@
-import { Loader2, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { MAX_INPUTS } from '../../services/importApi.js';
 
 const KIND_LABEL = { text: 'TEXT', image: 'IMAGE', pdf: 'PDF' };
@@ -110,10 +110,10 @@ export default function CaptureInput({
             type="button"
             onClick={onExtract}
             disabled={!canExtract}
-            className="w-full sm:w-auto px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-5 py-4 rounded-xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
             style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: canExtract ? 1 : 0.5 }}
           >
-            {extracting && <Loader2 size={14} className="animate-spin" />}
+            {extracting && <span className="modal-loading-dots"><span /><span /><span /></span>}
             {extracting ? 'Reading...' : 'Extract'}
           </button>
         </div>

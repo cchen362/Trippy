@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import ModalShell from '../shell/ModalShell.jsx';
 import AddBookingModal from '../logistics/AddBookingModal.jsx';
 import CaptureInput from './CaptureInput.jsx';
 import ExtractionReview from './ExtractionReview.jsx';
@@ -40,7 +41,24 @@ export default function CaptureFlow({
   const [tripStartDate, setTripStartDate] = useState(tripDates.startDate);
   const [confirmClose, setConfirmClose] = useState(false);
 
-  if (!open) return null;
+  // ModalShell keeps this component mounted while closed, so reset local
+  // state whenever the modal transitions back open (mirrors NewTripModal).
+  useEffect(() => {
+    if (!open) return;
+    setPhase('input');
+    setInputs([]);
+    setPastedText('');
+    setInputError(null);
+    setArtifact(null);
+    setExtraction(null);
+    setDraftBookings([]);
+    setEditingLocalId(null);
+    setConfirming(false);
+    setSubmitError(null);
+    setTripEndDate(tripDates.endDate);
+    setTripStartDate(tripDates.startDate);
+    setConfirmClose(false);
+  }, [open]);
 
   const totalInputCount = inputs.length + (pastedText.trim() ? 1 : 0);
 
@@ -151,53 +169,57 @@ export default function CaptureFlow({
   const isReview = phase === 'review';
   const hasUnsavedWork = phase === 'extracting' || (isReview && draftBookings.some((d) => d.included));
 
-  const handleCloseClick = () => {
-    if (hasUnsavedWork && !confirmClose) {
+  const handleRequestClose = () => {
+    if (confirmClose) {
+      setConfirmClose(false);
+      return;
+    }
+    if (hasUnsavedWork) {
       setConfirmClose(true);
       return;
     }
+    onClose();
+  };
+
+  const handleDiscard = () => {
     setConfirmClose(false);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-3xl rounded-[22px] border" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
-        <div className="p-5 sm:p-7 max-h-[85vh] overflow-y-auto">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div>
-              <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                {isReview ? 'Review' : 'Import'}
+    <>
+      <ModalShell
+        open={open}
+        onRequestClose={handleRequestClose}
+        eyebrow={isReview ? 'Review' : 'Import'}
+        headline={isReview ? "Here's what we found." : 'Dump your travel chaos here.'}
+        maxWidth="3xl"
+      >
+        <div className="pb-5 sm:pb-7">
+          {confirmClose && (
+            <div className="rounded-xl border p-4 mb-5 modal-danger-border">
+              <p className="font-body text-base" style={{ color: 'var(--cream-dim)' }}>
+                Discard this import? Anything extracted here will be lost.
               </p>
-              <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                {isReview ? "Here's what we found." : 'Dump your travel chaos here.'}
-              </h2>
-            </div>
-            {confirmClose ? (
-              <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="flex gap-3 mt-3">
                 <button
                   type="button"
                   onClick={() => setConfirmClose(false)}
-                  className="font-mono text-xs tracking-[0.24em] uppercase"
-                  style={{ color: 'var(--cream-dim)' }}
+                  className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border min-h-[44px]"
+                  style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
                 >
-                  Cancel
+                  Keep Working
                 </button>
                 <button
                   type="button"
-                  onClick={handleCloseClick}
-                  className="font-mono text-xs tracking-[0.24em] uppercase"
-                  style={{ color: '#f8b4b4' }}
+                  onClick={handleDiscard}
+                  className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border min-h-[44px] modal-danger-text modal-danger-border"
                 >
-                  Discard &amp; Close?
+                  Discard &amp; Close
                 </button>
               </div>
-            ) : (
-              <button type="button" onClick={handleCloseClick} className="font-mono text-xs tracking-[0.24em] uppercase flex-shrink-0" style={{ color: 'var(--cream-dim)' }}>
-                Close
-              </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {(phase === 'input' || phase === 'extracting') && (
             <CaptureInput
@@ -228,7 +250,7 @@ export default function CaptureFlow({
             />
           )}
         </div>
-      </div>
+      </ModalShell>
 
       {editingDraft && (
         <AddBookingModal
@@ -245,6 +267,6 @@ export default function CaptureFlow({
           mode="draft"
         />
       )}
-    </div>
+    </>
   );
 }

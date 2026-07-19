@@ -1,4 +1,3 @@
-import { Loader2 } from 'lucide-react';
 import ExtractedBookingCard from './ExtractedBookingCard.jsx';
 
 export default function ExtractionReview({
@@ -72,10 +71,10 @@ export default function ExtractionReview({
           type="button"
           onClick={onConfirm}
           disabled={includedCount === 0 || confirming}
-          className="px-5 py-4 rounded-2xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
+          className="px-5 py-4 rounded-xl font-mono text-xs tracking-[0.28em] uppercase inline-flex items-center justify-center gap-2"
           style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: includedCount === 0 || confirming ? 0.5 : 1 }}
         >
-          {confirming && <Loader2 size={14} className="animate-spin" />}
+          {confirming && <span className="modal-loading-dots"><span /><span /><span /></span>}
           {confirming ? 'Adding...' : `Add ${includedCount} bookings`}
         </button>
       </div>
