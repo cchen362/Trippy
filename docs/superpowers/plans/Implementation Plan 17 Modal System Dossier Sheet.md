@@ -1,6 +1,6 @@
 # Implementation Plan 17 — Modal System: Dossier Sheet Primitive & Five-Flow Refit
 
-**Status: COMPLETE (2026-07-19) — all three waves done; W3 (CaptureFlow + verification matrix) closed. Not yet deployed.**
+**Status: CLOSED (2026-07-19) — all three waves done, deployed to production at 43f83d7, owner browser QA passed in prod same day.**
 **Date:** 2026-07-19
 **Baseline:** Independent design/QA review of the five modal flows (2026-07-19 session), Luxury Dark Design System archive (AUDIT.md is the reconciled token authority where it agrees with `frontend/src/index.css`), spec §12.
 **Scope:** Frontend only. No backend, no data-shape, no route changes. No changes to extraction, provider lookup, session-token, or payload logic — presentation, semantics, and shell structure only.
