@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Paperclip, FileText } from 'lucide-react';
+import { Paperclip, FileText, X } from 'lucide-react';
 import AddBookingModal from '../components/logistics/AddBookingModal.jsx';
 import FlightBookingCard from '../components/logistics/FlightBookingCard.jsx';
 import TrainBookingCard from '../components/logistics/TrainBookingCard.jsx';
@@ -57,6 +57,8 @@ export default function LogisticsTab() {
   const [attachError, setAttachError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [confirmDocUrl, setConfirmDocUrl] = useState(null);
+  const [removingDoc, setRemovingDoc] = useState(false);
   const fileInputRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
@@ -83,6 +85,7 @@ export default function LogisticsTab() {
     setSelectedBooking(null);
     setConfirmDelete(false);
     setDeleteError(null);
+    setConfirmDocUrl(null);
   };
 
   const handleDeleteBooking = async () => {
@@ -111,6 +114,22 @@ export default function LogisticsTab() {
       setAttachError(err.message);
     } finally {
       setAttaching(false);
+    }
+  }
+
+  async function handleRemoveAttachment(doc) {
+    setDeleteError(null);
+    setRemovingDoc(true);
+    try {
+      const attachmentId = doc.url.split('/').pop();
+      await bookingsApi.removeAttachment(liveSelected.id, attachmentId);
+      setConfirmDocUrl(null);
+      await refresh();
+    } catch (err) {
+      setDeleteError(err.message || 'Could not remove this document.');
+      setConfirmDocUrl(null);
+    } finally {
+      setRemovingDoc(false);
     }
   }
 
@@ -207,16 +226,50 @@ export default function LogisticsTab() {
                 <p className="font-mono text-xs tracking-[0.22em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>Documents</p>
                 <div className="flex flex-wrap gap-2">
                   {liveSelected.documents.map((doc, i) => (
-                    <button
-                      key={doc.url}
-                      type="button"
-                      onClick={() => setViewerDoc(doc)}
-                      className="px-3 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase flex items-center gap-2"
-                      style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
-                    >
-                      <FileText size={14} />
-                      {doc.filename || (doc.mediaType === 'application/pdf' ? `Document ${i + 1}` : `Photo ${i + 1}`)}
-                    </button>
+                    <div key={doc.url} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setViewerDoc(doc)}
+                        className="px-3 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase flex items-center gap-2"
+                        style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
+                      >
+                        <FileText size={14} />
+                        {doc.filename || (doc.mediaType === 'application/pdf' ? `Document ${i + 1}` : `Photo ${i + 1}`)}
+                      </button>
+                      {doc.source === 'attachment' && (
+                        confirmDocUrl === doc.url ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDocUrl(null)}
+                              className="font-mono text-[11px] tracking-[0.18em] uppercase"
+                              style={{ color: 'var(--cream-dim)' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAttachment(doc)}
+                              disabled={removingDoc}
+                              className="px-2 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase"
+                              style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)', opacity: removingDoc ? 0.6 : 1 }}
+                            >
+                              {removingDoc ? 'Removing…' : 'Confirm?'}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${doc.filename || `Document ${i + 1}`}`}
+                            onClick={() => { setDeleteError(null); setConfirmDocUrl(doc.url); }}
+                            className="px-2 py-2 rounded-lg border font-mono text-[11px]"
+                            style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)' }}
+                          >
+                            <X size={12} />
+                          </button>
+                        )
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
