@@ -181,7 +181,9 @@ export default function MapTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--ink-deep)' }}>
       <DayTabs days={days} activeDayId={activeDayId} onSelect={setActiveDayId} />
-      <div style={{ position: 'relative', height: MAP_HEIGHT, minHeight: 300 }}>
+      {/* isolation contains Leaflet's internal z-indexes (panes 200-700, controls 1000)
+          so they can't stack above app chrome like the co-pilot FAB/panel. */}
+      <div style={{ position: 'relative', height: MAP_HEIGHT, minHeight: 300, isolation: 'isolate' }}>
         {configLoading && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
