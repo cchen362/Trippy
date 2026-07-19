@@ -38,6 +38,7 @@ function mapTrip(row, today, destinations = [], destinationCountries = []) {
     pace: row.pace,
     status: computeTripStatus(row.start_date, row.end_date, today),
     storedStatus: row.status,
+    summaryCurrency: row.summary_currency || null,
     createdAt: row.created_at,
   };
 }
@@ -862,6 +863,8 @@ export function createTrip(userId, input) {
   return getTripDetail(tripId, userId);
 }
 
+const SUMMARY_CURRENCY_RE = /^[A-Z]{3}$/;
+
 export function updateTrip(userId, tripId, input) {
   const db = getDb();
   const existingRow = assertTripAccess(userId, tripId);
@@ -869,6 +872,17 @@ export function updateTrip(userId, tripId, input) {
   const title = input.title?.trim() || existingRow.title;
   const travellers = input.travellers || existingRow.travellers;
   const pace = input.pace || existingRow.pace;
+
+  let summaryCurrency = existingRow.summary_currency;
+  if (input.summaryCurrency !== undefined) {
+    if (input.summaryCurrency === null) {
+      summaryCurrency = null;
+    } else if (typeof input.summaryCurrency === 'string' && SUMMARY_CURRENCY_RE.test(input.summaryCurrency.trim().toUpperCase())) {
+      summaryCurrency = input.summaryCurrency.trim().toUpperCase();
+    } else {
+      throw Object.assign(new Error('summaryCurrency must be a 3-letter ISO currency code or null'), { status: 400 });
+    }
+  }
   const interestTags = input.interestTags !== undefined
     ? normalizeArray(input.interestTags)
     : parseJson(existingRow.interest_tags, []);
@@ -963,10 +977,10 @@ export function updateTrip(userId, tripId, input) {
   }
 
   db.prepare(`
-    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?
+    UPDATE trips SET title = ?, travellers = ?, interest_tags = ?, pace = ?, start_date = ?, end_date = ?, summary_currency = ?
     WHERE id = ?
   `).run(
-    title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, tripId,
+    title, travellers, JSON.stringify(interestTags), pace, newStartDate, newEndDate, summaryCurrency, tripId,
   );
 
   return getTripDetail(tripId, userId);

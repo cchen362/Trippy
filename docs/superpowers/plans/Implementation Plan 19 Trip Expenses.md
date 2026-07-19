@@ -1,6 +1,6 @@
 # Implementation Plan 19 — Trip Expenses: Shared Spending Diary with Owed Amounts
 
-**Status: OPEN — scoped 2026-07-19, not started**
+**Status: OPEN — W1 (backend) + W2 (frontend) complete 2026-07-20; W3 (integration QA) pending.** W1: migration 031, currency utils, fx.js, expenses service/routes, trips summaryCurrency — 646/646 backend tests, migration proven on a real-DB copy. W2: expensesApi + useExpenses, wallet header icon (leftmost of 4), Expenses view, ModalShell capture sheet, summary-currency prompt — 178/178 frontend tests, clean build. Orchestrator smoke pass 2026-07-20 at 375px: create-expense end-to-end, CNY day-geo currency default, totals + D5e unestimated note + D5 footer render; FX service verified against live CDN for a past date (today's snapshot not yet published → correctly unestimated, never guessed).
 **Date:** 2026-07-19
 **Baseline:** Product-fit review `docs/superpowers/reviews/2026-07-19-expenses-tracker-product-fit-review.md` (all six gates answered; independent assessment returned GO). Modal system from Plan 17 (CLOSED, deployed 43f83d7) is the sheet primitive.
 **Scope:** One additive migration, one backend route/service pair + FX service, one frontend Expenses view + capture sheet + header entry point. No co-pilot integration, no offline writes, no changes to public sharing beyond a regression test proving exclusion.

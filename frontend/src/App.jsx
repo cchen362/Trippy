@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import LoadingScreen from './components/common/LoadingScreen.jsx';
+import ExpensesTab from './pages/ExpensesTab.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import LogisticsTab from './pages/LogisticsTab.jsx';
 import MapTab from './pages/MapTab.jsx';
@@ -39,6 +40,7 @@ function AppRoutes() {
         <Route path="plan" element={<PlanTab />} />
         <Route path="logistics" element={<LogisticsTab />} />
         <Route path="map" element={<MapTab />} />
+        <Route path="expenses" element={<ExpensesTab />} />
       </Route>
       <Route path="*" element={<Navigate to="/trips" replace />} />
     </Routes>

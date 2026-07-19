@@ -15,6 +15,7 @@ import collaborationRoutes from './routes/collaboration.js';
 import dayRoutes from './routes/days.js';
 import copilotRoutes from './routes/copilot.js';
 import discoveryRoutes, { discoveryPlacesRouter } from './routes/discovery.js';
+import expenseRoutes from './routes/expenses.js';
 import healthRoutes from './routes/health.js';
 import importRoutes from './routes/imports.js';
 import lookupRoutes from './routes/lookups.js';
@@ -47,6 +48,7 @@ app.use('/api/discovery', discoveryPlacesRouter);
 app.use('/api', dayRoutes);
 app.use('/api', stopRoutes);
 app.use('/api', bookingRoutes);
+app.use('/api', expenseRoutes);
 app.use('/api', importRoutes);
 app.use('/api/lookups', lookupRoutes);
 

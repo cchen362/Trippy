@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
-import { Edit2, Users } from 'lucide-react';
+import { Edit2, Users, Wallet } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
@@ -130,6 +130,16 @@ export default function TripPage() {
         title={tripState.trip.title}
         actions={(
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`/trips/${tripId}/expenses`)}
+              className="w-10 h-10 inline-flex items-center justify-center rounded-full border"
+              style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)', background: 'rgba(255,255,255,0.02)' }}
+              aria-label="Open trip expenses"
+              title="Expenses"
+            >
+              <Wallet size={18} />
+            </button>
             <button
               type="button"
               onClick={() => setShareOpen(true)}
