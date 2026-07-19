@@ -7,9 +7,9 @@ const router = Router();
 
 router.use(requireAuth);
 
-router.get('/trips/:tripId/expenses', requireTripAccess, (req, res, next) => {
+router.get('/trips/:tripId/expenses', requireTripAccess, async (req, res, next) => {
   try {
-    res.json(listExpenses(req.user.id, req.params.tripId));
+    res.json(await listExpenses(req.user.id, req.params.tripId));
   } catch (error) {
     next(error);
   }

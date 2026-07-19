@@ -5,6 +5,27 @@
 import { getDb } from '../db/database.js';
 
 const FETCH_TIMEOUT_MS = 5000;
+const NEGATIVE_CACHE_MS = 15 * 60 * 1000;
+
+// In-flight dedupe: concurrent getRate calls for the same (base, quote, date) key
+// share one network fetch rather than firing one each (e.g. N stragglers stamped
+// in the same listExpenses bounded-wait pass).
+const inFlight = new Map();
+
+// Negative cache: a TOTAL miss (both hosts failed, or no rate for the pair) is
+// remembered for NEGATIVE_CACHE_MS so repeated calls in that window short-circuit
+// without hitting the network. Never written to fx_rates — only in-memory.
+const negativeCache = new Map();
+
+function memoKey(base, quote, date) {
+  return `${base}:${quote}:${date}`;
+}
+
+// Test-only: clears both in-memory maps so tests stay isolated from each other.
+export function _resetFxMemoryForTests() {
+  inFlight.clear();
+  negativeCache.clear();
+}
 
 function primaryUrl(base, date) {
   return `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/${base.toLowerCase()}.json`;
@@ -58,16 +79,40 @@ export async function getRate(base, quote, date) {
   const cached = readCachedRate(baseCode, quoteCode, date);
   if (cached !== null && cached !== undefined) return cached;
 
+  const key = memoKey(baseCode, quoteCode, date);
+
+  const negative = negativeCache.get(key);
+  if (negative !== undefined && Date.now() - negative < NEGATIVE_CACHE_MS) {
+    return null;
+  }
+
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+
+  const attempt = fetchAndStoreRate(baseCode, quoteCode, date, key)
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, attempt);
+  return attempt;
+}
+
+async function fetchAndStoreRate(baseCode, quoteCode, date, key) {
   let payload = await fetchWithTimeout(primaryUrl(baseCode, date), FETCH_TIMEOUT_MS);
   if (!payload) {
     payload = await fetchWithTimeout(fallbackUrl(baseCode, date), FETCH_TIMEOUT_MS);
   }
-  if (!payload) return null;
+  if (!payload) {
+    negativeCache.set(key, Date.now());
+    return null;
+  }
 
   const rateTable = payload[baseCode.toLowerCase()];
   const rate = rateTable ? rateTable[quoteCode.toLowerCase()] : undefined;
-  if (typeof rate !== 'number' || !Number.isFinite(rate)) return null;
+  if (typeof rate !== 'number' || !Number.isFinite(rate)) {
+    negativeCache.set(key, Date.now());
+    return null;
+  }
 
   storeRate(baseCode, quoteCode, date, rate);
+  negativeCache.delete(key);
   return rate;
 }

@@ -9,6 +9,15 @@ import { minorUnitsFor } from '../utils/currency.js';
 
 const CATEGORIES = new Set(['lodging', 'transport', 'food', 'activity', 'shopping', 'other']);
 
+// Overall budget for the same-request stamping wait in listExpenses (W3.5 item c):
+// one bounded window across ALL stragglers, not per-row, so a list with many
+// unestimated rows still responds promptly.
+const LIST_STAMP_BUDGET_MS = 700;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function roundHalfUp(value) {
   return Math.floor(value + 0.5);
 }
@@ -207,7 +216,7 @@ function writeOwedRows(db, expenseId, owed) {
   }
 }
 
-export function listExpenses(userId, tripId) {
+export async function listExpenses(userId, tripId) {
   const trip = assertTripAccess(userId, tripId);
   const db = getDb();
 
@@ -219,11 +228,30 @@ export function listExpenses(userId, tripId) {
     ORDER BY e.expense_date DESC, e.created_at DESC
   `).all(tripId);
 
-  const expenses = rows.map((row) => formatExpense(row, fetchOwedRows(db, row.id)));
+  const unestimatedIds = rows.filter((row) => row.summary_amount === null).map((row) => row.id);
 
-  for (const row of rows) {
-    if (row.summary_amount === null) scheduleStamp(row.id);
+  if (unestimatedIds.length > 0 && trip.summary_currency) {
+    // Bounded same-request stamping: give the stragglers up to LIST_STAMP_BUDGET_MS
+    // (total, not per-row) to resolve so this response can carry healed rows.
+    // Attempts that don't finish in time are left running (not cancelled) — they
+    // may still stamp the DB after this response is sent, per D5(e).
+    const stampPromises = unestimatedIds.map((id) => stampExpenseFx(id).catch(() => {}));
+    await Promise.race([Promise.allSettled(stampPromises), delay(LIST_STAMP_BUDGET_MS)]);
+  } else {
+    for (const id of unestimatedIds) scheduleStamp(id);
   }
+
+  const finalRows = unestimatedIds.length > 0
+    ? db.prepare(`
+        SELECT e.*, u.display_name AS payer_name
+        FROM expenses e
+        JOIN users u ON u.id = e.payer_user_id
+        WHERE e.trip_id = ?
+        ORDER BY e.expense_date DESC, e.created_at DESC
+      `).all(tripId)
+    : rows;
+
+  const expenses = finalRows.map((row) => formatExpense(row, fetchOwedRows(db, row.id)));
 
   return {
     expenses,

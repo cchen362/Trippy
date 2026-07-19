@@ -11,7 +11,7 @@ import { getSharedTrip, createShareLink } from '../src/services/share.js';
 import {
   createExpense, updateExpense, deleteExpense, listExpenses, setOwedSettled,
 } from '../src/services/expenses.js';
-import { getRate } from '../src/services/fx.js';
+import { getRate, _resetFxMemoryForTests } from '../src/services/fx.js';
 import { currencyForCountry, minorUnitsFor } from '../src/utils/currency.js';
 
 let tmpDir;
@@ -48,6 +48,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  _resetFxMemoryForTests();
   getDb().close();
   rmSync(tmpDir, { recursive: true });
 });
@@ -91,7 +92,7 @@ describe('expenses CRUD + access', () => {
       amount: 5000, currency: 'SGD', category: 'transport', expenseDate: '2026-09-12',
     });
 
-    const listed = listExpenses(owner.id, tripDetail.trip.id);
+    const listed = await listExpenses(owner.id, tripDetail.trip.id);
     expect(listed.expenses).toHaveLength(1);
     expect(listed.summaryCurrency).toBe('SGD');
 
@@ -102,7 +103,7 @@ describe('expenses CRUD + access', () => {
 
     const deleted = deleteExpense(owner.id, tripDetail.trip.id, expense.id);
     expect(deleted.totals.spent).toBe(0);
-    expect(listExpenses(owner.id, tripDetail.trip.id).expenses).toHaveLength(0);
+    expect((await listExpenses(owner.id, tripDetail.trip.id)).expenses).toHaveLength(0);
   });
 
   it('404s on an expense id that belongs to a different trip', () => {
@@ -176,7 +177,7 @@ describe('owed-sum validation', () => {
 });
 
 describe('totals math', () => {
-  it('computes spent, awaitingRepayment, netShare, and per-user scoping', () => {
+  it('computes spent, awaitingRepayment, netShare, and per-user scoping', async () => {
     updateTrip(owner.id, tripDetail.trip.id, { summaryCurrency: 'SGD' });
     inviteCollaborator(owner.id, tripDetail.trip.id, 'friend');
 
@@ -192,10 +193,10 @@ describe('totals math', () => {
     createExpense(collaborator.id, tripDetail.trip.id, {
       amount: 2000, currency: 'SGD', category: 'transport', expenseDate: '2026-09-13',
     });
-    const ownerTotals = listExpenses(owner.id, tripDetail.trip.id).totals;
+    const ownerTotals = (await listExpenses(owner.id, tripDetail.trip.id)).totals;
     expect(ownerTotals.spent).toBe(10000);
 
-    const collabTotals = listExpenses(collaborator.id, tripDetail.trip.id).totals;
+    const collabTotals = (await listExpenses(collaborator.id, tripDetail.trip.id)).totals;
     expect(collabTotals.spent).toBe(2000);
   });
 
@@ -209,7 +210,7 @@ describe('totals math', () => {
     expect(totals.unestimatedByCurrency).toEqual({ JPY: 3000 });
   });
 
-  it('converts owed amounts using the expense stamped rate with round-half-up', () => {
+  it('converts owed amounts using the expense stamped rate with round-half-up', async () => {
     updateTrip(owner.id, tripDetail.trip.id, { summaryCurrency: 'SGD' });
     const { expense } = createExpense(owner.id, tripDetail.trip.id, {
       amount: 10000, currency: 'JPY', category: 'food', expenseDate: '2026-09-12',
@@ -218,7 +219,7 @@ describe('totals math', () => {
     });
     // amount 10000 JPY minor units (0 decimals) -> 10000 major JPY * 0.009 = 90 SGD major -> 9000 minor
     expect(expense.summaryAmount).toBe(9000);
-    const totals = listExpenses(owner.id, tripDetail.trip.id).totals;
+    const totals = (await listExpenses(owner.id, tripDetail.trip.id)).totals;
     // owed 3000 JPY * 0.009 = 27 SGD major -> 2700 minor
     expect(totals.awaitingRepayment).toBe(2700);
     expect(totals.netShare).toBe(9000 - 2700);
@@ -252,7 +253,7 @@ describe('manual rate override', () => {
 });
 
 describe('settled toggle', () => {
-  it('flips an owed row settled state and recomputes totals', () => {
+  it('flips an owed row settled state and recomputes totals', async () => {
     updateTrip(owner.id, tripDetail.trip.id, { summaryCurrency: 'SGD' });
     const { expense } = createExpense(owner.id, tripDetail.trip.id, {
       amount: 5000, currency: 'SGD', category: 'food', expenseDate: '2026-09-12',
@@ -260,7 +261,7 @@ describe('settled toggle', () => {
     });
     const owedId = expense.owed[0].id;
 
-    const before = listExpenses(owner.id, tripDetail.trip.id).totals;
+    const before = (await listExpenses(owner.id, tripDetail.trip.id)).totals;
     expect(before.awaitingRepayment).toBe(2000);
 
     const result = setOwedSettled(owner.id, tripDetail.trip.id, expense.id, owedId, true);
@@ -309,6 +310,72 @@ describe('fx service cache + mocked fetch', () => {
     vi.spyOn(global, 'fetch').mockResolvedValue({ ok: false });
     const rate = await getRate('JPY', 'SGD', '2026-09-14');
     expect(rate).toBe(null);
+  });
+
+  it('dedupes concurrent getRate calls for the same key into a single fetch', async () => {
+    let resolvePayload;
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(() => new Promise((resolve) => {
+      resolvePayload = () => resolve({ ok: true, json: async () => ({ jpy: { sgd: 0.0093 } }) });
+    }));
+
+    const p1 = getRate('JPY', 'SGD', '2026-09-15');
+    const p2 = getRate('JPY', 'SGD', '2026-09-15');
+    const p3 = getRate('JPY', 'SGD', '2026-09-15');
+    resolvePayload();
+
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    expect(r1).toBe(0.0093);
+    expect(r2).toBe(0.0093);
+    expect(r3).toBe(0.0093);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('negative-caches a total miss so a repeat call in the window skips the network and never writes fx_rates', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({ ok: false });
+
+    const rate1 = await getRate('JPY', 'SGD', '2026-09-16');
+    expect(rate1).toBe(null);
+    expect(fetchSpy).toHaveBeenCalledTimes(2); // primary + fallback attempted once
+
+    const rate2 = await getRate('JPY', 'SGD', '2026-09-16');
+    expect(rate2).toBe(null);
+    expect(fetchSpy).toHaveBeenCalledTimes(2); // no new network calls — served from negative cache
+
+    const cachedRow = getDb().prepare(`
+      SELECT rate FROM fx_rates WHERE base_currency = 'JPY' AND quote_currency = 'SGD' AND rate_date = '2026-09-16'
+    `).get();
+    expect(cachedRow).toBeUndefined();
+  });
+});
+
+describe('bounded same-request stamping in listExpenses', () => {
+  it('returns a healed summaryAmount in the same response when the provider fetch resolves quickly', async () => {
+    updateTrip(owner.id, tripDetail.trip.id, { summaryCurrency: 'SGD' });
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ jpy: { sgd: 0.0091 } }),
+    });
+
+    createExpense(owner.id, tripDetail.trip.id, {
+      amount: 10000, currency: 'JPY', category: 'food', expenseDate: '2026-09-17',
+    });
+
+    const listed = await listExpenses(owner.id, tripDetail.trip.id);
+    expect(listed.expenses[0].summaryAmount).toBe(9100); // 10000 JPY major * 0.0091 = 91 SGD major -> 9100 minor
+  });
+
+  it('leaves a row unestimated in the response when the provider fetch is slower than the budget', async () => {
+    updateTrip(owner.id, tripDetail.trip.id, { summaryCurrency: 'SGD' });
+    vi.spyOn(global, 'fetch').mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve({ ok: true, json: async () => ({ jpy: { sgd: 0.0091 } }) }), 1200);
+    }));
+
+    createExpense(owner.id, tripDetail.trip.id, {
+      amount: 10000, currency: 'JPY', category: 'food', expenseDate: '2026-09-18',
+    });
+
+    const listed = await listExpenses(owner.id, tripDetail.trip.id);
+    expect(listed.expenses[0].summaryAmount).toBe(null);
   });
 });
 

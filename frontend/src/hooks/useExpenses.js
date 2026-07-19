@@ -4,6 +4,20 @@ import { expensesApi } from '../services/expensesApi.js';
 // Mirrors useBookings' load/run shape, plus an optimistic settled-toggle
 // (the one mutation frequent enough — post-trip settlement checklist — to
 // warrant instant feedback instead of waiting on the round trip).
+//
+// Silent refetch (W3.5 item d): if a list response still has an unestimated
+// row (summaryAmount null while a summary currency is set and the row's own
+// currency differs from it), the backend's bounded stamping pass may just
+// have missed the budget — schedule ONE quiet retry ~3s later. A retry that
+// itself still comes back unestimated (e.g. FX negative-cached) does not
+// re-arm, so this can never loop.
+const SILENT_REFETCH_DELAY_MS = 3000;
+
+function hasUnestimatedRow(expenses, summaryCurrency) {
+  if (!summaryCurrency) return false;
+  return (expenses || []).some((exp) => exp.summaryAmount == null && exp.currency !== summaryCurrency);
+}
+
 export function useExpenses(tripId) {
   const [expenses, setExpenses] = useState([]);
   const [totals, setTotals] = useState(null);
@@ -13,31 +27,55 @@ export function useExpenses(tripId) {
   const [error, setError] = useState(null);
   const hasLoadedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const silentRetryTimerRef = useRef(null);
 
-  const refresh = useCallback(async () => {
+  const clearSilentRetryTimer = useCallback(() => {
+    if (silentRetryTimerRef.current) {
+      clearTimeout(silentRetryTimerRef.current);
+      silentRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const refresh = useCallback(async (options = {}) => {
     if (!tripId) return;
+    const isSilentRetry = Boolean(options.silentRetry);
     const requestId = (requestIdRef.current += 1);
     if (!hasLoadedRef.current) setLoading(true);
     setError(null);
     try {
       const result = await expensesApi.list(tripId);
       if (requestId !== requestIdRef.current) return; // superseded — drop
-      setExpenses(result.expenses || []);
+      const nextExpenses = result.expenses || [];
+      const nextSummaryCurrency = result.summaryCurrency ?? null;
+      setExpenses(nextExpenses);
       setTotals(result.totals || null);
-      setSummaryCurrency(result.summaryCurrency ?? null);
+      setSummaryCurrency(nextSummaryCurrency);
       hasLoadedRef.current = true;
+
+      // Fire at most one silent retry per completed refresh, and never chain a
+      // retry off of a retry — a still-unestimated row after the retry is left
+      // as-is (likely negative-cached upstream) rather than polled forever.
+      if (!isSilentRetry && hasUnestimatedRow(nextExpenses, nextSummaryCurrency)) {
+        clearSilentRetryTimer();
+        silentRetryTimerRef.current = setTimeout(() => {
+          silentRetryTimerRef.current = null;
+          refresh({ silentRetry: true });
+        }, SILENT_REFETCH_DELAY_MS);
+      }
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err);
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [tripId]);
+  }, [tripId, clearSilentRetryTimer]);
 
   useEffect(() => {
     hasLoadedRef.current = false;
+    clearSilentRetryTimer();
     refresh();
-  }, [refresh]);
+    return clearSilentRetryTimer;
+  }, [refresh, clearSilentRetryTimer]);
 
   const run = useCallback(async (action) => {
     setSaving(true);
