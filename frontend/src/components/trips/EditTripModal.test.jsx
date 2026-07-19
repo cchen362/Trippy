@@ -136,3 +136,150 @@ describe('EditTripModal — scopes-driven chips and honest removal', () => {
     });
   });
 });
+
+describe('EditTripModal — ModalShell migration', () => {
+  it('renders as a labelled dialog with the expected headline', () => {
+    render(
+      <EditTripModal
+        trip={baseTrip}
+        days={[]}
+        open
+        onClose={noop}
+        onSubmit={noop}
+        saving={false}
+        onDelete={noop}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+    const dialog = screen.getByRole('dialog');
+    const headline = screen.getByRole('heading', { name: 'Refine the plan.' });
+    expect(dialog).toHaveAttribute('aria-labelledby', headline.id);
+  });
+
+  it('renders nothing when closed', () => {
+    render(
+      <EditTripModal
+        trip={baseTrip}
+        days={[]}
+        open={false}
+        onClose={noop}
+        onSubmit={noop}
+        saving={false}
+        onDelete={noop}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('arms the danger confirm on "Delete trip", disarms on Cancel, and confirms via onDelete', () => {
+    const onDelete = vi.fn();
+    render(
+      <EditTripModal
+        trip={baseTrip}
+        days={[]}
+        open
+        onClose={noop}
+        onSubmit={noop}
+        saving={false}
+        onDelete={onDelete}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete trip' }));
+    const confirmButton = screen.getByRole('button', { name: 'Confirm delete' });
+    expect(confirmButton).toBeInTheDocument();
+
+    const cancelButtons = screen.getAllByRole('button', { name: 'Cancel' });
+    fireEvent.click(cancelButtons[0]);
+    expect(screen.queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete trip' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete trip' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits the form when the footer Save Changes button is clicked (form attribute wiring)', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <EditTripModal
+        trip={baseTrip}
+        days={[]}
+        open
+        onClose={noop}
+        onSubmit={onSubmit}
+        saving={false}
+        onDelete={noop}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the honest-constraint strings under their conditions', () => {
+    const trip = { ...baseTrip, endDate: '2026-08-10' };
+    render(
+      <EditTripModal
+        trip={trip}
+        days={[]}
+        open
+        onClose={noop}
+        onSubmit={noop}
+        saving={false}
+        onDelete={noop}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+
+    expect(screen.getByText('Start date cannot be changed')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Shortening will remove later days (blocked if they have stops)')
+    ).not.toBeInTheDocument();
+
+    const endDateInput = screen.getByDisplayValue('2026-08-10');
+    fireEvent.change(endDateInput, { target: { value: '2026-08-05' } });
+    expect(
+      screen.getByText('Shortening will remove later days (blocked if they have stops)')
+    ).toBeInTheDocument();
+  });
+
+  it('shows the removed-chip identity note verbatim', () => {
+    const trip = {
+      ...baseTrip,
+      scopes: [
+        { label: 'Shanghai', countryCode: 'CN', kind: 'city' },
+        { label: 'Hangzhou', countryCode: 'CN', kind: 'city' },
+      ],
+    };
+    const days = [{ date: '2026-08-01', resolvedCity: 'Shanghai', resolvedCountry: 'CN' }];
+    render(
+      <EditTripModal
+        trip={trip}
+        days={days}
+        open
+        onClose={noop}
+        onSubmit={noop}
+        saving={false}
+        onDelete={noop}
+        deleting={false}
+        lookupCities={lookupCities}
+      />
+    );
+
+    const shanghaiChip = screen.getByText('Shanghai').closest('button');
+    fireEvent.click(shanghaiChip);
+
+    expect(
+      screen.getByText('1 day still show Shanghai — days keep their identity; edit day headers or bookings to change them')
+    ).toBeInTheDocument();
+  });
+});

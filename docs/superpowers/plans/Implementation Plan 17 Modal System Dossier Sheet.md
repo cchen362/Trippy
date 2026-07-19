@@ -1,6 +1,6 @@
 # Implementation Plan 17 — Modal System: Dossier Sheet Primitive & Five-Flow Refit
 
-**Status: NOT STARTED**
+**Status: W1 COMPLETE (2026-07-19) — ModalShell primitive + AddPlaceModal/EditTripModal migrated; W2, W3 pending**
 **Date:** 2026-07-19
 **Baseline:** Independent design/QA review of the five modal flows (2026-07-19 session), Luxury Dark Design System archive (AUDIT.md is the reconciled token authority where it agrees with `frontend/src/index.css`), spec §12.
 **Scope:** Frontend only. No backend, no data-shape, no route changes. No changes to extraction, provider lookup, session-token, or payload logic — presentation, semantics, and shell structure only.
@@ -69,6 +69,8 @@ Shared CSS in `index.css`: retoken `.modal-input`/`.modal-action` radius to 12px
 4. Unit tests: shell semantics (role/aria/labelledby), Escape → `onRequestClose`, focus trap + return, scroll-lock refcount, stacked Escape scoping. Flow tests updated for moved markup.
 
 **Exit:** frontend tests + build green; both flows verified at 375px (sheet geometry, safe area, keyboard open on AddPlace search) and desktop (centered dialog, Tab cycle, Escape).
+
+**W1 COMPLETE 2026-07-19.** ModalShell built per §2 (stack registry via `useSyncExternalStore`, refcounted scroll lock, trap intercepts only Tab/Escape); 11 shell tests + updated flow tests, suite 165/165, build green. Browser-verified in dev at 375px and desktop: sheet flush-bottom with 16px top corners, `aria-modal`/labelledby, D5 autofocus, Escape → close + focus return + lock release, Tab wrap, danger-block arm/disarm, footer `form=`-attribute Save (PATCH 200), live Places suggestions with corrected type roles (Playfair name / Cormorant secondary). Deviations: none from spec; orchestrator upgraded the mobile entrance from a 24px settle to a true `translateY(100%)` slide (D1). Deferred to owner/W3: motion feel (Browser-pane rAF freeze), real software-keyboard inset, notched safe-area. Noted pre-existing (not a W1 regression): CopilotFab (z-100) floats above modals (z-40+) as it always did.
 
 ### W2 — New Trip + Add Booking
 

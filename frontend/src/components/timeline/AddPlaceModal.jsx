@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { dayDisplayLabel } from '../../utils/dayGeo.js';
+import ModalShell from '../shell/ModalShell.jsx';
 
 const EMPTY_FORM = {
   title: '',
@@ -19,6 +19,8 @@ const TYPE_OPTIONS = [
   { value: 'booked', label: 'Booked' },
 ];
 
+const FORM_ID = 'add-place-form';
+
 export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lookupPlaces, lookupPlaceDetails }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState(null);
@@ -29,6 +31,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
   // Session token for Google Places Autocomplete — generated on first keystroke,
   // carried through to the Place Details call, then discarded.
   const [sessionToken, setSessionToken] = useState(null);
+  const searchInputRef = useRef(null);
   const canSubmit = useMemo(() => form.title.trim().length > 0, [form.title]);
   const near = dayDisplayLabel(day);
 
@@ -65,8 +68,6 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
     }, 300);
     return () => clearTimeout(timer);
   }, [form.title, lookupPlaces, near, open, selectedTitle, sessionToken]);
-
-  if (!open) return null;
 
   const set = (key) => (event) => {
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -167,142 +168,134 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-[22px] border" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
-        <form onSubmit={handleSubmit} className="p-5 sm:p-7 max-h-[85vh] overflow-y-auto">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div>
-              <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                Add Place
+    <ModalShell
+      open={open}
+      onRequestClose={onClose}
+      eyebrow="Add Place"
+      headline={dayDisplayLabel(day) || 'New stop'}
+      maxWidth="xl"
+      initialFocusRef={searchInputRef}
+      footer={(
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+            style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form={FORM_ID}
+            disabled={!canSubmit || saving}
+            className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase inline-flex items-center gap-2"
+            style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !canSubmit || saving ? 0.6 : 1 }}
+          >
+            {saving ? 'Adding...' : 'Add Place'}
+          </button>
+        </div>
+      )}
+    >
+      <form id={FORM_ID} onSubmit={handleSubmit} className="pb-5 sm:pb-7">
+        <div className="grid gap-4">
+          <label className="block relative">
+            <span className="modal-label">Place Name</span>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={form.title}
+              onChange={handleTitleChange}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Raffles City Chongqing"
+              required
+              autoComplete="off"
+              className="modal-input"
+            />
+            {suggestions.length > 0 && (
+              <div
+                className="mt-2 rounded-xl border overflow-hidden overflow-y-auto"
+                style={{ borderColor: 'var(--ink-border)', maxHeight: '208px' }}
+              >
+                {suggestions.slice(0, 5).map((suggestion) => (
+                  <button
+                    key={`${suggestion.placeId}-${suggestion.text}`}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSuggestionSelect(suggestion)}
+                    className="block w-full text-left px-4 py-3 border-b last:border-b-0"
+                    style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
+                  >
+                    <span className="font-display italic text-base block truncate" style={{ color: 'var(--cream)' }}>
+                      {suggestion.mainText || suggestion.text}
+                    </span>
+                    {suggestion.secondaryText && (
+                      <span className="font-body text-sm block truncate" style={{ color: 'var(--cream-mute)' }}>
+                        {suggestion.secondaryText}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {searching && suggestions.length === 0 && (
+              <p className="mt-2 font-mono text-[11px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>
+                Searching...
               </p>
-              <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                {dayDisplayLabel(day) || 'New stop'}
-              </h2>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-10 h-10 inline-flex items-center justify-center rounded-full border"
-              style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)', background: 'rgba(255,255,255,0.02)' }}
-              aria-label="Close add place"
-              title="Close"
-            >
-              <X size={17} />
-            </button>
+            )}
+          </label>
+
+          <div className="pt-4" style={{ borderTop: '1px solid var(--ink-border)' }}>
+            <span className="modal-section-label">DETAILS — OPTIONAL</span>
           </div>
 
-          <div className="grid gap-4">
-            <label className="block relative">
-              <span className="modal-label">Place Name</span>
+          <div className="grid sm:grid-cols-2 gap-4 opacity-70">
+            <label className="block">
+              <span className="modal-label">Time</span>
+              <input
+                type="time"
+                value={form.time}
+                onChange={set('time')}
+                className="modal-input"
+              />
+            </label>
+
+            <label className="block">
+              <span className="modal-label">Duration</span>
               <input
                 type="text"
-                value={form.title}
-                onChange={handleTitleChange}
-                onKeyDown={handleTitleKeyDown}
-                placeholder="Raffles City Chongqing"
-                required
-                autoFocus
-                autoComplete="off"
+                value={form.duration}
+                onChange={set('duration')}
+                placeholder="1.5 hours"
                 className="modal-input"
-              />
-              {suggestions.length > 0 && (
-                <div
-                  className="mt-2 rounded-xl border overflow-hidden overflow-y-auto"
-                  style={{ borderColor: 'var(--ink-border)', maxHeight: '208px' }}
-                >
-                  {suggestions.slice(0, 5).map((suggestion) => (
-                    <button
-                      key={`${suggestion.placeId}-${suggestion.text}`}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleSuggestionSelect(suggestion)}
-                      className="block w-full text-left px-4 py-3 border-b last:border-b-0"
-                      style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
-                    >
-                      <span className="font-mono text-xs block truncate" style={{ color: 'var(--cream)' }}>
-                        {suggestion.mainText || suggestion.text}
-                      </span>
-                      {suggestion.secondaryText && (
-                        <span className="font-body text-base block truncate">{suggestion.secondaryText}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searching && suggestions.length === 0 && (
-                <p className="mt-2 font-mono text-[11px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>
-                  Searching...
-                </p>
-              )}
-            </label>
-
-            <div className="grid sm:grid-cols-2 gap-4">
-              <label className="block">
-                <span className="modal-label">Time</span>
-                <input
-                  type="time"
-                  value={form.time}
-                  onChange={set('time')}
-                  className="modal-input"
-                />
-              </label>
-
-              <label className="block">
-                <span className="modal-label">Duration</span>
-                <input
-                  type="text"
-                  value={form.duration}
-                  onChange={set('duration')}
-                  placeholder="1.5 hours"
-                  className="modal-input"
-                />
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="modal-label">Type</span>
-              <select value={form.type} onChange={set('type')} className="modal-input">
-                {TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="modal-label">Note</span>
-              <textarea
-                value={form.note}
-                onChange={set('note')}
-                placeholder="Tickets, directions, dish to try..."
-                rows={3}
-                className="modal-input"
-                style={{ resize: 'none', lineHeight: 1.5 }}
               />
             </label>
           </div>
 
-          {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
+          <label className="block opacity-70">
+            <span className="modal-label">Type</span>
+            <select value={form.type} onChange={set('type')} className="modal-input">
+              {TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
 
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
-              style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase inline-flex items-center gap-2"
-              style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !canSubmit || saving ? 0.6 : 1 }}
-            >
-              {saving ? 'Adding...' : 'Add Place'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+          <label className="block opacity-70">
+            <span className="modal-label">Note</span>
+            <textarea
+              value={form.note}
+              onChange={set('note')}
+              placeholder="Tickets, directions, dish to try..."
+              rows={3}
+              className="modal-input"
+              style={{ resize: 'none', lineHeight: 1.5 }}
+            />
+          </label>
+        </div>
+
+        {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
+      </form>
+    </ModalShell>
   );
 }

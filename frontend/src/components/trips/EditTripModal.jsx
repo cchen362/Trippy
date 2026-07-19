@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import InterestTagPicker from './InterestTagPicker';
 import DestinationChipPicker from './DestinationChipPicker';
+import ModalShell from '../shell/ModalShell';
 import { dayDisplayLabel } from '../../utils/dayGeo.js';
 import { canonicalGeoKey } from '../../utils/geoIdentity.js';
 
@@ -65,6 +66,26 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // ModalShell keeps the parent mounted while closed (unlike the old early-return-null
+  // panel, which unmounted and therefore always remounted with fresh state). Re-seed the
+  // form from `trip` whenever the modal transitions to open so a stale edit from a
+  // previous open (or a different trip) never leaks into the next one.
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      title: trip.title ?? '',
+      endDate: trip.endDate ?? '',
+      travellers: trip.travellers ?? 'couple',
+      pace: trip.pace ?? 'moderate',
+      interestTags: trip.interestTags ?? [],
+    });
+    setDestinationChips(deriveInitialChips(trip, days));
+    setRemovalNote(null);
+    setError(null);
+    setConfirmDelete(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, trip]);
+
   // The picker owns chip-list integrity (it uses functional onChange updates so async
   // bounds fetches can't clobber a just-added chip), so we hand it setDestinationChips
   // directly. The removal note is a pure function of chip transitions, computed here by
@@ -88,8 +109,6 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
     }
     prevChipsRef.current = destinationChips;
   }, [destinationChips, days]);
-
-  if (!open) return null;
 
   const handleClose = () => {
     setConfirmDelete(false);
@@ -119,175 +138,157 @@ export default function EditTripModal({ trip, days, open, onClose, onSubmit, sav
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  const formId = 'edit-trip-form';
+
   return (
-    <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-[22px] border" style={{ background: 'var(--ink-surface)', borderColor: 'var(--ink-border)' }}>
-        <form onSubmit={handleSubmit} className="p-5 sm:p-7 max-h-[85vh] overflow-y-auto">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div>
-              <p className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--gold)' }}>
-                Edit Trip
-              </p>
-              <h2 className="font-display italic text-3xl" style={{ color: 'var(--cream)' }}>
-                Refine the plan.
-              </h2>
-            </div>
-            <button type="button" onClick={handleClose} className="font-mono text-xs tracking-[0.24em] uppercase" style={{ color: 'var(--cream-dim)' }}>
-              Close
-            </button>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <label className="block sm:col-span-2">
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
-                Trip Title
-              </span>
-              <input
-                type="text"
-                value={form.title}
-                onChange={set('title')}
-                required
-                className="w-full px-4 py-3 rounded-xl font-mono text-sm"
-                style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
-              />
-            </label>
-
-            <DestinationChipPicker
-              chips={destinationChips}
-              onChange={setDestinationChips}
-              lookupCities={lookupCities}
+    <ModalShell
+      open={open}
+      onRequestClose={handleClose}
+      eyebrow="Edit Trip"
+      headline="Refine the plan."
+      maxWidth="2xl"
+      footer={
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={handleClose}
+            className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
+            style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form={formId}
+            disabled={!form.title.trim() || saving}
+            className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
+            style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !form.title.trim() || saving ? 0.6 : 1 }}
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      }
+    >
+      <form id={formId} onSubmit={handleSubmit} className="pb-6">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <label className="block sm:col-span-2">
+            <span className="modal-label">Trip Title</span>
+            <input
+              type="text"
+              value={form.title}
+              onChange={set('title')}
+              required
+              className="modal-input"
             />
-            {removalNote && (
-              <p className="sm:col-span-2 -mt-2 font-mono text-[11px] tracking-[0.08em]" style={{ color: 'var(--cream-dim)' }}>
-                {removalNote}
-              </p>
+          </label>
+
+          <DestinationChipPicker
+            chips={destinationChips}
+            onChange={setDestinationChips}
+            lookupCities={lookupCities}
+          />
+          {removalNote && (
+            <p className="sm:col-span-2 -mt-2 font-mono text-[11px] tracking-[0.08em]" style={{ color: 'var(--cream-dim)' }}>
+              {removalNote}
+            </p>
+          )}
+
+          <label className="block">
+            <span className="modal-label">Start Date</span>
+            <input
+              type="date"
+              value={trip.startDate}
+              disabled
+              className="modal-input opacity-40 cursor-not-allowed"
+            />
+            <span className="font-mono text-[10px] tracking-[0.14em] mt-1 block" style={{ color: 'rgba(240,234,216,0.35)' }}>
+              Start date cannot be changed
+            </span>
+          </label>
+
+          <label className="block">
+            <span className="modal-label">End Date</span>
+            <input
+              type="date"
+              value={form.endDate}
+              min={trip.startDate}
+              onChange={set('endDate')}
+              className="modal-input"
+            />
+            {form.endDate < trip.endDate && (
+              <span className="font-mono text-[10px] tracking-[0.14em] mt-1 block" style={{ color: '#e08a3a' }}>
+                Shortening will remove later days (blocked if they have stops)
+              </span>
             )}
+          </label>
 
-            <label className="block">
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
-                Start Date
-              </span>
-              <input
-                type="date"
-                value={trip.startDate}
-                disabled
-                className="w-full px-4 py-3 rounded-xl font-mono text-sm opacity-40 cursor-not-allowed"
-                style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
-              />
-              <span className="font-mono text-[10px] tracking-[0.14em] mt-1 block" style={{ color: 'rgba(240,234,216,0.35)' }}>
-                Start date cannot be changed
-              </span>
-            </label>
+          <label className="block">
+            <span className="modal-label">Travellers</span>
+            <select
+              value={form.travellers}
+              onChange={set('travellers')}
+              className="modal-input"
+            >
+              <option value="solo">Solo</option>
+              <option value="couple">Couple</option>
+              <option value="family">Family</option>
+              <option value="friends">Friends</option>
+            </select>
+          </label>
 
-            <label className="block">
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
-                End Date
-              </span>
-              <input
-                type="date"
-                value={form.endDate}
-                min={trip.startDate}
-                onChange={set('endDate')}
-                className="w-full px-4 py-3 rounded-xl font-mono text-sm"
-                style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
-              />
-              {form.endDate < trip.endDate && (
-                <span className="font-mono text-[10px] tracking-[0.14em] mt-1 block" style={{ color: '#e08a3a' }}>
-                  Shortening will remove later days (blocked if they have stops)
-                </span>
-              )}
-            </label>
+          <label className="block">
+            <span className="modal-label">Pace</span>
+            <select
+              value={form.pace}
+              onChange={set('pace')}
+              className="modal-input"
+            >
+              <option value="slow">Slow</option>
+              <option value="moderate">Moderate</option>
+              <option value="fast">Fast</option>
+            </select>
+          </label>
 
-            <label className="block">
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
-                Travellers
-              </span>
-              <select
-                value={form.travellers}
-                onChange={set('travellers')}
-                className="w-full px-4 py-3 rounded-xl font-mono text-sm"
-                style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
-              >
-                <option value="solo">Solo</option>
-                <option value="couple">Couple</option>
-                <option value="family">Family</option>
-                <option value="friends">Friends</option>
-              </select>
-            </label>
+          <InterestTagPicker
+            selected={form.interestTags}
+            onChange={(tags) => setForm((f) => ({ ...f, interestTags: tags }))}
+          />
+        </div>
 
-            <label className="block">
-              <span className="font-mono text-[11px] tracking-[0.22em] uppercase mb-2 block" style={{ color: 'var(--cream-mute)' }}>
-                Pace
-              </span>
-              <select
-                value={form.pace}
-                onChange={set('pace')}
-                className="w-full px-4 py-3 rounded-xl font-mono text-sm"
-                style={{ background: 'var(--ink-mid)', border: '1px solid var(--ink-border)', color: 'var(--cream)' }}
-              >
-                <option value="slow">Slow</option>
-                <option value="moderate">Moderate</option>
-                <option value="fast">Fast</option>
-              </select>
-            </label>
+        {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
 
-            <InterestTagPicker
-              selected={form.interestTags}
-              onChange={(tags) => setForm((f) => ({ ...f, interestTags: tags }))}
-            />
-          </div>
-
-          {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
-
-          <div className="mt-6 flex items-center justify-between gap-3">
+        <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--ink-border)' }}>
+          {confirmDelete ? (
             <div className="flex items-center gap-2">
-              {confirmDelete ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(false)}
-                    className="px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
-                    style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onDelete}
-                    disabled={deleting}
-                    className="px-4 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
-                    style={{ background: '#c0392b', color: '#fff', opacity: deleting ? 0.6 : 1 }}
-                  >
-                    {deleting ? 'Deleting…' : 'Confirm delete'}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(true)}
-                  className="px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border"
-                  style={{ color: '#c0392b', borderColor: 'rgba(192,57,43,0.3)' }}
-                >
-                  Delete trip
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={handleClose} className="px-4 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border" style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border min-h-[44px]"
+                style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
+              >
                 Cancel
               </button>
               <button
-                type="submit"
-                disabled={!form.title.trim() || saving}
-                className="px-5 py-3 rounded-xl font-mono text-xs tracking-[0.22em] uppercase"
-                style={{ background: 'var(--gold)', color: 'var(--ink-deep)', opacity: !form.title.trim() || saving ? 0.6 : 1 }}
+                type="button"
+                onClick={onDelete}
+                disabled={deleting}
+                className="modal-danger-fill px-4 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase min-h-[44px]"
+                style={{ opacity: deleting ? 0.6 : 1 }}
               >
-                {saving ? 'Saving...' : 'Save Changes'}
+                {deleting ? 'Deleting…' : 'Confirm delete'}
               </button>
             </div>
-          </div>
-        </form>
-      </div>
-    </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="modal-danger-text modal-danger-border px-3 py-2 rounded-xl font-mono text-xs tracking-[0.22em] uppercase border min-h-[44px]"
+            >
+              Delete trip
+            </button>
+          )}
+        </div>
+      </form>
+    </ModalShell>
   );
 }
