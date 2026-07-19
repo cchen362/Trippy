@@ -1,6 +1,6 @@
 # Implementation Plan 18 — Modal Sweep Completion: Share/Admin/Account Sheets, DocumentViewer, ErrorBanner
 
-**Status: W1 COMPLETE 2026-07-19 — all five items shipped + browser-verified locally (375px + desktop); awaiting deploy + owner prod QA.**
+**Status: W1 COMPLETE + DEPLOYED 2026-07-19 (server at c0cab58); owner prod QA PASSED. W2 (attachment follow-ups, §2b) OPEN — not started.**
 **W1 deviations/additions:** (1) ModalShell now renders via `createPortal(document.body)` — required because the sticky `backdrop-blur-md` header hosting the admin/account triggers becomes the containing block for `position: fixed` descendants (this is why the old code portaled); orchestrator-reviewed. (2) ModalShell's body gets `pb-6 sm:pb-7` when no footer is passed — footer-less content sheets (share/admin/account) otherwise ended flush at the panel edge; footered Plan 17 modals unchanged. (3) DocumentViewer holds `onClose` in a ref so parent re-renders don't re-run the focus/scroll-lock effect. (4) Owner-flagged during QA: LogisticsTab booking detail sheet action row now wraps (`flex-wrap`) and the sheet moved z-40 → z-[110] so the CopilotFab (z-100) no longer floats over it (co-pilot panel at 199–200 still wins). (5) Owner-flagged extra scope, commit 7d27724: co-pilot FAB/panel were invisible and unreachable on the Map tab — Leaflet's internal z-indexes (panes 200–700, controls 1000) competed page-wide because the map wrapper created no stacking context, burying FAB (z-100) and panel (z-199/200). Fixed with `isolation: isolate` on the MapTab map wrapper; co-pilot stays available on Map by owner decision (same shared conversation on all four tabs). Browser-verified mobile + desktop: FAB visible, panel opens above tiles, closes via ✕.
 **Date:** 2026-07-19
 **Baseline:** Plan 17 (CLOSED, deployed 43f83d7) built `ModalShell` and migrated the five form flows. This plan finishes the sweep for design coherence: the remaining hand-rolled overlays and the last off-palette `#f8b4b4` reds.
@@ -39,6 +39,14 @@
 5. **Sweep exit-check:** zero `#f8b4b4` / `rgba(248,180,180` anywhere in `frontend/src`; no hand-rolled `fixed inset-0` overlays outside ModalShell except DocumentViewer (justified full-screen) and CopilotPanel/DiscoveryPanel/DayPicker (out of scope).
 
 **Verification:** `cd frontend; npx vitest run` + `npm run build`; 375px + desktop passes on all four surfaces; Escape/Tab on each; share sheet opened WITH the co-pilot panel open (layering per D3); DocumentViewer QR scannability pane unchanged; owner click-script for motion/feel.
+
+## 2b. Post-deploy owner QA findings (2026-07-19, prod pass otherwise CLEAN) — follow-up wave W2
+
+Owner prod QA passed all W1 surfaces. Two pre-existing attachment defects found (root causes verified this session; both small):
+
+**W2-1 — PDF attachment renders Trippy-inside-Trippy (bug).** Root cause: `frontend/vite.config.js` VitePWA `workbox` block has NO `navigateFallback` denylist, so Workbox's default serves precached `index.html` for every navigation request — and an `<iframe>` load (how DocumentViewer embeds PDFs) is a navigation request. `<img>` loads are not, which is why PNGs work. Backend routes and the `/api` SPA-fallback exclusion in `backend/src/index.js` are correct; the service worker answers before the network. Only reproduces where the SW is active (prod/installed PWA). Fix: add `navigateFallbackDenylist: [/^\/api\//]` to the `workbox` config. Verify in a production build (`npm run build` + preview) — dev serves no SW.
+
+**W2-2 — no delete-attachment UI (missing feature).** Backend `DELETE /api/bookings/:bookingId/attachments/:attachmentId` exists and is access-checked (`backend/src/services/attachments.js` `deleteAttachment`); the frontend wrapper exists (`frontend/src/services/bookingsApi.js:12` `deleteAttachment`) but no UI calls it. Fix: ✕ affordance on document chips in the LogisticsTab booking detail sheet (`frontend/src/pages/LogisticsTab.jsx` ~line 205–220), two-step Confirm? pattern matching the existing booking-delete, `#e05a5a` danger family. ONLY on `source: 'attachment'` docs — `documents[]` also contains `source: 'import'` files from import artifacts (`backend/src/services/documents.js`), which this route cannot delete; import chips get no ✕.
 
 ## 3. Out of scope
 
