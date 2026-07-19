@@ -247,7 +247,7 @@ export default function ExpenseSheet({
           <div className="space-y-5 pt-1">
             <label className="block">
               <span className="modal-label">Paid by</span>
-              <select value={form.payerUserId} onChange={(e) => setForm((f) => ({ ...f, payerUserId: Number(e.target.value) }))} className="modal-input">
+              <select value={form.payerUserId} onChange={(e) => setForm((f) => ({ ...f, payerUserId: e.target.value }))} className="modal-input">
                 {collaborators.map((person) => (
                   <option key={person.id} value={person.id}>{person.displayName || person.username}</option>
                 ))}
@@ -264,7 +264,7 @@ export default function ExpenseSheet({
                 <span className="modal-label">Linked booking</span>
                 <select
                   value={form.bookingId ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, bookingId: e.target.value ? Number(e.target.value) : null }))}
+                  onChange={(e) => setForm((f) => ({ ...f, bookingId: e.target.value || null }))}
                   className="modal-input"
                 >
                   <option value="">Not linked</option>
@@ -309,7 +309,8 @@ export default function ExpenseSheet({
                       value={row.amount}
                       onChange={(e) => updateOwedRow(i, { amount: e.target.value })}
                       placeholder="0.00"
-                      className="modal-input w-28"
+                      className="modal-input"
+                      style={{ width: '7rem', flexShrink: 0 }}
                     />
                     <button type="button" onClick={() => removeOwedRow(i)} aria-label="Remove" className="p-2" style={{ color: 'var(--cream-mute)' }}>
                       <X size={16} />
