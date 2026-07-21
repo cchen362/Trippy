@@ -235,6 +235,22 @@ The proposed work is feasible, but it is not a presentation-only change. A later
 - Public sharing of expenses, booking costs, repayments, or financial metadata.
 - A fifth bottom-navigation tab.
 
+## 9. Post-review owner decisions (2026-07-21)
+
+An independent follow-up assessment (2026-07-21) verified every factual claim above against the live code and surfaced five product decisions the owner has now resolved. These are binding on the implementation plan.
+
+| # | Question | Decision |
+| --- | --- | --- |
+| a | Diary repayment mirror for non-payer viewers | **Render the mirror line only when the viewer is the payer.** Rationale is presentation altitude, not privacy — all collaborators can open any expense and see every owed row; only the "X owes you" phrasing is worth diary-level space. |
+| b | Settled-row behaviour in the repayments section | **Keep settled rows inline with strikethrough and a toggle-back**, exactly as shipped. §2.1's "settled rows disappear" is rejected: the checklist mental model plus mis-tap recovery wins. Revisit clutter with a collapsed "Settled (n)" group only if a real trip demonstrates the problem. |
+| c | Open-repayment consequences in the booking-delete review | **Yes, per-line.** Each checked cost with open owed rows shows a one-line consequence under its checkbox (e.g. `includes Sarah's ¥50 open repayment`), and the confirm button aggregates. Bottom-only warnings are rejected as overlookable. |
+| d | Scoping of booking cost indicators versus summary totals | **Rows are shared, totals are personal.** The booking card badge and detail-sheet cost lines count all linked expenses regardless of payer (trip-wide); the Expenses summary stays scoped to the viewer's own outlay (shipped D1). Each cost line in the booking detail shows the payer initial so the asymmetry is self-explaining. |
+| e | Owed-name identity (free-text `expense_owed.name`) | **Both fixes.** Entry-time suggestion chips in the owed rows (existing owed names on this trip plus collaborator display names) prevent variants at the source; grouping and chip dedupe use a normalized key (lowercase, internal whitespace stripped) so `Chee Loon` / `Cheeloon` / `CheeLoon` / `cheeloon` group as one person. Display uses the first-entered form. |
+
+Additional owner UI feedback (2026-07-21): the expense-row booking link glyph (11px `Link2` icon after the date) is too small to notice and reads as punctuation. Replace it with a legible booking reference in the row's mono metadata line as part of the booking-disclosure wave, since both surfaces of the expense-booking relationship should be redesigned together.
+
+Implementation is planned in `../plans/Implementation Plan 20 Expenses Refinement and Booking Costs.md`.
+
 ## Suggested follow-up review prompt
 
 ```text
