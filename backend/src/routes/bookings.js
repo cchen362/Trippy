@@ -30,7 +30,7 @@ router.patch('/bookings/:bookingId', (req, res, next) => {
 
 router.delete('/bookings/:bookingId', (req, res, next) => {
   try {
-    res.json(deleteBooking(req.user.id, req.params.bookingId));
+    res.json(deleteBooking(req.user.id, req.params.bookingId, req.body || {}));
   } catch (error) {
     next(error);
   }

@@ -10,6 +10,7 @@ import CaptureFlow from '../components/import/CaptureFlow.jsx';
 import DocumentViewer from '../components/documents/DocumentViewer.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import ExpenseSheet from '../components/expenses/ExpenseSheet.jsx';
+import BookingDeleteReview from '../components/logistics/BookingDeleteReview.jsx';
 import { categoryMeta } from '../components/expenses/categoryMeta.js';
 import { bookingCostDefaults } from '../components/expenses/bookingCostDefaults.js';
 import { bookingsApi } from '../services/bookingsApi.js';
@@ -124,6 +125,7 @@ export default function LogisticsTab() {
   const linkedExpenses = liveSelected
     ? expensesState.expenses.filter((e) => e.bookingId === liveSelected.id)
     : [];
+  const showDeleteReview = confirmDelete && linkedExpenses.length > 0;
 
   const openAddCost = () => {
     setEditingExpense(null);
@@ -166,14 +168,22 @@ export default function LogisticsTab() {
     return result;
   };
 
-  const handleDeleteBooking = async () => {
+  const handleDeleteBooking = async (deleteExpenseIds = []) => {
     setDeleteError(null);
     try {
-      await deleteBooking(liveSelected.id);
+      await deleteBooking(liveSelected.id, deleteExpenseIds);
+      // Surviving linked costs are now unlinked (booking_id set to NULL server-side) —
+      // LogisticsTab owns its own useExpenses store, so refresh it alongside the trip.
+      await expensesState.refresh();
       closeSheet();
     } catch (err) {
-      setDeleteError(err.message || 'Could not delete this booking.');
-      setConfirmDelete(false);
+      // The server validates every expense id before its transaction opens, so a
+      // failure means nothing at all was deleted. Re-sync the cost list: if the
+      // cause was a cost deleted on another device, the stale row disappears from
+      // the review instead of failing every retry. The dialog stays open with the
+      // selection intact so the user can retry without losing context.
+      setDeleteError(`${err.message || 'Could not delete this booking.'} Nothing was deleted.`);
+      await expensesState.refresh();
     }
   };
 
@@ -396,7 +406,7 @@ export default function LogisticsTab() {
               <p className="mt-3 font-body text-sm" style={{ color: '#e05a5a' }}>{attachError}</p>
             )}
 
-            {deleteError && (
+            {deleteError && !showDeleteReview && (
               <p className="mt-3 font-body text-sm" style={{ color: '#e05a5a' }}>{deleteError}</p>
             )}
 
@@ -408,58 +418,71 @@ export default function LogisticsTab() {
               className="sr-only"
             />
 
-            <div className="mt-6 flex flex-wrap justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={attaching}
-                className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase flex items-center gap-2"
-                style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
-              >
-                <Paperclip size={14} />
-                {attaching ? 'Attaching…' : 'Attach'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(liveSelected);
-                  setSelectedBooking(null);
-                }}
-                className="modal-action"
-              >
-                Edit Booking
-              </button>
-              {confirmDelete ? (
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(false)}
-                    className="font-mono text-xs tracking-[0.22em] uppercase"
-                    style={{ color: 'var(--cream-dim)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteBooking}
-                    disabled={saving}
-                    className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-                    style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)', opacity: saving ? 0.6 : 1 }}
-                  >
-                    {saving ? 'Deleting…' : 'Confirm?'}
-                  </button>
-                </div>
-              ) : (
+            {showDeleteReview ? (
+              <div className="mt-6">
+                <BookingDeleteReview
+                  booking={liveSelected}
+                  expenses={linkedExpenses}
+                  saving={saving}
+                  error={deleteError}
+                  onCancel={() => { setConfirmDelete(false); setDeleteError(null); }}
+                  onConfirm={handleDeleteBooking}
+                />
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-wrap justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
-                  className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
-                  style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)' }}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={attaching}
+                  className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase flex items-center gap-2"
+                  style={{ color: 'var(--cream-dim)', borderColor: 'var(--ink-border)' }}
                 >
-                  Delete Booking
+                  <Paperclip size={14} />
+                  {attaching ? 'Attaching…' : 'Attach'}
                 </button>
-              )}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(liveSelected);
+                    setSelectedBooking(null);
+                  }}
+                  className="modal-action"
+                >
+                  Edit Booking
+                </button>
+                {confirmDelete ? (
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="font-mono text-xs tracking-[0.22em] uppercase"
+                      style={{ color: 'var(--cream-dim)' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteBooking()}
+                      disabled={saving}
+                      className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
+                      style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)', opacity: saving ? 0.6 : 1 }}
+                    >
+                      {saving ? 'Deleting…' : 'Confirm?'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setDeleteError(null); setConfirmDelete(true); }}
+                    className="px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase"
+                    style={{ color: '#e05a5a', borderColor: 'rgba(224,90,90,0.28)' }}
+                  >
+                    Delete Booking
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

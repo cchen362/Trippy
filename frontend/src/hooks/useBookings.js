@@ -25,7 +25,7 @@ export function useBookings({ tripId, onChanged }) {
     error,
     createBooking: (data) => run(() => bookingsApi.create(tripId, data)),
     updateBooking: (bookingId, data) => run(() => bookingsApi.update(bookingId, data)),
-    deleteBooking: (bookingId) => run(() => bookingsApi.remove(bookingId)),
+    deleteBooking: (bookingId, deleteExpenseIds) => run(() => bookingsApi.remove(bookingId, deleteExpenseIds)),
     lookupHotels: bookingsApi.lookupHotels,
     lookupHotelDetails: bookingsApi.lookupHotelDetails,
     lookupFlight: bookingsApi.lookupFlight,

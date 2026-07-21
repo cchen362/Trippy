@@ -1,19 +1,16 @@
 import { formatMinor } from '../../utils/currency.js';
 import { categoryMeta } from './categoryMeta.js';
+import { normalizeOwedName } from '../../utils/owedNames.js';
 
 // Rows here are owed amounts on expenses the current user paid — the people
 // who owe money back. Displayed grouped by a normalized name key so different
 // spellings/casing of the same person collapse into one group, in the
 // ORIGINAL expense currency (the totals block is the only place that
 // converts — D1/D6).
-function normalizeName(name) {
-  return (name || '').toLowerCase().replace(/\s+/g, '');
-}
-
 function groupByName(rows) {
   const groups = new Map();
   for (const row of rows) {
-    const key = normalizeName(row.name);
+    const key = normalizeOwedName(row.name);
     if (!groups.has(key)) groups.set(key, { key, label: row.name, rows: [] });
     groups.get(key).rows.push(row);
   }

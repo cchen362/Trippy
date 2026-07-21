@@ -206,11 +206,39 @@ export async function updateBooking(userId, bookingId, input) {
   return formatBooking(row);
 }
 
-export function deleteBooking(userId, bookingId) {
+export function deleteBooking(userId, bookingId, options = {}) {
+  const booking = assertBookingAccess(userId, bookingId);
   const db = getDb();
-  assertBookingAccess(userId, bookingId);
-  db.prepare('DELETE FROM stops WHERE booking_id = ? AND booking_required = 1').run(bookingId);
-  db.prepare('UPDATE stops SET booking_id = NULL WHERE booking_id = ?').run(bookingId);
-  db.prepare('DELETE FROM bookings WHERE id = ?').run(bookingId);
-  return { ok: true };
+
+  const rawIds = options.deleteExpenseIds;
+  const ids = rawIds === undefined || rawIds === null ? [] : rawIds;
+  if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || id.length === 0)) {
+    throw Object.assign(new Error('deleteExpenseIds must be an array of expense ids'), { status: 400 });
+  }
+  const dedupedIds = [...new Set(ids)];
+
+  // Every expense id is validated (existence, trip membership, and linkage to this
+  // booking) before the transaction opens below — a bad payload must never
+  // partially apply, matching the prepareExpenseCreate validate-then-write pattern.
+  for (const expenseId of dedupedIds) {
+    const row = db.prepare('SELECT id, trip_id, booking_id FROM expenses WHERE id = ?').get(expenseId);
+    if (!row || row.trip_id !== booking.trip_id) {
+      throw Object.assign(new Error('Expense not found'), { status: 404 });
+    }
+    if (row.booking_id !== bookingId) {
+      throw Object.assign(new Error('Expense is not linked to this booking'), { status: 400 });
+    }
+  }
+
+  const run = db.transaction(() => {
+    for (const expenseId of dedupedIds) {
+      db.prepare('DELETE FROM expenses WHERE id = ?').run(expenseId);
+    }
+    db.prepare('DELETE FROM stops WHERE booking_id = ? AND booking_required = 1').run(bookingId);
+    db.prepare('UPDATE stops SET booking_id = NULL WHERE booking_id = ?').run(bookingId);
+    db.prepare('DELETE FROM bookings WHERE id = ?').run(bookingId);
+  });
+  run();
+
+  return { ok: true, deletedExpenseCount: dedupedIds.length };
 }

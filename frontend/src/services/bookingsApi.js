@@ -4,7 +4,11 @@ export const bookingsApi = {
   list: (tripId) => request(`/api/trips/${tripId}/bookings`),
   create: (tripId, data) => request(`/api/trips/${tripId}/bookings`, { method: 'POST', body: data }),
   update: (bookingId, data) => request(`/api/bookings/${bookingId}`, { method: 'PATCH', body: data }),
-  remove: (bookingId) => request(`/api/bookings/${bookingId}`, { method: 'DELETE' }),
+  remove: (bookingId, deleteExpenseIds) =>
+    request(`/api/bookings/${bookingId}`, {
+      method: 'DELETE',
+      ...(deleteExpenseIds?.length ? { body: { deleteExpenseIds } } : {}),
+    }),
   listAttachments: (bookingId) => request(`/api/bookings/${bookingId}/attachments`),
   addAttachment: (bookingId, { mediaType, filename, content }) =>
     request(`/api/bookings/${bookingId}/attachments`, { method: 'POST', body: { mediaType, filename, content } }),

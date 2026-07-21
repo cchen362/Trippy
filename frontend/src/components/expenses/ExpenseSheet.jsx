@@ -6,10 +6,7 @@ import CurrencyChip from './CurrencyChip.jsx';
 import { EXPENSE_CATEGORIES, categoryMeta } from './categoryMeta.js';
 import { minorUnitsFor, formatMinor, toMinorUnits } from '../../utils/currency.js';
 import { localIso } from '../../utils/date.js';
-
-function normalizeName(s) {
-  return s.toLowerCase().replace(/\s+/g, '');
-}
+import { normalizeOwedName as normalizeName } from '../../utils/owedNames.js';
 
 function toMajorString(minor, currency) {
   if (minor === null || minor === undefined) return '';

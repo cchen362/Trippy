@@ -20,7 +20,7 @@ const { initDb, getDb } = await import('../src/db/database.js');
 const { runMigrations } = await import('../src/db/migrations.js');
 const authService = await import('../src/services/auth.js');
 const { createTrip } = await import('../src/services/trips.js');
-const { createBooking, listBookings } = await import('../src/services/bookings.js');
+const { createBooking, listBookings, deleteBooking } = await import('../src/services/bookings.js');
 const { addAttachment } = await import('../src/services/attachments.js');
 const { createArtifactAndExtract, deleteArtifact } = await import('../src/services/importer.js');
 const { createExpense } = await import('../src/services/expenses.js');
@@ -342,5 +342,166 @@ describe('composite booking + cost create', () => {
 
     expect(booking.expenseSummary).toBe(null);
     expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+});
+
+describe('deleteBooking with linked expenses', () => {
+  function countBookingsById(bookingId) {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM bookings WHERE id = ?').get(bookingId).n;
+  }
+
+  function expenseRow(expenseId) {
+    return getDb().prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId);
+  }
+
+  function owedRows(expenseId) {
+    return getDb().prepare('SELECT * FROM expense_owed WHERE expense_id = ?').all(expenseId);
+  }
+
+  it('deletes the booking and leaves all linked expenses unlinked when no ids are given', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense: e1 } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+      owed: [{ name: 'Friend', amount: 10000 }],
+    });
+    const { expense: e2 } = createExpense(owner.id, trip.trip.id, {
+      amount: 12000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-12', bookingId: booking.id,
+    });
+
+    const result = deleteBooking(owner.id, booking.id);
+    expect(result).toEqual({ ok: true, deletedExpenseCount: 0 });
+    expect(countBookingsById(booking.id)).toBe(0);
+
+    const row1 = expenseRow(e1.id);
+    const row2 = expenseRow(e2.id);
+    expect(row1.booking_id).toBe(null);
+    expect(row2.booking_id).toBe(null);
+    expect(owedRows(e1.id)).toHaveLength(1);
+  });
+
+  it('deletes the booking and empty deleteExpenseIds array behaves the same as no body', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+
+    const result = deleteBooking(owner.id, booking.id, { deleteExpenseIds: [] });
+    expect(result).toEqual({ ok: true, deletedExpenseCount: 0 });
+    expect(countBookingsById(booking.id)).toBe(0);
+    expect(expenseRow(expense.id).booking_id).toBe(null);
+  });
+
+  it('deletes exactly the one selected expense and its owed rows, leaving the other unlinked', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense: e1 } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+      owed: [{ name: 'Friend', amount: 10000 }],
+    });
+    const { expense: e2 } = createExpense(owner.id, trip.trip.id, {
+      amount: 12000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-12', bookingId: booking.id,
+    });
+
+    const result = deleteBooking(owner.id, booking.id, { deleteExpenseIds: [e1.id] });
+    expect(result).toEqual({ ok: true, deletedExpenseCount: 1 });
+    expect(countBookingsById(booking.id)).toBe(0);
+    expect(expenseRow(e1.id)).toBeUndefined();
+    expect(owedRows(e1.id)).toHaveLength(0);
+
+    const row2 = expenseRow(e2.id);
+    expect(row2).toBeDefined();
+    expect(row2.booking_id).toBe(null);
+  });
+
+  it('deletes all selected expenses when many are given', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense: e1 } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+    const { expense: e2 } = createExpense(owner.id, trip.trip.id, {
+      amount: 12000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-12', bookingId: booking.id,
+    });
+
+    const result = deleteBooking(owner.id, booking.id, { deleteExpenseIds: [e1.id, e2.id] });
+    expect(result).toEqual({ ok: true, deletedExpenseCount: 2 });
+    expect(countBookingsById(booking.id)).toBe(0);
+    expect(expenseRow(e1.id)).toBeUndefined();
+    expect(expenseRow(e2.id)).toBeUndefined();
+  });
+
+  it('rejects an expense id from a different trip with 404 and deletes nothing', async () => {
+    const trip = makeTrip();
+    const otherTrip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const otherBooking = await createBooking(owner.id, otherTrip.trip.id, { type: 'hotel', title: 'Other hotel' });
+    const { expense: ownExpense } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+    const { expense: foreignExpense } = createExpense(owner.id, otherTrip.trip.id, {
+      amount: 5000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: otherBooking.id,
+    });
+
+    expect(() => deleteBooking(owner.id, booking.id, { deleteExpenseIds: [ownExpense.id, foreignExpense.id] }))
+      .toThrow(expect.objectContaining({ status: 404 }));
+
+    expect(countBookingsById(booking.id)).toBe(1);
+    expect(expenseRow(ownExpense.id)).toBeDefined();
+    expect(expenseRow(foreignExpense.id)).toBeDefined();
+  });
+
+  it('rejects an expense id linked to a different booking (same trip) with 400 and deletes nothing', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const otherBooking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Other hotel' });
+    const { expense: ownExpense } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+    const { expense: otherBookingExpense } = createExpense(owner.id, trip.trip.id, {
+      amount: 5000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: otherBooking.id,
+    });
+
+    expect(() => deleteBooking(owner.id, booking.id, { deleteExpenseIds: [ownExpense.id, otherBookingExpense.id] }))
+      .toThrow(expect.objectContaining({ status: 400 }));
+
+    expect(countBookingsById(booking.id)).toBe(1);
+    expect(expenseRow(ownExpense.id)).toBeDefined();
+    expect(expenseRow(otherBookingExpense.id)).toBeDefined();
+  });
+
+  it('rejects an expense id that is unlinked (same trip, no booking) with 400 and deletes nothing', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense: unlinkedExpense } = createExpense(owner.id, trip.trip.id, {
+      amount: 5000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11',
+    });
+
+    expect(() => deleteBooking(owner.id, booking.id, { deleteExpenseIds: [unlinkedExpense.id] }))
+      .toThrow(expect.objectContaining({ status: 400 }));
+
+    expect(countBookingsById(booking.id)).toBe(1);
+    expect(expenseRow(unlinkedExpense.id)).toBeDefined();
+  });
+
+  it('rejects a nonexistent hex id with 404 and deletes nothing', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+
+    expect(() => deleteBooking(owner.id, booking.id, { deleteExpenseIds: ['deadbeefdeadbeefdeadbeefdeadbeef'] }))
+      .toThrow(expect.objectContaining({ status: 404 }));
+
+    expect(countBookingsById(booking.id)).toBe(1);
+  });
+
+  it('rejects deleteExpenseIds that is not an array with 400', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+
+    expect(() => deleteBooking(owner.id, booking.id, { deleteExpenseIds: 'abc' }))
+      .toThrow(expect.objectContaining({ status: 400 }));
+
+    expect(countBookingsById(booking.id)).toBe(1);
   });
 });
