@@ -1,6 +1,6 @@
 # Implementation Plan 20 — Expenses Refinement and Booking Costs
 
-**Status:** NOT STARTED — no wave begun.
+**Status:** IN PROGRESS — Wave 1 complete (committed `450c493`, 2026-07-21), awaiting owner prod QA after deploy. Waves 2–4 not started.
 
 **Written:** 2026-07-21, from the [expenses experience review](../reviews/2026-07-20-expenses-experience-and-booking-costs-review.md) (§9 records the binding owner decisions) after an independent code-verified assessment. This plan is self-contained: every file path, payload shape, and gotcha below was verified against the live code on 2026-07-21 at commit `dc38d00`. Do not re-derive these facts; trust them unless the code has visibly moved.
 
