@@ -36,8 +36,8 @@ export default function PlanTab() {
     try {
       await reorderStops(activeDay.id, orderedStopIds);
     } catch {
-      // reorderStops already recorded the failure on useStops.error (surfaced by
-      // TripPage's shared banner). The optimistic order in Timeline's local state
+      // reorderStops already routed the failure to TripPage's shared banner via
+      // useStops onError. The optimistic order in Timeline's local state
       // never made it to the server, so refetch to re-sync `day.stops` with truth.
       await refresh();
     }
@@ -51,7 +51,11 @@ export default function PlanTab() {
     reportError(err, 'Could not move that stop.');
   });
 
-  const handleDeleteStop = (stopId) => deleteStop(stopId).catch(() => {});
+  const handleDeleteStop = (stopId) => deleteStop(stopId).catch((err) => {
+    // deleteStop routes the failure to TripPage's shared banner via useStops onError.
+    // Log locally too so the failure is never invisible (no silent swallow).
+    console.error('[stops] delete failed:', err);
+  });
 
   const handleAddPlace = (data) => createStop(activeDay.id, data);
 

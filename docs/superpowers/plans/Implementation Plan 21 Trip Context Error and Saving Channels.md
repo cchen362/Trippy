@@ -147,9 +147,14 @@ Assessment behind this choice (the owner asked for implication vs effort):
 
 ## Wave 1 — Error channel
 
-**Status:** NOT STARTED
+**Status:** COMPLETE — 2026-07-22. Browser-verified locally; not yet deployed (deploy held until W2 per the plan). Baseline 187 → 191 tests (4 added). Deviations: none beyond the anticipated comment refresh in the two F4 note-blur call sites and `handleReorder`; also removed a now-useless `catch(err){throw err}` in `useBookings` (try/finally is behaviour-identical and cleaner). No product decision changed.
 
-Files: `frontend/src/hooks/useStops.js`, `frontend/src/hooks/useBookings.js`, `frontend/src/pages/TripPage.jsx`, `frontend/src/pages/PlanTab.jsx`.
+**What was verified in the browser (Chrome extension, logged-in `localhost:5174`, Taipei–Kaohsiung trip):**
+- Stop create forced to fail → shared page banner **"SOMETHING WENT WRONG — Forced stop failure (QA)"** appeared on Plan *and* the modal's own inline error showed (both channels, as intended).
+- Navigated Plan → Map → banner **cleared** (D4).
+- Booking delete forced to fail → inline sheet error **"Forced booking delete failure (QA) Nothing was deleted."** with **no** page banner (booking mirror removed). No DB mutation occurred (all forced failures rejected client-side).
+
+Files: `frontend/src/hooks/useStops.js`, `frontend/src/hooks/useBookings.js`, `frontend/src/pages/TripPage.jsx`, `frontend/src/pages/PlanTab.jsx`. Comment-only touches in `StopCard.jsx`, `TransitStop.jsx` (F4 wording). New tests: `useStops.test.jsx`, `useBookings.test.jsx`.
 
 1. **Both hooks:** add `onError` to the options object. Replace the latched error state entirely — delete the `error` `useState` and remove `error` from the returned object. `run()`'s catch becomes:
 

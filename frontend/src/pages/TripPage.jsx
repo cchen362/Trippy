@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Edit2, Users, Wallet } from 'lucide-react';
@@ -31,7 +31,13 @@ export default function TripPage() {
   const location = useLocation();
   const isExpensesRoute = location.pathname.endsWith('/expenses');
   const tripState = useTrip(tripId);
-  const stopActions = useStops({ onChanged: tripState.refresh });
+  const [pageError, setPageError] = useState(null);
+  const reportError = useCallback((err, fallback) => setPageError(err?.message || fallback), []);
+  // D3 CONTRACT: useStops opts into the shared page banner via onError; useBookings does NOT.
+  // Four stop call sites depend on this banner surfacing their failures — do not remove onError
+  // without re-homing them: PlanTab.handleReorder, PlanTab.handleDeleteStop,
+  // StopCard.handleNoteBlur, TransitStop.handleNoteBlur.
+  const stopActions = useStops({ onChanged: tripState.refresh, onError: reportError });
   const bookingActions = useBookings({ tripId, onChanged: tripState.refresh });
   const copilotState = useCopilot(tripId);
   const [copilotOpen, setCopilotOpen] = useState(false);
@@ -40,24 +46,18 @@ export default function TripPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [pageError, setPageError] = useState(null);
   const discovery = useDiscovery(tripId);
 
   useEffect(() => {
     if (tripId) window.localStorage.setItem('trippy:lastTripId', tripId);
   }, [tripId]);
 
-  // Surface mutation failures from the stop/booking hooks alongside page-level
-  // catch handlers (delete trip, edit trip, map corrections) in one shared banner.
+  // A banner must not outlive the screen that produced it (D4). Every current producer
+  // leaves the user on its originating tab, so clearing on pathname change is safe.
   useEffect(() => {
-    if (stopActions.error) setPageError(stopActions.error.message || 'Could not save that change.');
-  }, [stopActions.error]);
+    setPageError(null);
+  }, [location.pathname]);
 
-  useEffect(() => {
-    if (bookingActions.error) setPageError(bookingActions.error.message || 'Could not save that change.');
-  }, [bookingActions.error]);
-
-  const reportError = (err, fallback) => setPageError(err?.message || fallback);
   const openCopilot = (context) => {
     setCopilotContext(context ? { ...context } : null);
     setCopilotOpen(true);

@@ -118,7 +118,7 @@ export default function StopCard({ stop, expanded, onToggle, onDelete, onUpdate,
       setNoteDirty(false);
     } catch {
       // Failed save: keep noteDirty true so the value isn't silently discarded.
-      // useStops.error is already surfaced by the shared TripPage banner.
+      // The failure is surfaced by the shared TripPage banner via useStops onError.
     }
   };
 

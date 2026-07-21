@@ -32,7 +32,7 @@ export default function TransitStop({ stop, index, expanded, onExpand, onDelete,
       setNoteDirty(false);
     } catch {
       // Failed save: keep noteDirty true so the value isn't silently discarded.
-      // useStops.error is already surfaced by the shared TripPage banner.
+      // The failure is surfaced by the shared TripPage banner via useStops onError.
     }
   };
 
