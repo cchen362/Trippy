@@ -56,7 +56,8 @@ QA for every wave: run automated tests locally, exercise the flow in a real brow
 - All ids are **hex strings**. Never `Number()` a form value that holds an id (Plan 19 W3 regression).
 - `.modal-input` sets `width:100%` and beats Tailwind `w-*` utilities; use inline style for narrower inputs (see ExpenseSheet owed amount input).
 - The in-app Browser pane runs pages as `document.hidden` → requestAnimationFrame paused → framer-motion animations freeze at frame 0. Verify settled end-states, let the owner confirm motion.
-- Dev QA: launch.json servers (frontend :5174, backend :3002); mint an `auth_sessions` row and set `document.cookie` to log in.
+- Dev QA: launch.json servers (frontend :5174, backend :3002). Use the **Claude in Chrome extension** for browser QA, not the in-app Browser pane — the pane runs the tab as `document.hidden` (see below) and its `document.cookie` auth-mint approach did not authenticate in this session (401s from `/api/auth/me` despite a validated `auth_sessions` row and correct cookie); Chrome extension against an already-logged-in localhost:5174 tab worked immediately with no login friction.
+- A second dev-only user, **"Sam QA"** (`e8be62d8a35ec71c7893ef0dd6108b60`), exists as a collaborator on the "Shanghai - Hangzhou (W3 verify)" trip in the local dev DB (`backend/data/trippy.db`) — created during Wave 1 QA specifically so payer/non-payer scenarios (e.g. the mirror line's payer-only rule) can be tested with two real accounts without minting throwaway data each session. Local-only, never touches prod.
 - Money is always integer minor units. Conversions happen only in `computeTotals`; every other surface shows original currency.
 - Prod migrations table is `_migrations` (irrelevant here — no migration — but do not "helpfully" add one).
 
