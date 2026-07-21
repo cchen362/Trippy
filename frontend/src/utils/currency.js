@@ -57,6 +57,16 @@ const CURRENCY_SYMBOLS = {
   IDR: 'Rp', PHP: '₱', VND: '₫',
 };
 
+// Converts a user-typed major-unit amount string (e.g. "12.5") to an integer
+// minor-unit amount for the given currency's decimal precision. Returns null
+// when the input doesn't parse to a finite number.
+export function toMinorUnits(amountStr, currency) {
+  const decimals = minorUnitsFor(currency);
+  const value = parseFloat(amountStr);
+  if (!Number.isFinite(value)) return null;
+  return Math.round(value * 10 ** decimals);
+}
+
 export function formatMinor(amount, currency) {
   if (amount === null || amount === undefined || !currency) return '—';
   const decimals = minorUnitsFor(currency);

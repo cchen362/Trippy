@@ -260,9 +260,11 @@ export async function listExpenses(userId, tripId) {
   };
 }
 
-export function createExpense(userId, tripId, input) {
+// Validates and resolves a create payload. Performs NO database writes, so a caller
+// can fail the whole operation before anything is persisted. Shared by createExpense
+// and the composite booking+cost path in bookings.js.
+export function prepareExpenseCreate(userId, tripId, input) {
   const trip = assertTripAccess(userId, tripId);
-  const db = getDb();
 
   if (!Number.isInteger(input.amount) || input.amount <= 0) {
     throw Object.assign(new Error('amount is required and must be a positive integer'), { status: 400 });
@@ -289,33 +291,57 @@ export function createExpense(userId, tripId, input) {
     manualRate: input.manualRate,
   });
 
+  return { trip, tripId, input, currency, owed, payerUserId, bookingId, fx };
+}
+
+// Performs the expense + owed row inserts. MUST be called inside a db.transaction()
+// owned by the caller. `bookingIdOverride` lets the composite create path link the
+// expense to a booking row inserted moments earlier in the same transaction.
+export function insertPreparedExpense(db, prepared, bookingIdOverride = undefined) {
+  const { tripId, input, currency, owed, payerUserId, fx } = prepared;
+  const bookingId = bookingIdOverride !== undefined ? bookingIdOverride : prepared.bookingId;
+
+  const row = db.prepare(`
+    INSERT INTO expenses (
+      trip_id, booking_id, payer_user_id, title, note, category, amount, currency,
+      expense_date, summary_amount, summary_currency, fx_rate, fx_rate_date, fx_source
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING id
+  `).get(
+    tripId, bookingId, payerUserId, input.title?.trim() || null, input.note?.trim() || null,
+    input.category, input.amount, currency, input.expenseDate,
+    fx.summaryAmount, fx.summaryCurrency, fx.fxRate, fx.fxRateDate, fx.fxSource,
+  );
+  const expenseId = row.id;
+  writeOwedRows(db, expenseId, owed);
+  return expenseId;
+}
+
+// Post-commit side effect: schedule async FX stamping when the write left
+// summary_amount null. Never call inside a transaction.
+export function finalizeExpenseCreate(prepared, expenseId) {
+  if (prepared.fx.summaryAmount === null && prepared.trip.summary_currency) {
+    scheduleStamp(expenseId);
+  }
+}
+
+export function createExpense(userId, tripId, input) {
+  const prepared = prepareExpenseCreate(userId, tripId, input);
+  const db = getDb();
+
   let expenseId;
   const run = db.transaction(() => {
-    const row = db.prepare(`
-      INSERT INTO expenses (
-        trip_id, booking_id, payer_user_id, title, note, category, amount, currency,
-        expense_date, summary_amount, summary_currency, fx_rate, fx_rate_date, fx_source
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING id
-    `).get(
-      tripId, bookingId, payerUserId, input.title?.trim() || null, input.note?.trim() || null,
-      input.category, input.amount, currency, input.expenseDate,
-      fx.summaryAmount, fx.summaryCurrency, fx.fxRate, fx.fxRateDate, fx.fxSource,
-    );
-    expenseId = row.id;
-    writeOwedRows(db, expenseId, owed);
+    expenseId = insertPreparedExpense(db, prepared);
   });
   run();
 
-  if (fx.summaryAmount === null && trip.summary_currency) {
-    scheduleStamp(expenseId);
-  }
+  finalizeExpenseCreate(prepared, expenseId);
 
   const saved = fetchExpenseRow(db, expenseId);
   return {
     expense: formatExpense(saved, fetchOwedRows(db, expenseId)),
-    totals: computeTotals(tripId, userId, trip.summary_currency),
+    totals: computeTotals(tripId, userId, prepared.trip.summary_currency),
   };
 }
 

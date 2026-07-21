@@ -11,6 +11,7 @@ import DocumentViewer from '../components/documents/DocumentViewer.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import ExpenseSheet from '../components/expenses/ExpenseSheet.jsx';
 import { categoryMeta } from '../components/expenses/categoryMeta.js';
+import { bookingCostDefaults } from '../components/expenses/bookingCostDefaults.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { fileToInput } from '../services/importApi.js';
 import { formatMinor, currencyForCountry } from '../utils/currency.js';
@@ -87,6 +88,15 @@ export default function LogisticsTab() {
     ? [collaboration.owner, ...collaboration.collaborators]
     : collaboration.collaborators;
 
+  // Memoised on the booking's primitive fields, not the booking object — `bookings`
+  // gets a fresh identity on every trip refresh, and ExpenseSheet resets its form when
+  // `defaults` changes identity, which would wipe an in-progress edit.
+  const addCostBooking = addCostBookingId ? bookings.find((x) => x.id === addCostBookingId) : null;
+  const addCostDefaults = useMemo(
+    () => (addCostBooking ? bookingCostDefaults(addCostBooking, user?.id) : null),
+    [addCostBooking?.id, addCostBooking?.type, addCostBooking?.title, user?.id], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   // Clear the navigation-state flag once read so a page refresh or revisit doesn't
   // resurface the same one-time import-failure message.
   useEffect(() => {
@@ -146,6 +156,14 @@ export default function LogisticsTab() {
     await expensesState.deleteExpense(expenseId);
     await refresh();
     closeExpenseSheet();
+  };
+
+  const handleCreateBooking = async (data) => {
+    const result = await createBooking(data);
+    // A composite create wrote an expense the local store hasn't seen — the trip
+    // refresh inside createBooking only carries the booking-card badge.
+    if (data.cost) await expensesState.refresh();
+    return result;
   };
 
   const handleDeleteBooking = async () => {
@@ -457,7 +475,8 @@ export default function LogisticsTab() {
         collaborators={collaboratorOptions}
         bookings={bookings}
         allExpenses={expensesState.expenses}
-        presetBookingId={addCostBookingId}
+        fixedBookingId={addCostBookingId}
+        defaults={addCostDefaults}
         saving={expensesState.saving}
         onSave={handleSaveExpense}
         onDelete={handleDeleteExpense}
@@ -467,12 +486,13 @@ export default function LogisticsTab() {
       <AddBookingModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onSubmit={createBooking}
+        onSubmit={handleCreateBooking}
         saving={saving}
         lookupHotels={lookupHotels}
         lookupHotelDetails={lookupHotelDetails}
         lookupFlight={lookupFlight}
         lookupCities={lookupCities}
+        defaultCostCurrency={defaultCurrency}
       />
 
       {/* Edit modal — keyed on booking.id so React remounts (and resets form) when target changes */}

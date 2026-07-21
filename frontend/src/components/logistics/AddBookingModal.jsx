@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { cityFromAirportString, cityFromIata, canonicalCity } from '../../utils/airports.js';
+import { toMinorUnits } from '../../utils/currency.js';
+import { localIso } from '../../utils/date.js';
+import { categoryForBookingType } from '../expenses/bookingCostDefaults.js';
+import CurrencyChip from '../expenses/CurrencyChip.jsx';
 import {
   DEFAULT_FORM,
   normalizeForm,
@@ -63,6 +68,7 @@ export default function AddBookingModal({
   lookupCities,
   booking,        // when provided, opens in edit mode (or seeds a draft, see `mode`)
   mode,           // "create" | "edit" | "draft" — defaults based on `booking` presence
+  defaultCostCurrency, // currency the optional Booking cost disclosure prefills (create mode only)
 }) {
   const resolvedMode = resolveBookingMode(mode, booking);
   const isEditing = resolvedMode === 'edit';
@@ -75,6 +81,12 @@ export default function AddBookingModal({
   // Session token for Google Places Autocomplete — generated on first hotel keystroke,
   // carried through to the Place Details call, then discarded. One UUID per search session.
   const [hotelSessionToken, setHotelSessionToken] = useState(null);
+  // Optional booking-cost disclosure (create mode only) — a saved booking's costs are
+  // managed from the detail sheet instead, never re-opened here.
+  const [costOpen, setCostOpen] = useState(false);
+  const [costAmount, setCostAmount] = useState('');
+  const [costCurrency, setCostCurrency] = useState(defaultCostCurrency || 'SGD');
+  const [costDate, setCostDate] = useState(() => localIso());
 
   // Sync form state when the booking prop changes (switching between edit targets
   // or transitioning from create to edit mode).
@@ -85,8 +97,12 @@ export default function AddBookingModal({
       setSuggestions([]);
       setSelectedHotelText('');
       setHotelSessionToken(null);
+      setCostOpen(false);
+      setCostAmount('');
+      setCostCurrency(defaultCostCurrency || 'SGD');
+      setCostDate(localIso());
     }
-  }, [open, booking]);
+  }, [open, booking, defaultCostCurrency]);
 
   useEffect(() => {
     if (!open || form.type !== 'hotel' || form.hotelName.trim().length < 3) {
@@ -162,9 +178,32 @@ export default function AddBookingModal({
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError(null);
+    const payload = normalizeForm(form);
+    // Gated on the amount alone, not on `costOpen` — collapsing the disclosure clears
+    // the amount (below), so a typed cost can never be silently dropped on save.
+    if (resolvedMode === 'create' && costAmount.trim()) {
+      const amountMinor = toMinorUnits(costAmount, costCurrency);
+      if (amountMinor === null || amountMinor <= 0) {
+        setError('Booking cost must be a positive amount.');
+        return;
+      }
+      payload.cost = {
+        amount: amountMinor,
+        currency: costCurrency,
+        category: categoryForBookingType(payload.type),
+        expenseDate: costDate,
+        title: payload.title || null,
+      };
+    }
     try {
-      await onSubmit(normalizeForm(form));
-      if (!isEditing) setForm(DEFAULT_FORM);
+      await onSubmit(payload);
+      if (!isEditing) {
+        setForm(DEFAULT_FORM);
+        setCostOpen(false);
+        setCostAmount('');
+        setCostCurrency(defaultCostCurrency || 'SGD');
+        setCostDate(localIso());
+      }
       setSuggestions([]);
       onClose();
     } catch (err) {
@@ -641,6 +680,51 @@ export default function AddBookingModal({
               Show in itinerary
             </span>
           </label>
+
+          {resolvedMode === 'create' && (
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (costOpen) setCostAmount('');
+                  setCostOpen(!costOpen);
+                }}
+                className="flex items-center gap-2 font-mono text-[11px] tracking-[0.22em] uppercase"
+                style={{ color: 'var(--cream-mute)' }}
+              >
+                {costOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                Booking cost
+              </button>
+
+              {costOpen && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-end gap-3">
+                    <label className="block flex-1">
+                      <span className="modal-label">Amount</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        min="0"
+                        value={costAmount}
+                        onChange={(e) => setCostAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="modal-input"
+                      />
+                    </label>
+                    <CurrencyChip value={costCurrency} onChange={setCostCurrency} />
+                  </div>
+                  <label className="block">
+                    <span className="modal-label">Date paid</span>
+                    <input type="date" value={costDate} onChange={(e) => setCostDate(e.target.value)} className="modal-input" />
+                  </label>
+                  <p className="font-mono text-[10px]" style={{ color: 'var(--cream-mute)' }}>
+                    Optional — logs this as an expense linked to the booking.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <p className="mt-4 font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>}
       </form>

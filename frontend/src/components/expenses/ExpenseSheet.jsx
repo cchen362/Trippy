@@ -4,18 +4,11 @@ import ModalShell from '../shell/ModalShell.jsx';
 import ErrorBanner from '../common/ErrorBanner.jsx';
 import CurrencyChip from './CurrencyChip.jsx';
 import { EXPENSE_CATEGORIES, categoryMeta } from './categoryMeta.js';
-import { minorUnitsFor, formatMinor } from '../../utils/currency.js';
+import { minorUnitsFor, formatMinor, toMinorUnits } from '../../utils/currency.js';
 import { localIso } from '../../utils/date.js';
 
 function normalizeName(s) {
   return s.toLowerCase().replace(/\s+/g, '');
-}
-
-function toMinor(amountStr, currency) {
-  const decimals = minorUnitsFor(currency);
-  const value = parseFloat(amountStr);
-  if (!Number.isFinite(value)) return null;
-  return Math.round(value * 10 ** decimals);
 }
 
 function toMajorString(minor, currency) {
@@ -24,7 +17,7 @@ function toMajorString(minor, currency) {
   return (minor / 10 ** decimals).toString();
 }
 
-function emptyForm(defaultCurrency, currentUserId, presetBookingId = null) {
+function emptyForm(defaultCurrency, currentUserId, overrides) {
   return {
     amount: '',
     currency: defaultCurrency,
@@ -32,10 +25,11 @@ function emptyForm(defaultCurrency, currentUserId, presetBookingId = null) {
     expenseDate: localIso(),
     title: '',
     note: '',
-    bookingId: presetBookingId,
+    bookingId: null,
     payerUserId: currentUserId,
     manualRate: '',
     owed: [],
+    ...(overrides || {}),
   };
 }
 
@@ -70,12 +64,23 @@ export default function ExpenseSheet({
   collaborators = [],
   bookings = [],
   allExpenses = [],
-  presetBookingId = null,
+  // Locks the expense to a single booking (no "Linked booking" picker; the booking
+  // is shown as static text above the form instead). Null when unlinked.
+  fixedBookingId = null,
+  // Prefill overrides applied on top of the base empty form (e.g. title/category/
+  // date/payer seeded from a booking). MUST be a useMemo'd object (or null) from
+  // the caller — it sits in the reset effect's dependency list below, so a fresh
+  // object identity on every render would reset the form on every render too.
+  defaults = null,
   saving,
   onSave,
   onDelete,
 }) {
-  const [form, setForm] = useState(() => (expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, presetBookingId)));
+  const createOverrides = useMemo(
+    () => ({ ...(defaults || {}), ...(fixedBookingId ? { bookingId: fixedBookingId } : {}) }),
+    [defaults, fixedBookingId],
+  );
+  const [form, setForm] = useState(() => (expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, createOverrides)));
   const [moreOpen, setMoreOpen] = useState(false);
   const [error, setError] = useState(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -84,13 +89,11 @@ export default function ExpenseSheet({
 
   useEffect(() => {
     if (!open) return;
-    setForm(expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, presetBookingId));
-    // A preset booking is worth surfacing immediately — expand "More" so the linked
-    // booking (and the rest of the collapsed fields) aren't hidden behind a tap.
-    setMoreOpen(Boolean(!expense && presetBookingId));
+    setForm(expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, createOverrides));
+    setMoreOpen(false);
     setError(null);
     setConfirmDeleteOpen(false);
-  }, [open, expense, defaultCurrency, currentUserId, presetBookingId]);
+  }, [open, expense, defaultCurrency, currentUserId, createOverrides]);
 
   const owedSuggestionPool = useMemo(() => {
     const freq = new Map(); // normalizedKey -> { name, count }
@@ -124,17 +127,20 @@ export default function ExpenseSheet({
       .map((entry) => entry.name);
   }, [allExpenses, collaborators, form.payerUserId]);
 
+  // Null when the id doesn't resolve (stale link) — the static line is simply omitted.
+  const fixedBooking = fixedBookingId ? bookings.find((b) => b.id === fixedBookingId) || null : null;
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
-  const amountMinor = toMinor(form.amount, form.currency);
+  const amountMinor = toMinorUnits(form.amount, form.currency);
   const amountValid = amountMinor !== null && amountMinor > 0;
 
   const owedSumMinor = form.owed.reduce((sum, row) => {
-    const rowMinor = toMinor(row.amount, form.currency);
+    const rowMinor = toMinorUnits(row.amount, form.currency);
     return sum + (Number.isFinite(rowMinor) ? rowMinor : 0);
   }, 0);
   const owedExceedsAmount = amountValid && owedSumMinor > amountMinor;
-  const owedRowsIncomplete = form.owed.some((row) => !row.name.trim() || toMinor(row.amount, form.currency) === null);
+  const owedRowsIncomplete = form.owed.some((row) => !row.name.trim() || toMinorUnits(row.amount, form.currency) === null);
 
   const canSave = amountValid && !owedExceedsAmount && !owedRowsIncomplete;
 
@@ -162,7 +168,7 @@ export default function ExpenseSheet({
       manualRate: form.manualRate.trim() ? parseFloat(form.manualRate) : (expense ? null : undefined),
       owed: form.owed.map((row) => ({
         name: row.name.trim(),
-        amount: toMinor(row.amount, form.currency),
+        amount: toMinorUnits(row.amount, form.currency),
         settled: Boolean(row.settled),
       })),
     };
@@ -285,6 +291,13 @@ export default function ExpenseSheet({
       <form id={formId} onSubmit={handleSubmit} className="pb-6 space-y-5">
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
+        {fixedBooking && (
+          <div>
+            <span className="modal-label">Linked booking</span>
+            <p className="font-mono text-xs" style={{ color: 'var(--cream)' }}>{fixedBooking.title}</p>
+          </div>
+        )}
+
         <div className="flex items-end gap-3">
           <label className="block flex-1">
             <span className="modal-label">Amount</span>
@@ -367,7 +380,7 @@ export default function ExpenseSheet({
               <textarea value={form.note} onChange={set('note')} className="modal-input" rows={2} />
             </label>
 
-            {bookings.length > 0 && (
+            {!fixedBookingId && bookings.length > 0 && (
               <label className="block">
                 <span className="modal-label">Linked booking</span>
                 <select

@@ -2,6 +2,7 @@ import { getDb } from '../db/database.js';
 import { syncStopWithBooking } from './stops.js';
 import { assertBookingAccess, assertTripAccess } from './trips.js';
 import { resolveBookingDocuments } from './documents.js';
+import { prepareExpenseCreate, insertPreparedExpense, finalizeExpenseCreate } from './expenses.js';
 
 function parseJson(value) {
   if (!value) return {};
@@ -102,36 +103,60 @@ export async function createBooking(userId, tripId, input) {
   assertTripAccess(userId, tripId);
   const db = getDb();
 
-  const row = db.prepare(`
-    INSERT INTO bookings (
-      trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
-      origin, destination, terminal_or_station, details_json, show_in_itinerary,
-      origin_tz, destination_tz
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    RETURNING *
-  `).get(
-    tripId,
-    input.type,
-    input.title.trim(),
-    input.confirmationRef || null,
-    input.bookingSource || null,
-    input.startDatetime || null,
-    input.endDatetime || null,
-    input.origin || null,
-    input.destination || null,
-    input.terminalOrStation || null,
-    normalizeDetailsJson(input.detailsJson),
-    defaultShowInItinerary(input),
-    input.originTz      || null,
-    input.destinationTz || null,
-  );
+  // A `cost` alongside the booking is prepared (validated + resolved) BEFORE any
+  // write, so an invalid cost throws with nothing persisted — the transaction below
+  // never opens on an already-doomed cost payload.
+  let preparedCost = null;
+  if (input.cost) {
+    if (input.cost.bookingId !== undefined) {
+      throw Object.assign(new Error('cost must not carry a bookingId — it links to the booking being created'), { status: 400 });
+    }
+    preparedCost = prepareExpenseCreate(userId, tripId, input.cost);
+  }
+
+  let row;
+  let expenseId;
+  const run = db.transaction(() => {
+    row = db.prepare(`
+      INSERT INTO bookings (
+        trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
+        origin, destination, terminal_or_station, details_json, show_in_itinerary,
+        origin_tz, destination_tz
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    `).get(
+      tripId,
+      input.type,
+      input.title.trim(),
+      input.confirmationRef || null,
+      input.bookingSource || null,
+      input.startDatetime || null,
+      input.endDatetime || null,
+      input.origin || null,
+      input.destination || null,
+      input.terminalOrStation || null,
+      normalizeDetailsJson(input.detailsJson),
+      defaultShowInItinerary(input),
+      input.originTz      || null,
+      input.destinationTz || null,
+    );
+
+    if (preparedCost) {
+      expenseId = insertPreparedExpense(db, preparedCost, row.id);
+    }
+  });
+  run();
+
+  const expenseSummary = preparedCost
+    ? { count: 1, single: { expenseId, amount: preparedCost.input.amount, currency: preparedCost.currency } }
+    : null;
+  if (preparedCost) {
+    finalizeExpenseCreate(preparedCost, expenseId);
+  }
 
   await syncStopWithBooking(row);
-  // No expense can be linked to a booking before the booking exists — expenseSummary
-  // is always null on the create response. The client's next trip-detail refresh
-  // carries the real aggregate once a cost is added.
-  return formatBooking(row);
+  return formatBooking(row, expenseSummary);
 }
 
 export async function updateBooking(userId, bookingId, input) {

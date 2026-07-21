@@ -223,3 +223,124 @@ describe('booking expenseSummary aggregate', () => {
     expect(updated.expenseSummary).toBe(null);
   });
 });
+
+describe('composite booking + cost create', () => {
+  function countBookings(tripId) {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM bookings WHERE trip_id = ?').get(tripId).n;
+  }
+
+  function countExpenses(tripId) {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM expenses WHERE trip_id = ?').get(tripId).n;
+  }
+
+  it('persists the booking and its linked cost atomically, with owed rows', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel',
+      cost: {
+        amount: 42000,
+        currency: 'JPY',
+        category: 'lodging',
+        expenseDate: '2026-09-11',
+        title: 'Hotel deposit',
+        owed: [{ name: 'Friend', amount: 10000 }],
+      },
+    });
+
+    expect(booking.expenseSummary).toEqual({
+      count: 1,
+      single: { expenseId: expect.any(String), amount: 42000, currency: 'JPY' },
+    });
+
+    const db = getDb();
+    const expenseRows = db.prepare('SELECT * FROM expenses WHERE trip_id = ?').all(trip.trip.id);
+    expect(expenseRows).toHaveLength(1);
+    expect(expenseRows[0].booking_id).toBe(booking.id);
+    expect(expenseRows[0].trip_id).toBe(trip.trip.id);
+    expect(expenseRows[0].amount).toBe(42000);
+    expect(expenseRows[0].currency).toBe('JPY');
+    expect(expenseRows[0].category).toBe('lodging');
+
+    const owedRows = db.prepare('SELECT * FROM expense_owed WHERE expense_id = ?').all(expenseRows[0].id);
+    expect(owedRows).toHaveLength(1);
+    expect(owedRows[0]).toMatchObject({ name: 'Friend', amount: 10000 });
+  });
+
+  it('rolls back the whole create when the cost amount is invalid', async () => {
+    const trip = makeTrip();
+    await expect(createBooking(owner.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel',
+      cost: { amount: 0, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11' },
+    })).rejects.toMatchObject({ status: 400 });
+
+    expect(countBookings(trip.trip.id)).toBe(0);
+    expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+
+  it('rolls back the whole create when owed exceeds the cost amount', async () => {
+    const trip = makeTrip();
+    await expect(createBooking(owner.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel',
+      cost: {
+        amount: 1000,
+        currency: 'JPY',
+        category: 'lodging',
+        expenseDate: '2026-09-11',
+        owed: [{ name: 'Friend', amount: 5000 }],
+      },
+    })).rejects.toMatchObject({ status: 400 });
+
+    expect(countBookings(trip.trip.id)).toBe(0);
+    expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+
+  it('rejects a cost payerUserId that is not a trip member, with no booking created', async () => {
+    const trip = makeTrip();
+    await expect(createBooking(owner.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel',
+      cost: {
+        amount: 1000,
+        currency: 'JPY',
+        category: 'lodging',
+        expenseDate: '2026-09-11',
+        payerUserId: 'not-a-real-user-id',
+      },
+    })).rejects.toMatchObject({ status: 400 });
+
+    expect(countBookings(trip.trip.id)).toBe(0);
+    expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+
+  it('rejects a cost carrying a bookingId, with no booking created', async () => {
+    const trip = makeTrip();
+    const other = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Other hotel' });
+
+    await expect(createBooking(owner.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel',
+      cost: {
+        amount: 1000,
+        currency: 'JPY',
+        category: 'lodging',
+        expenseDate: '2026-09-11',
+        bookingId: other.id,
+      },
+    })).rejects.toMatchObject({ status: 400 });
+
+    // Only the pre-existing "Other hotel" booking remains.
+    expect(countBookings(trip.trip.id)).toBe(1);
+    expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+
+  it('creates no expense and returns null expenseSummary when no cost is provided', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+
+    expect(booking.expenseSummary).toBe(null);
+    expect(countExpenses(trip.trip.id)).toBe(0);
+  });
+});
