@@ -1,6 +1,6 @@
 # Implementation Plan 20 — Expenses Refinement and Booking Costs
 
-**Status:** IN PROGRESS — Wave 1 CLOSED (committed `450c493`, deployed `a2e93f0`, owner prod QA passed 2026-07-21 via the click-script). Wave 2 CLOSED (committed `6e71a1b`, deployed 2026-07-21, owner prod QA passed 2026-07-21 — all 7 click-script items confirmed). Wave 3 CLOSED (committed `33c62d0`, deployed 2026-07-21, owner prod QA passed 2026-07-21 — all 9 click-script steps confirmed). Wave 4 implemented and locally verified 2026-07-21 — awaiting deploy and owner prod QA.
+**Status:** COMPLETE — all four waves CLOSED, deployed, and owner prod-QA'd (2026-07-21). No migration was needed anywhere in this plan, as forecast. Wave 1 CLOSED (committed `450c493`, deployed `a2e93f0`, owner prod QA passed 2026-07-21 via the click-script). Wave 2 CLOSED (committed `6e71a1b`, deployed 2026-07-21, owner prod QA passed 2026-07-21 — all 7 click-script items confirmed). Wave 3 CLOSED (committed `33c62d0`, deployed 2026-07-21, owner prod QA passed 2026-07-21 — all 9 click-script steps confirmed). Wave 4 CLOSED (committed `1e7f4e2`, deployed 2026-07-21, owner prod QA passed 2026-07-21 — all 8 click-script steps confirmed).
 
 **Written:** 2026-07-21, from the [expenses experience review](../reviews/2026-07-20-expenses-experience-and-booking-costs-review.md) (§9 records the binding owner decisions) after an independent code-verified assessment. This plan is self-contained: every file path, payload shape, and gotcha below was verified against the live code on 2026-07-21 at commit `dc38d00`. Do not re-derive these facts; trust them unless the code has visibly moved.
 
@@ -205,7 +205,9 @@ Booking form UI: an optional collapsed `Booking cost` disclosure (amount + curre
 
 ## Wave 4 — Booking deletion review
 
-**Status:** COMPLETE (local) — implemented and verified 2026-07-21. Not yet deployed; owner prod QA pending. No migration (schema already supported it, as planned).
+**Status:** CLOSED — owner prod QA passed 2026-07-21, all 8 click-script steps confirmed. Implemented and deployed to prod 2026-07-21 (commit `1e7f4e2`, container `trippy-trippy-1` rebuilt and healthy, `/api/health` OK, deployed bundle verified to carry the W4 strings, prod DB counts unchanged and migrations still at 031 — no migration, as planned; restore point `trippy-2026-07-21-030001.db`).
+
+Owner prod QA note: prod carried **no open owed rows** at deploy time, so the click-script had the owner create one (step 4) before the per-checked-line repayment consequence could be exercised at all. Keep this in mind for any future repayment-facing verification — an empty `expense_owed` silently makes that whole surface untestable.
 
 **Backend** (`backend/src/services/bookings.js`, `backend/src/routes/bookings.js`): `deleteBooking(userId, bookingId, options = {})` accepts `options.deleteExpenseIds`. It validates the payload shape (array of non-empty strings, deduped preserving order) and then **every** id — existence, `trip_id` match (404, so cross-trip existence never leaks), and `booking_id === bookingId` (400) — all **before** the transaction opens, following Wave 3's `prepareExpenseCreate` validate-then-write pattern. One `db.transaction` then deletes the selected expenses (`expense_owed` cascades), runs the two pre-existing stop statements, and deletes the booking. Returns `{ ok: true, deletedExpenseCount }`. Unlisted linked expenses are left to migration 031's `ON DELETE SET NULL`, which needs no code. The route passes `req.body || {}`.
 
