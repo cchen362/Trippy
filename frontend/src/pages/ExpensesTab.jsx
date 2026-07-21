@@ -42,7 +42,7 @@ export default function ExpensesTab() {
   };
 
   const handleDelete = async (expenseId) => {
-    await expensesState.deleteExpense(expenseId).catch(() => {});
+    await expensesState.deleteExpense(expenseId);
     closeSheet();
   };
 
@@ -64,8 +64,35 @@ export default function ExpensesTab() {
     );
   }
 
+  const hasOpenRepayments = expenses.some(
+    (e) => e.payerUserId === user?.id && (e.owed || []).length > 0
+  );
+
+  const repaymentsSection = (
+    <section key="repayments">
+      <h2 className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>
+        To collect
+      </h2>
+      <RepaymentsList
+        expenses={expenses}
+        currentUserId={user?.id}
+        onToggleSettled={expensesState.toggleOwedSettled}
+        onOpenExpense={(expenseId) => openEdit(expenses.find((e) => e.id === expenseId))}
+      />
+    </section>
+  );
+
+  const recentEntriesSection = (
+    <section key="recent">
+      <h2 className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>
+        Recent entries
+      </h2>
+      <ExpenseList expenses={expenses} onOpen={openEdit} currentUserId={user?.id} />
+    </section>
+  );
+
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="max-w-2xl mx-auto space-y-8 pb-28">
       <SummaryCurrencyPrompt
         open={!loading && !summaryCurrency}
         onSave={handleSaveSummaryCurrency}
@@ -88,23 +115,17 @@ export default function ExpensesTab() {
 
       <ExpenseSummary totals={totals} />
 
-      <section>
-        <h2 className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>
-          Recent entries
-        </h2>
-        <ExpenseList expenses={expenses} onOpen={openEdit} />
-      </section>
-
-      <section>
-        <h2 className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>
-          Open repayments
-        </h2>
-        <RepaymentsList
-          expenses={expenses}
-          currentUserId={user?.id}
-          onToggleSettled={expensesState.toggleOwedSettled}
-        />
-      </section>
+      {hasOpenRepayments ? (
+        <>
+          {repaymentsSection}
+          {recentEntriesSection}
+        </>
+      ) : (
+        <>
+          {recentEntriesSection}
+          {repaymentsSection}
+        </>
+      )}
 
       <ExpenseSheet
         open={sheetOpen}
@@ -114,6 +135,7 @@ export default function ExpensesTab() {
         currentUserId={user?.id}
         collaborators={collaboratorOptions}
         bookings={bookings}
+        allExpenses={expenses}
         saving={saving}
         onSave={handleSave}
         onDelete={handleDelete}

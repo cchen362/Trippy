@@ -29,6 +29,7 @@ export default function TripPage() {
   const { tripId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const isExpensesRoute = location.pathname.endsWith('/expenses');
   const tripState = useTrip(tripId);
   const stopActions = useStops({ onChanged: tripState.refresh });
   const bookingActions = useBookings({ tripId, onChanged: tripState.refresh });
@@ -132,10 +133,18 @@ export default function TripPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => navigate(`/trips/${tripId}/expenses`)}
+              onClick={() => {
+                if (!isExpensesRoute) {
+                  navigate(`/trips/${tripId}/expenses`, { state: { from: location.pathname } });
+                  return;
+                }
+                const from = location.state?.from;
+                const target = from && from.startsWith(`/trips/${tripId}`) ? from : `/trips/${tripId}`;
+                navigate(target);
+              }}
               className="w-10 h-10 inline-flex items-center justify-center rounded-full border"
-              style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)', background: 'rgba(255,255,255,0.02)' }}
-              aria-label="Open trip expenses"
+              style={{ borderColor: 'var(--ink-border)', color: isExpensesRoute ? 'var(--gold)' : 'var(--cream-dim)', background: 'rgba(255,255,255,0.02)' }}
+              aria-label={isExpensesRoute ? 'Close trip expenses' : 'Open trip expenses'}
               title="Expenses"
             >
               <Wallet size={18} />

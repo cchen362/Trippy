@@ -26,7 +26,7 @@ export default function ExpenseSummary({ totals }) {
 
       {unestimatedEntries.length > 0 && (
         <p className="font-mono text-xs" style={{ color: 'var(--cream-mute)' }}>
-          {unestimatedEntries.map(([currency, amount]) => `+ ${formatMinor(amount, currency)} unestimated`).join(', ')}
+          Not included in total yet: {unestimatedEntries.map(([currency, amount]) => `+ ${formatMinor(amount, currency)} unestimated`).join(', ')}
         </p>
       )}
 

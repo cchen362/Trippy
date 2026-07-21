@@ -37,6 +37,6 @@ describe('ExpenseSummary', () => {
         }}
       />
     );
-    expect(screen.getByText('+ ¥1,240,000 unestimated')).toBeInTheDocument();
+    expect(screen.getByText('Not included in total yet: + ¥1,240,000 unestimated')).toBeInTheDocument();
   });
 });

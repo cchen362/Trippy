@@ -6,7 +6,7 @@ function payerInitial(name) {
   return (name || '?').trim().charAt(0).toUpperCase();
 }
 
-export default function ExpenseList({ expenses, onOpen }) {
+export default function ExpenseList({ expenses, onOpen, currentUserId }) {
   if (expenses.length === 0) {
     return (
       <p className="font-body text-base py-6 text-center" style={{ color: 'var(--cream-dim)' }}>
@@ -19,6 +19,9 @@ export default function ExpenseList({ expenses, onOpen }) {
     <ul className="divide-y" style={{ borderColor: 'var(--ink-border)' }}>
       {expenses.map((expense) => {
         const { Icon, label } = categoryMeta(expense.category);
+        const openOwed = (expense.owed || []).filter((o) => !o.settled);
+        const showOwedLine = expense.payerUserId === currentUserId && openOwed.length >= 1;
+        const owedSum = showOwedLine ? openOwed.reduce((sum, o) => sum + o.amount, 0) : 0;
         return (
           <li key={expense.id}>
             <button
@@ -40,6 +43,13 @@ export default function ExpenseList({ expenses, onOpen }) {
                   {expense.expenseDate}
                   {expense.bookingId && <Link2 size={11} className="inline ml-1.5 align-text-top" aria-label="Linked to a booking" />}
                 </span>
+                {showOwedLine && (
+                  <span className="block font-mono text-[10px]" style={{ color: 'var(--gold)' }}>
+                    {openOwed.length === 1
+                      ? `${openOwed[0].name} owes you ${formatMinor(owedSum, expense.currency)}`
+                      : `${openOwed.length} people owe you ${formatMinor(owedSum, expense.currency)}`}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 text-right">
                 <span className="block font-mono text-sm" style={{ color: 'var(--cream)' }}>
