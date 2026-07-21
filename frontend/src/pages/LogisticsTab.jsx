@@ -9,9 +9,19 @@ import OtherBookingCard from '../components/logistics/OtherBookingCard.jsx';
 import CaptureFlow from '../components/import/CaptureFlow.jsx';
 import DocumentViewer from '../components/documents/DocumentViewer.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
+import ExpenseSheet from '../components/expenses/ExpenseSheet.jsx';
+import { categoryMeta } from '../components/expenses/categoryMeta.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { fileToInput } from '../services/importApi.js';
+import { formatMinor, currencyForCountry } from '../utils/currency.js';
+import { useExpenses } from '../hooks/useExpenses.js';
+import { useCollaboration } from '../hooks/useCollaboration.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import { useTripContext } from './TripPage.jsx';
+
+function payerInitial(name) {
+  return (name || '?').trim().charAt(0).toUpperCase();
+}
 
 const CARD_BY_TYPE = {
   flight: FlightBookingCard,
@@ -37,6 +47,7 @@ export default function LogisticsTab() {
   const {
     trip,
     bookings,
+    activeDay,
     refresh,
     createBooking,
     updateBooking,
@@ -47,6 +58,10 @@ export default function LogisticsTab() {
     lookupFlight,
     lookupCities,
   } = useTripContext();
+
+  const { user } = useAuth();
+  const expensesState = useExpenses(trip.id);
+  const collaboration = useCollaboration(trip.id);
 
   const [addOpen, setAddOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -59,10 +74,18 @@ export default function LogisticsTab() {
   const [deleteError, setDeleteError] = useState(null);
   const [confirmDocUrl, setConfirmDocUrl] = useState(null);
   const [removingDoc, setRemovingDoc] = useState(false);
+  const [expenseSheetOpen, setExpenseSheetOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [addCostBookingId, setAddCostBookingId] = useState(null);
   const fileInputRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   const [importBanner, setImportBanner] = useState(location.state?.bannerMessage || null);
+
+  const defaultCurrency = currencyForCountry(activeDay?.resolvedCountry) || expensesState.summaryCurrency || 'SGD';
+  const collaboratorOptions = collaboration.owner
+    ? [collaboration.owner, ...collaboration.collaborators]
+    : collaboration.collaborators;
 
   // Clear the navigation-state flag once read so a page refresh or revisit doesn't
   // resurface the same one-time import-failure message.
@@ -86,6 +109,43 @@ export default function LogisticsTab() {
     setConfirmDelete(false);
     setDeleteError(null);
     setConfirmDocUrl(null);
+  };
+
+  const linkedExpenses = liveSelected
+    ? expensesState.expenses.filter((e) => e.bookingId === liveSelected.id)
+    : [];
+
+  const openAddCost = () => {
+    setEditingExpense(null);
+    setAddCostBookingId(liveSelected.id);
+    setExpenseSheetOpen(true);
+  };
+  const openEditExpense = (expense) => {
+    setEditingExpense(expense);
+    setAddCostBookingId(null);
+    setExpenseSheetOpen(true);
+  };
+  const closeExpenseSheet = () => {
+    setExpenseSheetOpen(false);
+    setEditingExpense(null);
+    setAddCostBookingId(null);
+  };
+
+  const handleSaveExpense = async (payload) => {
+    if (editingExpense) {
+      await expensesState.updateExpense(editingExpense.id, payload);
+    } else {
+      await expensesState.createExpense(payload);
+    }
+    // Booking-card badges read expenseSummary off the trip-detail payload — refresh
+    // it so "Add cost" flips to "Cost · …" without a full page reload.
+    await refresh();
+  };
+
+  const handleDeleteExpense = async (expenseId) => {
+    await expensesState.deleteExpense(expenseId);
+    await refresh();
+    closeExpenseSheet();
   };
 
   const handleDeleteBooking = async () => {
@@ -275,6 +335,45 @@ export default function LogisticsTab() {
               </div>
             )}
 
+            <div className="mt-4">
+              <p className="font-mono text-xs tracking-[0.22em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>Costs</p>
+              {linkedExpenses.length > 0 && (
+                <ul className="space-y-2 mb-3">
+                  {linkedExpenses.map((expense) => (
+                    <li key={expense.id}>
+                      <button
+                        type="button"
+                        onClick={() => openEditExpense(expense)}
+                        className="w-full flex items-center gap-3 text-left"
+                      >
+                        <span className="min-w-0 flex-1 font-body text-base truncate" style={{ color: 'var(--cream)' }}>
+                          {expense.title || categoryMeta(expense.category).label}
+                        </span>
+                        <span className="shrink-0 font-mono text-sm" style={{ color: 'var(--cream)' }}>
+                          {formatMinor(expense.amount, expense.currency)}
+                        </span>
+                        <span
+                          className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center font-mono text-[10px]"
+                          style={{ background: 'var(--ink-mid)', color: 'var(--cream-dim)' }}
+                          title={expense.payerName}
+                        >
+                          {payerInitial(expense.payerName)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                type="button"
+                onClick={openAddCost}
+                className="px-3 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase"
+                style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
+              >
+                {linkedExpenses.length > 0 ? 'Add another cost' : 'Add cost'}
+              </button>
+            </div>
+
             {attachError && (
               <p className="mt-3 font-body text-sm" style={{ color: '#e05a5a' }}>{attachError}</p>
             )}
@@ -348,6 +447,21 @@ export default function LogisticsTab() {
       )}
 
       <DocumentViewer document={viewerDoc} onClose={() => setViewerDoc(null)} />
+
+      <ExpenseSheet
+        open={expenseSheetOpen}
+        onClose={closeExpenseSheet}
+        expense={editingExpense}
+        defaultCurrency={defaultCurrency}
+        currentUserId={user?.id}
+        collaborators={collaboratorOptions}
+        bookings={bookings}
+        allExpenses={expensesState.expenses}
+        presetBookingId={addCostBookingId}
+        saving={expensesState.saving}
+        onSave={handleSaveExpense}
+        onDelete={handleDeleteExpense}
+      />
 
       {/* Create modal */}
       <AddBookingModal

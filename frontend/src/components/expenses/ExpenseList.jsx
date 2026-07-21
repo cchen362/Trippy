@@ -1,4 +1,3 @@
-import { Link2 } from 'lucide-react';
 import { categoryMeta } from './categoryMeta.js';
 import { formatMinor } from '../../utils/currency.js';
 
@@ -6,7 +5,7 @@ function payerInitial(name) {
   return (name || '?').trim().charAt(0).toUpperCase();
 }
 
-export default function ExpenseList({ expenses, onOpen, currentUserId }) {
+export default function ExpenseList({ expenses, onOpen, currentUserId, bookings = [] }) {
   if (expenses.length === 0) {
     return (
       <p className="font-body text-base py-6 text-center" style={{ color: 'var(--cream-dim)' }}>
@@ -19,6 +18,9 @@ export default function ExpenseList({ expenses, onOpen, currentUserId }) {
     <ul className="divide-y" style={{ borderColor: 'var(--ink-border)' }}>
       {expenses.map((expense) => {
         const { Icon, label } = categoryMeta(expense.category);
+        const bookingTitle = expense.bookingId
+          ? bookings.find((b) => b.id === expense.bookingId)?.title
+          : null;
         const openOwed = (expense.owed || []).filter((o) => !o.settled);
         const showOwedLine = expense.payerUserId === currentUserId && openOwed.length >= 1;
         const owedSum = showOwedLine ? openOwed.reduce((sum, o) => sum + o.amount, 0) : 0;
@@ -39,9 +41,9 @@ export default function ExpenseList({ expenses, onOpen, currentUserId }) {
                 <span className="block font-body text-base truncate" style={{ color: 'var(--cream)' }}>
                   {expense.title || label}
                 </span>
-                <span className="block font-mono text-[10px] tracking-[0.14em] uppercase" style={{ color: 'var(--cream-mute)' }}>
+                <span className="block font-mono text-[10px] tracking-[0.14em] uppercase truncate" style={{ color: 'var(--cream-mute)' }}>
                   {expense.expenseDate}
-                  {expense.bookingId && <Link2 size={11} className="inline ml-1.5 align-text-top" aria-label="Linked to a booking" />}
+                  {bookingTitle && ` · ${bookingTitle}`}
                 </span>
                 {showOwedLine && (
                   <span className="block font-mono text-[10px]" style={{ color: 'var(--gold)' }}>

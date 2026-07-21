@@ -20,6 +20,7 @@ export default function TicketStubCard({
   rightTzBadge,
   footerLeft,
   footerRight,
+  costLine,
   connector = false,
   hasDocuments = false,
   onClick,
@@ -94,17 +95,29 @@ export default function TicketStubCard({
           </div>
         )}
 
-        {(footerLeft || footerRight) && (
+        {(footerLeft || footerRight || costLine) && (
           <div className="logistics-transit-footer">
             <div className="logistics-footer-line" />
-            <div className="logistics-footer-row">
-              {footerLeft ? (
-                <span className="logistics-footer-label">{footerLeft}</span>
-              ) : <span />}
-              {footerRight ? (
-                <span className="logistics-footer-value">{footerRight}</span>
-              ) : <span />}
-            </div>
+            {(footerLeft || footerRight) && (
+              <div className="logistics-footer-row">
+                {footerLeft ? (
+                  <span className="logistics-footer-label">{footerLeft}</span>
+                ) : <span />}
+                {footerRight ? (
+                  <span className="logistics-footer-value">{footerRight}</span>
+                ) : <span />}
+              </div>
+            )}
+            {costLine && (
+              <div
+                className="logistics-footer-row"
+                style={(footerLeft || footerRight) ? { marginTop: 6 } : undefined}
+              >
+                <span className="logistics-footer-label">COST</span>
+                {/* Non-gold: the ticket's one gold accent is already spent on the booking ref above. */}
+                <span className="logistics-footer-value" style={{ color: 'var(--cream-dim)' }}>{costLine}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

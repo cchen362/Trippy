@@ -12,7 +12,7 @@ function parseJson(value) {
   }
 }
 
-function formatBooking(row) {
+function formatBooking(row, expenseSummary = null) {
   const detailsJson = parseJson(row.details_json);
   return {
     id: row.id,
@@ -32,7 +32,30 @@ function formatBooking(row) {
     detailsJson,
     createdAt: row.created_at,
     documents: resolveBookingDocuments(row.id, detailsJson),
+    expenseSummary: expenseSummary || null,
   };
+}
+
+// One grouped query for the whole trip — never per-booking. MIN() columns are only
+// trusted when count = 1, where they identify the sole linked expense exactly.
+function computeBookingExpenseSummaries(tripId) {
+  const rows = getDb().prepare(`
+    SELECT booking_id, COUNT(*) AS count,
+           MIN(id) AS only_expense_id, MIN(amount) AS only_amount, MIN(currency) AS only_currency
+    FROM expenses WHERE trip_id = ? AND booking_id IS NOT NULL
+    GROUP BY booking_id
+  `).all(tripId);
+
+  const map = new Map();
+  for (const row of rows) {
+    map.set(row.booking_id, {
+      count: row.count,
+      single: row.count === 1
+        ? { expenseId: row.only_expense_id, amount: row.only_amount, currency: row.only_currency }
+        : null,
+    });
+  }
+  return map;
 }
 
 function normalizeDetailsJson(value) {
@@ -64,12 +87,14 @@ function defaultShowInItinerary(input) {
 export function listBookings(userId, tripId) {
   assertTripAccess(userId, tripId);
   const db = getDb();
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT *
     FROM bookings
     WHERE trip_id = ?
     ORDER BY COALESCE(start_datetime, end_datetime, created_at) ASC, created_at ASC
-  `).all(tripId).map(formatBooking);
+  `).all(tripId);
+  const summaries = computeBookingExpenseSummaries(tripId);
+  return rows.map((row) => formatBooking(row, summaries.get(row.id) || null));
 }
 
 export async function createBooking(userId, tripId, input) {
@@ -103,6 +128,9 @@ export async function createBooking(userId, tripId, input) {
   );
 
   await syncStopWithBooking(row);
+  // No expense can be linked to a booking before the booking exists — expenseSummary
+  // is always null on the create response. The client's next trip-detail refresh
+  // carries the real aggregate once a cost is added.
   return formatBooking(row);
 }
 
@@ -147,6 +175,9 @@ export async function updateBooking(userId, bookingId, input) {
   );
 
   await syncStopWithBooking(row);
+  // Editing a booking never changes its expense linkage — the caller already holds
+  // an accurate expenseSummary from its last list/detail load, so this response
+  // doesn't need to recompute it.
   return formatBooking(row);
 }
 

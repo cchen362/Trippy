@@ -1,4 +1,4 @@
-import { formatTime, formatShortDate, tzAbbr } from './bookingCardUtils.js';
+import { formatTime, formatShortDate, tzAbbr, costLineText } from './bookingCardUtils.js';
 import TicketStubCard from './TicketStubCard.jsx';
 
 function formatStationName(name) {
@@ -47,6 +47,7 @@ export default function TrainBookingCard({ booking, onOpen }) {
       rightTzBadge={tzAbbr(destTz, booking.endDatetime)}
       footerLeft={seatClass ? seatClass.toUpperCase() : (booking.confirmationRef ? 'BOOKING REF' : undefined)}
       footerRight={booking.confirmationRef || undefined}
+      costLine={costLineText(booking.expenseSummary)}
       connector
       hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}

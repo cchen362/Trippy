@@ -23,6 +23,8 @@ const { createTrip } = await import('../src/services/trips.js');
 const { createBooking, listBookings } = await import('../src/services/bookings.js');
 const { addAttachment } = await import('../src/services/attachments.js');
 const { createArtifactAndExtract, deleteArtifact } = await import('../src/services/importer.js');
+const { createExpense } = await import('../src/services/expenses.js');
+const { inviteCollaborator } = await import('../src/services/collaboration.js');
 
 const trainTicketBase64 = readFileSync(join(__dirname, 'fixtures/train-ticket.png')).toString('base64');
 
@@ -160,5 +162,64 @@ describe('booking documents resolution', () => {
     const bookings = listBookings(owner.id, trip.trip.id);
     const found = bookings.find((b) => b.id === booking.id);
     expect(found.documents).toHaveLength(0);
+  });
+});
+
+describe('booking expenseSummary aggregate', () => {
+  it('is null for a booking with no linked expenses', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+
+    const bookings = listBookings(owner.id, trip.trip.id);
+    expect(bookings.find((b) => b.id === booking.id).expenseSummary).toBe(null);
+  });
+
+  it('reports single with the exact expense when exactly one is linked', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    const { expense } = createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+
+    const bookings = listBookings(owner.id, trip.trip.id);
+    const summary = bookings.find((b) => b.id === booking.id).expenseSummary;
+    expect(summary.count).toBe(1);
+    expect(summary.single).toEqual({ expenseId: expense.id, amount: 42000, currency: 'JPY' });
+  });
+
+  it('reports count with no single when several expenses are linked, across payers and currencies', async () => {
+    const trip = makeTrip();
+    const inviteCode = authService.getInviteCode();
+    const friend = authService.register('friend', 'password123', 'Travel Friend', inviteCode).user;
+    inviteCollaborator(owner.id, trip.trip.id, 'friend');
+
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+    createExpense(friend.id, trip.trip.id, {
+      amount: 30, currency: 'SGD', category: 'lodging', expenseDate: '2026-09-12', bookingId: booking.id,
+    });
+
+    const bookings = listBookings(owner.id, trip.trip.id);
+    const summary = bookings.find((b) => b.id === booking.id).expenseSummary;
+    expect(summary.count).toBe(2);
+    expect(summary.single).toBe(null);
+  });
+
+  it('createBooking and updateBooking responses carry no stale expenseSummary', async () => {
+    const trip = makeTrip();
+    const booking = await createBooking(owner.id, trip.trip.id, { type: 'hotel', title: 'Hotel' });
+    expect(booking.expenseSummary).toBe(null);
+
+    createExpense(owner.id, trip.trip.id, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+
+    const { updateBooking } = await import('../src/services/bookings.js');
+    const updated = await updateBooking(owner.id, booking.id, { title: 'Hotel (renamed)' });
+    // The response itself doesn't recompute the aggregate — a linked expense already
+    // exists at this point, but the client relies on its next list/detail refresh.
+    expect(updated.expenseSummary).toBe(null);
   });
 });

@@ -995,6 +995,32 @@ export function listBookingsForTrip(tripId) {
   `).all(tripId).map(mapBooking);
 }
 
+// One grouped query for the whole trip — never per-booking, and never via listExpenses
+// (its FX-stamping budget would tax every trip-detail load). MIN() columns are only
+// trusted when count = 1, where they identify the sole linked expense exactly.
+// Duplicated from bookings.js's identical helper rather than shared across files —
+// this module already keeps its own booking serializer (mapBooking) independent of
+// bookings.js's (formatBooking); the aggregate follows the same local convention.
+function computeBookingExpenseSummaries(tripId) {
+  const rows = getDb().prepare(`
+    SELECT booking_id, COUNT(*) AS count,
+           MIN(id) AS only_expense_id, MIN(amount) AS only_amount, MIN(currency) AS only_currency
+    FROM expenses WHERE trip_id = ? AND booking_id IS NOT NULL
+    GROUP BY booking_id
+  `).all(tripId);
+
+  const map = new Map();
+  for (const row of rows) {
+    map.set(row.booking_id, {
+      count: row.count,
+      single: row.count === 1
+        ? { expenseId: row.only_expense_id, amount: row.only_amount, currency: row.only_currency }
+        : null,
+    });
+  }
+  return map;
+}
+
 export function listDaysForTrip(tripId, userId, bookings = []) {
   assertTripAccess(userId, tripId);
   const db = getDb();
@@ -1114,13 +1140,21 @@ export function getTripDetail(tripId, userId, { today = toIsoDate(new Date()) } 
     stopsByDay.get(stop.dayId).push(stop);
   }
 
+  // Attached only here, right before serialization to the client — listBookingsForTrip
+  // itself stays a plain read used internally by geo derivation (days.js, getDayGeo,
+  // share.js), which have no use for the aggregate and shouldn't pay for the extra query.
+  const expenseSummaries = computeBookingExpenseSummaries(tripId);
+
   return {
     trip,
     days: days.map((day) => ({
       ...day,
       stops: stopsByDay.get(day.id) || [],
     })),
-    bookings,
+    bookings: bookings.map((booking) => ({
+      ...booking,
+      expenseSummary: expenseSummaries.get(booking.id) || null,
+    })),
   };
 }
 

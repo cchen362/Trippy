@@ -1,4 +1,4 @@
-import { iataFromOriginString, formatTime, formatShortDate } from './bookingCardUtils.js';
+import { iataFromOriginString, formatTime, formatShortDate, costLineText } from './bookingCardUtils.js';
 import { tzFromIata } from '../../utils/airports.js';
 import TicketStubCard from './TicketStubCard.jsx';
 
@@ -58,6 +58,7 @@ export default function FlightBookingCard({ booking, onOpen }) {
       rightDate={hasTimes ? rightDate : ''}
       footerLeft={booking.confirmationRef ? 'BOOKING REF' : undefined}
       footerRight={booking.confirmationRef || undefined}
+      costLine={costLineText(booking.expenseSummary)}
       connector
       hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}

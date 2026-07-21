@@ -7,8 +7,10 @@ import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import {
   createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
-  listTripScopes,
+  listTripScopes, getTripDetail,
 } from '../src/services/trips.js';
+import { createBooking } from '../src/services/bookings.js';
+import { createExpense } from '../src/services/expenses.js';
 import { createShareLink, getSharedTrip } from '../src/services/share.js';
 import { canonicalGeoKey } from '../src/utils/geoIdentity.js';
 
@@ -966,6 +968,51 @@ describe('getSharedTrip — resolutionAnchor stamped on shared days (Plan 8 Wave
     expect(day.resolvedCity).toBe('Kaohsiung');
     expect(day.resolvedCountry).toBe('TW');
     expect(day.resolutionAnchor).toEqual({ label: 'Sinsing District', countryCode: 'TW', source: 'hotel' });
+  });
+});
+
+describe('getTripDetail — booking expenseSummary (Plan 20 Wave 2)', () => {
+  it('attaches expenseSummary to each booking in the trip-detail payload', async () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    const booking = await createBooking(owner.id, tripId, { type: 'hotel', title: 'Hotel' });
+    createExpense(owner.id, tripId, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+
+    const detail = getTripDetail(tripId, owner.id);
+    const found = detail.bookings.find((b) => b.id === booking.id);
+    expect(found.expenseSummary).toEqual({
+      count: 1,
+      single: { expenseId: expect.any(String), amount: 42000, currency: 'JPY' },
+    });
+  });
+
+  it('is null for a booking with no linked expenses', async () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    const booking = await createBooking(owner.id, tripId, { type: 'hotel', title: 'Hotel' });
+
+    const detail = getTripDetail(tripId, owner.id);
+    expect(detail.bookings.find((b) => b.id === booking.id).expenseSummary).toBe(null);
+  });
+});
+
+describe('public share payload carries no expense data (Plan 20 Wave 2 regression guard)', () => {
+  it('getSharedTrip never serializes bookings or expenseSummary, even when expenses exist', async () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    const booking = await createBooking(owner.id, tripId, { type: 'hotel', title: 'Hotel' });
+    createExpense(owner.id, tripId, {
+      amount: 42000, currency: 'JPY', category: 'lodging', expenseDate: '2026-09-11', bookingId: booking.id,
+    });
+
+    const { token } = createShareLink(owner.id, tripId);
+    const shared = getSharedTrip(token);
+    const serialized = JSON.stringify(shared);
+    expect(shared.bookings).toBeUndefined();
+    expect(serialized).not.toContain('expenseSummary');
+    expect(serialized).not.toContain('booking_id');
   });
 });
 

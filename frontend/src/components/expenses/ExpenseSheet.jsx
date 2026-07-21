@@ -24,7 +24,7 @@ function toMajorString(minor, currency) {
   return (minor / 10 ** decimals).toString();
 }
 
-function emptyForm(defaultCurrency, currentUserId) {
+function emptyForm(defaultCurrency, currentUserId, presetBookingId = null) {
   return {
     amount: '',
     currency: defaultCurrency,
@@ -32,7 +32,7 @@ function emptyForm(defaultCurrency, currentUserId) {
     expenseDate: localIso(),
     title: '',
     note: '',
-    bookingId: null,
+    bookingId: presetBookingId,
     payerUserId: currentUserId,
     manualRate: '',
     owed: [],
@@ -70,11 +70,12 @@ export default function ExpenseSheet({
   collaborators = [],
   bookings = [],
   allExpenses = [],
+  presetBookingId = null,
   saving,
   onSave,
   onDelete,
 }) {
-  const [form, setForm] = useState(() => (expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId)));
+  const [form, setForm] = useState(() => (expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, presetBookingId)));
   const [moreOpen, setMoreOpen] = useState(false);
   const [error, setError] = useState(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -83,11 +84,13 @@ export default function ExpenseSheet({
 
   useEffect(() => {
     if (!open) return;
-    setForm(expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId));
-    setMoreOpen(false);
+    setForm(expense ? fromExpense(expense) : emptyForm(defaultCurrency, currentUserId, presetBookingId));
+    // A preset booking is worth surfacing immediately — expand "More" so the linked
+    // booking (and the rest of the collapsed fields) aren't hidden behind a tap.
+    setMoreOpen(Boolean(!expense && presetBookingId));
     setError(null);
     setConfirmDeleteOpen(false);
-  }, [open, expense, defaultCurrency, currentUserId]);
+  }, [open, expense, defaultCurrency, currentUserId, presetBookingId]);
 
   const owedSuggestionPool = useMemo(() => {
     const freq = new Map(); // normalizedKey -> { name, count }

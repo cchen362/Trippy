@@ -87,7 +87,7 @@ export default function ExpensesTab() {
       <h2 className="font-mono text-[11px] tracking-[0.28em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>
         Recent entries
       </h2>
-      <ExpenseList expenses={expenses} onOpen={openEdit} currentUserId={user?.id} />
+      <ExpenseList expenses={expenses} onOpen={openEdit} currentUserId={user?.id} bookings={bookings} />
     </section>
   );
 

@@ -1,4 +1,5 @@
 import { naiveIsoToAbsolute } from '../../utils/date.js';
+import { formatMinor } from '../../utils/currency.js';
 
 // ES2015+ treats date-only strings ("2026-06-11") as UTC midnight,
 // which flips day-of-week for users east of UTC. Force local-time parsing.
@@ -57,6 +58,16 @@ export function iataFromOriginString(s) {
   if (!s) return '';
   const match = s.match(/^([A-Z]{3})\b/);
   return match ? match[1] : s.slice(0, 3).toUpperCase();
+}
+
+// One mono line summarizing a booking's linked expenses, per review §3.2: no payer,
+// no repayment state, no converted/summed totals across currencies — ever.
+export function costLineText(expenseSummary) {
+  if (!expenseSummary || expenseSummary.count === 0) return 'Add cost';
+  if (expenseSummary.count === 1 && expenseSummary.single) {
+    return `Cost · ${formatMinor(expenseSummary.single.amount, expenseSummary.single.currency)}`;
+  }
+  return `${expenseSummary.count} costs logged`;
 }
 
 // Returns the short timezone abbreviation for a naive ISO string interpreted in `tz`.

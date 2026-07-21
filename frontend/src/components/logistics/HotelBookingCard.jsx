@@ -1,5 +1,5 @@
 import { Paperclip } from 'lucide-react';
-import { formatShortDate, computeNights } from './bookingCardUtils.js';
+import { formatShortDate, computeNights, costLineText } from './bookingCardUtils.js';
 
 function Row({ label, value, valueStyle, last }) {
   if (!value) return null;
@@ -23,14 +23,6 @@ export default function HotelBookingCard({ booking, onOpen }) {
   const checkOutDisplay = checkOutStr
     ? `${checkOutStr}${nights > 0 ? ` \u00b7 ${nights} ${nights === 1 ? 'night' : 'nights'}` : ''}`
     : null;
-
-  const rows = [
-    checkInStr,
-    checkOutDisplay,
-    booking.bookingSource,
-    booking.confirmationRef,
-  ].filter(Boolean);
-  const lastIndex = rows.length - 1;
 
   return (
     <button
@@ -56,15 +48,11 @@ export default function HotelBookingCard({ booking, onOpen }) {
       </div>
 
       <div className="logistics-card-rows">
-        <Row label="CHECK-IN" value={checkInStr} last={lastIndex === 0} />
-        <Row label="CHECK-OUT" value={checkOutDisplay} last={lastIndex === 1} />
-        <Row label="BOOKED VIA" value={booking.bookingSource} last={lastIndex === 2} />
-        <Row
-          label="CONFIRMATION"
-          value={booking.confirmationRef}
-          valueStyle={{ color: 'var(--gold)' }}
-          last
-        />
+        <Row label="CHECK-IN" value={checkInStr} />
+        <Row label="CHECK-OUT" value={checkOutDisplay} />
+        <Row label="BOOKED VIA" value={booking.bookingSource} />
+        <Row label="CONFIRMATION" value={booking.confirmationRef} valueStyle={{ color: 'var(--gold)' }} />
+        <Row label="COST" value={costLineText(booking.expenseSummary)} last />
       </div>
     </button>
   );

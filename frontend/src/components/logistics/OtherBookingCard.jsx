@@ -1,5 +1,5 @@
 import { Paperclip } from 'lucide-react';
-import { formatShortDate } from './bookingCardUtils.js';
+import { formatShortDate, costLineText } from './bookingCardUtils.js';
 
 function Row({ label, value, valueStyle, last }) {
   if (!value) return null;
@@ -49,14 +49,10 @@ export default function OtherBookingCard({ booking, onOpen }) {
       </div>
 
       <div className="logistics-card-rows">
-        <Row label="WHEN" value={whenStr} last={!booking.destination && !booking.confirmationRef} />
-        <Row label="WHERE" value={booking.destination} last={!booking.confirmationRef} />
-        <Row
-          label="CONFIRMATION"
-          value={booking.confirmationRef}
-          valueStyle={{ color: 'var(--gold)' }}
-          last
-        />
+        <Row label="WHEN" value={whenStr} />
+        <Row label="WHERE" value={booking.destination} />
+        <Row label="CONFIRMATION" value={booking.confirmationRef} valueStyle={{ color: 'var(--gold)' }} />
+        <Row label="COST" value={costLineText(booking.expenseSummary)} last />
       </div>
     </button>
   );
