@@ -7,6 +7,7 @@ import UserAccountButton from '../components/common/UserAccountButton.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
 import NewTripModal from '../components/trips/NewTripModal.jsx';
 import TripCard from '../components/trips/TripCard.jsx';
+import EmptyTripsState from '../components/trips/EmptyTripsState.jsx';
 import { tripsApi } from '../services/tripsApi.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { importApi } from '../services/importApi.js';
@@ -64,6 +65,10 @@ export default function TripsHomePage() {
   }, [loading, navigate, trips]);
 
   const grouped = useMemo(() => groupTrips(trips), [trips]);
+  // First-run empty state only when the load actually succeeded with zero trips.
+  // A failed fetch also leaves `trips` empty, but that is an error to surface —
+  // not "No journeys yet" — so gate the empty state on the absence of an error.
+  const isEmpty = !error && trips.length === 0;
 
   const handleCreateTrip = async ({ captureArtifactId, captureBookings, ...tripFields }) => {
     setSaving(true);
@@ -114,14 +119,19 @@ export default function TripsHomePage() {
               <p className="font-body text-xl max-w-2xl" style={{ color: 'var(--cream-dim)' }}>
                 Your journeys, bookings, and day plans stay in one quietly dramatic place.
               </p>
-              <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className="w-full sm:w-auto mt-6 px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
-                style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
-              >
-                + New Trip
-              </button>
+              {/* On first run (no trips, clean load) the promoted CTA lives inside
+                  EmptyTripsState as the guided path's destination, so it is not
+                  duplicated here. */}
+              {!isEmpty && (
+                <button
+                  type="button"
+                  onClick={() => setOpen(true)}
+                  className="w-full sm:w-auto mt-6 px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
+                  style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
+                >
+                  + New Trip
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <UserAccountButton />
@@ -132,23 +142,8 @@ export default function TripsHomePage() {
 
         {error && <p className="font-mono text-xs mb-6" style={{ color: '#e05a5a' }}>{error}</p>}
 
-        {trips.length === 0 ? (
-          <div className="py-16 sm:py-24 flex flex-col items-center gap-4 text-center">
-            <h2 className="font-display italic text-4xl sm:text-5xl" style={{ color: 'var(--cream)' }}>
-              No journeys yet
-            </h2>
-            <p className="font-body text-xl" style={{ color: 'var(--cream-dim)' }}>
-              Where does it begin?
-            </p>
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              className="mt-2 px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
-              style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
-            >
-              + New Trip
-            </button>
-          </div>
+        {isEmpty ? (
+          <EmptyTripsState onNewTrip={() => setOpen(true)} />
         ) : (
           ['active', 'upcoming', 'past'].map((section, sectionIndex) => (
             grouped[section].length > 0 && (

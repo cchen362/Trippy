@@ -191,6 +191,12 @@ Build `TripRouteCover.jsx` and swap it into `TripCard`. The mockup is the pixel 
 - **Live dot** reuses the existing `trippyPulse` keyframe via a `.trip-live-dot` class; a matching `animation:none` entry was added to the existing `prefers-reduced-motion` block. Dot is the only added gold; text is cream — invariant 2 holds.
 - No new tokens added (D12); `--ink-raised`/`--radius-s`/`--radius-m` remain unconsumed — no dead tokens introduced.
 
+**Empty-state refinement (owner review, same day).** Owner flagged the first pass as awkward: two `+ New Trip` CTAs (header + centered block) and a centered block whose rhythm read as disconnected from the left-aligned header hero. Also surfaced a real bug — the empty state fired on `trips.length === 0`, which is *also* true after a failed fetch, so a `GET /api/trips` 500 rendered "No journeys yet" instead of the error. Resolved:
+- New `frontend/src/components/trips/EmptyTripsState.jsx` — the empty space is now drawn in Trippy's cartographic language: a faint atlas graticule panel with the trip's life as a gold itinerary-rail (Bookings → Itinerary → On the ground) terminating in the single New Trip CTA as its destination. Left-aligned, coherent with the header. Owner-approved copy: eyebrow `No route yet`, statement headline `Your first line on the map.` (deliberately a *statement* so it doesn't stack a second question under the `Where next?` masthead).
+- The header CTA is suppressed when empty (EmptyTripsState owns the sole CTA); it still renders when trips exist or when the load errored (so a failed load can still start a trip).
+- **Bug fix:** empty state now gated on `isEmpty = !error && trips.length === 0` — a failed load surfaces its error, never the empty state. Browser-verified via the harness `?error=1` path (500 → error shown, empty state absent, header CTA present).
+- Verified: `npm test` (209 pass) + `npm run build` clean + Opus browser QA of the new empty + error states at 375px and desktop; single CTA, zero horizontal overflow.
+
 1. **Status line (D6):** active `● Active now` + reduced-motion-safe pulse; upcoming humane countdown from `startDate`; past silent. Bare DM Mono, no bordered pill. Add the countdown helper (with boundary tests) in `utils/date.js` or a small local util — grep for an existing countdown/relative-date helper first.
 2. **Past subordination (D7):** dim card + muted route (the route muting lives in W2's component via a `status`/`muted` prop; W3 wires it).
 3. **Inline counts (D8):** `LABEL · N`, matching `LogisticsTab.jsx:274-277`; drop `justify-between`.
