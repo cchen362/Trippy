@@ -24,6 +24,8 @@ import { getTripMapData } from '../src/services/mapData.js';
 // destinations=["Chengdu","Chongqing"] / destination_countries=["CN"]; trip
 // "Ipoh - Kuala Lumpur" had destinations=["Ipoh","Kuala Lumpur"] / destination_countries=
 // ["MY"]; 7 gcj02 stops, all on the Chengdu-Chongqing trip; 1 share link, for that trip.
+// (Historical snapshot only — the live dev DB has since grown more CN content; the gcj02
+// safety-net test below asserts the CN-confinement invariant rather than that frozen count.)
 
 const REAL_DB_PATH = join(process.cwd(), 'data', 'trippy.db');
 
@@ -32,8 +34,6 @@ const PRE_MIGRATION_FACTS = {
     { title: 'Chengdu - Chongqing', destinations: ['Chengdu', 'Chongqing'], destinationCountries: ['CN'] },
     { title: 'Ipoh - Kuala Lumpur', destinations: ['Ipoh', 'Kuala Lumpur'], destinationCountries: ['MY'] },
   ],
-  gcj02StopCount: 7,
-  gcj02OnlyOnTitle: 'Chengdu - Chongqing',
 };
 
 let tmpDir;
@@ -148,14 +148,25 @@ describe.skipIf(!existsSync(REAL_DB_PATH))('Wave 4 backfill — real DB snapshot
     }
   });
 
-  it('pin relabel safety net: gcj02 stop count unchanged, still confined to the CN trip (production cohort is all on CN days)', () => {
+  it('pin relabel safety net: every gcj02 stop stays confined to a China-derived trip (no pin relabeled onto a non-CN cohort)', () => {
     const db = getDb();
     const gcj02Stops = db.prepare(`
       SELECT s.id, d.trip_id FROM stops s JOIN days d ON d.id = s.day_id
       WHERE s.coordinate_system = 'gcj02'
     `).all();
-    expect(gcj02Stops.length).toBe(PRE_MIGRATION_FACTS.gcj02StopCount);
-    const cnTrip = liveTrips.find((t) => t.title === PRE_MIGRATION_FACTS.gcj02OnlyOnTitle);
-    expect(gcj02Stops.every((s) => s.trip_id === cnTrip.id)).toBe(true);
+    // gcj02 is mainland China's coordinate system, so the durable invariant this migration
+    // safety net protects is that every gcj02 stop lives on a trip whose *derived* geography
+    // is China — a pin relabeled onto a non-CN cohort would be the regression. Do NOT assert a
+    // frozen total or a single trip title: this test reads the live dev DB, which has legitimately
+    // grown a second CN trip since the 2026-07-07 snapshot ("Shanghai - Hangzhou (W3 verify)",
+    // whose Shanghai/Hangzhou stops are correctly gcj02). The original cohort was 7 stops on
+    // "Chengdu - Chongqing"; asserting the CN-confinement invariant instead survives such growth.
+    expect(gcj02Stops.length).toBeGreaterThan(0);
+    const cnTripIds = new Set(
+      liveTrips
+        .filter((t) => getTripDetail(t.id, ownerId).trip.destinationCountries.includes('CN'))
+        .map((t) => t.id),
+    );
+    expect(gcj02Stops.every((s) => cnTripIds.has(s.trip_id))).toBe(true);
   });
 });
