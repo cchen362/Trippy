@@ -209,7 +209,14 @@ Build `TripRouteCover.jsx` and swap it into `TripCard`. The mockup is the pixel 
 
 ## Wave 4 — QA, convention capture, deploy
 
-**Status:** NOT STARTED.
+**Status:** COMPLETE 2026-07-22 (Opus orchestrator, no coder). Full bar green: `backend` 675 pass / `frontend` 209 pass / `npm run build` clean (the backend teardown segfault is a post-report better-sqlite3 exit quirk on Windows, not a test failure). Convention captured in `CLAUDE.md` › Current Architecture › Frontend (merged *alongside* the `5fa1e9a` palette edits, not over them). Browser QA (Claude-in-Chrome, logged-in `localhost:5174`) confirmed all 8 cross-wave invariants live at 375px + desktop and against real data — see verification below. Deploy + owner prod QA is the final gate.
+
+**W4 verification (live, not self-reported):**
+- **Full bar:** backend 675 pass (31 suites; the prior `geographyBackfill` red is fixed and green), frontend 209 pass (33 suites), build clean.
+- **`destinationsGeo` sampled from the live endpoint** (`GET /api/trips`, 5 real trips): ordering parity with `destinations` holds; `null` coordinates present and handled (Denpasar, Taipei both `null,null/null`); GCJ-02 provenance carried un-converted (Chengdu `gcj02` beside a `wgs84` node) — invariants 3 & 6.
+- **375px:** `#root` clamped to 375px → `scrollWidth === clientWidth === 375` (zero horizontal overflow); 5 inline-SVG covers, **zero `<img>` tiles** in cards — invariant 4.
+- **All three status/degradation states eyeballed:** active card = single gold node (Taipei `null` → D5 single-node branch) + `● Active now`; upcoming (Shanghai–Hangzhou) = full-gold 2-node ground route + `In 4 days` humane countdown; past (Ipoh–KL) = dimmed card + muted (no-gold) route + silent status — invariants 1, 2, 5, 7 (no migration).
+- **In-trip unaffected (invariant 8):** clicking a card lands in `/trips/:id/plan` with the full four-slot nav (Trips · Plan · Logistics · Map, all enabled) restored; Trips Home shows only the Trips slot.
 
 1. Full bar: `backend` + `frontend` tests green, `npm run build` clean, 375px regression pass on Trips Home (and a spot-check that in-trip tabs/routing are unaffected).
 2. Capture the convention in `CLAUDE.md` → Current Architecture › Frontend: **trip covers are route diagrams (no photo), rendered from `destinationsGeo`; status is a bare line (live pulse / countdown / silent past), never a pill; past subordinates cartographically; Trips Home shows only the Trips nav slot.** Note `destinationsGeo` as additive derived output on `GET /api/trips`. **MERGE, do not clobber:** the token-reconciliation session (`5fa1e9a`) already rewrote CLAUDE.md's Design & Aesthetic Rules / palette section (index.css = single token source of truth; trippy-revamped-system.css = design input). Add the route-cover conventions *alongside* those palette edits — do not overwrite them. (Recorded in memory.)
