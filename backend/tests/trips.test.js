@@ -7,7 +7,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import {
   createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
-  listTripScopes, getTripDetail,
+  listTripScopes, getTripDetail, listTripsForUser, boundsCentroid,
 } from '../src/services/trips.js';
 import { createBooking } from '../src/services/bookings.js';
 import { createExpense } from '../src/services/expenses.js';
@@ -1199,5 +1199,71 @@ describe('trip_scopes persistence (Plan 9 Wave 2 §2.1/2.2)', () => {
       expect(scope.placeId).toBe('place-new');
       expect(JSON.parse(scope.boundsJson)).toEqual({ low: { lat: 3, lng: 3 }, high: { lat: 4, lng: 4 } });
     });
+  });
+});
+
+function insertStop(dayId, { lat, lng, coordinateSystem }) {
+  getDb().prepare(`
+    INSERT INTO stops (day_id, title, type, lat, lng, coordinate_system)
+    VALUES (?, 'Test Stop', 'explore', ?, ?, ?)
+  `).run(dayId, lat, lng, coordinateSystem);
+}
+
+describe('destinationsGeo (Plan 22 W1)', () => {
+  describe('boundsCentroid', () => {
+    it('returns the midpoint of a normal box', () => {
+      expect(boundsCentroid('{"low":{"lat":30,"lng":120},"high":{"lat":31,"lng":121}}'))
+        .toEqual({ lat: 30.5, lng: 120.5 });
+    });
+
+    it('returns null for a missing, zero-area, or unparseable box', () => {
+      expect(boundsCentroid(null)).toBeNull();
+      expect(boundsCentroid('not json')).toBeNull();
+      expect(boundsCentroid('{"low":{"lat":1,"lng":1},"high":{"lat":1,"lng":2}}')).toBeNull(); // zero-area lat
+    });
+  });
+
+  it('scope-bounds node uses the bounds centroid with coordinateSystem wgs84; stop-fallback node uses the stop coord verbatim; a scope with only an unknown-system stop resolves to null; ordering matches destinations', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Sichuan Route',
+      destinations: [
+        { city: 'Chengdu', countryCode: 'CN' }, // scope with no bounds
+        { city: 'Chongqing', countryCode: 'CN', placeId: 'p1', bounds: { low: { lat: 1, lng: 1 }, high: { lat: 2, lng: 2 } } },
+      ],
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+
+    // Day 3 overrides to a day-derived-only city (no matching scope).
+    getDb().prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('Leshan', tripId, '2026-09-12');
+
+    // Chengdu's only stop has an 'unknown' coordinate_system -> must be skipped.
+    insertStop(dayIdFor(tripId, '2026-09-10'), { lat: 30.6, lng: 104.06, coordinateSystem: 'unknown' });
+    // Leshan's stop carries a real coordinate_system -> used verbatim.
+    insertStop(dayIdFor(tripId, '2026-09-12'), { lat: 29.55, lng: 103.72, coordinateSystem: 'gcj02' });
+
+    const listed = listTripsForUser(owner.id).find((t) => t.id === tripId);
+
+    expect(listed.destinations).toEqual(['Chengdu', 'Chongqing', 'Leshan']);
+    expect(listed.destinationsGeo.map((g) => g.name)).toEqual(listed.destinations);
+
+    const [chengdu, chongqing, leshan] = listed.destinationsGeo;
+
+    expect(chengdu).toEqual({ name: 'Chengdu', countryCode: 'CN', lat: null, lng: null, coordinateSystem: null });
+
+    expect(chongqing.countryCode).toBe('CN');
+    expect(chongqing.coordinateSystem).toBe('wgs84');
+    expect(chongqing.lat).toBeCloseTo(1.5);
+    expect(chongqing.lng).toBeCloseTo(1.5);
+
+    expect(leshan.countryCode).toBe('CN'); // carried forward from the previous day's resolved country (layer 4)
+    expect(leshan.coordinateSystem).toBe('gcj02');
+    expect(leshan.lat).toBe(29.55);
+    expect(leshan.lng).toBe(103.72);
   });
 });

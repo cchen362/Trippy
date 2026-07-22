@@ -24,13 +24,14 @@ function computeTripStatus(startDate, endDate, today = toIsoDate(new Date())) {
   return 'active';
 }
 
-function mapTrip(row, today, destinations = [], destinationCountries = []) {
+function mapTrip(row, today, destinations = [], destinationCountries = [], destinationsGeo = []) {
   return {
     id: row.id,
     title: row.title,
     ownerId: row.owner_id,
     destinations,
     destinationCountries,
+    destinationsGeo,
     startDate: row.start_date,
     endDate: row.end_date,
     travellers: row.travellers,
@@ -245,6 +246,27 @@ function parseScopeBounds(scope) {
   }
 
   return { low: { lat: lowLat, lng: lowLng }, high: { lat: highLat, lng: highLng } };
+}
+
+/**
+ * Centroid of a trip_scopes bounds box, or null when the box is unusable.
+ * Reuses parseScopeBounds hygiene. Longitude midpoint handles an antimeridian-
+ * crossing box (low.lng > high.lng) by adding 360 before halving, then re-wrapping.
+ * @param {string|null} boundsJson
+ * @returns {{lat:number, lng:number}|null}
+ */
+export function boundsCentroid(boundsJson) {
+  const bounds = parseScopeBounds({ boundsJson, label: '' });
+  if (!bounds) return null;
+  const lat = (bounds.low.lat + bounds.high.lat) / 2;
+  let lng;
+  if (bounds.low.lng <= bounds.high.lng) {
+    lng = (bounds.low.lng + bounds.high.lng) / 2;
+  } else {
+    lng = (bounds.low.lng + bounds.high.lng + 360) / 2;
+    if (lng > 180) lng -= 360;
+  }
+  return { lat, lng };
 }
 
 /**
@@ -646,6 +668,30 @@ function reconcileTripScopes(db, tripId, destinationPairs) {
   });
 }
 
+// Internal: the single ordered destination-pair list. Stored scopes first (position
+// order, deduped by canonicalGeoKey), then any day-derived city not already covered.
+// Carries the source scope object (so geo resolution can reach its bounds_json) and the
+// canonicalKey (so geo resolution can match a representative stop coordinate). The public
+// mergeDestinationsWithScopes and buildDestinationsGeo both fold over this one ordered
+// list, which is what guarantees destinationsGeo stays index-aligned with destinations.
+function mergeDestinationPairs(storedScopes, dayDerivedPairs) {
+  const seenKeys = new Set();
+  const pairs = [];
+  for (const scope of storedScopes || []) {
+    const canonicalKey = scope.canonicalKey || canonicalGeoKey(scope.label);
+    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
+    seenKeys.add(canonicalKey);
+    pairs.push({ city: scope.label, countryCode: scope.countryCode || null, canonicalKey, scope });
+  }
+  for (const pair of dayDerivedPairs || []) {
+    const canonicalKey = canonicalGeoKey(pair.city);
+    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
+    seenKeys.add(canonicalKey);
+    pairs.push({ city: pair.city, countryCode: pair.countryCode || null, canonicalKey, scope: null });
+  }
+  return pairs;
+}
+
 /**
  * Combines a trip's persisted scopes with its day-derived resolved pairs into the
  * legacy trips.destinations/destinationCountries response shape (Plan 9 Wave 2 §2.2).
@@ -660,27 +706,37 @@ function reconcileTripScopes(db, tripId, destinationPairs) {
  * @returns {{destinations: string[], destinationCountries: string[]}}
  */
 export function mergeDestinationsWithScopes(storedScopes, dayDerivedPairs) {
-  const seenKeys = new Set();
-  const pairs = [];
-
-  for (const scope of storedScopes || []) {
-    const canonicalKey = scope.canonicalKey || canonicalGeoKey(scope.label);
-    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
-    seenKeys.add(canonicalKey);
-    pairs.push({ city: scope.label, countryCode: scope.countryCode || null });
-  }
-
-  for (const pair of dayDerivedPairs || []) {
-    const canonicalKey = canonicalGeoKey(pair.city);
-    if (!canonicalKey || seenKeys.has(canonicalKey)) continue;
-    seenKeys.add(canonicalKey);
-    pairs.push({ city: pair.city, countryCode: pair.countryCode || null });
-  }
-
+  const pairs = mergeDestinationPairs(storedScopes, dayDerivedPairs);
   return {
     destinations: pairs.map((p) => p.city),
     destinationCountries: pairs.map((p) => p.countryCode).filter(Boolean),
   };
+}
+
+/**
+ * Per-destination geography for the trips list response (Plan 22 W1). Ordered
+ * identically to mergeDestinationsWithScopes().destinations. Coordinate ladder:
+ * (a) stored-scope bounds centroid (wgs84), (b) representative stop coord for a
+ * day-derived city (stop's own coordinate_system), (c) null. A null coordinate is
+ * a valid, handled value.
+ * @param {Array} storedScopes  listTripScopes() rows ({label, countryCode, boundsJson, canonicalKey, ...})
+ * @param {Array} dayDerivedPairs  deriveTripDestinationPairsFromDays() output ({city, countryCode})
+ * @param {Map<string,{lat:number,lng:number,coordinateSystem:string}>} stopCoordByCityKey
+ * @returns {Array<{name:string, countryCode:string|null, lat:number|null, lng:number|null, coordinateSystem:string|null}>}
+ */
+export function buildDestinationsGeo(storedScopes, dayDerivedPairs, stopCoordByCityKey) {
+  const pairs = mergeDestinationPairs(storedScopes, dayDerivedPairs);
+  return pairs.map((pair) => {
+    let lat = null; let lng = null; let coordinateSystem = null;
+    const centroid = pair.scope ? boundsCentroid(pair.scope.boundsJson) : null;
+    if (centroid) {
+      lat = centroid.lat; lng = centroid.lng; coordinateSystem = 'wgs84';
+    } else {
+      const stop = stopCoordByCityKey.get(pair.canonicalKey);
+      if (stop) { lat = stop.lat; lng = stop.lng; coordinateSystem = stop.coordinateSystem; }
+    }
+    return { name: pair.city, countryCode: pair.countryCode || null, lat, lng, coordinateSystem };
+  });
 }
 
 export function assertTripAccess(userId, tripId) {
@@ -772,13 +828,35 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
   return rows.map((row) => {
     const bookings = listBookingsForTrip(row.id);
     const days = listDaysForTrip(row.id, userId, bookings);
+    const storedScopes = listTripScopes(row.id);
     const dayDerivedPairs = deriveTripDestinationPairsFromDays(
       days.map((d) => ({ city: d.resolvedCity, cityCountry: d.resolvedCountry })),
     );
-    const { destinations, destinationCountries } = mergeDestinationsWithScopes(
-      listTripScopes(row.id), dayDerivedPairs,
-    );
-    return mapTrip(row, today, destinations, destinationCountries);
+    const { destinations, destinationCountries } = mergeDestinationsWithScopes(storedScopes, dayDerivedPairs);
+
+    // Representative stop coordinate per resolved-city key — first usable stop wins
+    // (date, then sort order). Skips non-finite coords and 'unknown'/null coordinate
+    // systems (a schematic node needs a trustworthy point; unknown-system coords are
+    // not render-trustworthy per coordinates.js's own toDisplayCoordinates rule).
+    const dayCityKeyById = new Map(days.map((d) => [d.id, canonicalGeoKey(d.resolvedCity)]));
+    const stopRows = db.prepare(`
+      SELECT s.day_id, s.lat, s.lng, s.coordinate_system
+      FROM stops s
+      JOIN days d ON d.id = s.day_id
+      WHERE d.trip_id = ?
+      ORDER BY d.date ASC, s.sort_order ASC, s.created_at ASC
+    `).all(row.id);
+    const stopCoordByCityKey = new Map();
+    for (const s of stopRows) {
+      const key = dayCityKeyById.get(s.day_id);
+      if (!key || stopCoordByCityKey.has(key)) continue;
+      if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) continue;
+      if (!s.coordinate_system || s.coordinate_system === 'unknown') continue;
+      stopCoordByCityKey.set(key, { lat: s.lat, lng: s.lng, coordinateSystem: s.coordinate_system });
+    }
+
+    const destinationsGeo = buildDestinationsGeo(storedScopes, dayDerivedPairs, stopCoordByCityKey);
+    return mapTrip(row, today, destinations, destinationCountries, destinationsGeo);
   });
 }
 
