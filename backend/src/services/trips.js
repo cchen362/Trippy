@@ -838,9 +838,14 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
     // (date, then sort order). Skips non-finite coords and 'unknown'/null coordinate
     // systems (a schematic node needs a trustworthy point; unknown-system coords are
     // not render-trustworthy per coordinates.js's own toDisplayCoordinates rule).
+    // Also skips 'transit' stops (flights/trains): a transit pin is the *route*, not a
+    // place — its coordinate is the origin/arrival end (e.g. a train "Chengdu → Chongqing"
+    // pinned at the Chengdu end), so it must never stand in for a destination centroid.
+    // This is a Trips-Home-cover concern ONLY; the day's resolvedCity (its header) is
+    // already decided upstream in listDaysForTrip and is not affected by this filter.
     const dayCityKeyById = new Map(days.map((d) => [d.id, canonicalGeoKey(d.resolvedCity)]));
     const stopRows = db.prepare(`
-      SELECT s.day_id, s.lat, s.lng, s.coordinate_system
+      SELECT s.day_id, s.lat, s.lng, s.coordinate_system, s.type
       FROM stops s
       JOIN days d ON d.id = s.day_id
       WHERE d.trip_id = ?
@@ -850,6 +855,7 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
     for (const s of stopRows) {
       const key = dayCityKeyById.get(s.day_id);
       if (!key || stopCoordByCityKey.has(key)) continue;
+      if (s.type === 'transit') continue;
       if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) continue;
       if (!s.coordinate_system || s.coordinate_system === 'unknown') continue;
       stopCoordByCityKey.set(key, { lat: s.lat, lng: s.lng, coordinateSystem: s.coordinate_system });

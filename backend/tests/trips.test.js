@@ -1209,6 +1209,13 @@ function insertStop(dayId, { lat, lng, coordinateSystem }) {
   `).run(dayId, lat, lng, coordinateSystem);
 }
 
+function insertStopFull(dayId, { title = 'Test Stop', type = 'explore', lat, lng, coordinateSystem, sortOrder = 0 }) {
+  getDb().prepare(`
+    INSERT INTO stops (day_id, title, type, lat, lng, coordinate_system, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(dayId, title, type, lat, lng, coordinateSystem, sortOrder);
+}
+
 describe('destinationsGeo (Plan 22 W1)', () => {
   describe('boundsCentroid', () => {
     it('returns the midpoint of a normal box', () => {
@@ -1265,5 +1272,45 @@ describe('destinationsGeo (Plan 22 W1)', () => {
     expect(leshan.coordinateSystem).toBe('gcj02');
     expect(leshan.lat).toBe(29.55);
     expect(leshan.lng).toBe(103.72);
+  });
+
+  it('a transit stop (flight/train) never supplies a destination coordinate: a real place stop on the same day wins even though the transit stop sorts first; a transit-only day resolves to null (Plan 23 Track A)', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Transit Filter',
+      destinations: [{ city: 'Chengdu', countryCode: 'CN' }], // scope, no bounds
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+
+    // Two day-derived-only cities (no matching scope) so both reach the stop fallback.
+    getDb().prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('Chongqing', tripId, '2026-09-11');
+    getDb().prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('Singapore', tripId, '2026-09-12');
+
+    // Chongqing day: the arrival train sorts FIRST but is pinned at the Chengdu departure
+    // end; the hotel that follows carries the true Chongqing coordinate.
+    insertStopFull(dayIdFor(tripId, '2026-09-11'), { title: 'G8613 Chengdu East -> Chongqing North', type: 'transit', lat: 30.70, lng: 104.15, coordinateSystem: 'wgs84', sortOrder: 0 });
+    insertStopFull(dayIdFor(tripId, '2026-09-11'), { title: 'Regent Chongqing', type: 'hotel', lat: 29.57, lng: 106.55, coordinateSystem: 'wgs84', sortOrder: 1 });
+
+    // Singapore day: only a flight code, geocoded to a garbage point -> must resolve to null.
+    insertStopFull(dayIdFor(tripId, '2026-09-12'), { title: 'SQ 103', type: 'transit', lat: 4.55, lng: 101.11, coordinateSystem: 'wgs84', sortOrder: 0 });
+
+    const listed = listTripsForUser(owner.id).find((t) => t.id === tripId);
+    const byName = Object.fromEntries(listed.destinationsGeo.map((g) => [g.name, g]));
+
+    // Transit skipped -> the hotel's true Chongqing coordinate wins (NOT the train's Chengdu-end pin at 30.70/104.15).
+    expect(byName.Chongqing.coordinateSystem).toBe('wgs84');
+    expect(byName.Chongqing.lat).toBeCloseTo(29.57);
+    expect(byName.Chongqing.lng).toBeCloseTo(106.55);
+
+    // Transit-only day -> honest null, never the flight's garbage pin (4.55/101.11).
+    expect(byName.Singapore.lat).toBeNull();
+    expect(byName.Singapore.lng).toBeNull();
+    expect(byName.Singapore.coordinateSystem).toBeNull();
   });
 });
