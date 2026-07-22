@@ -11,6 +11,13 @@ const STEPS = [
   { label: 'On the ground', copy: 'Live guidance the moment you land.' },
 ];
 
+// Rail geometry mirrors the Plan-tab itinerary timeline exactly (Timeline.jsx /
+// StopCard.jsx): a single gradient-faded gold line at left-[20px] over a
+// `relative pl-2` container, and each row is `relative pl-10` with one solid
+// gold dot at left-[8px] — so the dot centre (8 + 8 + 4.5 = 20.5) lands on the
+// line. Solid dots, no concentric ring, so nothing can look disconnected.
+const RAIL_LINE = 'linear-gradient(to bottom, rgba(201,168,76,0) 0%, rgba(201,168,76,0.35) 20%, rgba(201,168,76,0.35) 80%, rgba(201,168,76,0) 100%)';
+
 function Graticule() {
   const meridians = [];
   for (let i = 0; i < 6; i++) {
@@ -70,22 +77,18 @@ export default function EmptyTripsState({ onNewTrip }) {
 
         {/* The trip's life as an itinerary-route: gold nodes on a single rail,
             ending in the New Trip CTA as the journey's first destination. */}
-        <div className="relative">
-          {/* rail */}
+        {/* Itinerary rail — same construction as the Plan-tab timeline. */}
+        <div className="relative pl-2">
           <div
-            className="absolute top-1 bottom-0 w-px"
-            style={{ left: 5, background: 'var(--gold-line)' }}
+            className="absolute left-[20px] top-0 bottom-0 w-px"
+            style={{ background: RAIL_LINE }}
           />
           <ol className="space-y-7">
             {STEPS.map((step) => (
-              <li key={step.label} className="relative pl-9">
+              <li key={step.label} className="relative pl-10">
                 <span
-                  className="absolute left-0 top-1 w-[11px] h-[11px] rounded-full"
-                  style={{ background: 'var(--ink-deep)', border: '1.5px solid var(--gold-line)' }}
-                />
-                <span
-                  className="absolute w-[5px] h-[5px] rounded-full"
-                  style={{ left: 3, top: 4, background: 'var(--gold)' }}
+                  className="absolute left-[8px] top-[4px] w-[9px] h-[9px] rounded-full"
+                  style={{ background: 'var(--gold)' }}
                 />
                 <p className="font-mono text-[11px] tracking-[0.26em] uppercase mb-1.5" style={{ color: 'var(--cream)' }}>
                   {step.label}
@@ -95,11 +98,11 @@ export default function EmptyTripsState({ onNewTrip }) {
                 </p>
               </li>
             ))}
-            {/* terminal node — the CTA is the journey's first real destination */}
-            <li className="relative pl-9">
+            {/* Terminal node — the CTA is the journey's first real destination. */}
+            <li className="relative pl-10">
               <span
-                className="absolute left-0 top-1.5 w-[13px] h-[13px] rounded-full"
-                style={{ background: 'var(--gold-soft)', border: '1.5px solid var(--gold-line)' }}
+                className="absolute left-[8px] top-1/2 -translate-y-1/2 w-[9px] h-[9px] rounded-full"
+                style={{ background: 'var(--gold)' }}
               />
               <button
                 type="button"
