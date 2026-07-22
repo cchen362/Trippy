@@ -1,6 +1,6 @@
 # Implementation Plan 23 — Trips Home Route-Node Geography Correctness (+ bundle-split follow-up)
 
-**Status:** WRITTEN 2026-07-22 — **investigation-first, not started.** Surfaced during Plan 22 W4/owner prod QA: the route-diagram covers render faithfully, but some **nodes sit in the wrong place** because the *source geography they render is wrong*. This plan is scoped as investigation → owner-approved findings → fix. **Do not implement the fix track until the owner approves the approach** (there is a real product decision in Track A — see D-A1). Track B is independent, low-risk build hygiene.
+**Status:** WRITTEN 2026-07-22 — **investigation-first, not started.** Surfaced during Plan 22 W4/owner prod QA: some route-cover **nodes sit in the wrong place**. **Investigation update 2026-07-22 (root cause CONFIRMED — see Track A):** this is a **legacy-data artifact, not a live bug.** Trips created before the current scope picker captured a `bounds_json` viewport per destination have scopes with `bounds_json = NULL`; those nodes fall to a transit-stop coordinate fallback that can be poisoned. A trip created today (both destinations as bounds-carrying scopes) renders correctly. The live pipeline is healthy. This downgrades Track A from "bug fix" to "optional legacy hardening/cleanup" — **owner decides whether it's worth any work at all (D-A1).** Track B is independent, low-risk build hygiene.
 
 **Origin:** Plan 22 made per-destination geography visible for the first time (`destinationsGeo` → route cover). That visibility exposed two pre-existing data problems that were previously invisible. **Plan 22's render is correct; the underlying stored/derived coordinates are not.** Nothing here is a Plan 22 regression — Plan 22 is CLOSED and stays closed.
 
@@ -19,35 +19,37 @@
 | Ipoh – Kuala Lumpur | **Singapore** | `4.55, 101.11` (wgs84) | `1.29, 103.85` | a point near **Ipoh, Malaysia** |
 | Chengdu – Chongqing | **Chongqing** | `30.71, 104.15` (wgs84) | `29.56, 106.55` | a point in **Chengdu** |
 
-### Root cause (traced, not guessed)
+### Root cause (CONFIRMED 2026-07-22 by old-vs-new trip comparison in the prod DB)
 
-Both suspect scopes have **`bounds_json = NULL`** — so priority (a) (scope-bounds centroid) never fires. The coordinates come entirely from **W1 priority (b): the day/stop coordinate fallback** (`buildDestinationsGeo` + `stopCoordByCityKey` in `backend/src/services/trips.js`). That fallback is picking coordinates from stops that are geographically wrong for the destination they're keyed to. Two distinct mechanisms, both confirmed in the stop table:
+The trigger is **missing scope `bounds_json` on legacy trips**, not a derivation bug. Direct comparison of two Chengdu–Chongqing trips in prod:
 
-1. **Transit stops carry origin-end coordinates but destination-name titles.** The Chongqing node traces to the stop `G8613 Chengdu East → Chongqing North` (`30.705, 104.151`, `status=estimated`) — a train whose title contains "Chongqing" but which is physically located at the **Chengdu** departure end. Every genuinely-Chongqing stop (`Regent Chongqing` `29.57,106.57`, `Luohan Temple`, `Hongya Cave`…) sits on a day whose `city="Chengdu"` (the whole trip is one day, `city=Chengdu`), so they never key to a Chongqing node.
-2. **Flight/transit codes geocode to arbitrary points.** `SQ 103` → `4.55,101.11` (near Ipoh, feeds the bad **Singapore** node); `SQ 843` → `40.0,116.4` (**Beijing**); `SQ 842`, `TR 486`, `EG9049`, `G3360` similar. These are airline/train codes resolved to a coordinate with `status=estimated` (not `unresolved`), so they carry a plausible-looking but meaningless pin.
+| | Old (created **2026-04-29**) | New (created **2026-07-22**) |
+| --- | --- | --- |
+| Scopes | **only `Chengdu`**, `bounds_json = NULL` | **`Chengdu` + `Chongqing`, both `bounds_json = PRESENT`** |
+| Chongqing node source | falls to day/stop fallback (priority b) | scope-bounds centroid (priority a) |
+| Result | picks `G8613 …→ Chongqing North` (a train physically at the **Chengdu** end) → wrong | correct, renders SE of Chengdu |
 
-**Why W1's existing guard misses them:** W1 skips stops whose `coordinate_system` is `unknown`/`null` (the honest "no coordinate" case). But these bad stops are `coordinate_system='wgs84'` with `location_status='estimated'` — they pass the current filter. The filter gates on *coordinate-system provenance*, not on *resolution confidence* or *stop type*.
+So: **the current scope picker captures a Google-Places `bounds_json` viewport per selected destination.** When both destinations are bounds-carrying scopes, W1 priority (a) fires and the transit-stop fallback is never reached. The old trip predates that — it had a single `Chengdu` scope with `NULL` bounds (early scope-picker / migration-023 backfill from `destinations`, no viewport), so its `Chongqing` node had nothing but the poisoned fallback. **New trips are correct; the wrong nodes are stale legacy data.**
 
-### What still needs tracing before a fix is written (the investigation)
-- **The exact matching key** in `buildDestinationsGeo`/`stopCoordByCityKey` — how a stop is assigned to a destination (day resolved-city key vs stop title vs country). The Chongqing case suggests a title/name path is involved; confirm it. Read the actual W1 code, don't infer from this doc.
-- **Whether transit-type stops should ever be a coordinate source.** A `type='transit'`/flight/train stop's pin is the *route*, not a *place* — it is arguably never a valid destination centroid. Confirm stop `type` values in play.
-- **Whether `location_status IN ('estimated')` and/or `location_confidence < threshold` should be excluded** from the fallback, and what that does to legitimate nodes (many real place stops are also `estimated` — e.g. `Petronas Twin Towers` `estimated` but *correct*). A blunt "exclude all estimated" would strip good nodes; the transit-type signal is likely the cleaner discriminator. **This is the crux to get right — measure both filters against the full trip set before choosing.**
-- **Re-sample against production**, not just dev — the prod DB may have a different mix; confirm the same two mechanisms and count how many trips are affected.
+The fallback *is* poisonable (this is the secondary, still-true hardening target — it only ever bites a `NULL`-bounds node):
+1. **Transit stops carry origin-end coordinates but destination-name titles** — `G8613 Chengdu East → Chongqing North` sits at the Chengdu end (`status=estimated`) yet its title names Chongqing.
+2. **Flight/train codes geocode to arbitrary points** — `SQ 103` → near Ipoh (the bad **Singapore** node), `SQ 843` → Beijing, `SQ 842`/`TR 486`/`G3360` similar; all `wgs84` + `status=estimated`, so they pass W1's provenance-only guard (which skips only `coordinate_system` `unknown`/`null`).
 
-### Binding product decision needed (do NOT pre-decide)
-**D-A1 — When a destination has no *trustworthy* coordinate, what renders?** Options, in Plan 22's own degradation language:
-- (i) node resolves to `null` → the cover degrades per D5 (fewer located nodes, possibly the single-node or typographic branch). Honest, consistent with "a `null` coordinate is a valid handled value" (invariant 3). **Recommended** — it never draws a *wrong* pin, only *fewer* pins.
-- (ii) keep a rough coordinate (e.g. the day's city centroid from a place lookup) so the node still appears roughly right.
-- (iii) add a real geocode for un-bounded scopes (new resolver work / API cost — likely out of proportion for a schematic cover).
+### Binding decision — is any of this worth doing? (owner call; do NOT pre-decide)
+Because new trips are already correct, Track A is now **optional**. Three independent, non-exclusive options:
 
-Owner picks the philosophy before any code. The likely-correct, cheapest answer is **(i) + exclude transit-type stops from the fallback**, but confirm the good-node collateral first.
+- **D-A1(a) — Do nothing.** Accept that a handful of pre-July trips show an off node. Cheapest; the covers are schematic and the affected trips are mostly `past`. Zero code, zero risk.
+- **D-A1(b) — Harden the fallback (defensive, no API cost).** In `buildDestinationsGeo`, exclude `type='transit'` stops (and possibly `status='estimated'` — but measure: legit place stops like `Petronas Twin Towers` are also `estimated` and *correct*, so `type=transit` is the cleaner discriminator) from the coordinate fallback; when nothing trustworthy remains, resolve the node to `null` (Plan 22 invariant 3 — never a wrong pin, just fewer pins). Helps legacy trips *and* any future `NULL`-bounds edge case. ~1 backend change + a fixture test.
+- **D-A1(c) — Backfill `bounds_json` for legacy `NULL`-bounds scopes.** A one-off migration/script that re-resolves a viewport for old scopes (Google Places / geocoder — real API cost + a migration). Fully fixes legacy covers but is the heaviest option and probably out of proportion for a schematic index card.
 
-### Track A definition of done
-1. A findings write-up: exact match path, the filter chosen (with the good-vs-bad node counts that justify it), and D-A1 resolved.
-2. Fix in `buildDestinationsGeo`'s coordinate fallback (root cause, no bandaid): a stop only contributes a destination coordinate when it is a real place (not a transit/flight/train code) **and** its resolution is trustworthy for a centroid. Preserve W1's coordinate-system/provenance handling and the ordering-parity + `null`-is-valid invariants (Plan 22 invariants 3 & 6).
-3. Backend test with a fixture reproducing both mechanisms (a transit stop titled for the destination but located at the origin; a flight-code stop). Assert the affected nodes resolve to `null` (or the chosen D-A1 outcome), and that legitimate place-derived nodes are unaffected.
-4. Re-sample the live endpoint for the two known-bad trips and confirm the nodes are corrected. Per CLAUDE.md, sample the actual response — no green-mock-only closure.
-5. Browser: the Ipoh and Chengdu covers no longer draw a node in the wrong country/city. No deploy of its own — batch with the next deploy unless the owner wants it shipped standalone.
+Recommendation: **(b) alone** if the owner wants any hardening (it makes the pipeline robust regardless of bounds and costs nothing), otherwise **(a)**. **(c)** only if legacy covers matter enough to pay for geocoding.
+
+### Track A definition of done — **only if the owner picks D-A1(b)** (skip entirely for (a))
+1. Confirm the exact match path in `buildDestinationsGeo`/`stopCoordByCityKey` (day resolved-city key vs stop title vs country) and confirm `type='transit'` is the clean discriminator by counting good-vs-bad nodes across the prod trip set before choosing the filter.
+2. Fix in `buildDestinationsGeo`'s coordinate fallback (root cause, no bandaid): a stop only contributes a destination coordinate when it is a real place (not a transit/flight/train code) **and** its resolution is trustworthy for a centroid; when nothing trustworthy remains, the node is `null`. Preserve W1's coordinate-system/provenance handling and the ordering-parity + `null`-is-valid invariants (Plan 22 invariants 3 & 6).
+3. Backend test with a fixture reproducing both mechanisms (a transit stop titled for the destination but located at the origin; a flight-code stop). Assert the affected nodes resolve to `null`, and that legitimate place-derived nodes are unaffected.
+4. Re-sample the live endpoint for the two known-bad legacy trips and confirm the nodes are corrected/nulled. Per CLAUDE.md, sample the actual response — no green-mock-only closure.
+5. Browser: the Ipoh and old-Chengdu covers no longer draw a node in the wrong country/city. Batch with the next deploy unless shipped standalone.
 
 ---
 
