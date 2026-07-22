@@ -51,6 +51,9 @@ export default function LogisticsTab() {
     bookings,
     activeDay,
     refresh,
+    bookingActions,
+  } = useTripContext();
+  const {
     createBooking,
     updateBooking,
     deleteBooking,
@@ -59,7 +62,7 @@ export default function LogisticsTab() {
     lookupHotelDetails,
     lookupFlight,
     lookupCities,
-  } = useTripContext();
+  } = bookingActions;
 
   const { user } = useAuth();
   const expensesState = useExpenses(trip.id);

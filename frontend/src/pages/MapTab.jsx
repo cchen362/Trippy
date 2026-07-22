@@ -22,7 +22,8 @@ const chipBaseStyle = {
 };
 
 export default function MapTab() {
-  const { trip, days, bookings, activeDayId, setActiveDayId, updateStop, saving, reportError } = useTripContext();
+  const { trip, days, bookings, activeDayId, setActiveDayId, stopActions, reportError } = useTripContext();
+  const { updateStop, saving } = stopActions;
   const [focusedSegmentId, setFocusedSegmentId] = useState('all');
   const [correctionStop, setCorrectionStop] = useState(null);
   const [correctionCenter, setCorrectionCenter] = useState(null);

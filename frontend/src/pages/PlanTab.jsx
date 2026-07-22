@@ -17,16 +17,13 @@ export default function PlanTab() {
     activeDay,
     activeDayId,
     setActiveDayId,
-    reorderStops,
-    createStop,
-    saving,
-    deleteStop,
-    updateStop,
+    stopActions,
     discovery,
     refresh,
     reportError,
     openCopilot,
   } = useTripContext();
+  const { reorderStops, createStop, saving, deleteStop, updateStop } = stopActions;
 
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [addPlaceOpen, setAddPlaceOpen] = useState(false);

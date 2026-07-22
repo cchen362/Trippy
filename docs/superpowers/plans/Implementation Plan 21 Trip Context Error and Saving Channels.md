@@ -181,7 +181,15 @@ Files: `frontend/src/hooks/useStops.js`, `frontend/src/hooks/useBookings.js`, `f
 
 ## Wave 2 — Action namespacing
 
-**Status:** NOT STARTED
+**Status:** COMPLETE — 2026-07-22. Browser-verified locally; not yet deployed (single deploy held for W3). Tests 191 passing (unchanged from the W1 baseline — this wave adds no tests, only re-shapes two fixtures) and `npm run build` clean. All three F1 guards confirmed live in a real browser (Chrome extension, logged-in `localhost:5174`, "Shanghai – Hangzhou (W3 verify)" trip):
+
+- **Add Place submit (F1 #2):** with a stops-create round-trip delayed, the submit button rendered `Adding...` **and** `disabled=true` throughout the in-flight window, then closed on success. Dead before W2 (booking `saving`, always false on Plan).
+- **Timeline reorder indicator (F1 #3):** driven solely by `saving`; with a stop mutation delayed, `Saving order...` appeared while `stopActions.saving` was true and cleared on completion. *Note:* framer-motion's pointer-based `Reorder` drag cannot be driven by the CDP automation harness (the extension's mouse-drag doesn't fire it; synthetic pointer events wedge the renderer), so the indicator was lit via a real `deleteStop` — the identical, solely-`saving`-gated indicator the reorder path feeds.
+- **Map pin-save (F1 #1):** with the pin PATCH delayed, the "Set here" button went `disabled=false / opacity 1` → `disabled=true / opacity 0.55` mid-flight, then closed on success. Dead before W2.
+
+**Implementation deviation (documented, no product decision changed):** used **nested destructure** in the three consumers — pull `stopActions` / `bookingActions` from context, then `const { ... } = stopActions` — instead of dotting `stopActions.x` at each call site. Behaviourally identical (each render reads the same live flag), but it collapses ~20 scattered edits into 3 one-line changes and eliminates the wave's flagged "missed a call site → silent `undefined`" risk class entirely. No consumer mixes stop and booking actions, so per-call-site namespacing bought nothing. Grep confirmed no bare action key survives directly off `useTripContext()`.
+
+**QA data notes:** the junk "QA Wave2 Probe Stop" created for the Add Place probe was deleted (it doubled as the reorder-indicator trigger). Two verify-trip stops (SQ 832, West Lake) had their provenance flag flipped to `user_confirmed` by the pin-save probes — coordinates unchanged, on the disposable verify trip. Mobile-viewport (375px) layout was **not** re-checked this wave: Chrome's ~500px min-width floored the resize, and all three guards are form-factor-independent logic (disabled/label/indicator) — the 375px pass is Wave 3's task.
 
 Files: `frontend/src/pages/TripPage.jsx`, `frontend/src/pages/PlanTab.jsx`, `frontend/src/pages/MapTab.jsx`, `frontend/src/pages/LogisticsTab.jsx`, plus the test fixtures listed in the code map.
 

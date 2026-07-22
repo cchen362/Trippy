@@ -12,6 +12,7 @@ import '@testing-library/jest-dom/vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { useTrip } from '../hooks/useTrip.js';
 import { useStops } from '../hooks/useStops.js';
+import { useBookings } from '../hooks/useBookings.js';
 import PlanTab from './PlanTab.jsx';
 
 // --- jsdom polyfills framer-motion / Timeline need ---
@@ -112,7 +113,8 @@ vi.mock('./TripPage.jsx', () => ({ useTripContext: () => ctx }));
 function Harness() {
   const tripState = useTrip('t1');
   const stopActions = useStops({ onChanged: tripState.refresh });
-  ctx = { ...tripState, ...stopActions, discovery: {}, live: false, reportError: vi.fn() };
+  const bookingActions = useBookings({ tripId: 't1', onChanged: tripState.refresh });
+  ctx = { ...tripState, stopActions, bookingActions, discovery: {}, live: false, reportError: vi.fn() };
   if (tripState.loading) return <p>loading-screen</p>;
   return <PlanTab />;
 }

@@ -12,11 +12,13 @@ const mockContext = {
   activeDay: { id: 'day-1' },
   activeDayId: 'day-1',
   setActiveDayId: vi.fn(),
-  reorderStops: vi.fn(),
-  createStop: vi.fn(),
-  saving: false,
-  deleteStop: vi.fn(),
-  updateStop: vi.fn(),
+  stopActions: {
+    reorderStops: vi.fn(),
+    createStop: vi.fn(),
+    saving: false,
+    deleteStop: vi.fn(),
+    updateStop: vi.fn(),
+  },
   discovery: {},
   refresh: vi.fn(),
   reportError: vi.fn(),
@@ -44,7 +46,7 @@ describe('PlanTab — move failure surfaces feedback (Wave 4 §4.2)', () => {
 
   it('reports a failed move via reportError instead of silently swallowing it', async () => {
     const err = new Error('Network drop');
-    mockContext.updateStop.mockRejectedValueOnce(err);
+    mockContext.stopActions.updateStop.mockRejectedValueOnce(err);
 
     render(<PlanTab />);
     fireEvent.click(screen.getByText('trigger-move'));
@@ -52,17 +54,17 @@ describe('PlanTab — move failure surfaces feedback (Wave 4 §4.2)', () => {
     await waitFor(() => {
       expect(mockContext.reportError).toHaveBeenCalledWith(err, 'Could not move that stop.');
     });
-    expect(mockContext.updateStop).toHaveBeenCalledWith('stop-1', { dayId: 'day-2' });
+    expect(mockContext.stopActions.updateStop).toHaveBeenCalledWith('stop-1', { dayId: 'day-2' });
   });
 
   it('does not call reportError on a successful move', async () => {
-    mockContext.updateStop.mockResolvedValueOnce({});
+    mockContext.stopActions.updateStop.mockResolvedValueOnce({});
 
     render(<PlanTab />);
     fireEvent.click(screen.getByText('trigger-move'));
 
     await waitFor(() => {
-      expect(mockContext.updateStop).toHaveBeenCalledWith('stop-1', { dayId: 'day-2' });
+      expect(mockContext.stopActions.updateStop).toHaveBeenCalledWith('stop-1', { dayId: 'day-2' });
     });
     expect(mockContext.reportError).not.toHaveBeenCalled();
   });
