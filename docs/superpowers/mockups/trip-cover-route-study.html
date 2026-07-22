@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trippy · Trip cover route-hero study</title>
+  <link rel="stylesheet" href="./trippy-revamped-system.css">
+  <style>
+    .home-stage { padding: clamp(18px, 3vw, 38px); }
+    .home-head { margin-bottom: 30px; }
+    .home-eyebrow { color: var(--gold); }
+    .home-title { margin: 10px 0 8px; font-family: 'Playfair Display', serif; font-style: italic; font-weight: 400; font-size: clamp(38px, 5.4vw, 60px); line-height: 1.02; }
+    .home-sub { margin: 0; max-width: 46ch; color: var(--cream-dim); font-size: 19px; line-height: 1.45; }
+    .home-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+
+    /* Section header — inline count, Logistics-aligned */
+    .trip-section { margin-bottom: 34px; }
+    .section-head { margin: 0 0 16px; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--cream-mute); }
+    .section-head .count { color: var(--cream-dim); }
+
+    .trip-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+
+    /* Card shell — the collapse bug is fixed structurally: auto / 1fr / auto rows */
+    .trip-card { position: relative; min-height: 264px; overflow: hidden; border: 1px solid var(--ink-border-strong); border-radius: var(--radius-l); background: var(--ink-satin); box-shadow: 0 20px 50px rgba(0,0,0,.34); transition: transform .3s ease, border-color .3s ease; }
+    .trip-card:hover { transform: translateY(-3px); }
+    .trip-card.is-active { border-color: var(--gold-line); }
+    .trip-card.is-past { opacity: .58; }
+    .trip-card.is-past:hover { opacity: .78; }
+
+    .route-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .card-overlay { position: absolute; inset: 0; background: linear-gradient(96deg, rgba(13,11,9,.94) 0%, rgba(13,11,9,.52) 46%, rgba(13,11,9,.06) 100%); }
+
+    .trip-copy { position: relative; display: grid; grid-template-rows: auto 1fr auto; min-height: 264px; padding: 22px 24px; }
+    /* Bare status line — no bordered pill. Section header carries the category;
+       the card only speaks when it has something new to say (liveness / countdown). */
+    .status-zone { display: flex; align-items: center; min-height: 30px; }
+    .status-line { display: inline-flex; align-items: center; gap: 8px; font-family: 'DM Mono', monospace; font-size: 9.5px; letter-spacing: .24em; text-transform: uppercase; color: var(--cream-dim); }
+    .status-line.is-live { color: var(--cream); }
+    .active-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 0 rgba(201,168,76,.5); animation: livePulse 2.4s ease-out infinite; }
+    @keyframes livePulse { 0% { box-shadow: 0 0 0 0 rgba(201,168,76,.45); } 70% { box-shadow: 0 0 0 7px rgba(201,168,76,0); } 100% { box-shadow: 0 0 0 0 rgba(201,168,76,0); } }
+    @media (prefers-reduced-motion: reduce) { .active-dot { animation: none; box-shadow: 0 0 0 3px rgba(201,168,76,.16); } }
+
+    .trip-content { align-self: end; max-width: 92%; }
+    .destinations { margin: 0 0 12px; color: var(--cream-dim); font-family: 'DM Mono', monospace; font-size: 10px; line-height: 1.5; letter-spacing: .24em; text-transform: uppercase; }
+    .destinations .sep { color: var(--gold); opacity: .7; padding: 0 2px; }
+    .trip-title { margin: 0 0 12px; font-family: 'Playfair Display', serif; font-size: clamp(30px, 3.6vw, 43px); font-style: italic; font-weight: 400; line-height: 1.03; color: var(--cream); }
+    .trip-date { margin: 0; color: var(--cream-dim); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
+
+    /* Typographic variant (#1) — for honest comparison */
+    .mode-type .route-canvas { display: none; }
+    .mode-type .card-overlay { background: var(--ink-satin); }
+    .mode-type .trip-card { background:
+        radial-gradient(circle at 90% 8%, rgba(201,168,76,.06), transparent 46%),
+        var(--ink-satin); }
+    .mode-type .ghost-mark { position: absolute; right: -6px; bottom: -22px; margin: 0; font-family: 'Playfair Display', serif; font-style: italic; font-size: 168px; line-height: 1; color: rgba(240,234,216,.045); pointer-events: none; user-select: none; }
+    .mode-type .route-label { display: none; }
+    .route-label { margin: 0 0 12px; display: inline-flex; align-items: center; gap: 9px; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--gold); }
+    .route-label .arrow { color: var(--cream-mute); }
+    .mode-route .route-label { display: none; }
+    .mode-route .ghost-mark { display: none; }
+    .mode-route .trip-hairline { display: none; }
+    .trip-hairline { width: 46px; height: 1px; margin: 0 0 14px; background: var(--gold-line); }
+
+    /* New Trip CTA promoted into header */
+    .new-trip { align-self: flex-start; }
+
+    /* Empty-state preview */
+    .empty-state { display: grid; place-items: center; gap: 14px; padding: 60px 24px; border: 1px dashed var(--ink-border-strong); border-radius: var(--radius-l); text-align: center; }
+    .empty-state h3 { margin: 0; font-family: 'Playfair Display', serif; font-style: italic; font-weight: 400; font-size: 30px; }
+    .empty-state p { margin: 0; max-width: 40ch; color: var(--cream-dim); }
+
+    /* Mobile */
+    .mobile-preview .trip-grid { grid-template-columns: 1fr; }
+    .mobile-preview .trip-card, .mobile-preview .trip-copy { min-height: 236px; }
+    .mobile-preview .home-head-row { flex-direction: column; gap: 18px; }
+    .mobile-preview .home-title { font-size: 42px; }
+
+    @media (max-width: 760px) {
+      .trip-grid { grid-template-columns: 1fr; }
+      .home-head-row { flex-direction: column; gap: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="study">
+    <header class="study-header">
+      <div>
+        <p class="eyebrow">Identity study 03 · map-hero exploration</p>
+        <h1 class="study-title">Trips home — route covers</h1>
+        <p class="study-note">A stylized route diagram in the Trippy palette replaces the uniform stock photo. No map tiles, no roads, no POI clutter — a faint atlas graticule, a gold route line, city nodes. Solid line = ground segment, dashed arc = air segment. Toggle to the typographic variant to judge whether photo-less cards read as "boring."</p>
+      </div>
+      <div class="controls" aria-label="Mockup controls">
+        <div class="control-group" aria-label="Cover mode">
+          <button class="control-button" data-mode="route" aria-pressed="true">Route hero</button>
+          <button class="control-button" data-mode="type" aria-pressed="false">Typographic</button>
+        </div>
+        <div class="control-group" aria-label="Viewport">
+          <button class="control-button" data-device="desktop" aria-pressed="true">Desktop</button>
+          <button class="control-button" data-device="mobile" aria-pressed="false">Mobile</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="stage" aria-label="Trips home preview">
+      <div class="stage-caption">
+        <span id="stageLabel">Desktop · route hero</span>
+        <span>Solid = ground · dashed = air · past fades off the map</span>
+      </div>
+      <div class="home-stage mode-route" id="homeStage">
+        <div class="home-head">
+          <div class="home-head-row">
+            <div>
+              <p class="ui-label home-eyebrow">Trips</p>
+              <h2 class="home-title">Where next?</h2>
+              <p class="home-sub">Your journeys, bookings, and day plans stay in one quietly dramatic place.</p>
+            </div>
+            <button class="gold-button new-trip" type="button">+ New Trip</button>
+          </div>
+        </div>
+
+        <div id="sections"></div>
+
+        <div class="trip-section" aria-label="Empty-state reference">
+          <h3 class="section-head">First run <span class="count">· empty state</span></h3>
+          <div class="empty-state">
+            <p class="ui-label" style="color:var(--gold)">No journeys yet</p>
+            <h3>Where does it begin?</h3>
+            <p>Add your first trip and your bookings, days, and route will gather here.</p>
+            <button class="gold-button" type="button" style="margin-top:6px">+ New Trip</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Normalized city coordinates (0..100) sit in the RIGHT/negative-space half of the card,
+    // so the gradient keeps the text edge legible. Positions are geographically plausible,
+    // not literal lat/long — the point is route grammar, not cartographic accuracy.
+    const TODAY = '2026-07-22'; // demo "today" so the countdown is deterministic in the mockup
+    const TRIPS = [
+      {
+        status: 'active', title: 'Taipei — Kaohsiung', dates: 'Jul 20, 2026 — Jul 26, 2026', start: '2026-07-20',
+        route: 'ground', order: [0, 1],
+        cities: [ { name: 'Taipei', x: 72, y: 16 }, { name: 'Kaohsiung', x: 54, y: 84 } ],
+      },
+      {
+        status: 'upcoming', title: 'Shanghai — Hangzhou', dates: 'Jul 26, 2026 — Aug 1, 2026', start: '2026-07-26',
+        route: 'ground', order: [1, 0, 2],
+        cities: [ { name: 'Shanghai', x: 86, y: 34 }, { name: 'Suzhou', x: 58, y: 22 }, { name: 'Hangzhou', x: 60, y: 74 } ],
+      },
+      {
+        status: 'upcoming', title: 'Taipei — Okinawa', dates: 'Aug 3, 2026 — Aug 5, 2026', start: '2026-08-03',
+        route: 'air', order: [0, 1],
+        cities: [ { name: 'Taipei', x: 44, y: 78 }, { name: 'Okinawa', x: 84, y: 22 } ],
+      },
+      {
+        status: 'past', title: 'Kyoto — Osaka', dates: 'May 2, 2026 — May 8, 2026', start: '2026-05-02',
+        route: 'ground', order: [0, 1],
+        cities: [ { name: 'Kyoto', x: 66, y: 26 }, { name: 'Osaka', x: 50, y: 66 } ],
+      },
+    ];
+
+    // Humane countdown scale: Tomorrow → days → weeks → months. Recomputed each render.
+    function countdown(startISO, todayISO) {
+      const d = Math.round((Date.parse(`${startISO}T00:00:00`) - Date.parse(`${todayISO}T00:00:00`)) / 86400000);
+      if (d <= 0) return null;
+      if (d === 1) return 'Tomorrow';
+      if (d < 14) return `In ${d} days`;
+      if (d < 56) return `In ${Math.round(d / 7)} weeks`;
+      return `In ${Math.round(d / 30)} months`;
+    }
+    const NS = 'http://www.w3.org/2000/svg';
+    const VW = 600, VH = 300;
+    const mapX = (x) => 244 + (x / 100) * (562 - 244);
+    const mapY = (y) => 52 + (y / 100) * (252 - 52);
+
+    function el(name, attrs) {
+      const node = document.createElementNS(NS, name);
+      for (const k in attrs) node.setAttribute(k, attrs[k]);
+      return node;
+    }
+
+    function routeCanvas(trip) {
+      const isPast = trip.status === 'past';
+      const isActive = trip.status === 'active';
+      const accent = isPast ? 'rgba(240,234,216,0.34)' : '#c9a84c';
+      const accentSoft = isPast ? 'rgba(240,234,216,0.14)' : 'rgba(201,168,76,0.3)';
+      const routeAlpha = isActive ? 1 : (isPast ? 0.6 : 0.82);
+
+      const svg = el('svg', { class: 'route-canvas', viewBox: `0 0 ${VW} ${VH}`, preserveAspectRatio: 'xMidYMid slice', 'aria-hidden': 'true' });
+      const defs = el('defs', {});
+      const glow = el('radialGradient', { id: `glow-${trip.title.replace(/\W/g, '')}`, cx: '0.5', cy: '0.5', r: '0.5' });
+      glow.appendChild(el('stop', { offset: '0%', 'stop-color': isPast ? 'rgba(240,234,216,0.05)' : 'rgba(201,168,76,0.14)' }));
+      glow.appendChild(el('stop', { offset: '100%', 'stop-color': 'rgba(201,168,76,0)' }));
+      defs.appendChild(glow);
+      svg.appendChild(defs);
+
+      // Atlas graticule — sparse curved meridians, very low opacity (reads as globe, not graph paper)
+      const grat = el('g', { stroke: 'rgba(240,234,216,0.05)', 'stroke-width': '1', fill: 'none' });
+      for (let i = 0; i < 5; i++) {
+        const bx = 150 + i * 105;
+        grat.appendChild(el('path', { d: `M ${bx} -20 Q ${bx + 34} ${VH / 2} ${bx} ${VH + 20}` }));
+      }
+      for (let j = 0; j < 3; j++) {
+        const by = 70 + j * 85;
+        grat.appendChild(el('path', { d: `M 120 ${by} Q ${VW / 2} ${by - 26} ${VW + 20} ${by}` }));
+      }
+      svg.appendChild(grat);
+
+      // Centroid glow behind the route
+      const pts = trip.order.map((i) => trip.cities[i]);
+      const cx = pts.reduce((s, p) => s + mapX(p.x), 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + mapY(p.y), 0) / pts.length;
+      svg.appendChild(el('ellipse', { cx, cy, rx: 150, ry: 120, fill: `url(#glow-${trip.title.replace(/\W/g, '')})` }));
+
+      // Route path
+      const coords = pts.map((p) => [mapX(p.x), mapY(p.y)]);
+      let d;
+      if (trip.route === 'air' && coords.length === 2) {
+        const [a, b] = coords;
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 62; // lofted arc
+        d = `M ${a[0]} ${a[1]} Q ${mx} ${my} ${b[0]} ${b[1]}`;
+      } else {
+        // Gentle curve threaded through nodes
+        d = `M ${coords[0][0]} ${coords[0][1]}`;
+        for (let i = 1; i < coords.length; i++) {
+          const [px, py] = coords[i - 1];
+          const [x, y] = coords[i];
+          const cxp = (px + x) / 2 + (y - py) * 0.12;
+          const cyp = (py + y) / 2 - (x - px) * 0.12;
+          d += ` Q ${cxp} ${cyp} ${x} ${y}`;
+        }
+      }
+      svg.appendChild(el('path', {
+        d, fill: 'none', stroke: accent, 'stroke-width': isActive ? 1.7 : 1.4,
+        'stroke-linecap': 'round', 'stroke-opacity': routeAlpha,
+        'stroke-dasharray': trip.route === 'air' ? '2 6' : 'none',
+      }));
+
+      // Nodes + labels
+      pts.forEach((p, idx) => {
+        const x = mapX(p.x), y = mapY(p.y);
+        const primary = idx === 0;
+        svg.appendChild(el('circle', { cx: x, cy: y, r: primary ? 8 : 6.5, fill: 'none', stroke: accentSoft, 'stroke-width': '1' }));
+        svg.appendChild(el('circle', { cx: x, cy: y, r: primary ? 3.4 : 2.6, fill: accent, 'fill-opacity': routeAlpha }));
+        const anchor = x > 470 ? 'end' : 'start';
+        const lx = anchor === 'end' ? x - 13 : x + 13;
+        const label = el('text', {
+          x: lx, y: y + 3.5, 'text-anchor': anchor, fill: isPast ? 'rgba(240,234,216,0.34)' : 'rgba(240,234,216,0.62)',
+          'font-family': "'DM Mono', monospace", 'font-size': '11', 'letter-spacing': '1.4',
+        });
+        label.textContent = p.name.toUpperCase();
+        svg.appendChild(label);
+      });
+
+      return svg;
+    }
+
+    function card(trip) {
+      const article = document.createElement('article');
+      article.className = `trip-card is-${trip.status}`;
+
+      article.appendChild(routeCanvas(trip));
+      const overlay = document.createElement('div');
+      overlay.className = 'card-overlay';
+      article.appendChild(overlay);
+
+      const ghost = document.createElement('p');
+      ghost.className = 'ghost-mark';
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.textContent = trip.cities[0].name[0];
+      article.appendChild(ghost);
+
+      const copy = document.createElement('div');
+      copy.className = 'trip-copy';
+
+      const statusZone = document.createElement('div');
+      statusZone.className = 'status-zone';
+      if (trip.status === 'active') {
+        statusZone.innerHTML = '<span class="status-line is-live"><span class="active-dot"></span>Active now</span>';
+      } else if (trip.status === 'upcoming') {
+        const c = countdown(trip.start, TODAY);
+        if (c) statusZone.innerHTML = `<span class="status-line">${c}</span>`;
+      }
+      // Past: no status line — the dim card under the Past header carries it.
+      copy.appendChild(statusZone);
+      copy.appendChild(document.createElement('div')); // 1fr spacer
+
+      const content = document.createElement('div');
+      content.className = 'trip-content';
+      const dest = trip.order.map((i) => trip.cities[i].name);
+      content.innerHTML =
+        `<p class="destinations">${dest.join('<span class="sep">·</span>')}</p>` +
+        `<p class="route-label">${trip.cities[0].name.slice(0, 3).toUpperCase()} <span class="arrow">${trip.route === 'air' ? '⤳' : '→'}</span> ${trip.cities[trip.cities.length - 1].name.slice(0, 3).toUpperCase()}</p>` +
+        `<div class="trip-hairline"></div>` +
+        `<h3 class="trip-title">${trip.title}</h3>` +
+        `<p class="trip-date">${trip.dates}</p>`;
+      copy.appendChild(content);
+
+      article.appendChild(copy);
+      return article;
+    }
+
+    function renderSections() {
+      const host = document.getElementById('sections');
+      host.innerHTML = '';
+      const groups = [
+        ['active', 'Active'], ['upcoming', 'Upcoming'], ['past', 'Past'],
+      ];
+      groups.forEach(([status, label]) => {
+        const items = TRIPS.filter((t) => t.status === status);
+        if (!items.length) return;
+        const section = document.createElement('section');
+        section.className = 'trip-section';
+        section.innerHTML = `<h3 class="section-head">${label} <span class="count">· ${items.length}</span></h3>`;
+        const grid = document.createElement('div');
+        grid.className = 'trip-grid';
+        items.forEach((t) => grid.appendChild(card(t)));
+        section.appendChild(grid);
+        host.appendChild(section);
+      });
+    }
+
+    const home = document.getElementById('homeStage');
+    const label = document.getElementById('stageLabel');
+    const state = { mode: 'route', device: 'desktop' };
+
+    function setPressed(attr, val) {
+      document.querySelectorAll(`[data-${attr}]`).forEach((b) => b.setAttribute('aria-pressed', b.dataset[attr] === val ? 'true' : 'false'));
+    }
+    function render() {
+      home.classList.toggle('mode-route', state.mode === 'route');
+      home.classList.toggle('mode-type', state.mode === 'type');
+      home.classList.toggle('mobile-preview', state.device === 'mobile');
+      setPressed('mode', state.mode);
+      setPressed('device', state.device);
+      label.textContent = `${state.device === 'mobile' ? '375 px mobile' : 'Desktop'} · ${state.mode === 'route' ? 'route hero' : 'typographic'}`;
+    }
+    document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { state.mode = b.dataset.mode; render(); }));
+    document.querySelectorAll('[data-device]').forEach((b) => b.addEventListener('click', () => { state.device = b.dataset.device; render(); }));
+
+    renderSections();
+    render();
+  </script>
+</body>
+</html>
