@@ -189,7 +189,7 @@ export default function MapTab() {
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
             justifyContent: 'center', background: 'var(--ink-deep)',
-            color: 'rgba(240,234,216,0.6)', fontFamily: "'DM Mono', monospace", fontSize: 12, zIndex: 10
+            color: 'var(--cream-dim)', fontFamily: "'DM Mono', monospace", fontSize: 12, zIndex: 10
           }}>
             Loading map...
           </div>
@@ -515,9 +515,9 @@ export default function MapTab() {
           }}>
             <div style={{
               background: 'rgba(28,26,23,0.92)', borderRadius: 8,
-              padding: '16px 24px', border: '1px solid rgba(255,255,255,0.07)',
+              padding: '16px 24px', border: '1px solid var(--ink-border)',
               fontFamily: "'DM Mono', monospace", fontSize: 12,
-              color: 'rgba(240,234,216,0.6)', textAlign: 'center'
+              color: 'var(--cream-dim)', textAlign: 'center'
             }}>
               No pinned stops for this day
             </div>

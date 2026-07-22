@@ -95,7 +95,9 @@ Always use parameterised queries (never string interpolation). Run migrations in
 
 ## Design & Aesthetic Rules
 
-**Refer to:** `docs/superpowers/specs/2026-04-23-trippy-design.md` §12 for the implemented design language. `frontend/src/index.css` is the production token source. The external Luxury Dark Design System package and `docs/superpowers/mockups/` are design inputs for the upcoming revamp; do not silently replace production tokens or component behavior from a mockup.
+**Refer to:** `docs/superpowers/specs/2026-04-23-trippy-design.md` §12 for the implemented design language.
+
+**`frontend/src/index.css` is the single source of truth for design tokens** — it is the only stylesheet the running app loads, so its `:root` values are what ship. Read it directly; do not infer token values from any other file. `docs/superpowers/mockups/trippy-revamped-system.css` is a design **input**, not loaded by the app; it is the owner-blessed reference the shared tokens were reconciled *toward*. As of the 2026-07-22 token-reconciliation session the shared tokens in index.css match the revamped values (see palette below); the two files agree on shared tokens. When they next diverge, index.css wins for anything that ships — never copy a mockup value into production without verifying it in the app at 375px and desktop. The external Luxury Dark Design System package and other files under `docs/superpowers/mockups/` remain design inputs only; do not silently replace production tokens or component behavior from a mockup.
 
 **No AI Slop.**
 - No Inter, Roboto, Arial, or system-ui as the primary font
@@ -103,14 +105,22 @@ Always use parameterised queries (never string interpolation). Run migrations in
 - No generic card layouts that could belong to any SaaS dashboard
 - No clichéd color schemes — commit to the defined palette below
 
-**The palette is fixed. Do not deviate:**
+**The palette is fixed. Do not deviate. These are the reconciled index.css `:root` values (source of truth):**
 ```css
---ink-deep:   #0d0b09;  /* primary background */
---ink-mid:    #1c1a17;  /* cards */
---ink-surface:#232018;  /* elevated */
---gold:       #c9a84c;  /* single accent — once per component */
---cream:      #f0ead8;  /* primary text */
+--ink-deep:    #0d0b09;                    /* primary background */
+--ink-mid:     #1c1a17;                    /* cards */
+--ink-surface: #232018;                    /* elevated */
+--ink-border:  rgba(240,234,216,0.09);     /* hairlines/dividers — cream-based, NOT white */
+--gold:        #c9a84c;                     /* single accent — once per component */
+--gold-soft:   rgba(201,168,76,0.10);      /* gold fill (e.g. .modal-action bg) */
+--gold-line:   rgba(201,168,76,0.34);      /* gold border */
+--cream:       #f0ead8;                     /* primary text */
+--cream-dim:   rgba(240,234,216,0.66);     /* secondary text */
+--cream-mute:  rgba(240,234,216,0.34);     /* muted/label text */
 ```
+The five alpha tokens (`--ink-border`, `--gold-soft`, `--gold-line`, `--cream-dim`, `--cream-mute`) were reconciled to the revamped values on 2026-07-22; flipping any of them restyles every screen. index.css also defines route-cover material (`--ink-border-strong`, `--ink-satin`, `--shadow-deep`, `--radius-l`), obsidian booking-card material (`--obsidian-*`, `--foil`), and gold-foil — read the file for the full set.
+
+**Consume tokens via `var(--token)`, never a baked rgba literal** (this holds for JSX inline styles too — `style={{ color: 'var(--cream-dim)' }}` works). Hardcoding a token's current value forks it: when the token flips, the literal diverges and drifts off-palette. Deliberate one-off alphas that are *not* a shared token (e.g. discovery's local gold ramp, a component's tuned fill/border pairing) may stay literal — but anything serving a shared token's role must reference the token.
 
 **Typography is fixed. Three fonts only:**
 - `Playfair Display` italic — city/place names and section titles only

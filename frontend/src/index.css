@@ -8,13 +8,13 @@
   --ink-deep:    #0d0b09;
   --ink-mid:     #1c1a17;
   --ink-surface: #232018;
-  --ink-border:  rgba(255,255,255,0.07);
+  --ink-border:  rgba(240,234,216,0.09);
   --gold:        #c9a84c;
-  --gold-soft:   rgba(201,168,76,0.12);
-  --gold-line:   rgba(201,168,76,0.28);
+  --gold-soft:   rgba(201,168,76,0.10);
+  --gold-line:   rgba(201,168,76,0.34);
   --cream:       #f0ead8;
-  --cream-dim:   rgba(240,234,216,0.60);
-  --cream-mute:  rgba(240,234,216,0.28);
+  --cream-dim:   rgba(240,234,216,0.66);
+  --cream-mute:  rgba(240,234,216,0.34);
 
   /* Obsidian material (booking cards) — Direction 3, re-based on --gold #c9a84c */
   --obsidian-surface: radial-gradient(circle at 18% 8%, rgba(79,65,45,0.16), transparent 31%),
@@ -436,7 +436,7 @@ select {
   justify-content: center;
   border: 0;
   background: transparent;
-  color: rgba(240, 234, 216, 0.6);
+  color: var(--cream-dim);
   cursor: pointer;
 }
 
@@ -502,7 +502,7 @@ select {
   min-height: 44px;
   border: 0;
   background: transparent;
-  color: rgba(240, 234, 216, 0.6);
+  color: var(--cream-dim);
   font-family: 'DM Mono', monospace;
   cursor: pointer;
 }
@@ -595,7 +595,7 @@ select {
 .discovery-mobile-search-trigger {
   flex: 0 0 52px;
   border-left: 1px solid rgba(240, 234, 216, 0.08);
-  color: rgba(240, 234, 216, 0.6);
+  color: var(--cream-dim);
 }
 
 .discovery-mobile-search-field {
@@ -642,7 +642,7 @@ select {
 }
 
 .discovery-register-show-more:disabled {
-  color: rgba(240, 234, 216, 0.28);
+  color: var(--cream-mute);
   cursor: default;
 }
 

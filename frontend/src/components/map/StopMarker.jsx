@@ -68,7 +68,7 @@ export default function StopMarker({ stop, deepLinkProvider, muted = false, onSt
             {stop.title}
           </div>
           {stop.time && (
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'rgba(240,234,216,0.6)', marginBottom: 6 }}>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--cream-dim)', marginBottom: 6 }}>
               {stop.time}
             </div>
           )}

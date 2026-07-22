@@ -425,7 +425,7 @@ export default function MutationPreview({ proposal, days, onApply, onReject, app
             flex: 1,
             background: 'transparent',
             border: '1px solid rgba(255,255,255,0.10)',
-            color: 'rgba(240,234,216,0.28)',
+            color: 'var(--cream-mute)',
             fontFamily: "'DM Mono', monospace",
             fontSize: 11,
             letterSpacing: '0.18em',

@@ -286,7 +286,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '6px 16px 10px',
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            borderBottom: '1px solid var(--ink-border)',
             flexShrink: 0,
           }}
         >
@@ -296,7 +296,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
               fontSize: 11,
               letterSpacing: '0.28em',
               textTransform: 'uppercase',
-              color: 'rgba(240,234,216,0.60)',
+              color: 'var(--cream-dim)',
             }}
           >
             Co-Pilot
@@ -339,7 +339,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                   background: 'transparent',
                   border: 'none',
                   cursor: 'pointer',
-                  color: 'rgba(240,234,216,0.60)',
+                  color: 'var(--cream-dim)',
                   padding: 8,
                   display: 'flex',
                   alignItems: 'center',
@@ -369,7 +369,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                   justifyContent: 'center',
                   fontFamily: "'DM Mono', monospace",
                   fontSize: 15,
-                  color: 'rgba(240,234,216,0.60)',
+                  color: 'var(--cream-dim)',
                   borderRadius: 6,
                   background: 'transparent',
                   border: 'none',
@@ -394,7 +394,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                 justifyContent: 'center',
                 fontFamily: "'DM Mono', monospace",
                 fontSize: 15,
-                color: 'rgba(240,234,216,0.60)',
+                color: 'var(--cream-dim)',
                 borderRadius: 6,
                 background: 'transparent',
                 border: 'none',
@@ -575,7 +575,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
         <div
           style={{
             background: '#1c1a17',
-            borderTop: '1px solid rgba(255,255,255,0.07)',
+            borderTop: '1px solid var(--ink-border)',
             padding: '12px 16px',
             display: 'flex',
             alignItems: 'center',
