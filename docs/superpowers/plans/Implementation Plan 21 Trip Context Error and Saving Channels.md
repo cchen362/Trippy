@@ -1,6 +1,6 @@
 # Implementation Plan 21 — Trip Context Error and Saving Channels
 
-**Status:** NOT STARTED — written 2026-07-21.
+**Status:** W1+W2+W3 code COMPLETE — 2026-07-22. Local bar green (191 tests, clean build), 375px regression pass clean on Plan/Map/Logistics, convention captured in `CLAUDE.md`. Awaiting production deploy + owner prod QA to close.
 
 **Written:** 2026-07-21, from an investigation opened by a Wave 4 observation in [Implementation Plan 20](<Implementation Plan 20 Expenses Refinement and Booking Costs.md>): a failed booking delete showed its error inline *and* raised `TripPage`'s shared banner. The investigation found the duplicate banner is the least of it. Every fact below was verified against live code on 2026-07-21 at commit `e4b95d2`. Do not re-derive these facts; trust them unless the code has visibly moved.
 
@@ -213,11 +213,11 @@ Throttle the network if these round-trips are too fast to observe.
 
 ## Wave 3 — Convention capture and deploy
 
-**Status:** NOT STARTED
+**Status:** CODE COMPLETE — 2026-07-22. Local verification done; deploy + owner prod QA pending.
 
-1. Re-run the full bar and a 375px pass over Plan, Map, and Logistics — this plan touches the three busiest tabs and the pass condition almost everywhere is *no visible change*.
-2. Add the rule to `CLAUDE.md`'s frontend section: the call site owns the error message; `onError` at construction opts a hook into the shared page banner; stop mutations use it and booking mutations do not; action hooks are namespaced in the outlet context and must never be flat-spread.
-3. Deploy via `/deploy` and hand the owner a numbered click-script at phone width covering the three restored guards and a regression sweep of the tabs. Mark waves COMPLETE only after owner prod QA passes.
+1. ✅ Full bar re-run: **191 tests pass** (W2 baseline held), `npm run build` clean. **375px regression pass clean** on Plan, Map, and Logistics — verified by clamping `#root` to 375px and measuring `root.scrollWidth`: all three tabs report `375` (zero page-level horizontal overflow). The only elements extending past 375px are the day-strip pills inside an `overflow-x-auto` scroller (intentional) and the `position:fixed` co-pilot FAB anchored to the real viewport (clamp-method artifact, not overflow). The three F1 guards were browser-verified in W2; no rendered output changed this wave.
+2. ✅ Convention captured in `CLAUDE.md` → Current Architecture › Frontend (outlet-context and error-channel contract): trip data flat, action hooks namespaced and never flat-spread; one owner per failure (`onError` → banner, or local); `useStops` opts in, `useBookings` does not; `run()` keeps rethrowing.
+3. ⏳ Deploy via `/deploy`; owner click-script provided in-session. Mark waves COMPLETE only after owner prod QA passes.
 
 ---
 
