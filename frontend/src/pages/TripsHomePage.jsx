@@ -114,6 +114,14 @@ export default function TripsHomePage() {
               <p className="font-body text-xl max-w-2xl" style={{ color: 'var(--cream-dim)' }}>
                 Your journeys, bookings, and day plans stay in one quietly dramatic place.
               </p>
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="w-full sm:w-auto mt-6 px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
+                style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
+              >
+                + New Trip
+              </button>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <UserAccountButton />
@@ -124,36 +132,42 @@ export default function TripsHomePage() {
 
         {error && <p className="font-mono text-xs mb-6" style={{ color: '#e05a5a' }}>{error}</p>}
 
-        {['active', 'upcoming', 'past'].map((section, sectionIndex) => (
-          grouped[section].length > 0 && (
-            <section key={section} className="mb-10">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-mono text-[11px] tracking-[0.3em] uppercase" style={{ color: 'var(--cream-mute)' }}>
+        {trips.length === 0 ? (
+          <div className="py-16 sm:py-24 flex flex-col items-center gap-4 text-center">
+            <h2 className="font-display italic text-4xl sm:text-5xl" style={{ color: 'var(--cream)' }}>
+              No journeys yet
+            </h2>
+            <p className="font-body text-xl" style={{ color: 'var(--cream-dim)' }}>
+              Where does it begin?
+            </p>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="mt-2 px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
+              style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
+            >
+              + New Trip
+            </button>
+          </div>
+        ) : (
+          ['active', 'upcoming', 'past'].map((section, sectionIndex) => (
+            grouped[section].length > 0 && (
+              <section key={section} className="mb-10">
+                <h2 className="font-mono text-[11px] tracking-[0.3em] uppercase mb-4" style={{ color: 'var(--cream-mute)' }}>
                   {section}
+                  <span style={{ color: 'var(--cream-dim)' }}> &middot; {grouped[section].length}</span>
                 </h2>
-                <span className="font-mono text-[11px] tracking-[0.22em] uppercase" style={{ color: 'var(--cream-mute)' }}>
-                  {grouped[section].length}
-                </span>
-              </div>
-              <div className="grid lg:grid-cols-2 gap-5">
-                {grouped[section].map((trip, index) => (
-                  <motion.div key={trip.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (sectionIndex * 0.08) + (index * 0.05) }}>
-                    <TripCard trip={trip} />
-                  </motion.div>
-                ))}
-              </div>
-            </section>
-          )
-        ))}
-
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="w-full sm:w-auto px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
-          style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
-        >
-          + New Trip
-        </button>
+                <div className="grid lg:grid-cols-2 gap-5">
+                  {grouped[section].map((trip, index) => (
+                    <motion.div key={trip.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (sectionIndex * 0.08) + (index * 0.05) }}>
+                      <TripCard trip={trip} />
+                    </motion.div>
+                  ))}
+                </div>
+              </section>
+            )
+          ))
+        )}
       </main>
 
       <BottomNav />

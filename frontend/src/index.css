@@ -179,6 +179,10 @@ a {
   .modal-loading-dots span {
     animation: none;
   }
+
+  .trip-live-dot {
+    animation: none;
+  }
 }
 
 button,
@@ -204,6 +208,15 @@ select {
 @keyframes trippyPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.35; transform: scale(0.75); }
+}
+
+.trip-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  animation: trippyPulse 1.6s ease-in-out infinite;
 }
 
 .copilot-input::placeholder {

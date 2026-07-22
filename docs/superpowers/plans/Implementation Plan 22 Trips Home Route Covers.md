@@ -181,7 +181,15 @@ Build `TripRouteCover.jsx` and swap it into `TripCard`. The mockup is the pixel 
 
 ## Wave 3 — Trips Home refit
 
-**Status:** NOT STARTED.
+**Status:** COMPLETE 2026-07-22 (Opus orchestrator + design QA, Sonnet coder). Trips Home refit shipped: bare status line (live pulse dot / humane countdown / silent past), card-level past dimming, inline `LABEL · N` counts, promoted header CTA, first-run empty state, and single-slot nav on Home. 7 files: `utils/date.js` (+`formatCountdown`), `utils/date.test.js` (+8 boundary tests), `TripCard.jsx` (status zone + `opacity:0.72` past dim), `TripCard.test.jsx` (new, 3 tests), `index.css` (+`.trip-live-dot` + reduced-motion override), `TripsHomePage.jsx` (D8 inline counts + D11 CTA/empty state), `BottomNav.jsx` (D9 disabled branch removed). Not deployed (single deploy held for W4).
+
+**Verified: `cd frontend; npm test` (209 pass, incl. 11 new) + `npm run build` clean + Opus browser QA at 375px AND desktop** via a throwaway Vite harness that intercepted `fetch` to render the REAL `TripsHomePage` (wrapped in `MemoryRouter` + real `AuthProvider`) across every state deterministically. Confirmed live: nav renders only `Trips`; counts inline `active · 1 / upcoming · 4 / past · 1`; countdown scale exact — `Tomorrow` (+1d), `In 5 days` (+5d), `In 3 weeks` (+21d), `In 3 months` (+90d); past card `opacity` 0.72 with muted (no-gold) route; active card gold pulse dot + `Active now`; zero-geo card shows the gold-hairline typographic fallback + countdown; empty state renders `No journeys yet / Where does it begin?` with centered CTA; **page-level `scrollWidth === clientWidth` (zero horizontal overflow) at 375px**. Harness + screenshots deleted; `.playwright-mcp/` restored (no churn committed).
+
+**Decisions honored / notes:**
+- **D9 dead-code removal confirmed by grep:** the disabled `NavItem` branch had exactly one consumer (Home's `!inTrip` Plan/Logistics/Map slots) — every other `disabled=` in the tree is on a `<button>`. In-trip tabs are always enabled, so the branch was provably dead once Home renders only Trips; it was deleted, not restyled.
+- **Countdown derives from `startDate` only** (invariant 5) via the new `formatCountdown(startDate, now)` in `utils/date.js`, reusing `localIso`; parses both dates as local-midnight (never UTC). Scale: `Tomorrow` → `In N days` (<14) → `In N weeks` (<56d) → `In N months`. Returns `''` for non-positive diffs (defensive; only called for upcoming trips).
+- **Live dot** reuses the existing `trippyPulse` keyframe via a `.trip-live-dot` class; a matching `animation:none` entry was added to the existing `prefers-reduced-motion` block. Dot is the only added gold; text is cream — invariant 2 holds.
+- No new tokens added (D12); `--ink-raised`/`--radius-s`/`--radius-m` remain unconsumed — no dead tokens introduced.
 
 1. **Status line (D6):** active `● Active now` + reduced-motion-safe pulse; upcoming humane countdown from `startDate`; past silent. Bare DM Mono, no bordered pill. Add the countdown helper (with boundary tests) in `utils/date.js` or a small local util — grep for an existing countdown/relative-date helper first.
 2. **Past subordination (D7):** dim card + muted route (the route muting lives in W2's component via a `status`/`muted` prop; W3 wires it).

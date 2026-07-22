@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { naiveIsoToAbsolute } from './date.js';
+import { naiveIsoToAbsolute, formatCountdown, localIso } from './date.js';
+
+// Builds a local-date YYYY-MM-DD string `days` calendar days after `now`,
+// using the same local-midnight arithmetic formatCountdown itself relies on.
+function localDatePlusDays(now, days) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  return localIso(d);
+}
 
 describe('naiveIsoToAbsolute', () => {
   it('evening wall-clock time with a positive UTC offset that wraps to the next UTC calendar day', () => {
@@ -30,5 +37,42 @@ describe('naiveIsoToAbsolute', () => {
   it('hotel check-in at 16:00 in a positive-offset timezone wraps correctly', () => {
     const result = naiveIsoToAbsolute('2026-06-08T16:00', 'Asia/Shanghai');
     expect(result.toISOString()).toBe('2026-06-08T08:00:00.000Z');
+  });
+});
+
+describe('formatCountdown', () => {
+  const now = new Date(2026, 6, 22); // 2026-07-22 local midnight, fixed clock
+
+  it('day 1 (tomorrow) reads "Tomorrow"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 1), now)).toBe('Tomorrow');
+  });
+
+  it('day 2 reads "In 2 days"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 2), now)).toBe('In 2 days');
+  });
+
+  it('day 13 reads "In 13 days"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 13), now)).toBe('In 13 days');
+  });
+
+  it('day 14 crosses into weeks: "In 2 weeks"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 14), now)).toBe('In 2 weeks');
+  });
+
+  it('day 55 (last day still in weeks) reads "In 8 weeks"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 55), now)).toBe('In 8 weeks');
+  });
+
+  it('day 56 crosses into months: "In 2 months"', () => {
+    expect(formatCountdown(localDatePlusDays(now, 56), now)).toBe('In 2 months');
+  });
+
+  it('a large future date reads in months (120 days -> "In 4 months")', () => {
+    expect(formatCountdown(localDatePlusDays(now, 120), now)).toBe('In 4 months');
+  });
+
+  it('returns empty string for a non-positive day diff (defensive)', () => {
+    expect(formatCountdown(localDatePlusDays(now, 0), now)).toBe('');
+    expect(formatCountdown(localDatePlusDays(now, -3), now)).toBe('');
   });
 });

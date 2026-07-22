@@ -1,15 +1,6 @@
 import { NavLink } from 'react-router-dom';
 
-function NavItem({ to, label, disabled = false, end = false }) {
-  if (disabled) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 py-3" style={{ color: 'var(--cream-mute)', opacity: 0.45 }}>
-        <span className="font-mono text-[11px] tracking-[0.28em] uppercase">{label}</span>
-        <span className="w-[3px] h-[3px] rounded-full" style={{ background: 'transparent' }} />
-      </div>
-    );
-  }
-
+function NavItem({ to, label, end = false }) {
   return (
     <NavLink to={to} end={end} className="flex-1 flex flex-col items-center justify-center gap-2 py-3">
       {({ isActive }) => (
@@ -37,12 +28,18 @@ export default function BottomNav({ tripId = null, live = false }) {
     >
       <div className="max-w-6xl mx-auto px-3">
         <div className="flex items-center">
-          {live && inTrip
-            ? <NavItem to={`/trips/${tripId}/today`} label="Today" end />
-            : <NavItem to="/trips" label="Trips" end />}
-          <NavItem to={inTrip ? `/trips/${tripId}/plan` : '#'} label="Plan" disabled={!inTrip} />
-          <NavItem to={inTrip ? `/trips/${tripId}/logistics` : '#'} label="Logistics" disabled={!inTrip} />
-          <NavItem to={inTrip ? `/trips/${tripId}/map` : '#'} label="Map" disabled={!inTrip} />
+          {inTrip ? (
+            <>
+              {live
+                ? <NavItem to={`/trips/${tripId}/today`} label="Today" end />
+                : <NavItem to="/trips" label="Trips" end />}
+              <NavItem to={`/trips/${tripId}/plan`} label="Plan" />
+              <NavItem to={`/trips/${tripId}/logistics`} label="Logistics" />
+              <NavItem to={`/trips/${tripId}/map`} label="Map" />
+            </>
+          ) : (
+            <NavItem to="/trips" label="Trips" end />
+          )}
         </div>
       </div>
     </nav>

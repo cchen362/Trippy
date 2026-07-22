@@ -7,6 +7,25 @@ export function localIso(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+// Humane-scale countdown to a future YYYY-MM-DD local calendar date, e.g.
+// "Tomorrow", "In 5 days", "In 2 weeks", "In 3 months". Both dates are parsed
+// as local calendar dates (never UTC) so the day diff matches what the
+// traveler's clock/calendar actually shows. Returns '' for non-positive diffs —
+// callers only invoke this for trips whose start is still in the future.
+export function formatCountdown(startDate, now = new Date()) {
+  const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+  const start = new Date(startYear, startMonth - 1, startDay);
+  const [todayYear, todayMonth, todayDay] = localIso(now).split('-').map(Number);
+  const today = new Date(todayYear, todayMonth - 1, todayDay);
+  const days = Math.round((start.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+
+  if (days <= 0) return '';
+  if (days === 1) return 'Tomorrow';
+  if (days < 14) return `In ${days} days`;
+  if (days < 56) return `In ${Math.round(days / 7)} weeks`;
+  return `In ${Math.round(days / 30)} months`;
+}
+
 // Converts a naive wall-clock ISO string (e.g. "2026-06-08T08:45") to the
 // absolute UTC instant that corresponds to that wall-clock time in `tz`.
 // Required because new Date("2026-06-08T08:45") parses in the *device* timezone,
