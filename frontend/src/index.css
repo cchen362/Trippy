@@ -27,6 +27,12 @@
   --obsidian-shadow: 0 15px 42px rgba(0,0,0,0.35), inset 3px 0 rgba(120,92,43,0.13);
   --foil: linear-gradient(90deg, #6f592c 0%, #aa8b49 14%, #d0b774 31%, #8c7138 46%,
                                  #c4a25b 69%, #78602f 86%, #b0904b 100%);
+
+  /* Route-cover material (Plan 22 W2) */
+  --ink-border-strong: rgba(240,234,216,0.16);
+  --ink-satin:         linear-gradient(155deg, #252119 0%, #171410 44%, #211d17 100%);
+  --shadow-deep:       0 22px 70px rgba(0,0,0,0.46);
+  --radius-l:          16px;
 }
 
 * {
