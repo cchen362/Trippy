@@ -15,6 +15,7 @@ With Trippy, travellers can:
 - Create a trip around dates, destinations, interests, pace, and travel style
 - Turn confirmation emails, pasted text, screenshots, and PDFs into reviewed booking drafts
 - Keep flights, hotels, trains, tickets, rentals, and reservation documents together
+- Record trip spending, link costs to bookings, and keep simple repayments visible
 - Build each day as a flexible timeline of places, meals, activities, transit, and notes
 - Browse destination ideas and add promising places directly to a chosen day
 - See the day's stops and travel sequence on a map
@@ -81,6 +82,12 @@ The original material stays attached to the import, making it possible to return
 
 Booking documents can also be attached manually and opened again from Logistics or the relevant Today card.
 
+### Expenses
+
+Expenses is a private trip spending diary for the people planning the trip together. Log an amount in its original currency, date, category, optional title and note, and who paid. A cost can be linked to a booking when it belongs with a flight, stay, train, ticket, or other reservation.
+
+When someone paid on another traveller's behalf, Trippy can keep the amount owed alongside the expense and mark it settled later. The summary shows what the signed-in traveller paid, what is still owed back, and an estimated personal share. Entries in other currencies are converted to the trip's chosen summary currency using daily reference rates when available; the original amount remains visible, and unestimated entries are called out rather than folded silently into the total.
+
 ### Map
 
 The Map view shows the selected day's stops in itinerary order. It distinguishes places with confirmed locations from those that are estimated or still unresolved.
@@ -104,7 +111,7 @@ The co-pilot never applies itinerary changes silently. Every suggested change be
 
 Invited collaborators can plan a private trip together. The owner controls who has access and can remove collaborators when needed.
 
-For everyone else, Trippy can create a revocable public link with a clean, read-only itinerary. Public viewers see the trip plan without private booking confirmations, documents, co-pilot history, collaborator details, or editing controls.
+For everyone else, Trippy can create a revocable public link with a clean, read-only itinerary. Public viewers see the trip plan without private booking confirmations, documents, expenses, co-pilot history, collaborator details, or editing controls.
 
 ## Designed for Travel, Not a Dashboard
 
@@ -118,7 +125,7 @@ The intended feeling is a private travel dossier: calm enough to use during plan
 
 Trippy currently favors deliberate planning over automation. It does not silently rearrange an itinerary, continuously poll flight data, provide offline editing, or attempt real-time simultaneous collaboration.
 
-Weather, expense splitting, currency conversion, route-time analysis, and export formats are also outside the current product. When these capabilities are added, they should strengthen the shared trip rather than become disconnected mini-tools.
+Weather, payment processing, full accounting, live card-rate FX, route-time analysis, and export formats are outside the current product. Expenses is deliberately a lightweight shared trip diary with simple repayment tracking, not a finance app. When these capabilities are added, they should strengthen the shared trip rather than become disconnected mini-tools.
 
 ## Project Documentation
 
