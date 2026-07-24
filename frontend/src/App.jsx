@@ -1,49 +1,64 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import LoadingScreen from './components/common/LoadingScreen.jsx';
-import ExpensesTab from './pages/ExpensesTab.jsx';
-import LoginPage from './pages/LoginPage.jsx';
-import LogisticsTab from './pages/LogisticsTab.jsx';
-import MapTab from './pages/MapTab.jsx';
-import PlanTab from './pages/PlanTab.jsx';
-import ShareViewPage from './pages/ShareViewPage.jsx';
-import SetupPage from './pages/SetupPage.jsx';
-import TodayTab from './pages/TodayTab.jsx';
-import TripIndexRedirect from './pages/TripIndexRedirect.jsx';
-import TripPage from './pages/TripPage.jsx';
-import TripsHomePage from './pages/TripsHomePage.jsx';
+import ChunkErrorBoundary from './components/common/ChunkErrorBoundary.jsx';
 
-function AppRoutes() {
+const ExpensesTab = lazy(() => import('./pages/ExpensesTab.jsx'));
+const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
+const LogisticsTab = lazy(() => import('./pages/LogisticsTab.jsx'));
+const MapTab = lazy(() => import('./pages/MapTab.jsx'));
+const PlanTab = lazy(() => import('./pages/PlanTab.jsx'));
+const ShareViewPage = lazy(() => import('./pages/ShareViewPage.jsx'));
+const SetupPage = lazy(() => import('./pages/SetupPage.jsx'));
+const TodayTab = lazy(() => import('./pages/TodayTab.jsx'));
+const TripIndexRedirect = lazy(() => import('./pages/TripIndexRedirect.jsx'));
+const TripPage = lazy(() => import('./pages/TripPage.jsx'));
+const TripsHomePage = lazy(() => import('./pages/TripsHomePage.jsx'));
+
+export function AppRoutes() {
   const { user, needsSetup, loading } = useAuth();
   const location = useLocation();
 
+  let content;
+
   if (location.pathname.startsWith('/share/')) {
-    return (
+    content = (
       <Routes>
         <Route path="/share/:token" element={<ShareViewPage />} />
         <Route path="*" element={<Navigate to="/trips" replace />} />
       </Routes>
     );
+  } else if (loading) {
+    return <LoadingScreen label="Opening Trippy..." />;
+  } else if (needsSetup) {
+    content = <SetupPage />;
+  } else if (!user) {
+    content = <LoginPage />;
+  } else {
+    content = (
+      <Routes>
+        <Route path="/" element={<Navigate to="/trips" replace />} />
+        <Route path="/trips" element={<TripsHomePage />} />
+        <Route path="/trips/:tripId" element={<TripPage />}>
+          <Route index element={<TripIndexRedirect />} />
+          <Route path="today" element={<TodayTab />} />
+          <Route path="plan" element={<PlanTab />} />
+          <Route path="logistics" element={<LogisticsTab />} />
+          <Route path="map" element={<MapTab />} />
+          <Route path="expenses" element={<ExpensesTab />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/trips" replace />} />
+      </Routes>
+    );
   }
 
-  if (loading) return <LoadingScreen label="Opening Trippy..." />;
-  if (needsSetup) return <SetupPage />;
-  if (!user) return <LoginPage />;
-
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/trips" replace />} />
-      <Route path="/trips" element={<TripsHomePage />} />
-      <Route path="/trips/:tripId" element={<TripPage />}>
-        <Route index element={<TripIndexRedirect />} />
-        <Route path="today" element={<TodayTab />} />
-        <Route path="plan" element={<PlanTab />} />
-        <Route path="logistics" element={<LogisticsTab />} />
-        <Route path="map" element={<MapTab />} />
-        <Route path="expenses" element={<ExpensesTab />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/trips" replace />} />
-    </Routes>
+    <ChunkErrorBoundary variant="full" resetKey={location.pathname}>
+      <Suspense fallback={<LoadingScreen label="Opening Trippy..." />}>
+        {content}
+      </Suspense>
+    </ChunkErrorBoundary>
   );
 }
 

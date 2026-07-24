@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Edit2, Users, Wallet } from 'lucide-react';
 import AdminSettingsPanel from '../components/admin/AdminSettingsPanel.jsx';
+import ChunkErrorBoundary from '../components/common/ChunkErrorBoundary.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import LoadingScreen from '../components/common/LoadingScreen.jsx';
+import TabLoadingFallback from '../components/common/TabLoadingFallback.jsx';
 import BottomNav from '../components/nav/BottomNav.jsx';
 import TopBar from '../components/nav/TopBar.jsx';
 import CopilotFab from '../components/copilot/CopilotFab.jsx';
@@ -175,7 +177,11 @@ export default function TripPage() {
       />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
         <ErrorBanner message={pageError} onDismiss={() => setPageError(null)} className="mb-6" />
-        <Outlet context={{ ...tripState, stopActions, bookingActions, discovery, live: isLive, reportError, openCopilot }} />
+        <ChunkErrorBoundary variant="inline" resetKey={location.pathname}>
+          <Suspense fallback={<TabLoadingFallback />}>
+            <Outlet context={{ ...tripState, stopActions, bookingActions, discovery, live: isLive, reportError, openCopilot }} />
+          </Suspense>
+        </ChunkErrorBoundary>
       </main>
       {!copilotOpen && (
         <CopilotFab
