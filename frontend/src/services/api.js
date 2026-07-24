@@ -12,13 +12,19 @@ export async function request(path, options = {}) {
   }
 
   try {
-    const res = await fetch(path, {
-      credentials: 'include',
-      ...restOptions,
-      signal,
-      headers: { 'Content-Type': 'application/json', ...extraHeaders },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(path, {
+        credentials: 'include',
+        ...restOptions,
+        signal,
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      throw Object.assign(new Error(err.message || 'Network request failed'), { code: 'NETWORK_ERROR' });
+    }
 
     if (res.status === 401 && !silent401) {
       window.dispatchEvent(new Event('auth:unauthorized'));
@@ -32,7 +38,7 @@ export async function request(path, options = {}) {
     return res.json();
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw Object.assign(new Error('Request timed out'), { status: 408, timeout: true });
+      throw Object.assign(new Error('Request timed out'), { status: 408, timeout: true, code: 'TIMEOUT' });
     }
     throw err;
   } finally {

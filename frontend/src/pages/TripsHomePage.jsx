@@ -12,6 +12,7 @@ import { tripsApi } from '../services/tripsApi.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { importApi } from '../services/importApi.js';
 import { localIso } from '../utils/date.js';
+import { friendlyError } from '../utils/apiError.js';
 
 function groupTrips(trips) {
   return {
@@ -40,7 +41,7 @@ export default function TripsHomePage() {
       setTrips(response.trips || []);
       setError(null);
     } catch (err) {
-      setError(err.message);
+      setError(friendlyError(err, 'trips'));
     } finally {
       setLoading(false);
     }
@@ -122,7 +123,7 @@ export default function TripsHomePage() {
               {/* On first run (no trips, clean load) the promoted CTA lives inside
                   EmptyTripsState as the guided path's destination, so it is not
                   duplicated here. */}
-              {!isEmpty && (
+              {!isEmpty && !error && (
                 <button
                   type="button"
                   onClick={() => setOpen(true)}
@@ -140,9 +141,19 @@ export default function TripsHomePage() {
           </div>
         </section>
 
-        {error && <p className="font-mono text-xs mb-6" style={{ color: '#e05a5a' }}>{error}</p>}
-
-        {isEmpty ? (
+        {error ? (
+          <div className="flex flex-col items-start gap-4 py-10">
+            <p className="font-mono text-xs" style={{ color: '#e05a5a' }}>{error}</p>
+            <button
+              type="button"
+              onClick={loadTrips}
+              className="w-full sm:w-auto px-6 py-4 rounded-2xl border font-mono text-xs tracking-[0.28em] uppercase"
+              style={{ borderColor: 'var(--gold-line)', color: 'var(--gold)', background: 'var(--gold-soft)' }}
+            >
+              Try again
+            </button>
+          </div>
+        ) : isEmpty ? (
           <EmptyTripsState onNewTrip={() => setOpen(true)} />
         ) : (
           ['active', 'upcoming', 'past'].map((section, sectionIndex) => (

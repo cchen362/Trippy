@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authApi } from '../services/api.js';
+import { friendlyError } from '../utils/apiError.js';
 
 const AuthContext = createContext(null);
 const CACHED_USER_KEY = 'trippy:cachedUser';
@@ -76,7 +77,7 @@ export function AuthProvider({ children }) {
       setNeedsSetup(false);
       setUser(user);
       window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
-    } catch (err) { setError(err.message); throw err; }
+    } catch (err) { setError(friendlyError(err, 'auth')); throw err; }
   }, []);
 
   const login = useCallback(async (username, password) => {
@@ -85,7 +86,7 @@ export function AuthProvider({ children }) {
       const { user } = await authApi.login({ username, password });
       setUser(user);
       window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
-    } catch (err) { setError(err.message); throw err; }
+    } catch (err) { setError(friendlyError(err, 'auth')); throw err; }
   }, []);
 
   const register = useCallback(async (username, password, displayName, inviteCode) => {
@@ -94,7 +95,7 @@ export function AuthProvider({ children }) {
       const { user } = await authApi.register({ username, password, displayName, inviteCode });
       setUser(user);
       window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
-    } catch (err) { setError(err.message); throw err; }
+    } catch (err) { setError(friendlyError(err, 'auth')); throw err; }
   }, []);
 
   const logout = useCallback(async () => {
