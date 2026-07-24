@@ -55,6 +55,10 @@ Stops can be reordered, moved between days, edited, or removed as the trip devel
 
 Travellers can also add a place by searching for it directly, with its location carried into the itinerary and map.
 
+<p align="center">
+  <img src="docs/assets/readme/plan-mobile.jpeg" alt="A day in Trippy's Shanghai itinerary, with hotel and experience stops" width="360" />
+</p>
+
 ### Discover
 
 Discover helps answer the question, “What would I miss if I only planned from what I already know?”
@@ -82,11 +86,19 @@ The original material stays attached to the import, making it possible to return
 
 Booking documents can also be attached manually and opened again from Logistics or the relevant Today card.
 
+<p align="center">
+  <img src="docs/assets/readme/logistics-mobile.jpeg" alt="Trippy Logistics showing hotel bookings and their recorded costs" width="360" />
+</p>
+
 ### Expenses
 
 Expenses is a private trip spending diary for the people planning the trip together. Log an amount in its original currency, date, category, optional title and note, and who paid. A cost can be linked to a booking when it belongs with a flight, stay, train, ticket, or other reservation.
 
 When someone paid on another traveller's behalf, Trippy can keep the amount owed alongside the expense and mark it settled later. The summary shows what the signed-in traveller paid, what is still owed back, and an estimated personal share. Entries in other currencies are converted to the trip's chosen summary currency using daily reference rates when available; the original amount remains visible, and unestimated entries are called out rather than folded silently into the total.
+
+<p align="center">
+  <img src="docs/assets/readme/expenses-mobile.jpeg" alt="Trippy Expenses showing multi-currency trip spending and linked booking costs" width="360" />
+</p>
 
 ### Map
 
