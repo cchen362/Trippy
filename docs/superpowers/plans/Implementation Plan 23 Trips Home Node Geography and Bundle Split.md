@@ -153,6 +153,26 @@ Both are on the **eager login path**, so a cold first login downloads ~5 MB of i
 
 ---
 
+## Follow-up F-1 — Auth error copy is raw/unfriendly (surfaced during Track C prod QA 2026-07-24)
+
+**Status: LOGGED, not started — investigation-first (produce findings + decisions, get owner approval, then implement). Independent of Tracks A/B/C; do not fold into Track B.**
+
+**Not a bug and not a Track C regression** — surfaced incidentally while the owner exercised offline login and then tripped the auth rate limiter during QA. Both behaviors are *correct*; only the user-facing copy is unpolished. Two distinct error strings reach the login error line, via two different mechanisms:
+
+1. **`Failed to fetch` (offline submit).** `fetch` throws a native `TypeError` that `request()` rethrows verbatim ([api.js:33-37](../../../frontend/src/services/api.js) — the `catch` only special-cases `AbortError`, everything else is rethrown as-is). The message is **browser-dependent**: Chrome `Failed to fetch`, Firefox `NetworkError when attempting to fetch resource`, Safari `Load failed` — so a literal string match is the wrong detector. Detect the network-failure case structurally instead: the thrown error has **no `.status`** (contrast the HTTP-error path at [api.js:27-30](../../../frontend/src/services/api.js) which always stamps `status`), optionally corroborated by `navigator.onLine === false`.
+2. **`Too many requests, please try again later` (rate-limited, HTTP 429).** This is a **server** string ([rateLimit.js:12](../../../backend/src/middleware/rateLimit.js)) passed straight through as `err.message` with `status: 429` ([api.js:29](../../../frontend/src/services/api.js)). Prod limiter config: **20 auth requests / 15-min fixed window per IP** ([rateLimit.js:3,8-9](../../../backend/src/middleware/rateLimit.js) — `AUTH_RATE_LIMIT = 20` in prod, `5` in test; `windowMs = 15*60*1000`). `standardHeaders: true` is already set, so the response carries `RateLimit-Reset` / `RateLimit-Remaining` — but the api client **discards all response headers** ([api.js:32](../../../frontend/src/services/api.js) returns only `res.json()`), so a live "try again in N minutes" countdown needs the client to read the header, not just remap the string.
+
+**Shared-path constraint (do this centrally, not per-call-site):** `login`, `register`, and `setup` in [AuthContext.jsx:72-98](../../../frontend/src/context/AuthContext.jsx) all use the identical `catch (err) { setError(err.message); throw err; }` pattern, and the error renders in `LoginPage`'s error line ([LoginPage.jsx:173-180](../../../frontend/src/pages/LoginPage.jsx), DM Mono uppercase, color `#e08a7a`). The clean fix maps error→copy in **one** place (either a small helper the three callers share, or a mapping inside `request()` before it throws) so all three auth flows stay consistent. Preserve the existing `throw err` rethrow — call sites still `await`/`catch`. Keep the DM Mono uppercase treatment; any new copy must read well uppercased.
+
+**Open decisions for the next orchestrator (owner call — do NOT pre-decide):**
+- **D-F1a — Live countdown vs static copy for 429.** Read `RateLimit-Reset` and show "Too many attempts — try again in ~N min" (best UX, requires threading one header through `request()` — a small api-client change that touches every caller's return path, so weigh the blast radius), or just soften the static string ("Too many attempts — please wait a few minutes"). Recommendation: static string first; countdown only if the owner wants it.
+- **D-F1b — Offline copy scope.** Substitute friendly offline copy for login only, or for any auth action (register/setup) — and whether to also catch the `navigator.onLine` signal to pre-empt the submit entirely (e.g. disable the button offline) vs only reacting after the failed fetch. Reacting-after is the smaller change.
+- **D-F1c — Backend vs frontend for the 429 string.** Changing [rateLimit.js:12](../../../backend/src/middleware/rateLimit.js) alters the copy for every consumer of that message; mapping `status === 429` on the frontend keeps it presentation-layer. Frontend mapping is the cleaner boundary (server messages are for logs/API clients, UI owns UI copy) and is required anyway for D-F1a.
+
+**Scope estimate (do not treat as approval):** small — one centralized error→copy mapping + (if D-F1a) one header-passthrough in the api client + focused tests (offline→`no .status` path yields offline copy; 429 yields cooldown copy; happy path unchanged). No migration, no backend logic change unless D-F1c picks the backend string. **Acceptance:** the login error line shows human copy for both offline and rate-limited cases at 375px and desktop, all three auth flows consistent, and existing auth tests stay green.
+
+---
+
 ## Notes
 - Track A is investigation-first per the house workflow: produce findings + the D-A1 decision, get owner approval, then implement. Track B needs no product decision and can proceed on its own whenever.
 - Both tracks were surfaced by the Plan 22 owner prod QA pass (2026-07-22); recorded so they are not lost. Neither reopens Plan 22.
