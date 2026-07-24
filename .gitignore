@@ -49,3 +49,6 @@ docker-compose.override.yml
 
 # Playwright MCP snapshots and screenshots
 .playwright-mcp/
+
+# original design brief
+travel-planner-prompt.md 
