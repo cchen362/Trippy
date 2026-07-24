@@ -131,7 +131,6 @@ Weather, payment processing, full accounting, live card-rate FX, route-time anal
 
 The repository's product and engineering references live here:
 
-- [`AGENTS.md`](AGENTS.md) — engineering rules and current repository conventions
 - [`docs/superpowers/specs/2026-04-23-trippy-design.md`](docs/superpowers/specs/2026-04-23-trippy-design.md) — living product and architecture specification
 - [`docs/superpowers/plans/`](docs/superpowers/plans/) — implementation history and explicitly unfinished work
 
