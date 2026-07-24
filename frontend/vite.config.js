@@ -3,6 +3,28 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // Plan 23 Track B W4: the route split left the entry chunk ~99% stable
+        // third-party code (React+Router 53.8 kB gzip, framer-motion 39.1 kB gzip).
+        // Without this split every app-only redeploy changes the entry's content
+        // hash and forces returning clients to re-download all ~94 kB gzip even
+        // though the vendor code is unchanged. Isolating vendor into its own
+        // content-hashed chunks keeps it cache-stable across app deploys and
+        // shrinks the service-worker precache re-fetch surface on upgrade.
+        manualChunks(id) {
+          if (id.includes('node_modules/framer-motion') || id.includes('node_modules/motion')) return 'vendor-motion';
+          if (
+            id.includes('node_modules/react-router') ||
+            id.includes('node_modules/react-dom') ||
+            id.match(/node_modules\/react\//) ||
+            id.includes('node_modules/scheduler')
+          ) return 'vendor-react';
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({
