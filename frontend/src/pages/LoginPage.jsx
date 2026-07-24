@@ -220,7 +220,7 @@ export default function LoginPage() {
       {/* Mobile layout */}
       <div className="lp-mobile">
         <div className="lp-medallion-wrap">
-          <img src="/assets/mobile-vignette.png" alt="" className="lp-medallion-img" />
+          <img src="/assets/mobile-vignette-v2.webp" alt="" className="lp-medallion-img" />
           <div className="lp-medallion-fade" />
         </div>
         <div className="lp-mobile-card-wrap">
@@ -305,7 +305,7 @@ export default function LoginPage() {
             width: 100%;
             min-height: 100vh;
             padding-left: clamp(120px, 18vw, 260px);
-            background-image: url('/assets/illustration-login.png');
+            background-image: url('/assets/illustration-login-v2.webp');
             background-size: cover;
             background-position: center right;
           }
