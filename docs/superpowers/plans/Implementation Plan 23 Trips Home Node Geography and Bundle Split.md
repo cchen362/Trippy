@@ -163,23 +163,81 @@ Both are on the **eager login path**, so a cold first login downloads ~5 MB of i
 
 ## Follow-up F-1 — Raw/unfriendly offline & error copy (auth + Trips home) (surfaced during Track C/B prod QA 2026-07-24)
 
-**Status: LOGGED, not started — investigation-first (produce findings + decisions, get owner approval, then implement). Independent of Tracks A/B/C; do not fold into Track B.**
+**Status: READY TO IMPLEMENT — investigated + owner-decided 2026-07-24 (this session). Not started. Independent of Tracks A/B/C; do not fold into Track B.** Presentation-only across the board: no migration, no backend logic change, no SW caching change, no offline-data/write architecture.
 
-**Not a bug and not a Track C regression** — surfaced incidentally while the owner exercised offline login and then tripped the auth rate limiter during QA. Both behaviors are *correct*; only the user-facing copy is unpolished. Two distinct error strings reach the login error line, via two different mechanisms:
+**Not a bug and not a Track C regression** — surfaced incidentally while the owner exercised offline login, tripped the auth rate limiter, and cold-started the installed PWA offline. All three behaviors are *correct*; only the user-facing copy is unpolished. Three raw strings reach an error line via the same class of mechanism:
 
-1. **`Failed to fetch` (offline submit).** `fetch` throws a native `TypeError` that `request()` rethrows verbatim ([api.js:33-37](../../../frontend/src/services/api.js) — the `catch` only special-cases `AbortError`, everything else is rethrown as-is). The message is **browser-dependent**: Chrome `Failed to fetch`, Firefox `NetworkError when attempting to fetch resource`, Safari `Load failed` — so a literal string match is the wrong detector. Detect the network-failure case structurally instead: the thrown error has **no `.status`** (contrast the HTTP-error path at [api.js:27-30](../../../frontend/src/services/api.js) which always stamps `status`), optionally corroborated by `navigator.onLine === false`.
-2. **`Too many requests, please try again later` (rate-limited, HTTP 429).** This is a **server** string ([rateLimit.js:12](../../../backend/src/middleware/rateLimit.js)) passed straight through as `err.message` with `status: 429` ([api.js:29](../../../frontend/src/services/api.js)). Prod limiter config: **20 auth requests / 15-min fixed window per IP** ([rateLimit.js:3,8-9](../../../backend/src/middleware/rateLimit.js) — `AUTH_RATE_LIMIT = 20` in prod, `5` in test; `windowMs = 15*60*1000`). `standardHeaders: true` is already set, so the response carries `RateLimit-Reset` / `RateLimit-Remaining` — but the api client **discards all response headers** ([api.js:32](../../../frontend/src/services/api.js) returns only `res.json()`), so a live "try again in N minutes" countdown needs the client to read the header, not just remap the string.
+1. **Offline auth submit.** `fetch` rejects with a native `TypeError` that `request()` rethrows verbatim ([api.js:33-37](../../../frontend/src/services/api.js) — the `catch` only special-cases `AbortError`). The message is **browser-dependent** (Chrome `Failed to fetch`, Firefox `NetworkError when attempting to fetch resource`, Safari `Load failed`) — string matching is the wrong detector. `AuthContext`'s three flows ([AuthContext.jsx:72-98](../../../frontend/src/context/AuthContext.jsx)) do `setError(err.message)`, so the raw string lands in the login line ([LoginPage.jsx:173-180](../../../frontend/src/pages/LoginPage.jsx), DM Mono **uppercase**, `#e08a7a`).
+2. **Rate-limited (HTTP 429).** Server string `Too many requests, please try again later` ([rateLimit.js:12](../../../backend/src/middleware/rateLimit.js)), stamped `status: 429` ([api.js:29](../../../frontend/src/services/api.js)), passed straight through. `router.use(authLimiter)` ([auth.js:9](../../../backend/src/routes/auth.js)) throttles the **whole auth router** (login/register/setup/logout/me), so copy must be **action-neutral**. Prod: 20 requests / 15-min window per IP; test: 5.
+3. **`Load failed` on Trips Home offline.** `loadTrips` does `setError(err.message)` ([TripsHomePage.jsx:42-44](../../../frontend/src/pages/TripsHomePage.jsx)); `GET /api/trips` (the trip *list*) has **no** SW runtime-cache rule (only `/detail`, `/share`, `/map-config`, artifacts, attachments — [vite.config.js:62-141](../../../frontend/vite.config.js)), so offline the list fetch fails with the same transport mechanism as item 1. **Owner decided against caching the list** (the app is online-first; the one real offline case — glancing at an already-loaded itinerary — is already served by the `/detail` cache). Fix is presentation-only.
 
-3. **`Load failed` on Trips home when offline (folded in 2026-07-24, owner decision).** During Track B offline PWA QA the installed app cold-started offline and served the app shell + already-browsed trip *details* from precache, but the Trips index showed a raw `Load failed`: `GET /api/trips` (the trip *list*) has **no** SW runtime-cache rule (only `/api/trips/:id/detail`, `/share`, `/map-config`, artifacts, attachments are cached — [vite.config.js](../../../frontend/vite.config.js)), so offline the list fetch fails with the **same no-`.status` network-failure mechanism as item 1**. **Owner decided against caching the list for offline** (the app is online-first: co-pilot, discovery, un-opened trips, images, map tiles, and all writes need network — a working offline list is an orphaned half-win, and the one real offline case, glancing at an already-loaded itinerary, is already served by the `/detail` cache). The fix here is **presentation only**: replace the raw `Load failed` in the Trips-home load-error state with a calm offline message reusing F-1's centralized error→copy mapping. **No new SW caching, no offline-data architecture** — this widens F-1 to the trips-list read path, nothing more.
+### Classification contract (1 — transport vs. presentation ownership)
 
-**Shared-path constraint (do this centrally, not per-call-site):** `login`, `register`, and `setup` in [AuthContext.jsx:72-98](../../../frontend/src/context/AuthContext.jsx) all use the identical `catch (err) { setError(err.message); throw err; }` pattern, and the error renders in `LoginPage`'s error line ([LoginPage.jsx:173-180](../../../frontend/src/pages/LoginPage.jsx), DM Mono uppercase, color `#e08a7a`). The clean fix maps error→copy in **one** place (either a small helper the three callers share, or a mapping inside `request()` before it throws) so all three auth flows stay consistent. Preserve the existing `throw err` rethrow — call sites still `await`/`catch`. Keep the DM Mono uppercase treatment; any new copy must read well uppercased.
+**The api client owns transport facts; a pure presentation mapper owns wording.** Do not match browser message text anywhere.
 
-**Open decisions for the next orchestrator (owner call — do NOT pre-decide):**
-- **D-F1a — Live countdown vs static copy for 429.** Read `RateLimit-Reset` and show "Too many attempts — try again in ~N min" (best UX, requires threading one header through `request()` — a small api-client change that touches every caller's return path, so weigh the blast radius), or just soften the static string ("Too many attempts — please wait a few minutes"). Recommendation: static string first; countdown only if the owner wants it.
-- **D-F1b — Offline copy scope.** Substitute friendly offline copy for login only, or for any auth action (register/setup) — and whether to also catch the `navigator.onLine` signal to pre-empt the submit entirely (e.g. disable the button offline) vs only reacting after the failed fetch. Reacting-after is the smaller change.
-- **D-F1c — Backend vs frontend for the 429 string.** Changing [rateLimit.js:12](../../../backend/src/middleware/rateLimit.js) alters the copy for every consumer of that message; mapping `status === 429` on the frontend keeps it presentation-layer. Frontend mapping is the cleaner boundary (server messages are for logs/API clients, UI owns UI copy) and is required anyway for D-F1a.
+- **`request()` in [api.js](../../../frontend/src/services/api.js) — stamp a machine-readable `code` on transport failures, nothing more.** Restructure so an **inner** `try/catch` wraps *only* the `fetch()` call. If `fetch()` rejects (and it is not an `AbortError`), stamp `code: 'NETWORK_ERROR'` on the rethrown error. Keep the existing outer handling for `AbortError` → `{ status: 408, timeout: true, code: 'TIMEOUT' }`. Leave the HTTP-error branch stamping `status` as today. **Do not** wrap `res.json()` (the success-body parse) in the network catch — a malformed 2xx body must fall through with **neither `code` nor `status`** so it is classified "unexpected", never "offline". This is the correction to the original "missing `.status`" detector: the precise signal is *"`fetch()` itself rejected before any Response existed,"* which is narrower than "no status."
+  - Sketch: `let res; try { res = await fetch(...) } catch (err) { if (err.name === 'AbortError') throw err; throw Object.assign(new Error(err.message || 'Network request failed'), { code: 'NETWORK_ERROR' }); }` then the existing 401/`res.ok`/`res.json()` logic, wrapped by the current outer `try…catch(AbortError→408)…finally(clearTimeout)`.
+  - **Do not** thread response headers through the happy-path return (owner chose static 429, D-F1a below). The `RateLimit-Reset` header stays unread.
+- **New pure helper `frontend/src/utils/apiError.js` exporting `friendlyError(err, context)`** — the only place wording lives. `context` is `'auth' | 'trips'`. Precedence: network/timeout → context copy; `status === 429` → cooldown copy; any other `status` → **pass the server `err.message` through** (preserves Invalid credentials / Invalid invite code / Username already taken / Missing fields); else (no code, no status) → neutral generic. No growing global switch — one small context-aware function.
+- **`navigator.onLine` is not used.** The `code` signal is reliable; never gate submit on `onLine`. React after the failed request only.
+- **Preserve the original error.** Call sites map copy into state and **rethrow the original** so `code`/`status` survive. AuthContext's offline-bootstrap fallback ([AuthContext.jsx:44-57](../../../frontend/src/context/AuthContext.jsx)) keys on `err.status === 401` and is unaffected.
 
-**Scope estimate (do not treat as approval):** small — one centralized error→copy mapping + (if D-F1a) one header-passthrough in the api client + focused tests (offline→`no .status` path yields offline copy; 429 yields cooldown copy; happy path unchanged). No migration, no backend logic change unless D-F1c picks the backend string. **Acceptance:** the login error line shows human copy for both offline and rate-limited cases at 375px and desktop, all three auth flows consistent, and existing auth tests stay green.
+### Call sites & files in scope (2)
+
+- **`frontend/src/services/api.js`** — add `code` stamping in `request()` as above. (`requestStream` untouched — see non-goals.)
+- **`frontend/src/utils/apiError.js`** — new `friendlyError(err, context)` helper.
+- **`frontend/src/context/AuthContext.jsx`** — in `setup`/`login`/`register`, change `setError(err.message)` → `setError(friendlyError(err, 'auth'))`; keep `throw err`.
+- **`frontend/src/pages/TripsHomePage.jsx`** — `loadTrips` catch → `setError(friendlyError(err, 'trips'))`; render a **complete recoverable error state** (D-F1d): when `error` is set, show the friendly copy + a **Try again** button (re-runs `loadTrips`) in place of the trip sections, and suppress the header's `+ New Trip` button while errored (guard becomes `!isEmpty && !error`). The empty-state gate `isEmpty = !error && trips.length === 0` is already correct and stays — network error keeps `isEmpty=false`, so `EmptyTripsState` never shows on failure.
+- **No changes to** `LoginPage.jsx`/`SetupPage.jsx` markup — they already render `error`. Casing note: login/register uppercase, Setup/Trips do not; final copy below reads well in both. No color/restyle changes.
+
+### Final copy (3)
+
+- **Auth network/timeout:** `Can't reach Trippy right now. Check your connection and try again.`
+- **Trips Home network/timeout:** `We can't load your trips right now. Check your connection and try again.` *(adjusted from the owner's "…while offline" hypothesis — the transport code also fires on server-unreachable/DNS, so "check your connection" is accurate without asserting the user is offline.)*
+- **429 (both contexts, static — D-F1a):** `Too many attempts. Please wait before trying again.`
+- **Unexpected (no code, no status — malformed body / runtime):** `Something went wrong. Please try again.`
+- **Existing HTTP validation (any other `status`):** unchanged, server message passed through — Invalid credentials, Invalid invite code, Username already taken, Missing fields.
+
+All read correctly uppercased (login/register) and in sentence case (Setup, Trips).
+
+### Owner decisions (resolved 2026-07-24)
+
+- **D-F1a — 429 copy → STATIC.** No header threading; no happy-path api change. (If ever revisited, attach `retryAfterSeconds` from `RateLimit-Reset` **only** inside the 429 `!res.ok` branch — zero blast radius — but not now.)
+- **D-F1b — Offline copy scope → ALL THREE auth flows**, centralized in AuthContext. React-after-failure; `navigator.onLine` **not** used.
+- **D-F1c — 429 string → FRONTEND mapping.** Backend limiter message/behavior unchanged (server messages are for logs/API clients; UI owns UI copy).
+- **D-F1d — Trips Home retry → YES.** Full recoverable error state (copy + Try again button, hide New Trip while errored). Presentation-only; no caching.
+
+### Retry metadata (4)
+
+None threaded through the api client. Static 429 copy needs no header. Trips Home retry is a local `loadTrips()` re-invocation button — no new client plumbing.
+
+### Focused automated coverage (5)
+
+New `frontend/src/services/api.test.js` (`// @vitest-environment jsdom`, `vi.stubGlobal('fetch', …)`), `frontend/src/utils/apiError.test.js` (node), plus additions to AuthContext/TripsHome tests (jsdom, `@testing-library/react`, matching existing `vi.mock` conventions in e.g. [TripPage.test.jsx](../../../frontend/src/pages/TripPage.test.jsx)):
+
+1. **fetch rejection → `code:'NETWORK_ERROR'`, no `status`** (mock `fetch` rejecting with a `TypeError`).
+2. **Browser text is irrelevant** — reject with both `TypeError('Failed to fetch')` and `TypeError('Load failed')`; both yield `code:'NETWORK_ERROR'`.
+3. **Malformed 2xx body is NOT mislabeled offline** — `fetch` resolves `ok` but `res.json()` rejects → error has **neither** `code` nor `status`; `friendlyError` → generic, not the network copy.
+4. **HTTP 429 mapping** — `status:429` → `friendlyError(err,'auth')` and `(…, 'trips')` both return the static cooldown copy.
+5. **Existing HTTP validation preserved** — 401 `{error:'Invalid credentials'}` / 400 `{error:'Missing fields'}` keep `status` and pass the server message through `friendlyError`.
+6. **Happy path unchanged** — 2xx returns parsed JSON; no `code`.
+7. **Auth consistency + original-error rethrow** — mock `authApi` rejecting `NETWORK_ERROR`; `login`, `register`, `setup` each set `error` to the auth network copy **and** reject with the *original* error (`code` still present). Same assertion for a 429.
+8. **Trips Home network error ≠ empty state** — `tripsApi.list` rejecting `NETWORK_ERROR` renders the offline copy + Try again button and **not** `EmptyTripsState`; a separate happy-path with `trips:[]` renders `EmptyTripsState` and no error copy; Try again re-invokes `loadTrips`.
+
+### Browser QA (6)
+
+At 375px and desktop, exercise the error states with the network throttled to offline:
+- Login submit offline → friendly auth copy (uppercased).
+- Register submit offline → same copy, same treatment.
+- Setup submit offline → same copy in sentence case (Setup does not uppercase).
+- Trips Home cold load offline → recoverable error block + working Try again (reconnect, tap → list loads).
+- Trip 429: not force-tripped in QA (would burn the limiter); covered by tests. Spot-check the static string renders if convenient.
+
+### Non-goals (7)
+
+No migration. No backend limiter message/behavior change (D-F1c). No SW caching rule added or widened (owner decision — the trips list stays uncached; this is the whole reason the fix is presentation-only). No offline-data or offline-write support. `requestStream` (co-pilot SSE) raw-rethrow is **not** touched — out of scope, noted for a future consistency pass. No color/typography restyle of the existing error lines (the off-token `#e08a7a`/`#e05a5a` literals are a separate cleanup). No adjacent Plan 23 Track A/B/C work.
+
+**Acceptance:** all three raw strings are gone — auth (login/register/setup) shows the human network copy offline and the static cooldown copy when rate-limited, consistent across the three flows; Trips Home shows the recoverable offline block with a working Try again and never the empty state on failure; malformed/unexpected failures show the neutral generic, never the offline copy; existing HTTP validation messages and all happy paths are unchanged; new + existing frontend and backend tests green; verified at 375px and desktop.
 
 ---
 
