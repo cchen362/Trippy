@@ -1,6 +1,6 @@
 # Implementation Plan 24 — Google Maps Deep-Link Place Identity and Link-Coordinate Correctness
 
-**Status:** 2026-07-25 — **W1, W2, and W3-automated COMPLETE. Ready to deploy; owner production pass outstanding.** No migration. No new external API calls. **Nothing is deployed yet.** Commits: W1 `45de419`, W2 `8ae31cc`, W3 `a649773`. The owner's production click-script is [Appendix B](#appendix-b--owner-production-qa-click-script).
+**Status:** 2026-07-25 — **W1, W2, and W3-automated COMPLETE. Ready to deploy; owner production pass outstanding.** No migration. No new external API calls. **Nothing is deployed yet.** Commits: W1 `45de419`, W2 `8ae31cc`, W3 `989f04c`. The owner's production click-script is [Appendix B](#appendix-b--owner-production-qa-click-script).
 
 **Review basis:** [2026-07-25 Google Maps deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) (committed `a917215`). That document's verified facts, scenario table, data invariant, and legacy-vs-live segmentation are **inputs to this plan — do not re-derive them.**
 
