@@ -246,7 +246,17 @@ Per review §10 the matrix is deliberately split, and **passing one half proves 
 
 ## Appendix A — Spun-out D4: booking sync overwrites a `user_confirmed` pin
 
-**Status:** NOT INVESTIGATED. Deliberately excluded from Plan 24 (owner decision D4, 2026-07-25) because it changes **write precedence** rather than read/display, is orthogonal to deep links, and needs its own QA pass. This appendix is written to be actionable by a fresh orchestrator with no access to the Plan 24 session.
+**Status:** NOT INVESTIGATED — **APPROVED AS THE NEXT WORK ITEM (owner, 2026-07-26).** Deliberately excluded from Plan 24 (owner decision D4, 2026-07-25) because it changes **write precedence** rather than read/display, is orthogonal to deep links, and needs its own QA pass. This appendix is written to be actionable by a fresh orchestrator with no access to the Plan 24 session. The next session is an **investigation**: answer questions 1–3 below, then write a numbered implementation plan. **No code changes in that session.**
+
+**Caller enumeration for question 3 — established 2026-07-26, do not re-derive.** `resolveLocationForStop` has exactly **three** call sites, all in `backend/src/services/stops.js`:
+
+| Line | Enclosing function | Passes `existing`? | Guard 2 reachable? |
+|---|---|---|---|
+| `:437` | `resolveCreateStopData` | **no** (create path) | no — nothing to protect |
+| `:533` | `resolveUpdateStopData` | **yes** | yes |
+| `:940` | `syncStopWithBooking` | **yes** | **no — guard 1 pre-empts it (the defect)** |
+
+So only **two** call sites can protect a pin, and a *global* guard reorder would alter exactly one other caller: `resolveUpdateStopData`. That is the path the Discovery trusted fast path (`DiscoveryPanel.jsx:434-465`) and the Map "Check location" Google pick (`MapTab.jsx:153-163`) both reach — so question 3 reduces to a single, tractable question: *should a Google pick through `resolveUpdateStopData` still be allowed to move a `user_confirmed` stop?* `syncStopWithBooking` itself has two callers, `bookings.js:158` (create) and `bookings.js:202` (update); the importer reaches it through those.
 
 ### Symptom to confirm
 Re-saving a hotel booking that was created through Google Places autocomplete **silently discards a user's manually corrected pin** on the booking-linked stop, and reinstates a Google identity on that stop.
