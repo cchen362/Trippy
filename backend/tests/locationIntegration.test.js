@@ -13,6 +13,7 @@ import { getMapConfigForCountry } from '../src/services/mapConfig.js';
 import { googlePlaceIdForStop } from '../src/utils/googlePlaceIdentity.js';
 import * as unsplashService from '../src/services/unsplash.js';
 import * as claudeService from '../src/services/claude.js';
+import * as lookupsService from '../src/services/lookups.js';
 
 let tmpDir;
 let user;
@@ -1571,13 +1572,19 @@ describe('deep-link provider, precision, and place identity (Plan 24)', () => {
     expect(googlePlaceIdForStop(rowAfter)).toBeNull();
   });
 
-  // Appendix A / G5 / D4 probe — deliberately NOT a fix, per owner decision D4 (review
-  // §8, plan Appendix A). This documents the CURRENT behavior of resolveLocationForStop's
-  // guard ordering so a future D4 fix has a test to update rather than a blind spot. The
-  // safety property that must hold regardless of which way D4 is eventually resolved is
-  // that coordinates and provider_id never end up as a mismatched pair (a Google id
-  // sitting on the pin's coordinates, or vice versa) — that would be RC-4 all over again.
-  it('G5/Appendix-A probe — a placeId booking re-save overwrites a user-confirmed pin (documents current behavior, not a fix)', async () => {
+  // Plan 25 D-25-1 — a booking re-save must never move a stop the user has pinned.
+  // Before the fix (commit c112f6d), syncStopWithBooking always fed bookingPlaceLocation's
+  // trusted booking coordinates into resolveLocationForStop, whose earlier trustedCoordinates
+  // guard (stops.js:159) short-circuits before protectedUserPin (stops.js:169) is ever
+  // reached — so a placeId booking's re-save silently reinstated the Google location over
+  // a user-confirmed pin. The fix short-circuits bookingPlaceLocation itself
+  // (linkedStopHoldsConfirmedLocation, stops.js:929) whenever the linked stop already holds
+  // location_status === 'user_confirmed', so the sync input carries no coordinates and
+  // protectedUserPin fires instead. The safety property that must hold regardless of which
+  // way this was resolved is that coordinates and provider_id never end up as a mismatched
+  // pair (a Google id sitting on the pin's coordinates, or vice versa) — that would be
+  // RC-4 all over again.
+  it('Plan 25 D-25-1 — a placeId booking re-save preserves a user-confirmed pin', async () => {
     vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
 
     const booking = await createBooking(user.id, trip.trip.id, {
@@ -1617,17 +1624,20 @@ describe('deep-link provider, precision, and place identity (Plan 24)', () => {
 
     const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
 
-    // ACTUAL current behavior, per the review's read of stops.js:152 preceding :158:
-    // the booking's trusted-coordinate guard fires first, so the pin is silently
-    // discarded and the Google identity/coordinates are reinstated.
-    expect(stopAfterResync.location_status).toBe('resolved');
-    expect(stopAfterResync.provider_id).toBe('google:ChIJ_hotel_google_id');
-    expect(stopAfterResync.lat).toBeCloseTo(29.551, 9);
-    expect(stopAfterResync.lng).toBeCloseTo(106.551, 9);
+    // Fixed behavior (D-25-1): the linked stop is user_confirmed, so
+    // linkedStopHoldsConfirmedLocation short-circuits bookingPlaceLocation to null before
+    // syncStopWithBooking ever calls resolveLocationForStop with trusted coordinates —
+    // protectedUserPin fires and the pin survives the re-save untouched.
+    expect(stopAfterResync.location_status).toBe('user_confirmed');
+    expect(stopAfterResync.provider_id).toBeNull();
+    expect(stopAfterResync.lat).toBeCloseTo(29.6, 9);
+    expect(stopAfterResync.lng).toBeCloseTo(106.6, 9);
 
-    // The safety property that must hold regardless: coordinates and provider_id are a
-    // CONSISTENT pair — both the booking's Google values together, never a Google id
-    // paired with the pin's coordinates (which would be RC-4's stale pairing again).
+    // The safety property that must hold regardless of which way D-25-1 was resolved:
+    // coordinates and provider_id are a CONSISTENT pair — either the booking's Google
+    // values together, or the pin's values together, never a Google id paired with the
+    // pin's coordinates (which would be RC-4's stale pairing again). The fix settles this
+    // on isPinPair, but the assertion below is unchanged from before the fix on purpose.
     const isGooglePair = stopAfterResync.provider_id === 'google:ChIJ_hotel_google_id'
       && Math.abs(stopAfterResync.lat - 29.551) < 1e-6;
     const isPinPair = stopAfterResync.provider_id === null
@@ -1636,13 +1646,16 @@ describe('deep-link provider, precision, and place identity (Plan 24)', () => {
     expect(isGooglePair && isPinPair).toBe(false);
   });
 
-  it('G5 companion prediction — a booking with no placeId takes the other branch and preserves the pin', async () => {
+  it('Plan 25 — a booking with no placeId also preserves the pin (both branches now agree)', async () => {
     vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
-    // No placeId in details_json -> bookingPlaceLocation returns null -> the sync input
-    // carries no coordinates (coordinateSource: 'booking' only) -> resolvePlace runs with
-    // allowNetwork true. Stub fetch to a clean non-match so this stays offline and
+    // No placeId in details_json -> bookingPlaceLocation returns null regardless of
+    // linkedStopHoldsConfirmedLocation (there's nothing to short-circuit) -> the sync
+    // input carries no coordinates (coordinateSource: 'booking' only) -> resolvePlace runs
+    // with allowNetwork true. Stub fetch to a clean non-match so this stays offline and
     // resolves to `unresolved`, which is irrelevant here: this test only cares about the
-    // pin surviving a LATER re-save, not the initial resolution.
+    // pin surviving a LATER re-save, not the initial resolution. Combined with the probe
+    // above, this proves the placeId and no-placeId branches now agree on D-25-1: neither
+    // one overwrites a user-confirmed pin.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
 
     const booking = await createBooking(user.id, trip.trip.id, {
@@ -1672,11 +1685,340 @@ describe('deep-link provider, precision, and place identity (Plan 24)', () => {
 
     const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
 
-    // Prediction confirmed: trustedCoordinates is false (no placeId => no coordinates in
-    // the sync input), so protectedUserPin fires and the pin survives untouched.
+    // Confirmed: trustedCoordinates is false (no placeId => no coordinates in the sync
+    // input), so protectedUserPin fires and the pin survives untouched — same outcome as
+    // the placeId branch above, reached by a different guard.
     expect(stopAfterResync.location_status).toBe('user_confirmed');
     expect(stopAfterResync.provider_id).toBeNull();
     expect(stopAfterResync.lat).toBeCloseTo(29.7, 9);
     expect(stopAfterResync.lng).toBeCloseTo(106.7, 9);
+  });
+
+  // Plan 25 D-25-1 boundary — linkedStopHoldsConfirmedLocation must key ONLY on
+  // location_status === 'user_confirmed' (D-25-3). A stop that has never been pinned
+  // still needs a placeId re-save to land the booking's Google coordinates exactly as it
+  // did before the fix — if the predicate were broader (e.g. any resolved/estimated
+  // stop, or anything keying on coordinate_source), this is the test that would catch it.
+  it('Plan 25 — a normal (non-pinned) placeId booking still syncs Google coordinates on re-save', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel Never Pinned',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_never_pinned',
+        lat: 29.552,
+        lng: 106.552,
+        displayName: 'Hotel Never Pinned',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+    expect(stopAfterCreate.location_status).toBe('resolved');
+    expect(stopAfterCreate.provider_id).toBe('google:ChIJ_never_pinned');
+
+    // Re-save with an unrelated field change — no pin was ever placed, so
+    // linkedStopHoldsConfirmedLocation must stay false and bookingPlaceLocation must run.
+    await updateBooking(user.id, booking.id, { confirmationRef: 'NEW-REF-111' });
+
+    const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterResync.location_status).toBe('resolved');
+    expect(stopAfterResync.provider_id).toBe('google:ChIJ_never_pinned');
+    expect(stopAfterResync.lat).toBeCloseTo(29.552, 9);
+    expect(stopAfterResync.lng).toBeCloseTo(106.552, 9);
+  });
+
+  // F-25-9 recovery path — MapTab's "Check location" flow lets the user pick a Google
+  // result to move a stop it had previously pinned. D-25-1 protects the pin from a
+  // booking re-save, but must never block this explicit, user-initiated recovery: a
+  // trusted-coordinate write from updateStop always reaches resolveLocationForStop's
+  // trustedCoordinates guard directly (stops.js:159), which is unconditional on
+  // location_status — the pin-preservation fix lives only in syncStopWithBooking's
+  // bookingPlaceLocation call, not in resolveLocationForStop itself.
+  it('Plan 25 — a Google pick from MapTab.handlePickResult still moves a pinned stop', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel To Recover',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_recover_original',
+        lat: 29.553,
+        lng: 106.553,
+        displayName: 'Hotel To Recover',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.61,
+      lng: 106.61,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const stopAfterPin = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterPin.location_status).toBe('user_confirmed');
+
+    // MapTab.jsx:153-163 — handlePickResult's exact payload shape.
+    await updateStop(user.id, stopAfterPin.id, {
+      lat: 29.62,
+      lng: 106.62,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      providerId: 'google:ChIJ_recover_pick',
+      resolvedName: 'Recovered Hotel Name',
+      resolvedAddress: 'Recovered Address, Chongqing',
+      countryCode: 'CN',
+    });
+
+    const stopAfterRecovery = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterPin.id);
+    expect(stopAfterRecovery.location_status).toBe('resolved');
+    expect(stopAfterRecovery.provider_id).toBe('google:ChIJ_recover_pick');
+    expect(stopAfterRecovery.lat).toBeCloseTo(29.62, 9);
+    expect(stopAfterRecovery.lng).toBeCloseTo(106.62, 9);
+  });
+
+  // Candidate-(c)-regression guard — a fix that keyed protection on "already has a pin"
+  // rather than strictly on the D-25-1/D-25-3 predicate could plausibly freeze a pinned
+  // stop against a SECOND manual pin. A re-pin is a trusted-coordinate write and must
+  // always move the stop, exactly like the recovery path above.
+  it('Plan 25 — a second manual re-pin still moves an already-pinned stop', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel Re-Pinned Twice',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_repin_original',
+        lat: 29.554,
+        lng: 106.554,
+        displayName: 'Hotel Re-Pinned Twice',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+
+    // First pin.
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.63,
+      lng: 106.63,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const stopAfterFirstPin = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterFirstPin.location_status).toBe('user_confirmed');
+    expect(stopAfterFirstPin.lat).toBeCloseTo(29.63, 9);
+
+    // MapTab.jsx:104-111 — saveCorrection's exact payload shape, re-pinning at new coordinates.
+    await updateStop(user.id, stopAfterFirstPin.id, {
+      lat: 29.64,
+      lng: 106.64,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const stopAfterSecondPin = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterFirstPin.id);
+    expect(stopAfterSecondPin.location_status).toBe('user_confirmed');
+    expect(stopAfterSecondPin.lat).toBeCloseTo(29.64, 9);
+    expect(stopAfterSecondPin.lng).toBeCloseTo(106.64, 9);
+  });
+
+  // F-25-6 / cost-model regression guard — "Regent Chongqing" is the one at-risk prod row:
+  // a legacy hotel booking whose details_json carries a placeId but no lat/lng, which is
+  // exactly the shape that makes bookingPlaceLocation call the PAID lookupHotelDetails
+  // backfill. Once the stop is pinned, a booking re-save must never pay for that lookup
+  // again — this is the whole point of skipping bookingPlaceLocation entirely for a
+  // pinned stop (stops.js:950-955), not just discarding its result afterward.
+  it('Plan 25 D-25-1 — no paid Google lookup runs for a pinned stop on booking re-save', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const lookupSpy = vi.spyOn(lookupsService, 'lookupHotelDetails').mockResolvedValue({
+      lat: 29.5578,
+      lng: 106.5697,
+      placeId: 'ChIJ_regent_legacy',
+    });
+
+    // Legacy shape: placeId present, no lat/lng in details_json. This creation call
+    // legitimately pays for lookupHotelDetails — there is no existing stop yet to protect.
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Regent Chongqing',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_regent_legacy',
+        displayName: 'Regent Chongqing',
+      },
+    });
+    expect(lookupSpy).toHaveBeenCalledTimes(1);
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+    expect(stopAfterCreate.lat).toBeCloseTo(29.5578, 9);
+
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.65,
+      lng: 106.65,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    // The create-path backfill already wrote lat/lng into the booking's details_json
+    // (bookingPlaceLocation's legacy branch, stops.js:893), which would ALSO make a
+    // pre-fix bookingPlaceLocation call skip lookupHotelDetails on re-save — that would
+    // make this test pass for the wrong reason. Reset details_json to the genuine legacy
+    // (no-coordinates) shape so the re-save would call lookupHotelDetails again if the
+    // W1 fix were absent, proving the skip is really coming from
+    // linkedStopHoldsConfirmedLocation and not from an incidental coordinate cache.
+    getDb().prepare('UPDATE bookings SET details_json = ? WHERE id = ?').run(
+      JSON.stringify({ placeId: 'ChIJ_regent_legacy', displayName: 'Regent Chongqing' }),
+      booking.id,
+    );
+    lookupSpy.mockClear();
+
+    await updateBooking(user.id, booking.id, { confirmationRef: 'NEW-REF-222' });
+
+    expect(lookupSpy).not.toHaveBeenCalled();
+
+    const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterResync.location_status).toBe('user_confirmed');
+    expect(stopAfterResync.provider_id).toBeNull();
+    expect(stopAfterResync.lat).toBeCloseTo(29.65, 9);
+    expect(stopAfterResync.lng).toBeCloseTo(106.65, 9);
+  });
+
+  // D-25-4 scope — only LOCATION columns are protected by D-25-1; title, day, and other
+  // itinerary metadata still sync normally from the booking. Uses its own two-day trip
+  // (the shared beforeEach trip is a single day) so the booking can genuinely move days.
+  it('Plan 25 D-25-4 — title and day still sync for a pinned stop; location columns do not move', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const twoDayTrip = createTrip(user.id, {
+      title: 'Chongqing Two Day',
+      destinations: ['Chongqing'],
+      destinationCountries: ['CN'],
+      startDate: '2026-06-09',
+      endDate: '2026-06-10',
+      travellers: 'couple',
+      interestTags: ['food'],
+      pace: 'moderate',
+    });
+    const day1 = twoDayTrip.days[0].id;
+    const day2 = twoDayTrip.days[1].id;
+
+    const booking = await createBooking(user.id, twoDayTrip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel Before Move',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_day_move_hotel',
+        lat: 29.555,
+        lng: 106.555,
+        displayName: 'Hotel Before Move',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+    expect(stopAfterCreate.day_id).toBe(day1);
+
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.66,
+      lng: 106.66,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const rowBefore = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(rowBefore.location_status).toBe('user_confirmed');
+
+    await updateBooking(user.id, booking.id, {
+      title: 'Hotel After Move',
+      startDatetime: '2026-06-10T15:00',
+    });
+
+    const rowAfter = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+
+    // Non-location metadata syncs from the booking as always.
+    expect(rowAfter.title).toBe('Hotel After Move');
+    expect(rowAfter.day_id).toBe(day2);
+
+    // Every location column is byte-identical to the pinned state — D-25-1 protected it
+    // through both the field-level sync AND the day move.
+    expect(rowAfter.lat).toBe(rowBefore.lat);
+    expect(rowAfter.lng).toBe(rowBefore.lng);
+    expect(rowAfter.provider_id).toBe(rowBefore.provider_id);
+    expect(rowAfter.resolved_name).toBe(rowBefore.resolved_name);
+    expect(rowAfter.resolved_address).toBe(rowBefore.resolved_address);
+    expect(rowAfter.coordinate_system).toBe(rowBefore.coordinate_system);
+    expect(rowAfter.coordinate_source).toBe(rowBefore.coordinate_source);
+    expect(rowAfter.location_status).toBe(rowBefore.location_status);
+    expect(rowAfter.location_confidence).toBe(rowBefore.location_confidence);
+    expect(rowAfter.country_code).toBe(rowBefore.country_code);
+  });
+
+  // D-25-3 key — protection keys on location_status === 'user_confirmed' ALONE, never on
+  // coordinate_source === 'user_pin'. Forces the legacy shape that already exists on real
+  // rows (a curated coordinate_source, not user_pin) to prove the predicate isn't
+  // accidentally narrower than D-25-3 requires.
+  it("Plan 25 D-25-3 — protection keys on location_status, not on coordinate_source === 'user_pin'", async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel Curated Confirmed',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_curated_confirmed',
+        lat: 29.556,
+        lng: 106.556,
+        displayName: 'Hotel Curated Confirmed',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+
+    // Force the legacy shape directly: user_confirmed, but coordinate_source is
+    // 'curated' (a real value backend/src/services/placeResolver.js:102 produces),
+    // never 'user_pin'.
+    getDb().prepare(`
+      UPDATE stops
+      SET location_status = 'user_confirmed', coordinate_source = 'curated',
+          provider_id = 'curated:regent-chongqing', lat = ?, lng = ?
+      WHERE id = ?
+    `).run(29.5578, 106.5697, stopAfterCreate.id);
+
+    const rowBefore = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(rowBefore.location_status).toBe('user_confirmed');
+    expect(rowBefore.coordinate_source).toBe('curated');
+
+    await updateBooking(user.id, booking.id, { confirmationRef: 'NEW-REF-333' });
+
+    const rowAfter = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(rowAfter.location_status).toBe('user_confirmed');
+    expect(rowAfter.coordinate_source).toBe('curated');
+    expect(rowAfter.provider_id).toBe('curated:regent-chongqing');
+    expect(rowAfter.lat).toBeCloseTo(29.5578, 9);
+    expect(rowAfter.lng).toBeCloseTo(106.5697, 9);
   });
 });

@@ -1,8 +1,6 @@
 # Implementation Plan 25 — Booking Sync Must Not Overwrite a User Pin
 
-**Status:** 2026-07-26 — **W1 COMPLETE, W2 NOT STARTED.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). The fix is implemented and proven at runtime; test-suite alignment and manual QA remain. **No migration. No new external API calls — this plan removes one.**
-
-> **Repo is intentionally one test red between W1 and W2.** The `:1580` probe asserts the buggy behaviour on purpose and now fails (`expected 'user_confirmed' to be 'resolved'`) — that failure *is* the proof the fix landed. W2 Step 1 rewrites it. Do not "fix" the suite by reverting the change.
+**Status:** 2026-07-26 — **W1 AND W2 COMPLETE. READY TO DEPLOY, NOT YET DEPLOYED.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). Fix implemented, regression-tested, and manually verified end-to-end in a real browser against live Google Places. **No migration. No new external API calls — this plan removes one.** The only outstanding item is the post-deploy Regent Chongqing check, which is the owner's to run (W2 DoD).
 
 **Origin:** [Plan 24 Appendix A](<Implementation Plan 24 Google Maps Deep Link Place Identity.md>#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin) (spun-out owner decision D4, approved as the next work item 2026-07-26), recorded as **G5** in the [2026-07-25 deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) §8. Plan 24 is CLOSED and stays closed; nothing here reopens it.
 
@@ -126,7 +124,28 @@ Note in the code comment that skipping `bookingPlaceLocation` is deliberate on t
 
 ## Wave 2 — Verification
 
-**Status: NOT STARTED.**
+**Status: COMPLETE 2026-07-26.** One file changed: `backend/tests/locationIntegration.test.js` (+367/−25). Both probes updated, six new tests added, all gates green, full manual matrix passed on a freshly created trip.
+
+**Gates (Step 3).** Backend **709 passed / 32 files** (baseline 703, +6 — exactly the six new tests). Frontend **271 passed / 42 files**, *identical* to baseline, and `npm run build` produced a byte-identical precache (33 entries, 1161.73 KiB) — two independent confirmations that D-25-2's "no frontend surface" held.
+
+**Mutation check (not required by the plan, done anyway).** Before accepting the new tests, `linkedStopHoldsConfirmedLocation` was temporarily forced to `false` and the file re-run. Exactly four tests failed — the rewritten D-25-1 probe (`expected 'resolved' to be 'user_confirmed'`), the no-paid-lookup test (`lookupHotelDetails ... called 1 times`), D-25-4 (`expected 29.555 to be 29.66`), and D-25-3 — while the three "should still move" controls and the no-`placeId` companion stayed green. That is the correct signature: the new tests fail for the defect and only for the defect, and the controls are genuinely fix-independent. The paid-lookup test really did fire the Google call, confirming its `details_json` reset defeats the false-positive path rather than merely asserting around it.
+
+**Manual matrix (Step 4) — passed 2026-07-26**, local `:5174`/`:3002`, Chrome extension against the owner's logged-in session, on a **freshly created** two-day trip ("Plan 25 QA", Chongqing, 2026-08-01→02). The dev booking resolved to placeId `ChIJAQDwhxMzkzYRISqy1Z_sNdc` — *the same Google place as the production at-risk row*, so the rehearsal matched the real defect closely.
+
+| # | Step | DB read after the action | Verdict |
+|---|---|---|---|
+| 1 | Hotel booking via Places autocomplete | `google:ChIJAQDwhxMzkzYRISqy1Z_sNdc` · `resolved` · `places` · 29.574564/106.566971 | pass |
+| 2 | Map → Move pin → Set here | `user_confirmed` · `user_pin` · `provider_id` NULL · 29.572739/106.573284 · `country_code` still `CN` | pass |
+| 3 | Edit confirmation ref → save | ref `PLAN25-QA-001` saved; **every location column byte-identical to step 2**; `title`/`time` still synced | **pass — the defect, fixed** |
+| 4 | Change booking date to day 2 → save | `day_id` → day 2, `time` → 16:30, location columns unchanged | pass (D-25-4) |
+| 5 | Correction mode → search → pick Google result | moved to 29.565157/106.575488, `google:ChIJw2Yqr4E0kzYRwPSNgwikEQY` · `resolved` · `places` | pass (F-25-9 recovery intact) |
+| 6 | Move pin → Set here, twice | first re-pin cleared the Google identity; second re-pin moved an *already* `user_confirmed` stop 29.570144 → 29.568689 | pass (re-pinning not blocked) |
+
+Verified at 375px as well: the Map tab renders "STOP 1 · USER CONFIRMED" and the sequence panel "CONFIRMED" correctly. Amap tiles were correctly selected for CN throughout. QA trip, booking, and stop deleted afterwards (verified: zero rows remain); no session was minted — the owner's existing dev login was used.
+
+**Incidental observation, not caused by this plan and not fixed here:** at 375px the Leaflet stop popup and the Day Sequence panel overlap. This wave changed no frontend file and the build output is byte-identical, so this is pre-existing map chrome. Logged only so it is not mistaken for a regression later.
+
+**Note on Step 4's UI:** there is no separate "Check location" control. MapTab's search requires `correctionStop`, so the Google-pick recovery path lives *inside* correction mode, reached via "Move pin". The plan's step 5 wording implies a distinct entry point; the behaviour is correct, the wording was not.
 
 ### Step 1 — Update the two existing probe tests
 Per Plan 24 Appendix A's cross-reference, these assert current (buggy) behaviour deliberately and **must be updated when behaviour changes**.
