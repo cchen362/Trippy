@@ -246,7 +246,9 @@ Per review §10 the matrix is deliberately split, and **passing one half proves 
 
 ## Appendix A — Spun-out D4: booking sync overwrites a `user_confirmed` pin
 
-**Status:** NOT INVESTIGATED — **APPROVED AS THE NEXT WORK ITEM (owner, 2026-07-26).** Deliberately excluded from Plan 24 (owner decision D4, 2026-07-25) because it changes **write precedence** rather than read/display, is orthogonal to deep links, and needs its own QA pass. This appendix is written to be actionable by a fresh orchestrator with no access to the Plan 24 session. The next session is an **investigation**: answer questions 1–3 below, then write a numbered implementation plan. **No code changes in that session.**
+**Status:** **INVESTIGATED AND SUPERSEDED 2026-07-26 → [Implementation Plan 25 — Booking Sync Must Not Overwrite a User Pin](<Implementation Plan 25 Booking Sync User Pin Precedence.md>).** Questions 1–4 are answered there; the owner took decisions D-25-1 (pin always wins) and D-25-2 (silent — nothing is lost, so nothing to warn about), and candidate **(a) caller-scoped precedence** was adopted. Three corrections to this appendix, established during that investigation and recorded as facts F-25-4, F-25-5, and F-25-7 in Plan 25: the Discovery trusted fast path is a **CREATE**, not an update, so no guard change can reach it; candidate **(c) is a provable no-op** as stated, because `protectedUserPin` already contains `&& !trustedCoordinates`; and candidate **(b) cannot be built without a migration**, because a user pin clears `provider_id` and nothing else records which `placeId` a stop was last synced from. Read Plan 25, not this appendix, for the current shape of the work. The text below is retained as the investigation's starting point.
+
+Deliberately excluded from Plan 24 (owner decision D4, 2026-07-25) because it changes **write precedence** rather than read/display, is orthogonal to deep links, and needs its own QA pass.
 
 **Caller enumeration for question 3 — established 2026-07-26, do not re-derive.** `resolveLocationForStop` has exactly **three** call sites, all in `backend/src/services/stops.js`:
 
