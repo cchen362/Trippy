@@ -21,7 +21,7 @@ function TicketButton({ documents }) {
   );
 }
 
-export default function HeroCard({ item, deepLinkProvider, mapConfig }) {
+export default function HeroCard({ item, mapConfig }) {
   if (!item) return null;
 
   const isHotel = item.kind === 'hotel';
@@ -65,7 +65,7 @@ export default function HeroCard({ item, deepLinkProvider, mapConfig }) {
         </p>
       )}
       <div className="flex items-center gap-2 flex-wrap">
-        <NavigateIcon stop={stop} label={navLabel} deepLinkProvider={deepLinkProvider} mapConfig={mapConfig} />
+        <NavigateIcon stop={stop} label={navLabel} mapConfig={mapConfig} />
         <TicketButton documents={booking?.documents} />
         {showStatus && <StatusPill booking={booking} />}
       </div>

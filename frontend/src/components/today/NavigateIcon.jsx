@@ -1,20 +1,23 @@
 import { Navigation } from 'lucide-react';
 import { buildDeepLink } from '../../utils/deepLink.js';
-import { toDisplayCoordinates } from '../../utils/coordinates.js';
+import { resolveDeepLinkTarget } from '../../utils/deepLinkTarget.js';
 
-// H4: converts the stop's raw (possibly wgs84) coordinates to the map
-// provider's display system before building the deep link, mirroring
-// backend/src/services/mapData.js's displayLat/displayLng so Today-tab
-// navigation lands on the same pin as the Map tab (see utils/coordinates.js
-// for the guarded conversion — only wgs84-stored stops are ever converted).
-export default function NavigateIcon({ stop, label, deepLinkProvider, mapConfig }) {
-  const { lat, lng } = toDisplayCoordinates(stop, mapConfig);
+// Plan 24 (F8 fix): resolves the stop's own deep-link provider and
+// link-datum coordinates via resolveDeepLinkTarget — the stop's own country
+// wins, `mapConfig` (the day's provider) is only the fallback — rather than
+// assuming the day's provider is correct and converting to its datum
+// directly. Renders nothing while that resolution is unknown (e.g. before
+// trip context has loaded) instead of falling back to a Google default, so
+// no link is ever emitted for the wrong app or the wrong datum (D-24-7).
+export default function NavigateIcon({ stop, label, mapConfig }) {
+  const target = resolveDeepLinkTarget(stop, mapConfig);
 
-  if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+  if (!target) {
     return null;
   }
 
-  const href = buildDeepLink(deepLinkProvider, lat, lng, label);
+  const { provider, lat, lng } = target;
+  const href = buildDeepLink(provider, lat, lng, label);
 
   return (
     <a

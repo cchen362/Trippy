@@ -63,6 +63,7 @@ function mapStop(row) {
     locationStatus: row.location_status,
     locationConfidence: row.location_confidence,
     providerId: row.provider_id,
+    countryCode: row.country_code,
     unsplashPhotoUrl: row.unsplash_photo_url,
     unsplashPhotoId: row.unsplash_photo_id,
     photoAttribution: parseJson(row.photo_attribution_json, null),

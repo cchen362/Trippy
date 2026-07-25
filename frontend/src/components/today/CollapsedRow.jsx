@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import UpcomingRow from './UpcomingRow.jsx';
 
-export default function CollapsedRow({ items, deepLinkProvider, mapConfig }) {
+export default function CollapsedRow({ items, mapConfig }) {
   const [expanded, setExpanded] = useState(false);
   if (!items.length) return null;
 
@@ -20,7 +20,7 @@ export default function CollapsedRow({ items, deepLinkProvider, mapConfig }) {
       {expanded && (
         <div>
           {items.map((item) => (
-            <UpcomingRow key={`${item.kind}-${item.id}`} item={item} deepLinkProvider={deepLinkProvider} mapConfig={mapConfig} dim />
+            <UpcomingRow key={`${item.kind}-${item.id}`} item={item} mapConfig={mapConfig} dim />
           ))}
         </div>
       )}

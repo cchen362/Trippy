@@ -1,9 +1,21 @@
-// Frontend twin of backend/src/services/coordinates.js (H4). The WGS-84 <->
-// GCJ-02 conversion math is copied verbatim from that file — it is a pure,
+// Frontend twin of backend/src/services/coordinates.js (H4, Plan 24 F4).
+// The WGS-84 <-> GCJ-02 conversion math (isInChina, wgs84ToGcj02,
+// gcj02ToWgs84) is copied verbatim from that file — it is a pure,
 // well-known algorithm with no dependencies, so a faithful port here (rather
 // than an HTTP round-trip for every Today-tab render) keeps navigation fast
 // without diverging from the backend's math. If the formulas ever need to
 // change, update both files together.
+//
+// This twin is NOT a full mirror of the backend's toDisplayCoordinates.
+// It converts both directions (wgs84<->gcj02) exactly like the backend, but
+// it returns a plain `{ lat, lng }` instead of the backend's
+// `{ displayLat, displayLng, displayCoordinateSystem, canRenderMarker,
+// isEstimated }` shape, and it deliberately does NOT null out untrustworthy
+// ('unknown' datum, non-estimated) coordinates the way the backend does
+// (backend coordinates.js F5). That unknown-datum nulling is out of scope
+// for this frontend twin (Plan 24 G6 — Today linking unknown-datum legacy
+// coordinates — is explicitly out of scope); callers here get the raw stored
+// coordinates back unconverted when the system is 'unknown'.
 const CHINA_LAT_MIN = 3.86;
 const CHINA_LAT_MAX = 53.55;
 const CHINA_LNG_MIN = 73.66;
@@ -49,6 +61,33 @@ export function wgs84ToGcj02(lat, lng) {
   return { lat: lat + dLat, lng: lng + dLng };
 }
 
+export function gcj02ToWgs84(lat, lng) {
+  if (!isInChina(lat, lng)) return { lat, lng };
+
+  let minLat = lat - 0.01;
+  let maxLat = lat + 0.01;
+  let minLng = lng - 0.01;
+  let maxLng = lng + 0.01;
+  let wgsLat = lat;
+  let wgsLng = lng;
+
+  for (let i = 0; i < 30; i += 1) {
+    wgsLat = (minLat + maxLat) / 2;
+    wgsLng = (minLng + maxLng) / 2;
+    const converted = wgs84ToGcj02(wgsLat, wgsLng);
+    const dLat = converted.lat - lat;
+    const dLng = converted.lng - lng;
+
+    if (Math.abs(dLat) < 1e-7 && Math.abs(dLng) < 1e-7) break;
+    if (dLat > 0) maxLat = wgsLat;
+    else minLat = wgsLat;
+    if (dLng > 0) maxLng = wgsLng;
+    else minLng = wgsLng;
+  }
+
+  return { lat: wgsLat, lng: wgsLng };
+}
+
 function hasCoordinates(stop) {
   return Number.isFinite(stop?.lat) && Number.isFinite(stop?.lng);
 }
@@ -68,6 +107,8 @@ export function toDisplayCoordinates(stop, mapConfig) {
 
   if (targetSystem === 'gcj02' && coordinateSystem === 'wgs84') {
     return wgs84ToGcj02(stop.lat, stop.lng);
+  } else if (targetSystem === 'wgs84' && coordinateSystem === 'gcj02') {
+    return gcj02ToWgs84(stop.lat, stop.lng);
   }
 
   return { lat: stop.lat, lng: stop.lng };

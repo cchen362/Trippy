@@ -116,7 +116,14 @@ function applyResolutionFields(base, resolution, locationQuery) {
   };
 }
 
-function preserveLocationFields(input) {
+// D-24-4: a manual pin (or any other trusted-coordinate write) correctly clears
+// provider_id/resolvedName/resolvedAddress — the stop is no longer an attested named
+// place, and that clearing is what makes the Google place-identity invariant (D-24-3)
+// safe. country_code is not an identity claim, though — it's the input that selects map
+// tiles, the maps app, and the coordinate datum — so it must fall back to the existing
+// stop's country rather than being discarded whenever the caller (e.g. a MapTab manual
+// pin) sends no countryCode of its own.
+function preserveLocationFields(input, existing) {
   return {
     lat: input.lat ?? null,
     lng: input.lng ?? null,
@@ -128,7 +135,7 @@ function preserveLocationFields(input) {
     locationStatus: input.locationStatus || 'resolved',
     locationConfidence: input.locationConfidence ?? null,
     providerId: input.providerId ?? null,
-    countryCode: input.countryCode ?? null,
+    countryCode: input.countryCode ?? existing?.country_code ?? null,
   };
 }
 
@@ -150,7 +157,7 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
   const generatedCoordinates = inputHasCoordinates && isGeneratedCoordinateSource(input.coordinateSource);
 
   if (trustedCoordinates && !generatedCoordinates) {
-    return preserveLocationFields({ ...input, locationQuery });
+    return preserveLocationFields({ ...input, locationQuery }, existing);
   }
 
   const existingQuery = existing?.location_query || existing?.title || '';

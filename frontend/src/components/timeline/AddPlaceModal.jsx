@@ -105,6 +105,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
           city: place.city || '',
           lat: place.lat,
           lng: place.lng,
+          countryCode: place.countryCode || null,
         });
       }
     } catch {
@@ -153,6 +154,7 @@ export default function AddPlaceModal({ open, day, saving, onClose, onSubmit, lo
         resolvedName: pickedPlace.name,
         resolvedAddress: pickedPlace.address,
         locationQuery: pickedPlace.name,
+        countryCode: pickedPlace.countryCode,
       });
     }
 

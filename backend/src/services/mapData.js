@@ -1,5 +1,5 @@
 import { getDb } from '../db/database.js';
-import { getMapConfig, getMapConfigForCountry } from './mapConfig.js';
+import { getMapConfig, getMapConfigForCountry, linkCoordinateSystemForProvider } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
 import {
   assertTripAccess, deriveDayGeo, deriveTripDestinationsFromDays, buildTripScopes, listTripScopes,
@@ -92,7 +92,14 @@ function buildSegmentsForDay(day, dayStops, bookingById, resolvedCity) {
 }
 
 function formatMapStop(row, mapConfig, routeNumber, routeSegmentId, deepLinkProvider) {
+  // Tile-datum coordinates for marker rendering — unchanged (D-24-2, F3).
   const display = toDisplayCoordinates(row, mapConfig);
+  // Link-datum coordinates are additive, not a repoint of `display`: the tile provider
+  // (mapConfig) and the link provider (deepLinkProvider) can legitimately disagree — e.g.
+  // an HK/MO/TW stop on a mainland-China day tiles in gcj02 but must link to Google in
+  // wgs84 (D-24-1). Reusing toDisplayCoordinates means F5's null-on-untrustworthy-
+  // provenance behavior (unknown datum, not estimated) holds for the link pair too.
+  const link = toDisplayCoordinates(row, { coordinateSystem: linkCoordinateSystemForProvider(deepLinkProvider) });
   return {
     id: row.id,
     dayId: row.day_id,
@@ -103,6 +110,8 @@ function formatMapStop(row, mapConfig, routeNumber, routeSegmentId, deepLinkProv
     displayLat: display.displayLat,
     displayLng: display.displayLng,
     displayCoordinateSystem: display.displayCoordinateSystem,
+    linkLat: link.displayLat,
+    linkLng: link.displayLng,
     locationStatus: row.location_status,
     locationConfidence: row.location_confidence,
     routeNumber,

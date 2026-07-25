@@ -71,6 +71,12 @@ export function getMapConfig(destinationCountries, options = {}) {
   return getMapConfigForCountry(null, options);
 }
 
+// D-24-1: link coordinates follow the *link* provider, not the tile provider. This is
+// the single owner of that mapping — no caller may inline it.
+export function linkCoordinateSystemForProvider(provider) {
+  return provider === 'amap' ? 'gcj02' : 'wgs84';
+}
+
 export function buildDeepLink(provider, lat, lng, label) {
   switch (provider) {
     case 'amap':

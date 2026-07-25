@@ -160,6 +160,7 @@ export default function MapTab() {
           providerId: `google:${place.placeId || result.placeId}`,
           resolvedName: place.name || result.mainText || result.text,
           resolvedAddress: place.address || '',
+          countryCode: place.countryCode || null,
         });
         cancelCorrection();
       } else {

@@ -1,6 +1,6 @@
 # Implementation Plan 24 — Google Maps Deep-Link Place Identity and Link-Coordinate Correctness
 
-**Status:** OPEN 2026-07-25 — **not started.** W1 → W2 → W3, single deploy. No migration. No new external API calls.
+**Status:** OPEN 2026-07-25 — **W1 COMPLETE, W2 + W3 not started.** W1 → W2 → W3, single deploy. No migration. No new external API calls.
 
 **Review basis:** [2026-07-25 Google Maps deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) (committed `a917215`). That document's verified facts, scenario table, data invariant, and legacy-vs-live segmentation are **inputs to this plan — do not re-derive them.**
 
@@ -83,7 +83,17 @@ RC-2 and RC-3 are live bugs today, independent of place IDs. RC-1 cannot be fixe
 
 ## Wave 1 — Link geometry, provider parity, and country preservation
 
-**Status: NOT STARTED.** Pure correctness. No payload field is added for identity in this wave; RC-1 is W2.
+**Status: COMPLETE 2026-07-25.** Pure correctness. No payload field is added for identity in this wave; RC-1 is W2. All seven steps implemented as designed, no deviations. Baselines held exactly: backend **676 passed / 31 files**, frontend **240 passed / 39 files**, `npm run build` green. No test file was added or modified (W3 owns all new tests), and no existing assertion was weakened.
+
+**Step 0 findings.** The safety grep found **no consumer depending on `country_code` being cleared by a pin** — the only two references to its NULL-ness are `country_code = COALESCE(country_code, ?)` fills (`stops.js:841`, `:1048`), which only *benefit* from preservation. D-24-4 was therefore safe to implement without a product question.
+
+**W1 verification actually performed** (beyond the gates; the normative matrix is still W3's):
+- *Real-data Maps-vs-Today parity probe* over the legacy `Chengdu - Chongqing` trip plus the `Taipei - Kaohsiung` and `Shanghai - Hangzhou` current-code trips — **39 stops, 0 parity mismatches**: 38 linked, 1 correctly unlinked (the coordinate-less unresolved `G3360` transit stop), 18 needing a link-datum conversion. Legacy unknown-datum, legacy `curated:*`+`gcj02`+`user_confirmed`, and legacy `user_pin`+`gcj02` rows all came through precise and unmoved, because on an all-CN trip the tile provider and link provider coincide.
+- *RC-2b quantified* on synthetic rows (the case current data lacks, F14/review §7b): an **HK** stop on a mainland-CN day was **598 m** off under the old display-pair link and now sends true WGS-84 to Google; a **KR** stop on a CN day was **459 m** off and now sends true WGS-84 to Naver; a genuine **CN** stop still converts to GCJ-02 for Amap. Provider and coordinates agreed across both surfaces in all three.
+- *Browser, 375px, real session*: Today's `NavigateIcon` rendered `https://www.google.com/maps/search/?api=1&query=22.6205,120.2807` for a `TW` stop — provider taken from the **stop's own country**, coordinates unrounded — and the Map tab popup produced a **byte-identical** href. Zero console errors.
+- *D-24-4 through the real UI*: **Move pin → Set here** left `provider_id`/`resolved_name`/`resolved_address` NULL (correct, and what keeps D-24-3 safe) while **`country_code` stayed `TW`**; a subsequent real Google pick in *Check location* stamped `country_code: TW` alongside `provider_id: google:ChIJW8ThIHYEbjQR8k12HL3R1uY`. The QA stop and minted session were deleted afterwards.
+
+**Not verified locally, owed to the owner's production pass:** the `AddPlaceModal` and MapTab set-pin *modal* surfaces could not be opened in the in-app Browser pane (the known `document.hidden` → paused-rAF freeze), so `AddPlaceModal`'s `countryCode` forwarding was exercised by driving the exact payload it now builds, not by typing in the modal. MapTab's `handlePickResult` forwarding *was* exercised through the real UI. The full era-split manual matrix remains W3's.
 
 ### Step 0 — Baseline and one safety check (before any edit)
 - Record pre-change test counts: `cd backend; npm test` and `cd frontend; npm test`, plus `npm run build`. These are the W3 gates. (Per repo record the backend suite ends in a Windows teardown segfault *after* results print — read the printed totals.)
@@ -103,6 +113,8 @@ RC-2 and RC-3 are live bugs today, independent of place IDs. RC-1 cannot be fixe
 
 ### Step 4 — Complete the frontend coordinate twin
 `frontend/src/utils/coordinates.js`: add the `gcj02 → wgs84` branch mirroring `backend/src/services/coordinates.js:106-108`, and correct the header comment that currently claims an exact mirror (F4). `TripRouteCover` imports only `wgs84ToGcj02` and is unaffected — verify, don't assume.
+
+**As implemented:** the frontend twin deliberately still does **not** carry F5's unknown-datum nulling, so Today keeps linking legacy unknown-datum coordinates exactly as it does today — G6 is out of scope and must not move in either direction. The corrected header now states this explicitly instead of claiming an exact mirror. Confirmed unaffected: `TripRouteCover.jsx:2` imports `wgs84ToGcj02` only. Separately confirmed by reading `TripMap.jsx:6-10` that a `StopMarker` only renders when `canRenderMarker` is true, and that `toDisplayCoordinates` nulls on datum-*independent* conditions — so `linkLat` can never be null where `displayLat` is present, meaning the new `Number.isFinite(stop.linkLat)` gate cannot remove a Map-tab link that exists today.
 
 ### Step 5 — One frontend owner for "how do I open this stop externally"
 New `frontend/src/utils/deepLinkTarget.js`, exporting a single `resolveDeepLinkTarget(stop, dayMapConfig)` → `{ provider, lat, lng }` or `null`:

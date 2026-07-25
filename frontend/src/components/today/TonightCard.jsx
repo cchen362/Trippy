@@ -1,6 +1,6 @@
 import NavigateIcon from './NavigateIcon.jsx';
 
-export default function TonightCard({ booking, stop, deepLinkProvider, mapConfig }) {
+export default function TonightCard({ booking, stop, mapConfig }) {
   if (!booking) return null;
 
   return (
@@ -20,7 +20,7 @@ export default function TonightCard({ booking, stop, deepLinkProvider, mapConfig
             {booking.confirmationRef}
           </p>
         )}
-        <NavigateIcon stop={stop} label={booking.title} deepLinkProvider={deepLinkProvider} mapConfig={mapConfig} />
+        <NavigateIcon stop={stop} label={booking.title} mapConfig={mapConfig} />
       </div>
     </div>
   );
