@@ -1,7 +1,7 @@
 # Google Maps Deep-Link Identity and Precision — Review
 
 **Date:** 2026-07-25
-**Status:** REVIEW COMPLETE — owner decisions resolved (§11). Legacy-vs-live verification added (§7b). Ready for an implementation plan to be drafted.
+**Status:** REVIEW COMPLETE — owner decisions resolved (§11). Legacy-vs-live verification added (§7b). **Plan drafted: [Implementation Plan 24](../plans/Implementation%20Plan%2024%20Google%20Maps%20Deep%20Link%20Place%20Identity.md)** (D4/G5 spun out to its Appendix A).
 **Scope of investigation:** every path that produces a "open this stop in a maps app" link, on both the Map tab popup and the Today tab, plus every stop-entry path that writes the location identity those links depend on.
 **Nothing was changed.** This document is findings only.
 
