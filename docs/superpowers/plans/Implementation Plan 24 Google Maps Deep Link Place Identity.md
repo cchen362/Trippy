@@ -387,7 +387,25 @@ Two stops created four minutes apart on 2026-07-25 demonstrate the split cleanly
 
 Note also that a place-id-less Google link sends `query=<lat>,<lng>` and **deliberately omits the stop's name** — sending the name as a text query is precisely how Google opens a confidently wrong place. Precision over prettiness is the W2 premise; do not "fix" this by adding the label.
 
-**Unscheduled options if naming coverage should improve** (owner decision, own plan, cost implications): accept as-is (zero cost); flip the resolver to Google-first (paid Places Text Search on nearly every resolution, not a rare fallback); or Google-first for Discovery-created stops only (bounded cost, since discovery generation is already daily-budgeted). Recommended if pursued: the third.
+**Unscheduled options if naming coverage should improve** (owner decision, own plan). Costed against production on 2026-07-25 — see the next section, which **supersedes the earlier guess that "Discovery-only Google-first" is the cheap option.**
+
+### Costing the naming-coverage options — measured 2026-07-25
+
+Measured, not estimated. Production totals: **2,014** `discovery_places` across **11** destinations (~183/city), **102** stops all-time.
+
+**The Discovery-first option is nearly a no-op, because Discovery already pays Google.** Of 1,219 *verified* discovery places, **1,173 carry `google:`** and only **46 carry OSM** — Nominatim fails on ~96% of Discovery's AI-generated venue names ("Qinghefang Alley Late Drinking Route"), so the paid fallback already fires almost every time. Flipping Discovery to Google-first therefore adds **+46 calls per ~1,219 (+3.8%)**, not a new cost centre.
+
+**And it would not fix the symptom.** Verified discovery places already yield named cards: `DiscoveryPanel.jsx` (~L440) has a trusted fast path carrying `placeRef` (`google:…`), `coordinateSource:'places'`, `locationStatus:'resolved'` onto the stop, satisfying all five clauses with **zero** extra API calls. The 2026-07-25 `Lotus Pond` add missed it only because that row is `provenance='unverified'` with NULL id/coords — **784 of 2,014 (39%)** are unverified, so they fall to the slow Nominatim-first path. The daily resolver budget is 500 and peak observed daily verification was 421, so **the budget is not obviously the binding constraint** — the unverified backlog needs its own investigation, not an assumption.
+
+| Change | Extra Google calls | Cost at list |
+|---|---|---|
+| **Stop resolver → Google-first** | **+62, all-time** (62 of 102 stops are Nominatim-resolved) | **~$0.002** |
+| Discovery → Google-first | +46/month | ~$1.50/mo |
+| Discovery verification as it runs today | (already being spent) | ~1,219/mo |
+
+Rating enrichment is **off** in production (`rating` NULL on all 2,014 rows), so calls sit on the cheaper **Text Search Pro** field-mask tier, not Enterprise. Absolute per-call pricing was **not** verified in-session and Google's 2025 model includes a per-SKU monthly free allowance that may zero this out — **confirm current rates before acting.** The call-volume figures above are measured and reliable; only the dollar conversion is uncertain.
+
+**Revised recommendation:** do **not** change Discovery's resolver order — it moves ~4% of calls and fixes nothing. The two levers that actually improve naming are (1) flipping the **stop** resolver to Google-first, which is financially trivial but carries a real quality risk — Google Text Search returns confident *wrong* matches on ambiguous names where OSM gives precise geometry, the exact tension W2 exists to manage, so it needs a confidence guard — and (2) closing the 39% unverified discovery backlog so more adds take the existing free fast path.
 
 ### Not reproducible in production — do not hunt for it
 
