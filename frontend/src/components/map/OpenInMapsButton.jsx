@@ -1,7 +1,7 @@
 import { buildDeepLink } from '../../utils/deepLink.js';
 
-export default function OpenInMapsButton({ lat, lng, label, deepLinkProvider }) {
-  const href = buildDeepLink(deepLinkProvider, lat, lng, label);
+export default function OpenInMapsButton({ lat, lng, label, deepLinkProvider, googlePlaceId }) {
+  const href = buildDeepLink(deepLinkProvider, lat, lng, label, googlePlaceId);
   const buttonLabel =
     deepLinkProvider === 'amap' ? 'Open in Amap' :
     deepLinkProvider === 'naver' ? 'Open in Naver Maps' :

@@ -4,6 +4,7 @@ import { countryCodeFromName } from '../utils/countries.js';
 import { resolveBookingDocuments } from './documents.js';
 import { resolvePlace } from './placeResolver.js';
 import { canonicalGeoKey, scopesMatch, knownCityLabel } from '../utils/geoIdentity.js';
+import { googlePlaceIdForStop } from '../utils/googlePlaceIdentity.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -63,6 +64,7 @@ function mapStop(row) {
     locationStatus: row.location_status,
     locationConfidence: row.location_confidence,
     providerId: row.provider_id,
+    googlePlaceId: googlePlaceIdForStop(row),
     countryCode: row.country_code,
     unsplashPhotoUrl: row.unsplash_photo_url,
     unsplashPhotoId: row.unsplash_photo_id,

@@ -1016,6 +1016,30 @@ describe('public share payload carries no expense data (Plan 20 Wave 2 regressio
   });
 });
 
+describe('public share payload carries no Google place identity (Plan 24 Wave 2)', () => {
+  it('getSharedTrip omits googlePlaceId and providerId even for a stop that satisfies every D-24-3 clause', () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    const dayId = dayIdFor(tripId, '2026-09-10');
+    getDb().prepare(`
+      INSERT INTO stops (
+        day_id, title, type, lat, lng, coordinate_system, coordinate_source, location_status, provider_id
+      ) VALUES (?, 'Google Stop', 'explore', 30.66, 104.07, 'wgs84', 'places', 'resolved', 'google:ChIJtest1234')
+    `).run(dayId);
+
+    const { token } = createShareLink(owner.id, tripId);
+    const shared = getSharedTrip(token);
+    const serialized = JSON.stringify(shared);
+    const sharedStop = shared.days.find((d) => d.id === dayId).stops.find((s) => s.title === 'Google Stop');
+
+    expect(sharedStop.googlePlaceId).toBeUndefined();
+    expect(sharedStop.providerId).toBeUndefined();
+    expect(serialized).not.toContain('googlePlaceId');
+    expect(serialized).not.toContain('providerId');
+    expect(serialized).not.toContain('ChIJtest1234');
+  });
+});
+
 describe('trip_scopes persistence (Plan 9 Wave 2 §2.1/2.2)', () => {
   it('F2: createTrip with two chips writes two trip_scopes rows in position order; every day seeds destinations[0]; response carries scopes', () => {
     const trip = createTrip(owner.id, {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMapConfig, getMapConfigForCountry, buildDeepLink } from '../src/services/mapConfig.js';
+import { getMapConfig, getMapConfigForCountry } from '../src/services/mapConfig.js';
 import { gcj02ToWgs84, toDisplayCoordinates, wgs84ToGcj02 } from '../src/services/coordinates.js';
 
 describe('getMapConfig', () => {
@@ -89,33 +89,6 @@ describe('getMapConfigForCountry (Plan 6 Wave 2 — per-day provider selection)'
     expect(config.tileProvider).toBe('osm');
     expect(config.coordinateSystem).toBe('wgs84');
     expect(config.deepLinkProvider).toBe('google');
-  });
-});
-
-describe('buildDeepLink', () => {
-  it('builds amap deep link correctly', () => {
-    const url = buildDeepLink('amap', 31.2, 121.4, 'Place');
-    expect(url).toBe('https://uri.amap.com/marker?position=121.4,31.2&name=Place');
-  });
-
-  it('builds naver deep link correctly', () => {
-    const url = buildDeepLink('naver', 37.5, 127.0, 'Seoul');
-    expect(url).toBe('https://map.naver.com/p/search/Seoul?c=127,37.5,15,0,0,0,dh');
-  });
-
-  it('builds google deep link correctly', () => {
-    const url = buildDeepLink('google', 31.2, 121.4, 'Place');
-    expect(url).toBe('https://www.google.com/maps/search/?api=1&query=31.2,121.4');
-  });
-
-  it('defaults to google for unknown provider', () => {
-    const url = buildDeepLink('unknown', 51.5, -0.1, 'London');
-    expect(url).toBe('https://www.google.com/maps/search/?api=1&query=51.5,-0.1');
-  });
-
-  it('encodes label with special characters for amap', () => {
-    const url = buildDeepLink('amap', 39.9, 116.4, 'Hello World');
-    expect(url).toContain('Hello%20World');
   });
 });
 

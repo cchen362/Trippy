@@ -1,6 +1,7 @@
 import { getDb } from '../db/database.js';
 import { getMapConfig, getMapConfigForCountry, linkCoordinateSystemForProvider } from './mapConfig.js';
 import { toDisplayCoordinates } from './coordinates.js';
+import { googlePlaceIdForStop } from '../utils/googlePlaceIdentity.js';
 import {
   assertTripAccess, deriveDayGeo, deriveTripDestinationsFromDays, buildTripScopes, listTripScopes,
 } from './trips.js';
@@ -114,6 +115,7 @@ function formatMapStop(row, mapConfig, routeNumber, routeSegmentId, deepLinkProv
     linkLng: link.displayLng,
     locationStatus: row.location_status,
     locationConfidence: row.location_confidence,
+    googlePlaceId: googlePlaceIdForStop(row),
     routeNumber,
     routeSegmentId,
     deepLinkProvider,

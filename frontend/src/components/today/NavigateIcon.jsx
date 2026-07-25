@@ -17,7 +17,7 @@ export default function NavigateIcon({ stop, label, mapConfig }) {
   }
 
   const { provider, lat, lng } = target;
-  const href = buildDeepLink(provider, lat, lng, label);
+  const href = buildDeepLink(provider, lat, lng, label, stop.googlePlaceId);
 
   return (
     <a

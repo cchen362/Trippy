@@ -73,7 +73,7 @@ export default function StopMarker({ stop, deepLinkProvider, muted = false, onSt
             </div>
           )}
           {Number.isFinite(stop.linkLat) && Number.isFinite(stop.linkLng) && (
-            <OpenInMapsButton lat={stop.linkLat} lng={stop.linkLng} label={stop.title} deepLinkProvider={deepLinkProvider} />
+            <OpenInMapsButton lat={stop.linkLat} lng={stop.linkLng} label={stop.title} deepLinkProvider={deepLinkProvider} googlePlaceId={stop.googlePlaceId} />
           )}
           {onStartCorrection && (
             <button

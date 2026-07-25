@@ -1,6 +1,6 @@
 # Implementation Plan 24 — Google Maps Deep-Link Place Identity and Link-Coordinate Correctness
 
-**Status:** OPEN 2026-07-25 — **W1 COMPLETE, W2 + W3 not started.** W1 → W2 → W3, single deploy. No migration. No new external API calls.
+**Status:** OPEN 2026-07-25 — **W1 + W2 COMPLETE, W3 not started.** W1 → W2 → W3, single deploy. No migration. No new external API calls. **Nothing is deployed yet** — the single deploy happens after W3.
 
 **Review basis:** [2026-07-25 Google Maps deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) (committed `a917215`). That document's verified facts, scenario table, data invariant, and legacy-vs-live segmentation are **inputs to this plan — do not re-derive them.**
 
@@ -28,7 +28,9 @@ RC-2 and RC-3 are live bugs today, independent of place IDs. RC-1 cannot be fixe
 
 **F1 — One link builder, two callers.** `frontend/src/utils/deepLink.js:3` `buildDeepLink(provider, lat, lng, label)` is the only link constructor. Callers: `components/map/OpenInMapsButton.jsx:4` (from `StopMarker.jsx:76`) and `components/today/NavigateIcon.jsx:17` (from `HeroCard`, `TonightCard`, `UpcomingRow`). A duplicate exists at `backend/src/services/mapConfig.js:74` with **zero callers** — dead code, see W2 step 5.
 
-**F2 — `deepLink.js` has no test file.** `frontend/src/utils/deepLink.test.js` does not exist. There is no test anywhere asserting the shape of a produced URL.
+**F2 — `deepLink.js` has no test file.** `frontend/src/utils/deepLink.test.js` does not exist. ~~There is no test anywhere asserting the shape of a produced URL.~~
+
+> **CORRECTED during W2 (2026-07-25).** The second sentence was **wrong**. `backend/tests/map.test.js:95-119` held five URL-shape assertions (amap, naver, google, unknown-provider-defaults-to-google, label special-character encoding) — but they exercised the **dead backend twin**, not the builder the app ships. So the repo's only URL-shape coverage guarded code with zero production callers, which is the sharpest possible argument for F1's deletion instruction. W2 deleted the function *and* those five assertions together; **W3's `deepLink.test.js` must carry all five branches forward onto the live frontend builder** so the coverage moves rather than disappears. F1's "zero callers" claim was correct about production code and incomplete about tests — grep tests too, next time.
 
 **F3 — Map markers must keep tile-datum coordinates.** `StopMarker.jsx:48-49` uses `displayLat/displayLng` for `<Marker position>`. That is correct for rendering and must not change. Only the *link* coordinates are wrong. The fix therefore **adds** a link coordinate pair; it does not repoint the existing one.
 
@@ -142,7 +144,17 @@ New `frontend/src/utils/deepLinkTarget.js`, exporting a single `resolveDeepLinkT
 
 ## Wave 2 — Google place identity
 
-**Status: NOT STARTED.** Additive payload. Depends on W1 only for coherence: `googlePlaceId` is emitted solely for stops whose stored datum is `wgs84` (invariant clause 4), which is exactly the datum W1 sends to Google.
+**Status: COMPLETE 2026-07-25.** All five steps implemented as designed. Gates: backend **672 passed / 31 files** (676 W1 baseline **+1** new share test **−5** deleted dead-twin assertions — see the F2 correction above), frontend **240 passed / 39 files** unchanged, `npm run build` green. The invariant lives only in `backend/src/utils/googlePlaceIdentity.js`; the frontend contains zero clause logic.
+
+**W2 verification actually performed** (the normative matrix is still W3's):
+- *Invariant run over all 58 real stops*: **7 qualify** with genuine `ChIJ…` IDs; **51 return null, every one of them on clause 1**. Of those, **28** carry unprefixed `way:*`/`node:*` OSM identifiers and **3** carry `curated:*` — concrete proof of F11/F12: an `osm:`-prefixed *denylist* would have handed all 28 OSM ids to Google as place IDs. No row failed on clauses 2–5, consistent with the plan's claim that RC-4 has zero rows.
+- *Browser, 375px, real session* — Google **with** ID: `…?api=1&query=22.6244914,120.30142339999999&query_place_id=ChIJHTWHW4YEbjQRYHlaoZkM1dw` (exact coordinates retained as the D-24-5 safety net). Google **without** ID (Malaysian `manual_lookup`/OSM stops): `…?api=1&query=4.6249395,101.1572286` — byte-identical to the pre-W2 form. **Amap**: byte-identical to the W1 baseline across the legacy trip, **0 place IDs leaked anywhere** — including `Crowne Plaza CHENGDU PANDA GARDEN`, a stop that *does* hold a valid `googlePlaceId` but links via Amap, proving the non-Google branches ignore a supplied ID on real data rather than only in theory.
+- *Share payload*: independently re-read `share.js:64-84` — its `mapStop` is a hand-built allowlist (no `provider_id`, no provenance, no status) that cannot inherit from either mapper W2 touched. G7 holds; one regression test now guards it.
+- *Trip-context payload*: `googlePlaceId` arrives bare (prefix stripped) beside the raw `providerId`, null where it should be.
+
+**Data observation contradicting F14.** `Crowne Plaza CHENGDU PANDA GARDEN` lives in the **legacy** `Chengdu - Chongqing` trip yet satisfies all five clauses — F14 predicted "legacy: 0 of 39". The likely cause is booking sync having restamped a Google identity onto it after the resolver landed, which is exactly the **Appendix A / D4** mechanism. **Era is not a reliable proxy for identity**, so W3's era-split manual matrix must classify rows by their actual provenance columns, not by trip creation date.
+
+Additive payload. Depends on W1 only for coherence: `googlePlaceId` is emitted solely for stops whose stored datum is `wgs84` (invariant clause 4), which is exactly the datum W1 sends to Google.
 
 ### Step 1 — The invariant, in one place
 New `backend/src/utils/googlePlaceIdentity.js`: `googlePlaceIdForStop(row)` → the bare place ID (prefix stripped) when all five D-24-3 clauses hold, else `null`. Pure function over a `stops` row, no DB access, no I/O. Placed in `utils/` per the repo's file conventions (pure shared helper, not business orchestration).
@@ -176,7 +188,7 @@ Both call the same helper. Neither reimplements a clause.
 **Status: NOT STARTED.** Full matrix in review §10; it is normative, not a summary. Highlights and gates:
 
 ### Automated
-- **New** `frontend/src/utils/deepLink.test.js` (F2 — first coverage this helper has ever had): google+ID URL shape and parameter order; google+null ID byte-identical to today's URL (no-regression anchor); amap and naver ignore a supplied ID; unsafe characters encoded; coordinate precision not rounded.
+- **New** `frontend/src/utils/deepLink.test.js` (F2 — first coverage this helper has ever had): google+ID URL shape and parameter order; google+null ID byte-identical to today's URL (no-regression anchor); amap and naver ignore a supplied ID; unsafe characters encoded; coordinate precision not rounded. **Plus the five branches inherited from the deleted backend twin** (see the F2 correction): amap, naver, google, unknown-provider-defaults-to-google, and label special-character encoding. W2 deleted those assertions along with their dead subject, so this file is where that coverage must reappear — do not let it lapse. Also cover google+**empty-string** ID (must omit the parameter, not emit `query_place_id=`).
 - **Frontend** coordinate tests: the new `gcj02→wgs84` inverse; no double-conversion when stored and target systems match; backend-agreement on a known Chongqing coordinate.
 - **Frontend** `deepLinkTarget` tests: provider precedence (stop country wins, day fallback, null when neither), and null when coordinates are non-finite.
 - **Backend** invariant tests: one case per row 1–15 of review §5, including row 6 (`coordinate_source === 'places'` + `way:123` → null) and row 10 (`estimated` + `google:*` → null).
