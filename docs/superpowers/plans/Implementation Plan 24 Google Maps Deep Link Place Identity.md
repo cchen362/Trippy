@@ -405,7 +405,13 @@ Measured, not estimated. Production totals: **2,014** `discovery_places` across 
 
 Rating enrichment is **off** in production (`rating` NULL on all 2,014 rows), so calls sit on the cheaper **Text Search Pro** field-mask tier, not Enterprise. Absolute per-call pricing was **not** verified in-session and Google's 2025 model includes a per-SKU monthly free allowance that may zero this out — **confirm current rates before acting.** The call-volume figures above are measured and reliable; only the dollar conversion is uncertain.
 
-**Revised recommendation:** do **not** change Discovery's resolver order — it moves ~4% of calls and fixes nothing. The two levers that actually improve naming are (1) flipping the **stop** resolver to Google-first, which is financially trivial but carries a real quality risk — Google Text Search returns confident *wrong* matches on ambiguous names where OSM gives precise geometry, the exact tension W2 exists to manage, so it needs a confidence guard — and (2) closing the 39% unverified discovery backlog so more adds take the existing free fast path.
+### OWNER DECISION 2026-07-26 — precision over polish. This follow-up is CLOSED.
+
+**No resolver change will be made.** The owner's ruling: an occasionally-wrong named card is a trust failure, and map accuracy will not be traded for a slightly more polished Google Maps card. Nominatim-first ordering stays; coordinate-only deep links for OSM-resolved, user-pinned, and unresolved stops are the accepted, correct behaviour. **Do not re-propose Google-first for either the stop resolver or Discovery.** The costing below is retained only as the evidence base for that decision.
+
+The one item that survived is *not* about naming: the investigation surfaced Discovery **data-quality** problems (44% of served suggestions unverified; dedupe blind to them), spun out to [2026-07-26 Discovery catalogue quality review](../reviews/2026-07-26-discovery-catalogue-quality-review.md).
+
+**Superseded recommendation (retained for context):** do **not** change Discovery's resolver order — it moves ~4% of calls and fixes nothing. The two levers that actually improve naming are (1) flipping the **stop** resolver to Google-first, which is financially trivial but carries a real quality risk — Google Text Search returns confident *wrong* matches on ambiguous names where OSM gives precise geometry, the exact tension W2 exists to manage, so it needs a confidence guard — and (2) closing the 39% unverified discovery backlog so more adds take the existing free fast path.
 
 ### Not reproducible in production — do not hunt for it
 
