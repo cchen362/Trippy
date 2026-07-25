@@ -363,6 +363,32 @@ All rows passed. Four observations were raised and each was checked against prod
 
 **Follow-up, not scheduled:** coincident markers have no offset/spiderfy treatment. One prod occurrence; needs an owner decision (nudge overlapping pins, cluster them, or merge the duplicate stops) before any work starts.
 
+### Why most stops open on coordinates, not a named card — 2026-07-25
+
+Raised after QA when several KL/Taipei pins and a freshly added stop all opened coordinate-only. **All expected.** The cause is resolver ordering, not this plan.
+
+`placeResolver.js` (~L614–645) tries **Nominatim first** and only falls through to **Google Places when Nominatim returns no result**. Nominatim is strong on exactly the landmarks a traveller adds — temples, parks, pagodas, streets, towers — so the common path succeeds and stamps `provider_id = way:/node:/relation:` with `coordinate_source = manual_lookup`. Clause 1 requires a literal `google:` prefix, so those correctly produce a coordinate-only link. **A named card is the exception by design.**
+
+Measured across all **102** production stops on 2026-07-25:
+
+| Outcome | n | % |
+|---|---|---|
+| **Qualifies — named card** | 29 | 28% |
+| OSM `way:` | 41 | 40% |
+| OSM `node:` | 12 | 12% |
+| OSM `relation:` | 9 | 9% |
+| `provider_id` NULL (user pin) | 5 | 5% |
+| No coordinates — no link button | 4 | 4% |
+| `curated:` | 2 | 2% |
+
+Two stops created four minutes apart on 2026-07-25 demonstrate the split cleanly: **Lotus Pond** → `relation:2999045` / `manual_lookup` / `estimated` → coordinates (Nominatim knew it); **Apple The Exchange TRX** → `google:ChIJr4bX6743zDERAgnOBGsB1F0` / `places` / `resolved` → named card (Nominatim did not know a new mall tenant, so it fell through to Google). Same code path, opposite outcome, decided purely by OSM coverage.
+
+**A named card therefore appears only when:** (1) the stop was added via Plan → Add place from a Google autocomplete suggestion, which bypasses the resolver entirely; (2) Nominatim failed and Google Places answered; or (3) a booking carried its own `placeId`. It never appears for well-mapped OSM places, hand-placed pins, or unresolved stops.
+
+Note also that a place-id-less Google link sends `query=<lat>,<lng>` and **deliberately omits the stop's name** — sending the name as a text query is precisely how Google opens a confidently wrong place. Precision over prettiness is the W2 premise; do not "fix" this by adding the label.
+
+**Unscheduled options if naming coverage should improve** (owner decision, own plan, cost implications): accept as-is (zero cost); flip the resolver to Google-first (paid Places Text Search on nearly every resolution, not a rare fallback); or Google-first for Discovery-created stops only (bounded cost, since discovery generation is already daily-budgeted). Recommended if pursued: the third.
+
 ### Not reproducible in production — do not hunt for it
 
 No production trip mixes mainland-China stops with HK/TW/KR stops, so the **HK-or-KR-on-a-mainland-day** case — the largest single correction at ~598 m and ~459 m — cannot be exercised from existing prod data. It is covered by integration tests and was demonstrated in a browser on a purpose-built trip. To see it live, add a Hong Kong stop to a day of **Shanghai - Hangzhou**, confirm it opens **Google** on the correct HK building while that day's other stops still open Amap, then delete it.
