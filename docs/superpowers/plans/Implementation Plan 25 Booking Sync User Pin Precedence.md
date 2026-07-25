@@ -1,6 +1,6 @@
 # Implementation Plan 25 — Booking Sync Must Not Overwrite a User Pin
 
-**Status:** 2026-07-26 — **W1 AND W2 COMPLETE. READY TO DEPLOY, NOT YET DEPLOYED.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). Fix implemented, regression-tested, and manually verified end-to-end in a real browser against live Google Places. **No migration. No new external API calls — this plan removes one.** The only outstanding item is the post-deploy Regent Chongqing check, which is the owner's to run (W2 DoD).
+**Status:** 2026-07-26 — **W1 AND W2 COMPLETE. DEPLOYED TO PRODUCTION at `6b4c179`.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). Fix implemented, regression-tested, and manually verified end-to-end in a real browser against live Google Places. **No migration. No new external API calls — this plan removes one.** The only outstanding item is the post-deploy Regent Chongqing check, which is the owner's to run (W2 DoD, click-script in §Deploy record).
 
 **Origin:** [Plan 24 Appendix A](<Implementation Plan 24 Google Maps Deep Link Place Identity.md>#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin) (spun-out owner decision D4, approved as the next work item 2026-07-26), recorded as **G5** in the [2026-07-25 deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) §8. Plan 24 is CLOSED and stays closed; nothing here reopens it.
 
@@ -188,6 +188,35 @@ Verify at 375px because that is the repo default for exercising the Map tab, not
 ## Deploy profile
 
 Standalone, backend-only, no migration, no frontend bundle change, and one *fewer* possible Google Places call. Pre-deploy backup into the chee-owned `~/Trippy/backups/` via `sqlite3 .backup` (prod `~/Trippy/data` is root-owned with no passwordless sudo). Post-deploy: `/api/health`, clean startup logs, then the owner's Regent Chongqing check above.
+
+## Deploy record — 2026-07-26
+
+**Deployed `6b4c179` (fast-forward from `5322832`).** The fix itself is `c112f6d`; `845c56c` carries the tests; `6b4c179` is the unrelated Discovery review doc that rode along.
+
+**Pre-flight.** Backend **709 passed / 32 files**, frontend **271 passed / 42 files** (identical to baseline), `npm run build` green with a precache of **33 entries / 1161.73 KiB** — byte-identical to the W1 Step 0 baseline. No secrets in the deployed diff, no files under `backend/src/db/migrations/`, `git diff --check` clean.
+
+**Backup.** `~/Trippy/backups/pre-plan25-20260725-124500.db` (7,000,064 bytes; server clock runs a day behind the local date). `PRAGMA integrity_check` → `ok`; contents 102 stops / 4 `user_confirmed`, matching the F-25-6 census. Backup cron and its healthcheck both confirmed still active.
+
+**Server change.** `git pull --ff-only` moved exactly one production file: `backend/src/services/stops.js`, **+17/−1**, and **zero** files under `frontend/src`. The Docker rebuild returned `CACHED` for the `npm run build` layer and rebuilt only `COPY backend/` — an independent, image-level confirmation of D-25-2.
+
+**Post-deploy.** Container `trippy-trippy-1` up; startup log is the single line `Trippy backend running on :3001 [production]` with **no migration output** (correct — none shipped); `/api/health` → `200 {"status":"ok","db":"connected"}`; `/` → 200; `/api/trips` unauthenticated → 401. Row counts unchanged across the deploy (102 stops / 16 bookings / 4 `user_confirmed` / 5 trips), and the Regent Chongqing stop is byte-identical before and after.
+
+**The at-risk row, re-read in production immediately before the deploy** — it still holds the exact F-25-6 legacy shape, so the owner's check is a true reproduction of the defect:
+
+| Field | Value |
+|---|---|
+| Stop `875d592c…` | 29.571138262433255 / 106.57039761543275 · `user_confirmed` · `user_pin` · `provider_id` NULL · `country_code` **NULL** |
+| Booking `0fc9ddab…` | `type=hotel`, `details_json.placeId = ChIJAQDwhxMzkzYRISqy1Z_sNdc`, **`lat`/`lng` absent** |
+
+### Owner's production check (W2 DoD) — click-script
+
+1. Open the **Chengdu - Chongqing** trip → Logistics → the **Regent Chongqing** hotel booking.
+2. Edit one non-location field (the confirmation reference is the cleanest) and save.
+3. Map tab → the Regent Chongqing stop. **Expected: the pin has not moved** and still reads `USER CONFIRMED`. Pre-fix, this same save would have fired a paid Google `lookupHotelDetails` call *and* replaced the pin with Google's coordinates.
+
+**One expected, non-regression change to anticipate:** that stop's `country_code` is currently NULL. W1 Step 3 established that the country fallback can *fill* a null but never overwrite a good value, so this save may legitimately set it to `CN`. A NULL→`CN` transition is the fix behaving as designed — it is not the pin moving. Coordinates, `provider_id`, `location_status`, and `coordinate_source` are the fields that must not change.
+
+**Rollback, if ever needed:** `git -C ~/Trippy checkout 5322832 && docker compose up -d --build`. The DB backup should **not** be restored — no migration ran and no row was written by this deploy.
 
 ---
 
