@@ -7,8 +7,10 @@ import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import { createBooking, updateBooking } from '../src/services/bookings.js';
 import { createStop, reorderStops, repairTripStopLocations, updateStop } from '../src/services/stops.js';
-import { createTrip } from '../src/services/trips.js';
+import { createTrip, getTripDetail, getDayGeo } from '../src/services/trips.js';
 import { getTripMapData } from '../src/services/mapData.js';
+import { getMapConfigForCountry } from '../src/services/mapConfig.js';
+import { googlePlaceIdForStop } from '../src/utils/googlePlaceIdentity.js';
 import * as unsplashService from '../src/services/unsplash.js';
 import * as claudeService from '../src/services/claude.js';
 
@@ -1390,5 +1392,291 @@ describe('user photo swap pinning (Plan 10 Wave 4)', () => {
 
     expect(selectSpy).toHaveBeenCalledOnce();
     expect(updated.unsplashPhotoId).toBe('photo-rerolled');
+  });
+});
+
+// Plan 24 Wave 3 — deep-link provider/precision/identity integration coverage, per
+// review §10. The harness trip (`Chongqing`, CN) supplies a single CN-derived day, which
+// is exactly the "mainland-CN day" context RC-2/RC-2b need for the HK/KR cross-country
+// cases below.
+describe('deep-link provider, precision, and place identity (Plan 24)', () => {
+  it('an HK stop on a CN-derived day links via google in true WGS-84, while the tile display pair is GCJ-02 (RC-2)', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const stop = await createStop(user.id, dayId, {
+      title: 'Victoria Peak',
+      type: 'experience',
+      lat: 22.2759,
+      lng: 114.1455,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      providerId: 'google:ChIJ_victoria_peak',
+      countryCode: 'HK',
+      unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, trip.trip.id);
+    const mapStop = mapData.stops.find((s) => s.id === stop.id);
+
+    expect(mapStop.deepLinkProvider).toBe('google');
+    // Link pair is the exact stored WGS-84 coordinates — no conversion, since the link
+    // provider (google) targets wgs84 and the stop is already stored wgs84.
+    expect(mapStop.linkLat).toBeCloseTo(22.2759, 9);
+    expect(mapStop.linkLng).toBeCloseTo(114.1455, 9);
+    // Tile display pair is converted to the CN day's GCJ-02 tile datum and therefore
+    // diverges from the link pair — this divergence (the review measured ~598m for this
+    // exact case) is the whole point of RC-2: the two pairs must NOT be equal.
+    expect(Math.abs(mapStop.displayLat - mapStop.linkLat)).toBeGreaterThan(1e-4);
+    expect(Math.abs(mapStop.displayLng - mapStop.linkLng)).toBeGreaterThan(1e-4);
+  });
+
+  it('a KR stop on a CN-derived day links via naver in true WGS-84, while the tile display pair is GCJ-02', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const stop = await createStop(user.id, dayId, {
+      title: 'Gyeongbokgung Palace',
+      type: 'experience',
+      lat: 37.5796,
+      lng: 126.9770,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      providerId: 'google:ChIJ_gyeongbokgung',
+      countryCode: 'KR',
+      unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, trip.trip.id);
+    const mapStop = mapData.stops.find((s) => s.id === stop.id);
+
+    expect(mapStop.deepLinkProvider).toBe('naver');
+    expect(mapStop.linkLat).toBeCloseTo(37.5796, 9);
+    expect(mapStop.linkLng).toBeCloseTo(126.9770, 9);
+    expect(Math.abs(mapStop.displayLat - mapStop.linkLat)).toBeGreaterThan(1e-4);
+    expect(Math.abs(mapStop.displayLng - mapStop.linkLng)).toBeGreaterThan(1e-4);
+  });
+
+  it('a CN stop stored GCJ-02 links via amap with the coordinates passed through verbatim, and googlePlaceId is null', async () => {
+    // Review §10 words this case as "CN stop on a JP day"; the harness trip's only day is
+    // CN-derived (there is no non-CN day to attach a stop to without adding trip/day
+    // plumbing unrelated to this bug). The equivalent, real assertion for the harness's
+    // CN day is a CN-country stop stored gcj02: its own country (CN) drives both the
+    // link provider (amap) and the link datum (gcj02) via the same Option-C precedence
+    // (mapData.js:236), so the stored pair passes through with no conversion at all —
+    // the datum-consistency half of the JP-day scenario, proven directly.
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const stop = await createStop(user.id, dayId, {
+      title: 'Jiefangbei Pedestrian Street',
+      type: 'experience',
+      lat: 29.5628,
+      lng: 106.5515,
+      coordinateSystem: 'gcj02',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      countryCode: 'CN',
+      unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, trip.trip.id);
+    const mapStop = mapData.stops.find((s) => s.id === stop.id);
+
+    expect(mapStop.deepLinkProvider).toBe('amap');
+    expect(mapStop.linkLat).toBeCloseTo(29.5628, 9);
+    expect(mapStop.linkLng).toBeCloseTo(106.5515, 9);
+    expect(mapStop.googlePlaceId).toBeNull();
+  });
+
+  it('Maps (/map-data) and Today (trip-context) agree on provider inputs and googlePlaceId for the same stop', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const stop = await createStop(user.id, dayId, {
+      title: 'Peak Tram Lower Terminus',
+      type: 'experience',
+      lat: 22.2800,
+      lng: 114.1500,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      providerId: 'google:ChIJ_peak_tram',
+      countryCode: 'HK',
+      unsplashPhotoUrl: null,
+    });
+
+    const mapData = getTripMapData(user.id, trip.trip.id);
+    const mapStop = mapData.stops.find((s) => s.id === stop.id);
+
+    const detail = getTripDetail(trip.trip.id, user.id);
+    const detailDay = detail.days.find((d) => d.id === dayId);
+    const detailStop = detailDay.stops.find((s) => s.id === stop.id);
+
+    // Both mappers call the same one-owner googlePlaceIdForStop helper (D-24-3) — this
+    // is the direct parity proof, not a re-derivation.
+    expect(detailStop.googlePlaceId).toBe(mapStop.googlePlaceId);
+    expect(detailStop.googlePlaceId).toBe('ChIJ_peak_tram');
+
+    // Today derives its own display coordinates client-side from lat/lng + countryCode
+    // (F9) — that derivation itself is covered by the frontend deepLinkTarget tests, not
+    // here. What this backend test can and must prove is that the *inputs* driving that
+    // derivation are identical between the two payloads: the stop's raw coordinates and
+    // its countryCode.
+    expect(detailStop.lat).toBe(mapStop.lat);
+    expect(detailStop.lng).toBe(mapStop.lng);
+    expect(detailStop.countryCode).toBe('HK');
+
+    // Recompute the provider from the trip-context payload's own inputs (countryCode,
+    // falling back to the day's resolved country per the shared Option-C precedence) and
+    // confirm it lands on the same provider /map-data actually emitted for this stop —
+    // proving the two surfaces cannot drift on which app a link opens in.
+    const dayGeo = getDayGeo(detailDay.id);
+    const linkCountry = detailStop.countryCode || dayGeo.countryCode || null;
+    const expectedProvider = getMapConfigForCountry(linkCountry).deepLinkProvider;
+    expect(expectedProvider).toBe(mapStop.deepLinkProvider);
+    expect(expectedProvider).toBe('google');
+  });
+
+  it('a manual pin after a Google pick clears provider_id and googlePlaceId, while preserving country_code (D-24-4)', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    const stop = await createStop(user.id, dayId, {
+      title: 'Google-Picked Museum',
+      type: 'experience',
+      lat: 29.55,
+      lng: 106.55,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'places',
+      locationStatus: 'resolved',
+      locationConfidence: 0.95,
+      providerId: 'google:ChIJ_museum_pick',
+      countryCode: 'CN',
+      unsplashPhotoUrl: null,
+    });
+
+    const rowBefore = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(googlePlaceIdForStop(rowBefore)).toBe('ChIJ_museum_pick');
+
+    // Exactly the payload MapTab.saveCorrection sends: no providerId, no countryCode.
+    await updateStop(user.id, stop.id, {
+      lat: 29.60,
+      lng: 106.60,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const rowAfter = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stop.id);
+    expect(rowAfter.provider_id).toBeNull();
+    expect(rowAfter.country_code).toBe('CN');
+    expect(googlePlaceIdForStop(rowAfter)).toBeNull();
+  });
+
+  // Appendix A / G5 / D4 probe — deliberately NOT a fix, per owner decision D4 (review
+  // §8, plan Appendix A). This documents the CURRENT behavior of resolveLocationForStop's
+  // guard ordering so a future D4 fix has a test to update rather than a blind spot. The
+  // safety property that must hold regardless of which way D4 is eventually resolved is
+  // that coordinates and provider_id never end up as a mismatched pair (a Google id
+  // sitting on the pin's coordinates, or vice versa) — that would be RC-4 all over again.
+  it('G5/Appendix-A probe — a placeId booking re-save overwrites a user-confirmed pin (documents current behavior, not a fix)', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel With Place Id',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {
+        placeId: 'ChIJ_hotel_google_id',
+        lat: 29.551,
+        lng: 106.551,
+        displayName: 'Hotel With Place Id',
+      },
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+    expect(stopAfterCreate.provider_id).toBe('google:ChIJ_hotel_google_id');
+    expect(stopAfterCreate.location_status).toBe('resolved');
+
+    // Pan the pin exactly as MapTab.saveCorrection does.
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.6,
+      lng: 106.6,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const stopAfterPin = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterPin.provider_id).toBeNull();
+    expect(stopAfterPin.location_status).toBe('user_confirmed');
+    expect(stopAfterPin.lat).toBeCloseTo(29.6, 9);
+
+    // Re-save the booking, changing only an unrelated field, to trigger syncStopWithBooking.
+    await updateBooking(user.id, booking.id, { confirmationRef: 'NEW-REF-999' });
+
+    const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+
+    // ACTUAL current behavior, per the review's read of stops.js:152 preceding :158:
+    // the booking's trusted-coordinate guard fires first, so the pin is silently
+    // discarded and the Google identity/coordinates are reinstated.
+    expect(stopAfterResync.location_status).toBe('resolved');
+    expect(stopAfterResync.provider_id).toBe('google:ChIJ_hotel_google_id');
+    expect(stopAfterResync.lat).toBeCloseTo(29.551, 9);
+    expect(stopAfterResync.lng).toBeCloseTo(106.551, 9);
+
+    // The safety property that must hold regardless: coordinates and provider_id are a
+    // CONSISTENT pair — both the booking's Google values together, never a Google id
+    // paired with the pin's coordinates (which would be RC-4's stale pairing again).
+    const isGooglePair = stopAfterResync.provider_id === 'google:ChIJ_hotel_google_id'
+      && Math.abs(stopAfterResync.lat - 29.551) < 1e-6;
+    const isPinPair = stopAfterResync.provider_id === null
+      && Math.abs(stopAfterResync.lat - 29.6) < 1e-6;
+    expect(isGooglePair || isPinPair).toBe(true);
+    expect(isGooglePair && isPinPair).toBe(false);
+  });
+
+  it('G5 companion prediction — a booking with no placeId takes the other branch and preserves the pin', async () => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+    // No placeId in details_json -> bookingPlaceLocation returns null -> the sync input
+    // carries no coordinates (coordinateSource: 'booking' only) -> resolvePlace runs with
+    // allowNetwork true. Stub fetch to a clean non-match so this stays offline and
+    // resolves to `unresolved`, which is irrelevant here: this test only cares about the
+    // pin surviving a LATER re-save, not the initial resolution.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    const booking = await createBooking(user.id, trip.trip.id, {
+      type: 'hotel',
+      title: 'Hotel Without Place Id',
+      startDatetime: '2026-06-09T15:00',
+      destination: 'Chongqing',
+      detailsJson: {},
+    });
+
+    const stopAfterCreate = getDb().prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
+    expect(stopAfterCreate.provider_id).toBeNull();
+
+    await updateStop(user.id, stopAfterCreate.id, {
+      lat: 29.7,
+      lng: 106.7,
+      coordinateSystem: 'wgs84',
+      coordinateSource: 'user_pin',
+      locationStatus: 'user_confirmed',
+      locationConfidence: 1,
+    });
+
+    const stopAfterPin = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+    expect(stopAfterPin.location_status).toBe('user_confirmed');
+
+    await updateBooking(user.id, booking.id, { confirmationRef: 'NEW-REF-000' });
+
+    const stopAfterResync = getDb().prepare('SELECT * FROM stops WHERE id = ?').get(stopAfterCreate.id);
+
+    // Prediction confirmed: trustedCoordinates is false (no placeId => no coordinates in
+    // the sync input), so protectedUserPin fires and the pin survives untouched.
+    expect(stopAfterResync.location_status).toBe('user_confirmed');
+    expect(stopAfterResync.provider_id).toBeNull();
+    expect(stopAfterResync.lat).toBeCloseTo(29.7, 9);
+    expect(stopAfterResync.lng).toBeCloseTo(106.7, 9);
   });
 });

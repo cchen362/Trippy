@@ -1,6 +1,6 @@
 # Implementation Plan 24 — Google Maps Deep-Link Place Identity and Link-Coordinate Correctness
 
-**Status:** OPEN 2026-07-25 — **W1 + W2 COMPLETE, W3 not started.** W1 → W2 → W3, single deploy. No migration. No new external API calls. **Nothing is deployed yet** — the single deploy happens after W3.
+**Status:** 2026-07-25 — **W1, W2, and W3-automated COMPLETE. Ready to deploy; owner production pass outstanding.** No migration. No new external API calls. **Nothing is deployed yet.** Commits: W1 `45de419`, W2 `8ae31cc`, W3 `a649773`. The owner's production click-script is [Appendix B](#appendix-b--owner-production-qa-click-script).
 
 **Review basis:** [2026-07-25 Google Maps deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) (committed `a917215`). That document's verified facts, scenario table, data invariant, and legacy-vs-live segmentation are **inputs to this plan — do not re-derive them.**
 
@@ -51,6 +51,8 @@ RC-2 and RC-3 are live bugs today, independent of place IDs. RC-1 cannot be fixe
 **F10 — The manual pin already clears provider identity.** `MapTab.saveCorrection` (`MapTab.jsx:101-111`) omits `providerId`; `preserveLocationFields` (`stops.js:119-133`) resolves `providerId: input.providerId ?? null`; `writeUpdateStop` writes `provider_id = ?` unconditionally (`stops.js:603,634`). Verified in data: all 7 `user_pin` rows have `provider_id` NULL. **No stale-ID-after-pin defect exists.** The same function also nulls `resolved_name`, `resolved_address`, and `country_code` — only the last of those is a defect (see D-24-4).
 
 **F11 — The OSM resolver emits an unprefixed identifier.** `placeResolver.js:451` produces `way:<id>` / `node:<id>`, **not** `osm:way:<id>`. Any denylist keyed on an `osm:` prefix would miss every real OSM row. Hence the positive `google:` allowlist.
+
+> **STRENGTHENED during W3 (2026-07-25), from a read-only production query.** The enumeration above is **incomplete**: production also holds **8 `relation:<id>` rows** (e.g. `relation:2110257` "Dujiangyan Irrigation System", `relation:2999045` "Dragon and Tiger Pagodas"), a prefix that appears nowhere in this plan or the review and does not exist in the dev database at all. Every one is correctly rejected, because the positive `google:` allowlist rejects *by construction* rather than by enumerating what to exclude. Had the denylist approach been taken, it would have leaked a prefix nobody knew existed. Do not replace clause 1 with a denylist, and do not "complete" the OSM prefix list — the point is that the list cannot be known to be complete.
 
 **F12 — Discovery's trusted path labels non-Google identities as `places`.** `DiscoveryPanel.jsx:454` sends `providerId: suggestion.placeRef` alongside a hard-coded `coordinateSource: 'places'`, and `placeRef` may be `google:*`, `way:*`, `node:*`, or `curated:*` (`routes/discovery.js:47`). Gating identity on `coordinate_source` alone would send non-Google IDs to Google.
 
@@ -185,7 +187,33 @@ Both call the same helper. Neither reimplements a clause.
 
 ## Wave 3 — Verification
 
-**Status: NOT STARTED.** Full matrix in review §10; it is normative, not a summary. Highlights and gates:
+**Status: AUTOMATED COMPLETE 2026-07-25 · owner production pass OUTSTANDING.** Full matrix in review §10; it is normative, not a summary.
+
+**Gates, all green:** backend **703 passed / 32 files** (+31), frontend **271 passed / 42 files** (+31), `npm run build` green. **62 tests added, zero source files modified in W3** — every W1/W2 behavior passed its test unmodified on the first honest run, and no assertion was loosened to make a test pass.
+
+New files: `frontend/src/utils/deepLink.test.js` (12), `frontend/src/utils/deepLinkTarget.test.js` (13), `frontend/src/utils/coordinates.test.js` (6), `backend/tests/googlePlaceIdentity.test.js` (24 — one per review §5 row 1–13, plus edge cases). Extended: `backend/tests/locationIntegration.test.js` (+7, new `describe` block only; no existing test altered).
+
+**The RC-2b/RC-3 fix, proven in a real browser.** A throwaway single-day CN trip was created with three qualifying stops on the *same mainland-China day*, then deleted. At 375px and again at 1280px, **Today** and the **Map popup** produced byte-identical links for all three:
+
+| Stop | App | Link coordinates | `query_place_id` |
+|---|---|---|---|
+| CN Jiefangbei | `uri.amap.com` | `29.55995…,106.55521…` — **converted to GCJ-02** | absent |
+| HK Victoria Peak | `google.com` | `22.2759,114.1455` — **true WGS-84, unconverted** | `ChIJ_qa_hk` |
+| KR Gyeongbokgung | `map.naver.com` | `37.5796,126.977` — true WGS-84 | absent |
+
+Three apps and three datum decisions from one day. Under the old code all three would have received that day's GCJ-02 tile pair — the HK link ~598 m off and the KR link ~459 m off. This single screen is the RC-2, RC-2b, RC-3, and D-24-6 acceptance evidence.
+
+**G5 / Appendix A is now CONFIRMED at runtime, not merely read from code.** The two probe tests form the discriminating experiment Appendix A specified, and both behaved exactly as predicted: a booking **with** `details.placeId` re-saved after a user pin **silently discards the pin** and reinstates the Google identity and coordinates; a booking **without** `placeId` takes the other branch, `protectedUserPin` fires, and the pin **survives untouched**. D4 is therefore a confirmed live defect, not a hypothesis — see [Appendix A](#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin), whose "Mechanism (read from code, not yet reproduced at runtime)" heading is now out of date. The probe asserts the safety property that must hold whichever way D4 is resolved: coordinates and `provider_id` always move together, never a Google ID stranded on the pin's coordinates.
+
+**Two honest limitations of the automated matrix:**
+1. **The parity test is one-sided.** `googlePlaceId` parity between the two mappers is a direct assertion (both call the same one-owner helper), and the coordinate *inputs* are asserted identical — but the backend test cannot execute the frontend's `resolveDeepLinkTarget`, so the provider axis is re-derived using backend functions rather than cross-checked. The genuine cross-surface proof is empirical, not automated: a one-off probe imported the frontend helper against real data and found **0 mismatches across 39 real stops**, and the browser table above shows byte-identical hrefs from both surfaces. The two suites now pin the same provider/datum table, so drift in either breaks a test.
+2. **`AddPlaceModal`'s modal surface was never opened in a browser** (the in-app pane's paused-rAF freeze). Its `countryCode` forwarding was exercised by driving the exact payload it builds. MapTab's `handlePickResult` forwarding *was* driven through the real UI with a live Places call.
+
+**Production reconnaissance (read-only, 2026-07-25)** — used to build the owner click-script, and worth keeping: prod holds **100 stops, 28 of which qualify (28%)**, a better payoff than D3's 13%-all-data framing. Prod has only **5** unknown-datum rows and **4** `user_pin` rows. No production trip mixes CN with TW/HK/KR stops, so **RC-2b is not reproducible from production data either** — it stays covered by tests, exactly as F14/review §7b anticipated. Prod also surfaced the `relation:` prefix that corrected F11 above.
+
+**Latent trap recorded, not a defect:** there is a **third** stop mapper, `stops.js formatStop`, which W2 deliberately did not touch, so create/update responses omit `googlePlaceId`. This is currently invisible because `useStops.run` calls `onChanged: tripState.refresh` after every mutation, refetching through `getTripDetail` (which does emit it). If anyone ever switches those hooks to optimistic local patching, the place ID would silently vanish from a just-edited stop until the next refetch.
+
+Highlights and gates:
 
 ### Automated
 - **New** `frontend/src/utils/deepLink.test.js` (F2 — first coverage this helper has ever had): google+ID URL shape and parameter order; google+null ID byte-identical to today's URL (no-regression anchor); amap and naver ignore a supplied ID; unsafe characters encoded; coordinate precision not rounded. **Plus the five branches inherited from the deleted backend twin** (see the F2 correction): amap, naver, google, unknown-provider-defaults-to-google, and label special-character encoding. W2 deleted those assertions along with their dead subject, so this file is where that coverage must reappear — do not let it lapse. Also cover google+**empty-string** ID (must omit the parameter, not emit `query_place_id=`).
@@ -221,7 +249,9 @@ Per review §10 the matrix is deliberately split, and **passing one half proves 
 ### Symptom to confirm
 Re-saving a hotel booking that was created through Google Places autocomplete **silently discards a user's manually corrected pin** on the booking-linked stop, and reinstates a Google identity on that stop.
 
-### Mechanism (read from code, not yet reproduced at runtime)
+### Mechanism — ~~read from code, not yet reproduced at runtime~~ **CONFIRMED at runtime 2026-07-25 (Plan 24 W3)**
+
+> The two probe tests in `backend/tests/locationIntegration.test.js` executed the discriminating experiment below and **both predictions held exactly**: a `placeId` booking re-save silently discarded a `user_confirmed` pin and reinstated `provider_id = google:*` with the booking's coordinates; the same sequence with a **non**-`placeId` booking preserved the pin untouched. The reading below is therefore verified behavior, and question 4 ("does it reproduce on a new trip?") is **answered yes** — the probe runs on a trip created fresh by the test harness under current code. Questions 1–3 remain genuinely open, and question 3 is still the real risk.
 
 `backend/src/services/stops.js`, `resolveLocationForStop` (lines 135-309) evaluates guards in this order:
 
@@ -270,3 +300,60 @@ Open `backend/data/trippy.db` with `new Database(path, { readonly: true })`. Use
 
 ### Cross-reference
 Recorded as **G5** in [the 2026-07-25 review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) §8, classified there as **LIVE (code shape), data-age independent**. Plan 24's W3 includes a *probe* test that documents current behavior without changing it — that test is the natural starting point for this work, and it will need updating when the behavior changes.
+
+The W3 probe **confirmed this mechanism at runtime** (see the W3 status block) — both of Appendix A's predictions held, so D4 is a verified live defect rather than a code reading.
+
+---
+
+## Appendix B — Owner production QA click-script
+
+Run **after** deploying. Every stop named below was confirmed present in production by a read-only query on 2026-07-25, so no hunting is required. Do the **375px phone pass first**, then spot-check two rows on desktop. A row fails if the wrong app opens, the pin is visibly displaced, or a name appears on a stop that should be an unnamed dropped pin.
+
+**Reading the result:** "**named card**" = Google opens showing its own place name, photo, and details. "**dropped pin**" = Google opens on a bare coordinate marker with no name. Both are correct outcomes — the point is that each stop gets the *right* one.
+
+### A. Current-code half — stops must gain real names
+
+| # | Where | Expected |
+|---|---|---|
+| A1 | **Taipei - Kaohsiung** (active) → **Today**, 25 Jul → tap Navigate on **Formosa Boulevard Station (Architecture)** | Google opens a **named card**, correct pin |
+| A2 | Same trip → **Map** → day 25 Jul → tap that stop's pin → **Open in Google Maps** | Identical destination to A1 — same app, same place, same pin. **This is the parity check; a mismatch here is the most serious possible failure.** |
+| A3 | Same trip → **Map** → day 20 Jul → **Kimpton Da An Hotel** | **named card** (hotel booking carrying a `placeId`) |
+| A4 | Same trip → **Map** → day 24 Jul → **Fo Guang Shan Buddha Museum** | **named card** |
+| A5 | Same trip → **Map** → day 23 Jul → **Dragon and Tiger Pagodas (Lotus Pond)** | **dropped pin** at the right spot, **no name** — OSM-resolved (`relation:2999045`); a Google name here would be the bug W2 prevents |
+| A6 | **Kuala Lumpur** → **Map** → day 5 Aug → **SQ 125** | **named card**; a Singapore stop inside a Malaysian trip, so it also proves the stop's own country drives the link |
+
+### B. China half — Amap, and never a Google place ID
+
+| # | Where | Expected |
+|---|---|---|
+| B1 | **Shanghai - Hangzhou** → **Map** → day 28 Jul → **Qinghefang Antique Street** | **Amap** opens (not Google), pin on the right street |
+| B2 | Same trip → **Map** → day 26 Jul → **Shanghai the Bund W Hotels** | **Amap**, pin on the hotel |
+| B3 | Same trip → **Map** → day 28 Jul → **The Bund** | **Amap**, correct pin, **no name** (OSM `relation:2142077`) |
+| B4 | Once that trip is live (from 26 Jul), repeat **B1 from the Today tab** | Same app and same pin as B1 — the RC-2 regression check from Today |
+
+### C. Legacy half — untrustworthy rows must stay precise and unnamed
+
+Passing only A and B proves nothing. This half proves the fix degrades honestly instead of inventing names.
+
+| # | Where | Expected |
+|---|---|---|
+| C1 | **Chengdu - Chongqing** → **Map** → day 9 Jun → **Regent Chongqing** | **Amap**, pin **exactly where it is today** — a hand-placed `user_pin` stored in GCJ-02; it must not shift and must not gain a name |
+| C2 | Same trip → **Map** → day 14 Jun → **Long Chao Shou** | Pin at its current position, **no name** (unknown-datum legacy row) |
+| C3 | Same trip → **Map** → day 15 Jun → **Dujiangyan Irrigation System** | **dropped pin**, no name (`relation:2110257`) |
+| C4 | Same trip → **Map** → day 13 Jun → **W Chengdu** | **No "Open in..." button at all** — unresolved with no coordinates, so offering a link would be wrong |
+| C5 | **Kuala Lumpur** → **Map** → day 3 Aug → **Petronas Twin Towers** | Google **dropped pin** exactly where the pin was placed, **no named card** (`user_pin`, identity correctly cleared) |
+
+### D. Write-path check (one minute)
+
+| # | Where | Expected |
+|---|---|---|
+| D1 | Any trip → **Map** → a stop → **Move pin** → pan slightly → **Set here** → reopen the popup | Still the **correct app for that country** after pinning. This is the D-24-4 fix: before it, pinning wiped the stop's country and the app choice fell back to day geography |
+| D2 | **Plan** → **Add place** → type a place → pick a Google suggestion → save → open it from the Map | **named card.** This is the one surface the agent could not click locally (the in-app browser cannot open modals), so it is the highest-value row for you to run |
+
+### Not reproducible in production — do not hunt for it
+
+No production trip mixes mainland-China stops with HK/TW/KR stops, so the **HK-or-KR-on-a-mainland-day** case — the largest single correction at ~598 m and ~459 m — cannot be exercised from existing prod data. It is covered by integration tests and was demonstrated in a browser on a purpose-built trip. To see it live, add a Hong Kong stop to a day of **Shanghai - Hangzhou**, confirm it opens **Google** on the correct HK building while that day's other stops still open Amap, then delete it.
+
+### If a row fails
+
+Note the trip, day, stop name, which surface (Today vs Map), and the URL the button actually opened (long-press → copy link). A stop's `provider_id`, `coordinate_source`, `coordinate_system`, `location_status`, and `country_code` determine every expectation above, so those five columns plus the observed URL are enough to diagnose without reproducing.
