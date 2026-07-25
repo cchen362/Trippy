@@ -1,6 +1,6 @@
 # Implementation Plan 24 — Google Maps Deep-Link Place Identity and Link-Coordinate Correctness
 
-**Status:** 2026-07-25 — **W1, W2, and W3-automated COMPLETE. DEPLOYED to production 2026-07-25 at `8b6af67`; owner production pass outstanding.** No migration. No new external API calls. Commits: W1 `45de419`, W2 `8ae31cc`, W3 `989f04c`, docs pin `8b6af67`. The owner's production click-script is [Appendix B](#appendix-b--owner-production-qa-click-script).
+**Status:** 2026-07-25 — **PLAN CLOSED. W1, W2, W3 COMPLETE · DEPLOYED to production 2026-07-25 at `8b6af67` · owner production pass PASSED 2026-07-25** (all Appendix B rows; four observations raised, three were designed behaviour and one a pre-existing coincident-marker data quirk — no code change required, see Appendix B). The only remaining Plan 24-adjacent work is [Appendix A](#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin), deliberately out of scope. No migration. No new external API calls. Commits: W1 `45de419`, W2 `8ae31cc`, W3 `989f04c`, docs pin `8b6af67`. The owner's production click-script is [Appendix B](#appendix-b--owner-production-qa-click-script).
 
 **Deploy record (2026-07-25).** Server fast-forwarded `7801cf4 → 8b6af67` (nine commits: the four Plan 24 commits plus five docs-only commits that had never shipped), container `trippy-trippy-1` rebuilt via `docker compose up -d --build`. Pre-deploy backup `~/Trippy/backups/pre-plan24-<stamp>.db`, `integrity_check: ok`. Zero files under `backend/src/db/migrations/` in the deployed diff — the no-migration profile was verified on the server, not merely asserted. Infrastructure verification: `/api/health` 200 `{"status":"ok","db":"connected"}`, clean startup logs, backup cron intact. Live read-only spot check through `getTripMapData`: "Kimpton Da An Hotel" (Taipei - Kaohsiung) returns `linkLat`/`linkLng` and `googlePlaceId` `ChIJQYzd58yrQjQRMxp7e6xhxxY`; across all five production trips **0 located stops lack a link datum**, and a Chengdu - Chongqing stop returns a link datum genuinely displaced from its stored coordinate, confirming the GCJ-02 branch converts rather than passes through. Browser QA was deliberately not run by the agent — Appendix B is the owner's.
 
@@ -189,7 +189,7 @@ Both call the same helper. Neither reimplements a clause.
 
 ## Wave 3 — Verification
 
-**Status: AUTOMATED COMPLETE 2026-07-25 · owner production pass OUTSTANDING.** Full matrix in review §10; it is normative, not a summary.
+**Status: COMPLETE 2026-07-25 · owner production pass PASSED 2026-07-25.** Full matrix in review §10; it is normative, not a summary. Owner QA result and the four observations raised are recorded in [Appendix B](#appendix-b--owner-production-qa-click-script).
 
 **Gates, all green:** backend **703 passed / 32 files** (+31), frontend **271 passed / 42 files** (+31), `npm run build` green. **62 tests added, zero source files modified in W3** — every W1/W2 behavior passed its test unmodified on the first honest run, and no assertion was loosened to make a test pass.
 
@@ -328,7 +328,7 @@ Run **after** deploying. Every stop named below was confirmed present in product
 
 | # | Where | Expected |
 |---|---|---|
-| B1 | **Shanghai - Hangzhou** → **Map** → day 28 Jul → **Qinghefang Antique Street** | **Amap** opens (not Google), pin on the right street |
+| B1 | **Shanghai - Hangzhou** → **Map** → day **29 Jul** → **Qinghefang Antique Street** | **Amap** opens (not Google), pin on the right street. **Note:** this stop and **Qinghefang Night Market & Street Food** (same day) are stored at byte-identical coordinates and the *same* `provider_id`, so their markers sit exactly on top of each other and only one is tappable. Either one satisfies this row — the deep link is identical. See the 2026-07-25 QA note below. |
 | B2 | Same trip → **Map** → day 26 Jul → **Shanghai the Bund W Hotels** | **Amap**, pin on the hotel |
 | B3 | Same trip → **Map** → day 28 Jul → **The Bund** | **Amap**, correct pin, **no name** (OSM `relation:2142077`) |
 | B4 | Once that trip is live (from 26 Jul), repeat **B1 from the Today tab** | Same app and same pin as B1 — the RC-2 regression check from Today |
@@ -351,6 +351,17 @@ Passing only A and B proves nothing. This half proves the fix degrades honestly 
 |---|---|---|
 | D1 | Any trip → **Map** → a stop → **Move pin** → pan slightly → **Set here** → reopen the popup | Still the **correct app for that country** after pinning. This is the D-24-4 fix: before it, pinning wiped the stop's country and the app choice fell back to day geography |
 | D2 | **Plan** → **Add place** → type a place → pick a Google suggestion → save → open it from the Map | **named card.** This is the one surface the agent could not click locally (the in-app browser cannot open modals), so it is the highest-value row for you to run |
+
+### Owner QA result — 2026-07-25: PASSED
+
+All rows passed. Four observations were raised and each was checked against production data; **three were the designed behaviour and one is a pre-existing data/rendering quirk unrelated to this plan.** None required a code change.
+
+- **A5 — "opened Google Maps showing coordinates."** Expected, and the point of W2. `Dragon and Tiger Pagodas (Lotus Pond)` carries `provider_id = relation:2999045` (OSM), so the positive `google:` allowlist yields no place id and the link degrades to a coordinate-only dropped pin. A *named* card here would have been the bug.
+- **C5 — "Google Maps opened showing coordinates."** Expected. `Petronas Twin Towers` is `coordinate_source = user_pin`, `provider_id = NULL` — identity correctly cleared, so the owner's hand-placed pin wins and no Google name is invented.
+- **C4 — "no pin, only a 'Place on Map' button, so no 'Open in…' button."** Expected, exactly as written. `W Chengdu` is `location_status = unresolved` with `lat`/`lng` `NULL`; "Place on Map" is the correct affordance and offering a deep link would be wrong.
+- **B1 — wrong day in the script, and the stop's marker is invisible.** Both correct observations. The day was a script error (the stop is on **29 Jul**, now fixed above). The invisible marker is **real but not caused by this plan**: `Qinghefang Antique Street` and `Qinghefang Night Market & Street Food` were both created on 2026-07-09, 57 seconds apart, and the resolver mapped both onto the same real place — identical `lat`/`lng` (`30.241968, 120.170816`), identical `provider_id` (`google:ChIJIyHi70OdTDQRmQAg6H8E-WU`), both `resolved_name = "Qinghefang"`. `StopMarker` renders a plain Leaflet `<Marker>` with no coincident-pin offset or clustering, so one sits exactly beneath the other. A production-wide sweep found **exactly one** such pair, so this is a single data coincidence, not a systemic fault. Because both stops share the same place id, coordinates, and country, their deep links are byte-identical — tapping the visible twin fully satisfies B1.
+
+**Follow-up, not scheduled:** coincident markers have no offset/spiderfy treatment. One prod occurrence; needs an owner decision (nudge overlapping pins, cluster them, or merge the duplicate stops) before any work starts.
 
 ### Not reproducible in production — do not hunt for it
 
