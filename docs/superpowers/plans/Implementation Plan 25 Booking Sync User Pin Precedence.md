@@ -1,6 +1,6 @@
 # Implementation Plan 25 — Booking Sync Must Not Overwrite a User Pin
 
-**Status:** 2026-07-26 — **W1 AND W2 COMPLETE. DEPLOYED TO PRODUCTION at `6b4c179`.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). Fix implemented, regression-tested, and manually verified end-to-end in a real browser against live Google Places. **No migration. No new external API calls — this plan removes one.** The only outstanding item is the post-deploy Regent Chongqing check, which is the owner's to run (W2 DoD, click-script in §Deploy record).
+**Status:** 2026-07-26 — **CLOSED. All waves complete, deployed at `6b4c179`, owner production QA PASSED. No QA debt.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). Fix implemented, regression-tested, manually verified end-to-end in a real browser against live Google Places, and confirmed in production on the one real at-risk row. **No migration. No new external API calls — this plan removed one, and that removal is now measured in production (§Owner production QA).**
 
 **Origin:** [Plan 24 Appendix A](<Implementation Plan 24 Google Maps Deep Link Place Identity.md>#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin) (spun-out owner decision D4, approved as the next work item 2026-07-26), recorded as **G5** in the [2026-07-25 deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) §8. Plan 24 is CLOSED and stays closed; nothing here reopens it.
 
@@ -217,6 +217,31 @@ Standalone, backend-only, no migration, no frontend bundle change, and one *fewe
 **One expected, non-regression change to anticipate:** that stop's `country_code` is currently NULL. W1 Step 3 established that the country fallback can *fill* a null but never overwrite a good value, so this save may legitimately set it to `CN`. A NULL→`CN` transition is the fix behaving as designed — it is not the pin moving. Coordinates, `provider_id`, `location_status`, and `coordinate_source` are the fields that must not change.
 
 **Rollback, if ever needed:** `git -C ~/Trippy checkout 5322832 && docker compose up -d --build`. The DB backup should **not** be restored — no migration ran and no row was written by this deploy.
+
+## Owner production QA — PASSED 2026-07-26
+
+The owner opened the Regent Chongqing booking, edited the confirmation reference, and saved. **The pin held.** Production re-read immediately after:
+
+| Column | Pre-deploy | After owner's edit | |
+|---|---|---|---|
+| `lat` / `lng` | 29.571138262433255 / 106.57039761543275 | **identical** | ✅ |
+| `provider_id` | NULL | **NULL** | ✅ |
+| `location_status` | `user_confirmed` | **`user_confirmed`** | ✅ |
+| `coordinate_source` | `user_pin` | **`user_pin`** | ✅ |
+| `coordinate_system` | `gcj02` | **`gcj02`** | ✅ |
+| `country_code` | NULL | NULL (see below) | ✅ |
+| booking `confirmation_ref` | — | **`IVFXYZ`** | the save really happened |
+| booking `details_json` lat/lng | absent | **still absent** | no paid lookup fired |
+
+Three things this proves that the pre-deploy test suite could not:
+
+1. **The defect is fixed on the real row.** Every location column is byte-identical across a save that, before `c112f6d`, was demonstrated by probe `:1580` to overwrite them.
+2. **`syncStopWithBooking` genuinely ran** — `confirmation_ref` is now `IVFXYZ`. This was not a no-op that merely resembled success; the sync executed and selected the preserving branch, which is D-25-4 holding (non-location fields still sync).
+3. **The cost claim is measured, not asserted.** `details_json` still has `placeId` with **no `lat`/`lng`**. The legacy branch at `bookingPlaceLocation` (`:886-899`) backfills coordinates whenever it runs; the absence of that backfill is the observable fingerprint that `bookingPlaceLocation` was skipped entirely and **no paid `lookupHotelDetails` call was made**. W2 test #4 asserted this against a spy; production now confirms it against the real Google account.
+
+**On the anticipated `country_code` NULL→`CN` fill: it did not occur, and correctly so.** `bookingCountryCode` reads `details.destinationCountryCode || details.countryCode`, and this booking carries neither — only `city: "Chong Qing"`. The fallback had nothing to fill with. The pin's own `coordinate_system = gcj02` is what selects Amap tiles and the datum for this stop, so nothing downstream depends on the null. Not a defect and not in this plan's scope; if country-code coverage on legacy bookings is ever worth pursuing it is a separate data-quality item, alongside the two `unresolved` placeId bookings already listed under *Explicitly out of scope*.
+
+Production census unchanged after the edit: 102 stops, 4 `user_confirmed`.
 
 ---
 
