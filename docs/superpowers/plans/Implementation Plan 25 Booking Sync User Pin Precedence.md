@@ -1,6 +1,8 @@
 # Implementation Plan 25 — Booking Sync Must Not Overwrite a User Pin
 
-**Status:** 2026-07-26 — **WRITTEN, NOT STARTED.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). W1 and W2 not started. **No migration. No new external API calls — this plan removes one.**
+**Status:** 2026-07-26 — **W1 COMPLETE, W2 NOT STARTED.** Investigation complete; owner product decisions D-25-1 and D-25-2 taken (below). The fix is implemented and proven at runtime; test-suite alignment and manual QA remain. **No migration. No new external API calls — this plan removes one.**
+
+> **Repo is intentionally one test red between W1 and W2.** The `:1580` probe asserts the buggy behaviour on purpose and now fails (`expected 'user_confirmed' to be 'resolved'`) — that failure *is* the proof the fix landed. W2 Step 1 rewrites it. Do not "fix" the suite by reverting the change.
 
 **Origin:** [Plan 24 Appendix A](<Implementation Plan 24 Google Maps Deep Link Place Identity.md>#appendix-a--spun-out-d4-booking-sync-overwrites-a-user-confirmed-pin) (spun-out owner decision D4, approved as the next work item 2026-07-26), recorded as **G5** in the [2026-07-25 deep-link identity review](../reviews/2026-07-25-google-maps-deep-link-identity-review.md) §8. Plan 24 is CLOSED and stays closed; nothing here reopens it.
 
@@ -89,7 +91,14 @@ This row is worse than the generic case: with no stored coordinates, `bookingPla
 
 ## Wave 1 — The fix
 
-**Status: NOT STARTED.**
+**Status: COMPLETE 2026-07-26.** Implemented exactly as specified in Steps 1–3, no deviations. One file changed: `backend/src/services/stops.js`, two hunks, +16/−1.
+
+- **Step 0 baseline measured at `97ee1af`** and matched the plan's predicted figures exactly: backend **703 passed / 32 files**, frontend **271 passed / 42 files**, `npm run build` green (PWA precache 33 entries, 1161.73 KiB). The suite exited 0 with no Windows teardown segfault this run.
+- **Step 1** — added non-exported `linkedStopHoldsConfirmedLocation(existingStop)` immediately after `bookingCountryCode`, keyed on `location_status === 'user_confirmed'` alone (D-25-3). Its comment carries the D-25-1 rationale, the explicit "not redundant with guard 2, which is unreachable from this caller" warning, and a pointer back to this plan.
+- **Step 2** — gated the place branch by short-circuiting the call itself: `const placeLocation = linkedStopHoldsConfirmedLocation(existingStop) ? null : await bookingPlaceLocation(booking);`. `null` makes the *pre-existing* ternary select the `{ coordinateSource: 'booking' }` branch, so guard 2 fires and every line downstream (`location`, photo resolve, the UPDATE at `:980-1035`) is byte-identical. The cost rationale is in the code comment.
+- **Step 3** — verified, no edit needed, as the plan predicted. Guard 2 returns `existing.country_code`, so `resolvedLocation.countryCode || bookingCountryCode(booking)` can only *fill* a null country, never overwrite a good one on a pinned stop.
+- **Blast-radius proof:** `git diff` shows hunks at lines 922 and 950 only — **zero** edits between `:142` and `:316`, so guard order and guard conditions are untouched (F-25-5 respected). `git status --short` shows one modified file; no frontend file, no migration (D-25-2).
+- **Runtime proof:** post-change backend run is **702 passed / 1 failed (703)**. The single failure is the `:1580` probe at its first inverted assertion — `expected 'user_confirmed' to be 'resolved'` — i.e. it fails *because the pin now survives*. The `:1639` companion stayed green, so the `placeId` and no-`placeId` branches now agree. This is the W1 definition of done, not a regression.
 
 ### Step 0 — Baseline
 Record pre-change totals: `cd backend; npm test` and `cd frontend; npm test`, plus `npm run build`. Expected green baseline at `3289b76`: backend **703 passed / 32 files**, frontend **271 passed / 42 files**. (Per repo record the backend suite ends in a Windows teardown segfault *after* results print — read the printed totals.) These are W2's gates.

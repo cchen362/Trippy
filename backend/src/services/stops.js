@@ -919,6 +919,17 @@ function bookingCountryCode(booking) {
   return details.destinationCountryCode || details.countryCode || null;
 }
 
+// D-25-1: a booking re-save must never move a stop the user has pinned. This is
+// NOT redundant with resolveLocationForStop's protectedUserPin guard — that guard
+// is unreachable from syncStopWithBooking, because a placeId booking's input
+// (real lat/lng, coordinateSource: 'places') satisfies trustedCoordinates, and
+// the earlier trustedCoordinates guard returns before protectedUserPin is ever
+// evaluated. See docs/superpowers/plans/Implementation Plan 25 Booking Sync User
+// Pin Precedence.md.
+function linkedStopHoldsConfirmedLocation(existingStop) {
+  return existingStop?.location_status === 'user_confirmed';
+}
+
 export async function syncStopWithBooking(booking) {
   const db = getDb();
   const existingStop = db.prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
@@ -936,7 +947,12 @@ export async function syncStopWithBooking(booking) {
     return null;
   }
 
-  const placeLocation = await bookingPlaceLocation(booking);
+  // Skip bookingPlaceLocation entirely for a pinned stop — it's the only path that
+  // can trigger a paid lookupHotelDetails call during a booking save (the legacy
+  // backfill branch above), and a pinned stop has no use for its result anyway.
+  const placeLocation = linkedStopHoldsConfirmedLocation(existingStop)
+    ? null
+    : await bookingPlaceLocation(booking);
   const resolvedLocation = await resolveLocationForStop({
     day,
     title: inferred.title,
