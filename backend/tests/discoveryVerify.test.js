@@ -24,6 +24,7 @@ import {
 let tmpDir;
 let originalRatingEnrichment;
 let originalBudget;
+let originalEscalationBudget;
 
 function resolvedHit(overrides = {}) {
   return {
@@ -61,8 +62,10 @@ beforeEach(() => {
   __resetDiscoveryVerifyForTests();
   originalRatingEnrichment = config.discoveryRatingEnrichment;
   originalBudget = config.discoveryResolverDailyBudget;
+  originalEscalationBudget = config.discoveryEscalationDailyBudget;
   config.discoveryRatingEnrichment = false;
   config.discoveryResolverDailyBudget = 500;
+  config.discoveryEscalationDailyBudget = 50;
   getDb().prepare('DELETE FROM discovery_places').run();
   getDb().prepare('DELETE FROM discovery_destinations').run();
 });
@@ -70,6 +73,7 @@ beforeEach(() => {
 afterEach(() => {
   config.discoveryRatingEnrichment = originalRatingEnrichment;
   config.discoveryResolverDailyBudget = originalBudget;
+  config.discoveryEscalationDailyBudget = originalEscalationBudget;
 });
 
 function makeDestination(overrides = {}) {
@@ -171,10 +175,64 @@ describe('discoveryVerify — country matching', () => {
     expect(updated.provenance).toBe('unverified');
   });
 
-  it('accepts a resolved hit for an unknown-country destination regardless of resolved country', async () => {
+  // Plan 26 W2.2 (F-26-8): this test used to be named "accepts a resolved hit
+  // for an unknown-country destination regardless of resolved country" and
+  // asserted `provenance === 'verified'`. That old behaviour was pinned on
+  // purpose at the time (there was nothing to compare against, so any
+  // resolved country was let through) — it is deliberately narrowed here:
+  // with no destination country there is nothing to check identity against,
+  // so "verified" would be a claim the system cannot support. The affected
+  // production population is exactly the two empty-country test destinations
+  // (北京, 南疆) scheduled for deletion in W5.1 — this narrowing costs no
+  // real user-visible verified content today.
+  it('records the resolved country and lands unverified for an unknown-country destination with a resolved-country hit', async () => {
     const dest = makeDestination({ cityKey: 'verifytest3', countryCode: '' });
     const place = insertOne(dest.id, { name: 'Any Country Place' });
     mockResolvePlace.mockResolvedValue(resolvedHit({ countryCode: 'FR' }));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await enqueueForVerification(getDb(), dest.id, [place.id]);
+    await waitForVerificationDrain(dest.id);
+
+    const updated = getDb().prepare('SELECT * FROM discovery_places WHERE id = ?').get(place.id);
+    expect(updated.provenance).toBe('unverified');
+
+    const recordingLogs = errorSpy.mock.calls.filter((call) =>
+      typeof call[0] === 'string' && call[0].includes('empty-country destination — cannot country-check'));
+    expect(recordingLogs).toHaveLength(1);
+    expect(recordingLogs[0]).toEqual(expect.arrayContaining([place.id, place.name, dest.id, dest.display_name, 'FR']));
+    errorSpy.mockRestore();
+  });
+
+  it('lands unverified for an unknown-country destination even when the resolution reports no country at all', async () => {
+    const dest = makeDestination({ cityKey: 'verifytest3b', countryCode: '' });
+    const place = insertOne(dest.id, { name: 'No Country Reported Place' });
+    // The W2.2 narrowing is deliberately uniform across both empty-destination
+    // cases. A hit that reports NO country is weaker evidence than one that
+    // reports a mismatching country, so passing this while failing the test
+    // above would be exactly backwards — an empty-country destination simply
+    // cannot produce a country-checked 'verified' row.
+    mockResolvePlace.mockResolvedValue(resolvedHit({ countryCode: null }));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await enqueueForVerification(getDb(), dest.id, [place.id]);
+    await waitForVerificationDrain(dest.id);
+
+    const updated = getDb().prepare('SELECT * FROM discovery_places WHERE id = ?').get(place.id);
+    expect(updated.provenance).toBe('unverified');
+
+    // Still recorded, with 'none' standing in for the absent resolved country.
+    const recordingLogs = errorSpy.mock.calls.filter((call) =>
+      typeof call[0] === 'string' && call[0].includes('empty-country destination — cannot country-check'));
+    expect(recordingLogs).toHaveLength(1);
+    expect(recordingLogs[0]).toEqual(expect.arrayContaining([place.id, place.name, 'none']));
+    errorSpy.mockRestore();
+  });
+
+  it('still accepts a resolution with no country at all when the destination country is known (unchanged)', async () => {
+    const dest = makeDestination({ cityKey: 'verifytest3c', countryCode: 'JP' });
+    const place = insertOne(dest.id, { name: 'Known Dest No Country Reported' });
+    mockResolvePlace.mockResolvedValue(resolvedHit({ countryCode: null }));
 
     await enqueueForVerification(getDb(), dest.id, [place.id]);
     await waitForVerificationDrain(dest.id);
@@ -291,6 +349,74 @@ describe('discoveryVerify — resolver-call daily budget', () => {
     const afterSecondDrain = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ? ORDER BY id').all(dest.id);
     expect(afterSecondDrain.filter((r) => r.provenance === 'pending')).toHaveLength(0);
     expect(afterSecondDrain.filter((r) => r.provenance === 'verified')).toHaveLength(2);
+  });
+});
+
+describe('discoveryVerify — escalation daily sub-budget (Plan 26 W2.3, D-26-4)', () => {
+  it('passes an escalateWeakHit function to every resolvePlace call', async () => {
+    const dest = makeDestination({ cityKey: 'verifytest10' });
+    const place = insertOne(dest.id, { name: 'Escalation Wiring Place' });
+    mockResolvePlace.mockResolvedValue(resolvedHit());
+
+    await enqueueForVerification(getDb(), dest.id, [place.id]);
+    await waitForVerificationDrain(dest.id);
+
+    expect(mockResolvePlace).toHaveBeenCalledTimes(1);
+    expect(typeof mockResolvePlace.mock.calls[0][0].escalateWeakHit).toBe('function');
+  });
+
+  it('caps escalateWeakHit at the configured ceiling and logs exhaustion exactly once', async () => {
+    config.discoveryEscalationDailyBudget = 2;
+    const dest = makeDestination({ cityKey: 'verifytest11' });
+    const place = insertOne(dest.id, { name: 'Escalation Ceiling Place' });
+    mockResolvePlace.mockResolvedValue(resolvedHit());
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await enqueueForVerification(getDb(), dest.id, [place.id]);
+    await waitForVerificationDrain(dest.id);
+
+    // The real escalation trigger (a weak Nominatim hit + a configured Google
+    // key) lives in the mocked-out resolver, so we drive the sub-budget
+    // directly through the function baseArgs actually handed to resolvePlace.
+    const escalateWeakHit = mockResolvePlace.mock.calls[0][0].escalateWeakHit;
+    expect(escalateWeakHit()).toBe(true);
+    expect(escalateWeakHit()).toBe(true);
+    expect(escalateWeakHit()).toBe(false);
+    expect(escalateWeakHit()).toBe(false);
+
+    const exhaustionLogs = errorSpy.mock.calls.filter((call) =>
+      typeof call[0] === 'string' && call[0].includes('daily escalation sub-budget exhausted'));
+    expect(exhaustionLogs).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
+  it('is independent of the resolver lookup budget in both directions', async () => {
+    config.discoveryEscalationDailyBudget = 1;
+    config.discoveryResolverDailyBudget = 500;
+    const dest = makeDestination({ cityKey: 'verifytest12' });
+    const places = [
+      insertOne(dest.id, { name: 'Independence One' }),
+      insertOne(dest.id, { name: 'Independence Two' }),
+      insertOne(dest.id, { name: 'Independence Three' }),
+    ];
+    mockResolvePlace.mockResolvedValue(resolvedHit());
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await enqueueForVerification(getDb(), dest.id, places.map((p) => p.id));
+    await waitForVerificationDrain(dest.id);
+
+    // Exhaust the escalation sub-budget directly (ceiling of 1) after the
+    // fact — this must not have consumed or been gated by resolver lookups.
+    const escalateWeakHit = mockResolvePlace.mock.calls[0][0].escalateWeakHit;
+    expect(escalateWeakHit()).toBe(true);
+    expect(escalateWeakHit()).toBe(false);
+
+    // All 3 resolver lookups ran to completion (verified) — the exhausted
+    // escalation sub-budget did not reduce resolver lookups performed.
+    expect(mockResolvePlace).toHaveBeenCalledTimes(3);
+    const rows = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(dest.id);
+    expect(rows.every((r) => r.provenance === 'verified')).toBe(true);
+    errorSpy.mockRestore();
   });
 });
 

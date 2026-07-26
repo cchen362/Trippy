@@ -406,23 +406,41 @@ function waitForNominatimSlot({ priority = 'interactive' } = {}) {
   });
 }
 
-function classifyNominatimResult(place, { queryText, city }) {
-  const displayName = place.display_name || '';
-  const name = place.name || displayName.split(',')[0] || queryText;
-  const normalizedName = normalizeText(name);
+// Shared "is this returned place actually the thing we asked for" decision (F-26-8).
+// Originally lived only inline in classifyNominatimResult; extracted so the Google
+// Places path can apply the identical strong/weak-match rule instead of trusting
+// Google's first result unconditionally. strongName checks the returned name/address
+// against the query; cityMatch checks the returned address against the caller's city
+// (vacuously true when no city was given). Confidence/status thresholds are the
+// Nominatim-tier values (0.78 resolved / 0.55 estimated) that every caller already
+// round-trips through readCache's `< 0.7 -> 'estimated'` rule.
+function classifyNameMatch({ queryText, city, returnedName, returnedAddress }) {
+  const normalizedName = normalizeText(returnedName);
   const normalizedQuery = normalizeText(queryText);
-  const normalizedDisplay = normalizeText(displayName);
+  const normalizedAddress = normalizeText(returnedAddress);
   const normalizedCity = normalizeText(city);
   const strongName = normalizedName === normalizedQuery
-    || normalizedDisplay.startsWith(normalizedQuery)
-    || normalizedDisplay.includes(normalizedQuery);
-  const cityMatch = !normalizedCity || normalizedDisplay.includes(normalizedCity);
+    || normalizedAddress.startsWith(normalizedQuery)
+    || normalizedAddress.includes(normalizedQuery);
+  const cityMatch = !normalizedCity || normalizedAddress.includes(normalizedCity);
 
   return {
     locationStatus: strongName && cityMatch ? 'resolved' : 'estimated',
     confidence: strongName && cityMatch ? 0.78 : 0.55,
-    name,
   };
+}
+
+function classifyNominatimResult(place, { queryText, city }) {
+  const displayName = place.display_name || '';
+  const name = place.name || displayName.split(',')[0] || queryText;
+  const classification = classifyNameMatch({
+    queryText,
+    city,
+    returnedName: name,
+    returnedAddress: displayName,
+  });
+
+  return { ...classification, name };
 }
 
 function nominatimQueryTexts(queryText) {
@@ -604,15 +622,31 @@ async function searchGooglePlaces({ queryText, city, country, includeRatingField
     lng = converted.lng;
   }
 
+  // F-26-8: Google's first Text Search hit was previously trusted unconditionally
+  // (hardcoded resolved/0.9) — a vague query could attach to an unrelated real place
+  // and still earn the product's strongest trust label. This now runs the SAME
+  // strong/weak name-match check Nominatim has always applied (classifyNameMatch),
+  // so a weak match is labelled 'estimated'/0.55 instead of 'resolved'/0.9. This is
+  // deliberately global, not opt-in — it narrows every resolvePlace caller including
+  // stop/booking resolution (stops.js), since a mislabelled 'resolved' is the wrong
+  // failure mode regardless of caller.
+  const resolvedName = place.displayName?.text || queryText;
+  const match = classifyNameMatch({
+    queryText,
+    city,
+    returnedName: resolvedName,
+    returnedAddress: place.formattedAddress,
+  });
+
   return {
     result: formatResolution({
       lat,
       lng,
       coordinateSystem: 'wgs84',
       coordinateSource: 'places',
-      locationStatus: 'resolved',
-      confidence: 0.9,
-      resolvedName: place.displayName?.text || queryText,
+      locationStatus: match.locationStatus,
+      confidence: match.locationStatus === 'resolved' ? 0.9 : 0.55,
+      resolvedName,
       resolvedAddress: place.formattedAddress || null,
       providerId: place.id ? `google:${place.id}` : null,
       provider: 'google_places',
@@ -639,7 +673,14 @@ function unresolved() {
 // above: the default is 'interactive' so every existing caller (stops.js, trips.js,
 // bookings) keeps byte-identical behaviour with no edit to those files. Only
 // discoveryVerify.js opts into 'background' (F-26-5) — see waitForNominatimSlot.
-export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false, priority = 'interactive' } = {}) {
+//
+// escalateWeakHit is another such opt-in (W2.3, F-26-7): null by default, so every
+// existing caller is byte-identical. When a caller passes a zero-arg function, a
+// Nominatim hit that came back weak ('estimated') is allowed one authorised Google
+// Places attempt instead of being returned immediately — the function is the
+// caller's budget gate (it returns true iff it is willing to spend one Google
+// request) and is called at most once per resolvePlace invocation.
+export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false, priority = 'interactive', escalateWeakHit = null } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
@@ -686,7 +727,46 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
     const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases, priority });
     nominatimRaw = rawJson;
     if (result) {
+      // Nominatim always gets cached exactly as before, regardless of what happens
+      // below. See the escalation branch's comment for why the (potential) Google
+      // result never overwrites this write.
       writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result, rawJson });
+
+      // W2.3 (F-26-7) escalation: a weak Nominatim hit ('estimated') previously
+      // short-circuited resolvePlace immediately, suppressing any Google attempt
+      // even when Google might have resolved it strongly. This branch is reachable
+      // ONLY when the caller opted in with escalateWeakHit — every existing caller
+      // (stops.js, bookings via stops.js, trips.js) passes none, so they keep this
+      // exact byte-identical fast-return path (proven by the Plan-24 compatibility
+      // tests in placeResolver.test.js).
+      if (result.locationStatus !== 'resolved' && typeof escalateWeakHit === 'function' && config.googlePlacesKey) {
+        const authorised = escalateWeakHit();
+        if (authorised) {
+          try {
+            const google = await searchGooglePlaces({ queryText: query, city, country, includeRatingFields });
+            const won = google?.result?.locationStatus === 'resolved';
+            console.error(
+              '[placeResolver] escalated weak Nominatim hit for "%s" to Google Places (won=%s)',
+              query,
+              won,
+            );
+            if (won) {
+              // CACHE RULE (load-bearing): the escalated Google result is NEVER
+              // written to place_resolution_cache. That cache is shared with
+              // interactive stop/booking resolution, keyed on (queryText, city,
+              // country) — writing a discovery-only escalation result there would
+              // silently re-route a later stop lookup onto a Google-named row and
+              // regress the CLOSED Plan 24 "precision over polish" decision. Cost
+              // is unaffected in practice: each catalogue row is verified once, so
+              // the Nominatim cache write above already prevents a repeat lookup.
+              return google.result;
+            }
+          } catch (error) {
+            console.error('[placeResolver] Google Places escalation failed for "%s": %s', query, error.message);
+          }
+        }
+      }
+
       return result;
     }
   } catch (error) {

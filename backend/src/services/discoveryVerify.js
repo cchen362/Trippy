@@ -67,6 +67,49 @@ function logBudgetExhaustedOnce() {
   );
 }
 
+// Plan 26 W2.3 (D-26-4): a second, independent daily counter bounding GOOGLE
+// PLACES REQUESTS spent escalating past a weak Nominatim hit during
+// verification. Mirrors budgetDate/budgetUsed/budgetExhaustedLoggedForDate
+// above exactly (same reset-on-new-UTC-day semantics, same todayUtc()) but is
+// tracked separately so escalation spend can never eat into or be masked by
+// the resolver lookup budget, and so its exhaustion is logged distinctly.
+let escalationBudgetDate = null;
+let escalationBudgetUsed = 0;
+let escalationBudgetExhaustedLoggedForDate = null;
+
+function resetEscalationBudgetIfNewDay() {
+  const today = todayUtc();
+  if (escalationBudgetDate !== today) {
+    escalationBudgetDate = today;
+    escalationBudgetUsed = 0;
+  }
+}
+
+function logEscalationBudgetExhaustedOnce() {
+  resetEscalationBudgetIfNewDay();
+  if (escalationBudgetExhaustedLoggedForDate === escalationBudgetDate) return;
+  escalationBudgetExhaustedLoggedForDate = escalationBudgetDate;
+  console.error(
+    '[discoveryVerify] daily escalation sub-budget exhausted (%d) — weak Nominatim hits left unescalated',
+    config.discoveryEscalationDailyBudget,
+  );
+}
+
+// Passed to placeResolver.js as the `escalateWeakHit` opt-in (see baseArgs
+// below): called at most once per resolvePlace call, and only at the moment
+// escalation would actually fire, so this counts real Google requests, not
+// attempts. Returns true and consumes one unit when today's sub-budget has
+// room; returns false otherwise, logging exhaustion once per UTC day.
+function tryConsumeEscalationBudget() {
+  resetEscalationBudgetIfNewDay();
+  if (escalationBudgetUsed >= config.discoveryEscalationDailyBudget) {
+    logEscalationBudgetExhaustedOnce();
+    return false;
+  }
+  escalationBudgetUsed += 1;
+  return true;
+}
+
 // Wraps a single resolvePlace call with the budget gate. Returns `null` as a
 // sentinel meaning "budget exhausted, did not call the resolver" — distinct
 // from a legitimate resolution object (including an unresolved one).
@@ -77,14 +120,44 @@ async function budgetedResolve(args) {
 }
 
 // A confident hit: locationStatus is 'resolved' (not 'estimated'/'unresolved'),
-// and when both the resolved country and destination country are known they
-// match case-insensitively. Unknown-country destinations, or a resolution that
-// didn't report a country, always pass the country check (nothing to compare).
-function isConfidentHit(resolution, destination) {
+// and the destination's country is known and matches the resolved country
+// case-insensitively. A resolution that didn't report a country still passes
+// when the DESTINATION's country is known (nothing to compare — unchanged,
+// pre-existing behaviour that W2 deliberately does not narrow).
+//
+// F-26-8 (Plan 26 W2.2): an EMPTY destination country no longer earns a free
+// pass, in EITHER direction. With no destination country there is nothing to
+// check identity against, so returning true here would be a "verified" claim
+// the system cannot support — it previously let a vague query attach to any
+// resolved country and receive the product's strongest trust label. Note the
+// check is uniform on purpose: a hit that reports no country at all is weaker
+// evidence than one that reports a mismatching country, so passing the former
+// while failing the latter would be exactly backwards. Such hits now fall
+// through to the caller's terminal 'unverified' path, and the resolved
+// country (when there is one) is recorded via a structured log line — there
+// is no schema surface to persist it this wave: discovery_places has no
+// country column, and discovery_destinations.country_code is half of the
+// (city_key, country_code) identity key, so neither can be overwritten here.
+// That log is the evidence W3.1's attempt columns will later persist properly.
+//
+// Production cost of the narrowing is nil: the only two empty-country
+// destinations are 北京 and 南疆 (the owner's own CJK free-text test
+// destinations), which hold 162 active rows and ZERO verified rows today, and
+// are deleted outright in W5.1 (D-26-3). W4.5 then blocks shared-catalogue
+// creation for unknown-country destinations, so this path stops being
+// reachable at all.
+function isConfidentHit(resolution, destination, place) {
   if (!resolution || resolution.locationStatus !== 'resolved') return false;
   const destCountry = destination.country_code || '';
   const resolvedCountry = resolution.countryCode || '';
-  if (!destCountry || !resolvedCountry) return true;
+  if (!destCountry) {
+    console.error(
+      '[discoveryVerify] empty-country destination — cannot country-check, recording not trusting: place=%s name=%s destination=%s (%s) resolved_country=%s provider=%s',
+      place?.id, place?.name, destination.id, destination.display_name, resolvedCountry || 'none', resolution.provider,
+    );
+    return false;
+  }
+  if (!resolvedCountry) return true;
   return destCountry.toLowerCase() === resolvedCountry.toLowerCase();
 }
 
@@ -184,19 +257,27 @@ async function verifyOne(db, id, destination) {
     // interactive lookup can overtake a draining verification queue instead of
     // waiting behind it (placeResolver.js waitForNominatimSlot).
     priority: 'background',
+    // Plan 26 W2.3 (D-26-4): discoveryVerify is the ONLY permitted caller of this
+    // opt-in. It draws from its own escalation sub-budget (config.discoveryEscalationDailyBudget),
+    // separate from the resolver-lookup budget above, so Google spend past a weak
+    // Nominatim hit is bounded by construction. Stop/booking resolution never sets
+    // this, so the escalation branch stays unreachable from them (Plan 24 stays closed).
+    escalateWeakHit: tryConsumeEscalationBudget,
   };
 
   try {
     let resolution = await budgetedResolve({ queryText: row.name, ...baseArgs });
     if (resolution === null) return { budgetExhausted: true };
 
-    if (!isConfidentHit(resolution, destination) && row.local_name) {
+    let confident = isConfidentHit(resolution, destination, row);
+    if (!confident && row.local_name) {
       const fallback = await budgetedResolve({ queryText: row.local_name, ...baseArgs });
       if (fallback === null) return { budgetExhausted: true };
       resolution = fallback;
+      confident = isConfidentHit(resolution, destination, row);
     }
 
-    if (isConfidentHit(resolution, destination)) {
+    if (confident) {
       applyVerified(db, row, resolution, destination);
     } else {
       db.prepare(`UPDATE discovery_places SET provenance = 'unverified' WHERE id = ?`).run(id);
@@ -305,4 +386,7 @@ export function __resetDiscoveryVerifyForTests() {
   budgetDate = null;
   budgetUsed = 0;
   budgetExhaustedLoggedForDate = null;
+  escalationBudgetDate = null;
+  escalationBudgetUsed = 0;
+  escalationBudgetExhaustedLoggedForDate = null;
 }

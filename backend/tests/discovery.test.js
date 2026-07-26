@@ -1155,13 +1155,19 @@ describe('verification worker — failure isolation', () => {
       return {
         lat: 1, lng: 2, coordinateSystem: 'wgs84', coordinateSource: 'manual_lookup',
         locationStatus: 'resolved', confidence: 0.9, resolvedName: queryText, resolvedAddress: 'addr',
-        providerId: 'osm:node/1', provider: 'nominatim', countryCode: null,
+        providerId: 'osm:node/1', provider: 'nominatim', countryCode: 'MY',
         businessStatus: null, rating: null, ratingCount: null,
       };
     });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { events, error } = await callDiscover({ destination: 'Failtown' });
+    // Country-coded destination + matching resolved country, so the surviving
+    // item genuinely reaches 'verified'. Plan 26 W2.2 narrowed isConfidentHit so
+    // an EMPTY-country destination can no longer earn 'verified' at all — with
+    // the old ''-bucket fixture this test would still pass while silently
+    // measuring nothing (both rows unverified), which would stop it testing the
+    // failure isolation it is named for.
+    const { events, error } = await callDiscover({ destination: 'Failtown', countryCode: 'MY' });
 
     expect(error).toBeUndefined();
     expect(events.find((e) => e.type === 'error')).toBeUndefined();

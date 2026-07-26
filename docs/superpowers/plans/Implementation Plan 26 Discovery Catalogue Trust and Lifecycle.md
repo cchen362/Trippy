@@ -108,7 +108,36 @@ Each is scheduled, not deferred indefinitely. None blocks W1.
 
 ## W2 — Verifier integrity
 
-**Status:** 2026-07-26 — **NOT STARTED.** W1 is complete and committed at `347e8f6` (not deployed); nothing in W2 depends on W1, and nothing in W1 invalidated a W2 fact. **No migration.**
+**Status:** 2026-07-27 — **COMPLETE, verified locally, NOT deployed.** No migration, backend-only, no UI surface. Backend 737/737 (32/32 files; baseline was 726, +11 net new) and frontend 43/43 files green; `npm run build` clean. Verified beyond the suite by a throwaway integration harness driving the REAL resolver through the REAL verification worker against a temp DB with `fetch` stubbed (zero provider traffic, zero cost) and inspecting the PERSISTED rows — see "Measured" below. Owner production QA still owed.
+
+**Measured (persisted-row outcomes, not return values).** The unit suites cannot show this: `discoveryVerify.test.js` mocks `placeResolver` out entirely and `placeResolver.test.js` never touches catalogue rows, so nothing pinned the two halves together. Four scenarios, each ending in a `SELECT` against `discovery_places` and `place_resolution_cache`:
+
+| Scenario | Persisted result | Provider requests |
+| --- | --- | --- |
+| Weak Nominatim hit → escalation → strong Google | `verified`, `provider_place_id=google:…`, coordinates stored; **shared cache still holds the Nominatim row** (`confidence 0.55`) | nominatim 1, google 1 |
+| Same, escalation sub-budget = 0 | `unverified`, no id, no coordinates; exhaustion logged once | nominatim 1, **google 0** |
+| Nominatim miss → **unrelated** Google result (W2.1) | `unverified`, no id, no coordinates | nominatim 1, google 1 |
+| Empty-country destination, otherwise-strong hit (W2.2) | `unverified`, resolved country recorded in the log line | nominatim 1, google 1 |
+
+Row 3 is the headline user-visible fix: before W2.1 that row became `verified` and stored an unrelated real place's provider id and coordinates — the strongest trust label on the wrong place.
+
+**W2.1 is deliberately GLOBAL, not opt-in — and this is the one place W2 touches interactive behaviour.** The plan's wording is unconditional ("a result failing the check must not be labelled `resolved`"), and a mislabelled `resolved` is the same defect for a user's stop pin as for a Discovery card. Plan 24's closed decision is about provider *ordering*, not about labelling, so this does not reopen it. Concretely: a Google Text Search hit whose returned name/address does not match the query now yields `estimated`/0.55 instead of `resolved`/0.9, for every caller, and the shared `place_resolution_cache` row records 0.55 so a later cache read reproduces `estimated` (`readCache`'s `< 0.7` rule) rather than a false `resolved`. The strong-match path is byte-identical (`resolved`/0.9).
+
+**The check itself was not re-invented.** `classifyNominatimResult`'s inline strong-name/city test was extracted into one shared `classifyNameMatch` used by both provider paths, so there is one definition of "is this actually the thing we asked for" rather than two. Nominatim behaviour is unchanged (same 0.78/0.55 thresholds, same inputs).
+
+**W2.3's escalation is budgeted by callback, not by flag.** `escalateWeakHit` is `null` by default and is a zero-arg function `resolvePlace` invokes *at the moment it is about to issue the Google request* — so the sub-budget counts real paid requests rather than intentions (a boolean would have to be decided before anyone knows whether Nominatim will come back weak). `config.discoveryEscalationDailyBudget` (`DISCOVERY_ESCALATION_DAILY_BUDGET`, default **50**) is a wholly separate counter from the 500-lookup budget, with its own once-per-UTC-day exhaustion log, per D-26-4.
+
+**Cache rule, load-bearing: the escalated Google result is never written to `place_resolution_cache`.** That cache is shared with interactive stop/booking resolution and keyed on (queryText, city, country). Writing a discovery-only escalation result there would silently re-route a later stop lookup onto a Google-named row — a Plan 24 regression through *data* rather than code, which a behaviour-identical-code proof would never catch. The Nominatim row is still written exactly as today; cost is unaffected because each catalogue row is verified once.
+
+**Plan 24 compatibility gate — discharged three ways, not by a green suite.** (1) Argument-level: `escalateWeakHit` defaults to `null`, and none of `stops.js` (:189/:199/:210/:831/:833/:836/:839), `bookings.js` (which has no direct `resolvePlace` call at all — it resolves through `stops.js`) or `trips.js:1269` passes it, so the escalation branch is unreachable from them. (2) Behavioural test: a call made with the exact argument shape `stops.js:189`/`:831` use, against a weak Nominatim hit with a Google key configured, issues **zero** requests to `places.googleapis.com` (asserted on the fetch mock, which throws if Google is touched). (3) Structural pin: a test reads `stops.js` and `bookings.js` from disk and asserts neither mentions `escalateWeakHit`, so a future edit opting them in fails loudly.
+
+**W2.2's narrowing is uniform in both directions, on purpose.** An empty-country destination now fails the country check whether the resolution reports a mismatching country *or none at all* — a hit reporting no country is weaker evidence than one reporting a wrong country, so passing the former while failing the latter would be exactly backwards. There is no schema surface to persist the resolved country this wave (`discovery_places` has no country column; `discovery_destinations.country_code` is half the identity key), so "record" is a structured log line — the evidence W3.1's attempt columns will later persist properly. **Production cost is nil:** the only empty-country destinations are 北京 and 南疆, holding 162 active rows and **zero** verified rows today (D-26-3), deleted in W5.1; W4.5 then stops the path being reachable.
+
+**Two tests were changed deliberately, neither weakened.** `discoveryVerify.test.js:174` pinned the old behaviour on purpose and is rewritten to assert `unverified` + the recording log, with a comment recording why it is narrowed. `discovery.test.js`'s verification-worker failure-isolation fixture used a `''`-country destination; under W2.2 it would still have *passed* while silently measuring nothing (both rows unverified), so its destination is now country-coded and its stubbed resolution reports a matching country — it goes back to testing the isolation it is named for.
+
+**One unreproduced flake, reported not hidden:** a single full-suite run showed `collaboration.test.js > keeps the existing share payload fields byte-identical…` failing. It passed in isolation and in three subsequent full runs, and the W2 diff touches neither share nor day-geo code. Not reproduced; not explained.
+
+**Line numbers cited in the F-facts above were read at `ca37222`, before W1. W1 shifted the ones W2 needs — use these:**
 
 **Line numbers cited in the F-facts above were read at `ca37222`, before W1. W1 shifted the ones W2 needs — use these:**
 

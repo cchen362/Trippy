@@ -53,5 +53,12 @@ export const config = {
   // criteria) — guards cost, not a rate limiter (Nominatim's 1 req/s pacing is
   // separate, enforced inside placeResolver.js).
   discoveryResolverDailyBudget: parseInt(process.env.DISCOVERY_RESOLVER_DAILY_BUDGET || '500', 10),
+  // Plan 26 W2.3 (D-26-4): a cap on GOOGLE PLACES REQUESTS spent escalating past a
+  // weak Nominatim hit during discovery verification. Deliberately a separate
+  // sub-budget from discoveryResolverDailyBudget above — that one counts resolver
+  // lookups, not provider requests (F-26-6), so it cannot bound Google spend by
+  // itself. Keeping the escalation ceiling on its own counter makes it structural
+  // rather than assumed.
+  discoveryEscalationDailyBudget: parseInt(process.env.DISCOVERY_ESCALATION_DAILY_BUDGET || '50', 10),
   isProd: process.env.NODE_ENV === 'production',
 };

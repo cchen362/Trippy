@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { initDb, getDb } from '../src/db/database.js';
@@ -345,7 +345,11 @@ describe('resolvePlace', () => {
       lng: 101.6953,
       coordinateSystem: 'wgs84',
       coordinateSource: 'places',
+      // This is also the Google name-similarity ACCEPTANCE case (F-26-8): the
+      // returned displayName exactly matches queryText, so the strong-match path
+      // keeps today's resolved/0.9 values unchanged.
       locationStatus: 'resolved',
+      confidence: 0.9,
       provider: 'google_places',
       providerId: 'google:ChIJ_test_place',
       countryCode: 'MY',
@@ -609,5 +613,216 @@ describe('resolvePlace — priority-aware Nominatim gate', () => {
     for (let i = 1; i < grantTimes.length; i += 1) {
       expect(grantTimes[i] - grantTimes[i - 1]).toBeGreaterThanOrEqual(1000);
     }
+  });
+});
+
+// Plan 26 W2.1 (F-26-8): Google Text Search's first result was previously trusted
+// unconditionally (hardcoded resolved/0.9) with no name-similarity check, unlike the
+// Nominatim path (classifyNominatimResult). These prove the shared check now applies
+// on both paths.
+describe('resolvePlace — Google Places name-similarity check', () => {
+  it('does not label an unrelated Google result "resolved" when Nominatim misses entirely', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const db = getDb();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return { ok: true, json: async () => [] };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_unrelated_place',
+            displayName: { text: 'Totally Different Place' },
+            formattedAddress: 'Somewhere Not Kuala Lumpur',
+            location: { latitude: 3.111, longitude: 101.222 },
+            addressComponents: [
+              { longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] },
+            ],
+          }],
+        }),
+      };
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Test Coffee Roasters',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+    });
+
+    expect(result).toMatchObject({
+      locationStatus: 'estimated',
+      confidence: 0.55,
+      provider: 'google_places',
+    });
+    expect(result.locationStatus).not.toBe('resolved');
+
+    // A cache read must reproduce 'estimated' too (readCache's `< 0.7 -> estimated` rule).
+    const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Test Coffee Roasters');
+    expect(cached.confidence).toBe(0.55);
+  });
+});
+
+// Plan 26 W2.3 (F-26-7): resolvePlace previously returned any Nominatim result
+// immediately, even a weak 'estimated' one, suppressing a stronger Google attempt.
+// escalateWeakHit is an opt-in that lets a caller (discovery verification) authorise
+// exactly one Google escalation on a weak Nominatim hit.
+describe('resolvePlace — Google escalation past a weak Nominatim hit (opt-in)', () => {
+  function mockWeakNominatimThenGoogle(googlePlace) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return {
+          ok: true,
+          json: async () => [{
+            lat: '3.1000',
+            lon: '101.2000',
+            // Name/address unrelated to the query and city -> weak match (estimated).
+            display_name: 'Random Diner, Somewhere Else, Malaysia',
+            name: 'Random Diner',
+            osm_type: 'node',
+            osm_id: '999',
+          }],
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ places: googlePlace ? [googlePlace] : [] }),
+      };
+    });
+  }
+
+  it('escalates a weak Nominatim hit to Google and returns the strong Google result, but caches the Nominatim row', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const db = getDb();
+    const fetchMock = mockWeakNominatimThenGoogle({
+      id: 'ChIJ_escalated_place',
+      displayName: { text: 'Escalation Target' },
+      formattedAddress: '1 Escalation Target, Kuala Lumpur, Malaysia',
+      location: { latitude: 3.15, longitude: 101.7 },
+      addressComponents: [
+        { longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] },
+      ],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Escalation Target',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      escalateWeakHit: () => true,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'google_places',
+      locationStatus: 'resolved',
+      providerId: 'google:ChIJ_escalated_place',
+    });
+
+    const googleCall = fetchMock.mock.calls.find(([url]) => String(url).includes('places.googleapis.com'));
+    expect(googleCall).toBeTruthy();
+
+    // CACHE RULE: the escalated Google result must never overwrite the Nominatim
+    // cache row — place_resolution_cache is shared with interactive stop/booking
+    // resolution and must not be silently re-routed onto a Google-named row.
+    const cached = db.prepare('SELECT * FROM place_resolution_cache WHERE query_text = ?').get('Escalation Target');
+    expect(cached.provider).toBe('nominatim');
+    expect(cached.name).toBe('Random Diner');
+  });
+
+  it('does not call Google when escalateWeakHit declines', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const fetchMock = mockWeakNominatimThenGoogle(null);
+
+    const result = await resolvePlace({
+      queryText: 'Escalation Target',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      escalateWeakHit: () => false,
+    });
+
+    expect(result).toMatchObject({ provider: 'nominatim', locationStatus: 'estimated' });
+    const googleCall = fetchMock.mock.calls.find(([url]) => String(url).includes('places.googleapis.com'));
+    expect(googleCall).toBeFalsy();
+  });
+
+  it('keeps the Nominatim result when the escalated Google result is also weak', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const fetchMock = mockWeakNominatimThenGoogle({
+      id: 'ChIJ_still_unrelated',
+      displayName: { text: 'Also Unrelated' },
+      formattedAddress: 'Nowhere Near Kuala Lumpur',
+      location: { latitude: 3.16, longitude: 101.71 },
+      addressComponents: [
+        { longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] },
+      ],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Escalation Target',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      escalateWeakHit: () => true,
+    });
+
+    // Google was consulted (opted in and authorised)...
+    const googleCall = fetchMock.mock.calls.find(([url]) => String(url).includes('places.googleapis.com'));
+    expect(googleCall).toBeTruthy();
+    // ...but it did not win just by existing: the weak Google result loses to the
+    // (also weak) Nominatim result, which is what's returned.
+    expect(result).toMatchObject({ provider: 'nominatim', locationStatus: 'estimated' });
+  });
+});
+
+// Plan 26 W2.3 acceptance gate: PROVING (not just testing) that stops.js/bookings.js
+// behaviour is byte-identical before and after this wave. A green suite alone is
+// explicitly insufficient per the plan — these assert directly on the fetch mock and
+// on the source files themselves.
+describe('resolvePlace — Plan 24 compatibility proof (stops.js / bookings.js untouched)', () => {
+  it('never calls Google when invoked with the exact argument shape stops.js:189/:831 use (no escalateWeakHit), even on a weak Nominatim hit with a Google key configured', async () => {
+    config.googlePlacesKey = 'test-google-key';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return {
+          ok: true,
+          json: async () => [{
+            lat: '3.1000',
+            lon: '101.2000',
+            display_name: 'Random Diner, Somewhere Else, Malaysia',
+            name: 'Random Diner',
+            osm_type: 'node',
+            osm_id: '999',
+          }],
+        };
+      }
+      throw new Error('Google Places must not be called for a caller that did not opt into escalateWeakHit');
+    });
+
+    // Exact shape of the stops.js:189 call (queryText/city/country/aliases/allowNetwork/
+    // preferNominatim) — deliberately no escalateWeakHit key at all.
+    const result = await resolvePlace({
+      queryText: 'Escalation Target',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      aliases: [],
+      allowNetwork: true,
+      preferNominatim: false,
+    });
+
+    const googleCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com'));
+    expect(googleCalls).toHaveLength(0);
+    expect(result).toMatchObject({ provider: 'nominatim', locationStatus: 'estimated' });
+  });
+
+  it('does not reference escalateWeakHit anywhere in stops.js or bookings.js (structural pin — expected to fail loudly if a future edit opts either file into escalation)', () => {
+    const stopsSource = readFileSync(
+      new URL('../src/services/stops.js', import.meta.url),
+      'utf8',
+    );
+    const bookingsSource = readFileSync(
+      new URL('../src/services/bookings.js', import.meta.url),
+      'utf8',
+    );
+
+    expect(stopsSource).not.toMatch(/escalateWeakHit/);
+    expect(bookingsSource).not.toMatch(/escalateWeakHit/);
   });
 });
