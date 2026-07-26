@@ -1,20 +1,18 @@
 import { useCallback, useReducer, useRef } from 'react';
 import { discoveryApi } from '../services/discoveryApi.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
+import { normalizeName } from '../utils/placeNames.js';
 
-const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loading: false, error: null, cached: false };
+// W1.5: `notice` carries a decline the server chose to surface honestly
+// (e.g. 'catalogue_full', 'generation_limit') rather than a genuine failure —
+// see the `type: 'error'` handling below for how the two are told apart.
+const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loading: false, error: null, notice: null, cached: false };
 
-// Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
-// and "Dujiangyan Scenic Area" collapse to the same canonical key. Mirrors the
-// server-side normalizeName in backend/src/services/claude.js.
-function normalizeName(str) {
-  return (str ?? '')
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// Decline codes the server sends as `type: 'error', code: ..., message: ...`
+// that are an honest "not doing this right now" rather than a failure — the
+// UI must keep showing results and explain calmly, not show the generic red
+// retry line (DiscoveryPanel.jsx's `error` rendering).
+const DECLINE_CODES = new Set(['catalogue_full', 'generation_limit']);
 
 export function useDiscovery(tripId) {
   // cacheRef is the source of truth: { [normalizedDestination]: DiscoveryEntry }
@@ -61,7 +59,13 @@ export function useDiscovery(tripId) {
         } else if (chunk.type === 'done') {
           cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false };
         } else if (chunk.type === 'error') {
-          cacheRef.current[key] = { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
+          // W1.5: a decline (e.g. 'catalogue_full') is the server honestly
+          // saying "not doing this right now" — it must not read as a
+          // failure. Route it to `notice`, leaving `error` for the case with
+          // no known code, which is a genuine failure.
+          cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
+            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message } }
+            : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }
       }, controller.signal);
@@ -91,7 +95,7 @@ export function useDiscovery(tripId) {
     const controller = new AbortController();
     abortRefs.current[key] = controller;
 
-    cacheRef.current[key] = { ...(current ?? EMPTY_ENTRY), loading: true, error: null };
+    cacheRef.current[key] = { ...(current ?? EMPTY_ENTRY), loading: true, error: null, notice: null };
     forceRender();
 
     try {
@@ -117,7 +121,13 @@ export function useDiscovery(tripId) {
         } else if (chunk.type === 'done') {
           cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false };
         } else if (chunk.type === 'error') {
-          cacheRef.current[key] = { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
+          // See discover()'s identical handling above — a decline must not
+          // clear the grid or read as a failure; this is what keeps the
+          // "Show more" button from getting stuck mid-loading on a decline
+          // (loading:false is set here either way).
+          cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
+            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message } }
+            : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }
       }, controller.signal, true);

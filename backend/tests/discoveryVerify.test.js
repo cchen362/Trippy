@@ -293,3 +293,41 @@ describe('discoveryVerify — resolver-call daily budget', () => {
     expect(afterSecondDrain.filter((r) => r.provenance === 'verified')).toHaveLength(2);
   });
 });
+
+describe('discoveryVerify — in-flight dedup across concurrent enqueue calls (Plan 26 W1.2 follow-on)', () => {
+  it('does not re-resolve a row that is already in-flight when enqueueForVerification is called again mid-drain', async () => {
+    const dest = makeDestination({ cityKey: 'verifytest9' });
+    const place = insertOne(dest.id, { name: 'Slow Place' });
+
+    let releaseFirst;
+    const firstCallGate = new Promise((resolve) => { releaseFirst = resolve; });
+    mockResolvePlace.mockImplementation(async () => {
+      await firstCallGate;
+      return resolvedHit();
+    });
+
+    // Kick off the drain — insertPlaces already stamped the row 'pending', and
+    // it is now shifted off queue.items and awaiting resolvePlace (still
+    // provenance='pending' in the DB, since verifyOne only flips it once the
+    // resolver call settles).
+    const drainPromise = enqueueForVerification(getDb(), dest.id, [place.id]);
+
+    // Simulate the W1.4 change (enqueueForVerification firing once per
+    // completed category instead of once per generation): a second call
+    // arrives for the same destination with no new ids, while the first row
+    // is still mid-flight. Without the in-flight exclusion this would
+    // re-collect the pending row and add a duplicate resolvePlace call.
+    // Not awaited — real callers (the route) never await this either, and
+    // its returned promise is the same in-flight drain, which won't settle
+    // until releaseFirst() below runs.
+    enqueueForVerification(getDb(), dest.id, []);
+
+    releaseFirst();
+    await drainPromise;
+    await waitForVerificationDrain(dest.id);
+
+    expect(mockResolvePlace).toHaveBeenCalledTimes(1);
+    const updated = getDb().prepare('SELECT * FROM discovery_places WHERE id = ?').get(place.id);
+    expect(updated.provenance).toBe('verified');
+  });
+});

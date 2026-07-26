@@ -102,12 +102,24 @@ export function insertPlaces(db, destinationId, items, batch) {
   const findExisting = db.prepare(
     'SELECT id FROM discovery_places WHERE destination_id = ? AND normalized_name = ?',
   );
+  // Freshly inserted rows are stamped 'pending', not 'unverified' (Plan 26 W1.2 /
+  // F-26-1, F-26-3). Before this change both "never checked yet" and "checked and
+  // failed" (discoveryVerify.js's terminal outcome for a non-confident hit) wrote
+  // the same 'unverified' value, so enforceCategoryCap could not tell them apart
+  // and could archive a row before the verification worker ever reached it — the
+  // 78 production rows that are archived AND unverified are exactly that
+  // collision, and verifyOne's early-return on non-active rows means they could
+  // never recover (F-26-3). 'pending' already means "awaiting a check" elsewhere
+  // in this codebase (discoveryVerify.js's markPending and enqueueForVerification
+  // both key off it), so this also means a row orphaned by a restart mid-drain
+  // self-heals the next time enqueueForVerification runs for its destination,
+  // instead of being stranded at a terminal value forever.
   const insert = db.prepare(`
     INSERT INTO discovery_places (
       destination_id, category, name, normalized_name, local_name, aliases_json,
       description, why_go, estimated_duration, opening_hours, lat, lng,
       provenance, status, batch, generated_at, photo_query, scene_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unverified', 'active', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'active', ?, ?, ?, ?)
   `);
   const selectById = db.prepare('SELECT * FROM discovery_places WHERE id = ?');
 
@@ -189,16 +201,58 @@ function rankAscendingByScore(rows) {
     .map((entry) => entry.row);
 }
 
-// Bounds enforcement (Plan 7 Wave 2, decision 4): keeps each category's active
-// row count at or under `cap` (default 45) by archiving surplus. Victims are
-// chosen worst-first using the Wave 3 rankPlaces scorer (score()) with neutral
-// prefs, applied within two tiers to preserve the invariant that a verified
-// row is never archived while an unverified row in the same category is still
-// active: the unverified/pending tier is ranked worst-first and consumed
-// completely before the verified tier is touched at all. Within each tier,
-// "worst" now reflects the real scoring formula (verified boost, batch
-// penalty, category/pace fit, quality), not the old neutral SQL ordering.
-export function enforceCategoryCap(db, destinationId, cap = 45) {
+// The daily-generation category cap (Plan 7 Wave 2, decision 4; Plan 26 W1.2
+// exports the number so callers/routes/tests reference one constant instead
+// of a repeated literal). Q-26-1 (whether 45 stays the right number) is left
+// open until W1's fairness fix has been observed in production — do not
+// change this value here.
+export const CATEGORY_ACTIVE_CAP = 45;
+
+// Read-only counterpart used by route/UI work that needs to know how full
+// each category is (e.g. Plan 26 W1.5's "show more declines honestly at a
+// full category"). Counts ALL provenances of ACTIVE rows for the destination,
+// including 'pending' — a pending row still occupies a display slot even
+// though enforceCategoryCap below will never archive it.
+export function countActivePlacesByCategory(db, destinationId) {
+  return db.prepare(
+    `SELECT category, COUNT(*) AS count FROM discovery_places
+     WHERE destination_id = ? AND status = 'active'
+     GROUP BY category`,
+  ).all(destinationId);
+}
+
+// Bounds enforcement (Plan 7 Wave 2, decision 4; revised Plan 26 W1.2 for
+// F-26-1/F-26-2/F-26-3). Keeps each category's active row count at or under
+// `cap` by archiving surplus, chosen worst-first using the Wave 3 rankPlaces
+// scorer (score()) with neutral prefs, across three tiers:
+//
+//   1. checked-unverified (provenance === 'unverified') — a row that WAS
+//      looked up and failed the confidence check. Archived worst-first,
+//      consumed completely before tier 2 is touched at all.
+//   2. verified — only archived once tier 1 is exhausted.
+//   3. pending (provenance === 'pending', i.e. never yet checked) — NEVER
+//      archived by this function, at any surplus.
+//
+// Invariants (pin these in tests):
+//   PRESERVED (Plan 7 decision 4) — a verified row is never archived while a
+//   checked-unverified row in the same category is still active.
+//   ADDED — a freshly checked row may displace a weaker verified incumbent:
+//   the entire checked-unverified tier is consumed before verified is
+//   touched, so a newly VERIFIED row survives a cap sweep same as any other
+//   verified row.
+//   ADDED — a row that has never completed a check attempt is never
+//   archived, so "archived and permanently unverifiable" (F-26-3) becomes
+//   structurally impossible: verifyOne only ever runs against active rows,
+//   and a pending row that's still active will get its turn.
+//
+// The cap still runs on every generation and still archives surplus among
+// checked (non-pending) rows — this does not weaken the cap or change its
+// value. If exempting pending rows leaves too few archivable victims to
+// clear the surplus, archive what can legitimately be archived and leave the
+// category temporarily above cap; log it so the condition is observable
+// rather than silent. A pending row becomes archivable as soon as its check
+// completes (Plan 26 W1.2).
+export function enforceCategoryCap(db, destinationId, cap = CATEGORY_ACTIVE_CAP) {
   const categories = db.prepare(
     `SELECT DISTINCT category FROM discovery_places WHERE destination_id = ? AND status = 'active'`,
   ).all(destinationId).map((row) => row.category);
@@ -219,8 +273,10 @@ export function enforceCategoryCap(db, destinationId, cap = 45) {
     if (surplus <= 0) continue;
 
     const rows = rowsStmt.all(destinationId, category);
-    const unverifiedTier = rows.filter((row) => row.provenance !== 'verified');
+    const unverifiedTier = rows.filter((row) => row.provenance === 'unverified');
     const verifiedTier = rows.filter((row) => row.provenance === 'verified');
+    // provenance === 'pending' rows are excluded from both tiers entirely —
+    // they are never archivable victims (see comment above).
 
     const rankedUnverified = rankAscendingByScore(unverifiedTier);
     const victims = rankedUnverified.slice(0, surplus);
@@ -236,6 +292,19 @@ export function enforceCategoryCap(db, destinationId, cap = 45) {
       console.error(
         '[discoveryCatalogue] archived place=%s name=%s category=%s reason=category_cap provenance=%s',
         victim.id, victim.name, category, victim.provenance,
+      );
+    }
+
+    const stillSurplus = surplus - victims.length;
+    if (stillSurplus > 0) {
+      // Exempting never-checked (pending) rows means there weren't enough
+      // legitimately archivable victims to clear the surplus this pass — the
+      // category stays temporarily above cap until more rows finish a check.
+      // Deliberate trade-off (Plan 26 W1.2): logged so it's observable, never
+      // silent.
+      console.error(
+        '[discoveryCatalogue] category=%s destination=%s still %d over cap=%d after archiving checked rows — %d pending rows exempted',
+        category, destinationId, stillSurplus, cap, rows.length - unverifiedTier.length - verifiedTier.length,
       );
     }
   }

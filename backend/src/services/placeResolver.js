@@ -14,6 +14,74 @@ const NEGATIVE_CACHE_TTL_MS = 60 * 60 * 1000;
 
 let nextNominatimRequestAt = 0;
 
+// Priority-aware grant scheduler for the shared 1 req/s Nominatim gate (F-26-5).
+// The gate is shared by background discovery verification (discoveryVerify.js)
+// and interactive callers the user is waiting on (add-stop, booking-linked
+// resolution, day-override country inference). A plain FIFO queue lets an
+// interactive request queue behind a draining verification batch (~12 minutes,
+// F-26-6), so grants are decided by priority instead: an interactive waiter
+// is granted ahead of any background waiter, EXCEPT that background work must
+// never be starved outright — it may be delayed, never cancelled.
+//
+// Background may be delayed at most this long before it is granted ahead of
+// interactive waiters regardless. One interactive stop-add can issue several
+// sequential variant lookups (resolverQueryTexts) before it's done, so this
+// bound must be comfortably longer than one interactive burst while still
+// hard-capping how long background work can be deferred.
+const MAX_BACKGROUND_DEFERRAL_MS = 10000;
+
+// { background: boolean, enqueuedAt: number, resolve: () => void }
+let nominatimWaiters = [];
+let nominatimPumpTimer = null;
+
+// Schedules (if not already scheduled) a single timer for the next available
+// slot instant. The waiter to grant is decided INSIDE the timer callback, at
+// grant time rather than enqueue time — that is what lets an interactive
+// caller that arrives after a background waiter was already queued still
+// overtake it, without needing to cancel and reschedule any timer.
+function grantNominatimSlot() {
+  nominatimPumpTimer = null;
+  if (nominatimWaiters.length === 0) return;
+
+  const grantTime = Date.now();
+  const starvedIndex = nominatimWaiters.findIndex(
+    (waiter) => waiter.background && (grantTime - waiter.enqueuedAt) >= MAX_BACKGROUND_DEFERRAL_MS,
+  );
+  let winnerIndex = starvedIndex;
+  if (winnerIndex === -1) {
+    const interactiveIndex = nominatimWaiters.findIndex((waiter) => !waiter.background);
+    winnerIndex = interactiveIndex !== -1 ? interactiveIndex : 0;
+  }
+
+  const [winner] = nominatimWaiters.splice(winnerIndex, 1);
+  nextNominatimRequestAt = Math.max(grantTime, nextNominatimRequestAt) + NOMINATIM_INTERVAL_MS;
+  winner.resolve();
+
+  pumpNominatimQueue();
+}
+
+function pumpNominatimQueue() {
+  if (nominatimPumpTimer || nominatimWaiters.length === 0) return;
+
+  const now = Date.now();
+  const delay = Math.max(0, nextNominatimRequestAt - now);
+
+  // When the gate is already open (delay 0 — nothing to wait for, matching
+  // the pre-W1.1 behaviour's skip-the-timer-entirely fast path) grant
+  // immediately instead of round-tripping through a macrotask: a real
+  // setTimeout(fn, 0) still needs an actual timer tick, which would make an
+  // interactive caller wait a full event-loop turn for no pacing reason, and
+  // would hang tests that don't explicitly advance fake timers before their
+  // very first lookup.
+  if (delay <= 0) {
+    grantNominatimSlot();
+    return;
+  }
+
+  nominatimPumpTimer = setTimeout(grantNominatimSlot, delay);
+  if (typeof nominatimPumpTimer.unref === 'function') nominatimPumpTimer.unref();
+}
+
 // Curated place coordinates are OSM/WGS-84 reference values used as starting points only.
 // They are labeled 'estimated' so repair runs can overwrite them with accurate Nominatim data.
 const CURATED_PLACES = [
@@ -331,13 +399,11 @@ function writeCache({ queryKey, queryText, city, country, provider, result, rawJ
   );
 }
 
-async function waitForNominatimSlot() {
-  const now = Date.now();
-  const waitMs = Math.max(0, nextNominatimRequestAt - now);
-  nextNominatimRequestAt = Math.max(now, nextNominatimRequestAt) + NOMINATIM_INTERVAL_MS;
-  if (waitMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-  }
+function waitForNominatimSlot({ priority = 'interactive' } = {}) {
+  return new Promise((resolve) => {
+    nominatimWaiters.push({ background: priority === 'background', enqueuedAt: Date.now(), resolve });
+    pumpNominatimQueue();
+  });
 }
 
 function classifyNominatimResult(place, { queryText, city }) {
@@ -395,8 +461,8 @@ function resolverQueryTexts(queryText, aliases = []) {
   ]);
 }
 
-async function fetchNominatimPayload({ queryText, city, country }) {
-  await waitForNominatimSlot();
+async function fetchNominatimPayload({ queryText, city, country, priority = 'interactive' }) {
+  await waitForNominatimSlot({ priority });
   const q = [queryText, city].filter(Boolean).join(', ');
   const params = new URLSearchParams({
     q,
@@ -423,11 +489,11 @@ async function fetchNominatimPayload({ queryText, city, country }) {
   return response.json();
 }
 
-async function searchNominatim({ queryText, city, country, aliases = [] }) {
+async function searchNominatim({ queryText, city, country, aliases = [], priority = 'interactive' }) {
   const attempts = [];
 
   for (const candidate of resolverQueryTexts(queryText, aliases)) {
-    const payload = await fetchNominatimPayload({ queryText: candidate, city, country });
+    const payload = await fetchNominatimPayload({ queryText: candidate, city, country, priority });
     attempts.push({ queryText: candidate, payload });
 
     const place = Array.isArray(payload) ? payload[0] : null;
@@ -569,7 +635,11 @@ function unresolved() {
   });
 }
 
-export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false } = {}) {
+// priority is an explicit per-call opt-in, scoped exactly like includeRatingFields
+// above: the default is 'interactive' so every existing caller (stops.js, trips.js,
+// bookings) keeps byte-identical behaviour with no edit to those files. Only
+// discoveryVerify.js opts into 'background' (F-26-5) — see waitForNominatimSlot.
+export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false, priority = 'interactive' } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
@@ -613,7 +683,7 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
 
   let nominatimRaw = null;
   try {
-    const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases });
+    const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases, priority });
     nominatimRaw = rawJson;
     if (result) {
       writeCache({ queryKey, queryText: query, city, country, provider: 'nominatim', result, rawJson });
@@ -651,4 +721,12 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
 
 export function __resetPlaceResolverForTests() {
   nextNominatimRequestAt = 0;
+  // Clear any waiters left over from a previous test and cancel the pending
+  // pump timer so it can't keep the node process (or the next test's fake
+  // timers) alive — a dangling timer here would leak across tests.
+  nominatimWaiters = [];
+  if (nominatimPumpTimer) {
+    clearTimeout(nominatimPumpTimer);
+    nominatimPumpTimer = null;
+  }
 }

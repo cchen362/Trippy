@@ -177,10 +177,26 @@ export async function extractBookings({ files, contextText, tripContext }) {
 
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
 // and "Dujiangyan Scenic Area" collapse to the same canonical key.
+//
+// Mirrored verbatim in THREE places that must stay in sync (Plan 26 W1.3 /
+// F-26-9): this function, and — on the frontend — the copies being
+// consolidated into the single shared module frontend/src/utils/placeNames.js.
+// Any change here must be ported there too.
+//
+// [^\w\s] with no /u flag made \w ASCII-only, so any pure-CJK name (e.g.
+// 北京烤鸭, 故宫博物院) folded to "" — the first such item in a destination
+// claimed normalized_name = '' and every subsequent one was silently skipped
+// as a duplicate by insertPlaces (discoveryCatalogue.js). \p{L}\p{N} with /u
+// keeps any Unicode letter or number instead of only ASCII word characters —
+// canonicalGeoKey (utils/geoIdentity.js) is the fix template. This is
+// forward-only: existing normalized_name values are NOT backfilled (W3 will
+// have evidence about what a rewrite would merge before that's attempted).
+// Deliberately no NFD/diacritic folding here — that would change dedupe for
+// accented Latin names beyond this wave's scope.
 export function normalizeName(str) {
   return str
     .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();

@@ -42,11 +42,11 @@ const DAYS = [
 // state, regardless of which destination/country it's called with — this
 // lets each test drive DiscoveryPanel's rendering directly without needing
 // to fake the SSE stream underneath useDiscovery.
-function makeDiscovery({ partialResults = {}, completedCategories = new Set(), loading = false, error = null } = {}) {
+function makeDiscovery({ partialResults = {}, completedCategories = new Set(), loading = false, error = null, notice = null } = {}) {
   return {
     discover: vi.fn(),
     showMore: vi.fn(),
-    getDestination: vi.fn(() => ({ partialResults, completedCategories, loading, error, cached: false })),
+    getDestination: vi.fn(() => ({ partialResults, completedCategories, loading, error, notice, cached: false })),
     isAnyLoading: false,
   };
 }
@@ -188,6 +188,55 @@ describe('DiscoveryPanel — show more affordance (Wave 4 §4.3)', () => {
 
     expect(screen.queryByText(/finding more places/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^show more$/i })).toBeInTheDocument();
+  });
+});
+
+describe('DiscoveryPanel — show more decline notice (W1.5)', () => {
+  it('shows the decline message near Show more without hiding results, and not as the red error line', () => {
+    const partialResults = { essentials: [{ id: 1, name: 'Essential A' }] };
+    const completedCategories = new Set(['essentials']);
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({
+          partialResults,
+          completedCategories,
+          notice: { code: 'catalogue_full', message: "Every category here is already full." },
+        })}
+      />,
+    );
+
+    // Results stay on screen — a decline is not a failure.
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(screen.getByText('Every category here is already full.')).toBeInTheDocument();
+    // Never the generic red retry line.
+    expect(screen.queryByText('Couldn’t load places right now. Please try again.')).not.toBeInTheDocument();
+    // The Show more button itself is unaffected — the user can still see and use it.
+    expect(screen.getByRole('button', { name: /^show more$/i })).toBeInTheDocument();
+  });
+
+  it('does not render a notice when there is none', () => {
+    const partialResults = { essentials: [{ id: 1, name: 'Essential A' }] };
+    const completedCategories = new Set(['essentials']);
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={makeDiscovery({ partialResults, completedCategories })}
+      />,
+    );
+
+    expect(screen.getByText('Essential A')).toBeInTheDocument();
+    expect(screen.queryByText(/already full/i)).not.toBeInTheDocument();
   });
 });
 

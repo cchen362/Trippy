@@ -28,10 +28,15 @@ function coerceSceneType(value) {
   return SCENE_TYPES.includes(value) ? value : null;
 }
 
+// DISCOVERY_CATEGORIES mirrors the real list in src/services/claude.js — W1.5's
+// catalogue_full headroom check (routes/discovery.js) iterates it directly.
+const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
+
 vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
   normalizeName,
   coerceSceneType,
+  DISCOVERY_CATEGORIES,
 }));
 
 // --- Mock config to avoid env var validation ---
@@ -408,10 +413,14 @@ describe('POST /trips/:tripId/discover — merge-on-refresh', () => {
     expect(exclusionList).toEqual(expect.arrayContaining(['Kinkakuji', 'Ramen Alley']));
 
     // Stream contract for a stale refresh: stored breadth is streamed up front
-    // (instant grid), the mid-generation delta is suppressed, and the full merged
-    // set is streamed at the end. The client's non-append protocol replaces each
-    // category with the last version received, so the final visible state must be
-    // the MERGED set — never the bare delta. No event carries the append flag
+    // (instant grid), then each category is re-streamed as its MERGED
+    // (stored + new) set as soon as that category's generation completes
+    // (W1.4/Q-26-2 — previously the delta was suppressed entirely and the
+    // full merged set streamed only once, after the whole generation
+    // finished). Either way the client's non-append protocol replaces each
+    // category with the LAST version received, so this assertion — the final
+    // visible state must be the MERGED set, never the bare delta — holds
+    // under both the old and new mechanism. No event carries the append flag
     // (this is a full page load, not a "show more" continuation).
     const categoryEvents = events.filter((e) => e.type === 'category');
     expect(categoryEvents.every((e) => e.append === undefined)).toBe(true);
@@ -573,6 +582,69 @@ describe('POST /trips/:tripId/discover — more:true (append mode)', () => {
       `SELECT name FROM discovery_places WHERE destination_id = ? AND status = 'active' ORDER BY id`,
     ).all(dest.id).map((r) => r.name);
     expect(activeNames).toEqual(['Kinkakuji']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Show more against a full catalogue (W1.5, F-26-2, F-26-16) — every category
+// already at CATEGORY_ACTIVE_CAP means a generation would only buy rows
+// enforceCategoryCap immediately archives (new rows are always the cap's
+// first victim under neutral prefs). Decline honestly instead of spending a
+// Claude call and a daily generation slot on something the user will never see.
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/discover — show more against a full catalogue (W1.5)', () => {
+  it('declines with catalogue_full, without calling Claude, inserting rows, or consuming the daily generation counter, when every category is at cap', async () => {
+    const { CATEGORY_ACTIVE_CAP } = await import('../src/db/discoveryCatalogue.js');
+    const dest = seedDestination({ cityKey: 'fullcity', displayName: 'Fullcity', lastGeneratedAt: nowSql() });
+    for (const category of DISCOVERY_CATEGORIES) {
+      for (let i = 0; i < CATEGORY_ACTIVE_CAP; i += 1) {
+        seedPlace(dest.id, { category, name: `${category} spot ${i}` });
+      }
+    }
+
+    const { events, error } = await callDiscover({ destination: 'Fullcity', more: true });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent?.code).toBe('catalogue_full');
+    expect(errorEvent?.message).toBeTruthy();
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent).toBeUndefined();
+
+    // Nothing was inserted and the daily generation counter never moved.
+    const totalPlaces = getDb().prepare(
+      'SELECT COUNT(*) AS c FROM discovery_places WHERE destination_id = ?',
+    ).get(dest.id).c;
+    expect(totalPlaces).toBe(DISCOVERY_CATEGORIES.length * CATEGORY_ACTIVE_CAP);
+    const dailyRow = getDb().prepare(
+      `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+    ).get(dest.id);
+    expect(dailyRow).toBeUndefined();
+  });
+
+  it('still generates when at least one category has headroom, even though most are at cap', async () => {
+    const { CATEGORY_ACTIVE_CAP } = await import('../src/db/discoveryCatalogue.js');
+    const dest = seedDestination({ cityKey: 'almostfullcity', displayName: 'Almostfullcity', lastGeneratedAt: nowSql() });
+    for (const category of DISCOVERY_CATEGORIES) {
+      const count = category === 'wellness' ? CATEGORY_ACTIVE_CAP - 1 : CATEGORY_ACTIVE_CAP;
+      for (let i = 0; i < count; i += 1) {
+        seedPlace(dest.id, { category, name: `${category} spot ${i}` });
+      }
+    }
+
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      const cats = [{ category: 'wellness', items: [{ name: 'Quiet Onsen', description: 'A small neighbourhood bathhouse.' }] }];
+      cats.forEach((cat) => onCategory(cat));
+      return cats;
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Almostfullcity', more: true });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
   });
 });
 
@@ -782,9 +854,14 @@ describe('POST /trips/:tripId/discover — golden fixture parity', () => {
     expect(streamedItem.whyGo).toBe(goldenBlobCategories[0].items[0].whyItFits);
     // Never verified in this test (the mocked resolver always returns
     // 'unresolved' — see beforeEach), so provenance stays at insertPlaces's
-    // default and lat/lng confirm the "unverified stays null" rule even
-    // though the row's actual lat/lng columns are always null anyway.
-    expect(streamedItem.provenance).toBe('unverified');
+    // default. Pre-W1 that default was 'unverified'; W1.2 changes it to
+    // 'pending' ("never checked" — a distinct, non-terminal state from
+    // 'unverified', which now means "checked and failed", F-26-3). This row
+    // was inserted but its verification attempt never ran in this test, so
+    // it stays 'pending'. lat/lng confirm the "not verified stays null" rule
+    // either way, even though the row's actual lat/lng columns are always
+    // null anyway.
+    expect(streamedItem.provenance).toBe('pending');
     expect(typeof streamedItem.batch).toBe('number');
     // insertPlaces never sets provider_place_id — no resolver has run.
     expect(streamedItem.placeRef).toBeNull();

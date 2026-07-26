@@ -5,12 +5,15 @@ import { getDb } from '../db/database.js';
 import { countryNameFromCode } from '../utils/countries.js';
 import { assertTripAccess } from '../services/trips.js';
 import { runCatalogueGeneration } from '../services/discoveryGeneration.js';
+import { DISCOVERY_CATEGORIES } from '../services/claude.js';
 import {
   getOrCreateDestination,
   listActivePlaces,
   getDailyGenerationCount,
   listCountryCodedRows,
+  countActivePlacesByCategory,
   CACHE_TTL_MS,
+  CATEGORY_ACTIVE_CAP,
   cacheTimestampToEpochMs,
   MAX_GENERATIONS_PER_DESTINATION_PER_DAY,
 } from '../db/discoveryCatalogue.js';
@@ -217,13 +220,42 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const isStaleRefresh = !more && hasActivePlaces && !cacheIsFresh;
     const isMerge = isAppend || isStaleRefresh;
 
+    // W1.5 (F-26-2, F-26-16): "Show more" against a catalogue with no headroom
+    // in ANY category would spend a daily generation and a Claude call only to
+    // insert rows enforceCategoryCap immediately archives — new rows are always
+    // the cap's first victim (score() reduces to exactly -0.75*batch under
+    // neutral prefs), so nothing the user asked for would ever become visible.
+    // Decline honestly before calling Claude at all, and before touching the
+    // daily generation counter. Scoped to "no category anywhere has room"
+    // (not per-category) deliberately: a generation still adds real value to
+    // whichever categories aren't full, and a per-category decline would need
+    // the client to say which category it's viewing, which Q-26-1 defers.
+    if (isAppend) {
+      const activeCounts = countActivePlacesByCategory(db, destinationRow.id);
+      const countByCategory = new Map(activeCounts.map((row) => [row.category, row.count]));
+      const hasHeadroom = DISCOVERY_CATEGORIES.some(
+        (category) => (countByCategory.get(category) ?? 0) < CATEGORY_ACTIVE_CAP,
+      );
+      if (!hasHeadroom) {
+        console.error(
+          '[discover] catalogue_full destination=%s',
+          destinationRow.id,
+        );
+        write({
+          type: 'error',
+          code: 'catalogue_full',
+          message: "Every category here is already full. There's nothing new to surface right now — try again once some of these places have had time to prove themselves.",
+        });
+        return res.end();
+      }
+    }
+
     // A stale refresh regenerates only a delta (stored names are excluded), but
-    // the client's non-append protocol REPLACES each category it receives — so
-    // streaming the delta alone would shrink the visible grid to just-new items
-    // while the DB holds the merged breadth. Instead: stream the stored breadth
-    // up front (instant full grid), suppress the mid-generation delta chunks
-    // (they'd clobber the stored categories), and stream the full merged set
-    // (re-read from the DB) once generation completes.
+    // the client's non-append protocol REPLACES each category it receives.
+    // Streaming the stored breadth up front keeps the grid instant while
+    // generation runs — the alternative is a blank screen until the first
+    // category lands, which is a worse experience than briefly showing what's
+    // already known to be there.
     if (isStaleRefresh) {
       for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
         write({ type: 'category', category: cat.category, items: cat.items });
@@ -234,61 +266,64 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const ping = setInterval(() => write({ type: 'thinking' }), 8000);
 
     try {
-      const { insertedIds } = await runCatalogueGeneration(db, {
+      await runCatalogueGeneration(db, {
         destinationRow,
         claudeDestination,
         useExclusions: isMerge,
-        onCategory: (categoryObj) => {
-          // Both stale-refresh and append stream their post-insert, DB-derived
-          // result once generation completes (see below) rather than the raw
-          // mid-generation delta — a raw delta could contain items insertPlaces
-          // will end up skipping as duplicates, which would desync what the
-          // client displays from what's actually stored. Only a true cache-miss
-          // (neither merge path) streams live as categories complete.
-          //
-          // Wave 3 note: this callback intentionally is NOT run through
-          // rankPlaces/serializePlaceRow. These are raw Claude items that
-          // haven't been inserted into discovery_places yet — they have no
-          // DB-assigned id, provenance, or batch, so there is nothing for
-          // the scorer to rank on. They stream in Claude's own editorial
-          // order, which becomes the "generation order" ranking ties fall
-          // back to once these same items are re-read from the DB later.
-          if (isMerge) return;
+        // W1.4 (Q-26-2): runCatalogueGeneration now inserts/caps/enqueues per
+        // category BEFORE calling this back, so `inserted` here is already a
+        // set of real, persisted discovery_places rows (id/provenance/batch
+        // all real) — not raw Claude items (F-26-11). That's what makes it
+        // safe to stream live on every path, restoring progressive reveal on
+        // the merge paths Plan 7 §1.4 had traded away.
+        onCategory: ({ category, inserted }) => {
+          if (isStaleRefresh) {
+            // The client replaces the whole category on every chunk, so
+            // stream the MERGED set (stored + this generation's new rows for
+            // this category), re-read from the DB, rather than the delta
+            // alone — a delta-only chunk would shrink the visible grid to
+            // just what's new while the DB holds the full breadth.
+            const mergedRows = listActivePlaces(db, destinationRow.id)
+              .filter((row) => row.category === category);
+            const [merged] = groupPlaceRowsByCategory(mergedRows, prefs);
+            if (merged) write({ type: 'category', category: merged.category, items: merged.items });
+            return;
+          }
+
+          // True cache-miss and append both stream only the rows just
+          // inserted for this category — but enforceCategoryCap (already run
+          // for this category by the time this fires) may have archived one
+          // of them as category surplus, so recheck status rather than
+          // trusting insertPlaces's return snapshot.
+          // ORDER BY id is load-bearing, not decoration: rankPlaces is a stable
+          // sort, so score ties fall back to the input order and that order is
+          // meant to be generation order (services/discoveryRank.js) — leaving
+          // it to whatever order `IN (...)` happens to return would make tie
+          // ordering an implementation detail of SQLite.
+          const insertedIds = inserted.map((row) => row.id);
+          const stillActive = insertedIds.length
+            ? db.prepare(`
+                SELECT * FROM discovery_places
+                WHERE status = 'active' AND id IN (${insertedIds.map(() => '?').join(',')})
+                ORDER BY id
+              `).all(...insertedIds)
+            : [];
+          if (stillActive.length === 0) return;
+          const [ranked] = groupPlaceRowsByCategory(stillActive, prefs);
+          if (!ranked) return;
           write({
             type: 'category',
-            category: categoryObj.category,
-            items: (categoryObj.items || []).map((item) => ({ ...item, lat: null, lng: null })),
+            category: ranked.category,
+            items: ranked.items,
+            ...(isAppend ? { append: true } : {}),
           });
         },
       });
 
       clearInterval(ping);
-
-      if (isStaleRefresh) {
-        // Re-read the full (now-merged) active set and stream it so the
-        // client's replace-per-category protocol ends up showing the union.
-        const mergedRows = listActivePlaces(db, destinationRow.id);
-        for (const cat of groupPlaceRowsByCategory(mergedRows, prefs)) {
-          write({ type: 'category', category: cat.category, items: cat.items });
-        }
-      } else if (isAppend) {
-        // Stream only the newly inserted items still active — enforceCategoryCap
-        // above may have already archived one of them as category surplus, so
-        // re-check status rather than trusting insertPlaces's return snapshot.
-        const stillActiveInserted = insertedIds.length
-          ? db.prepare(`
-              SELECT * FROM discovery_places
-              WHERE destination_id = ? AND status = 'active' AND id IN (${insertedIds.map(() => '?').join(',')})
-              ORDER BY category, id
-            `).all(destinationRow.id, ...insertedIds)
-          : [];
-        for (const cat of groupPlaceRowsByCategory(stillActiveInserted, prefs)) {
-          write({ type: 'category', category: cat.category, items: cat.items, append: true });
-        }
-      }
-      // True cache-miss (no isMerge): mid-generation deltas were already
-      // streamed live from the onCategory callback above — nothing more to
-      // stream here.
+      // Every path already streamed its final per-category state live from
+      // the onCategory callback above (true miss, append) or up front plus
+      // live merges (stale refresh) — nothing left to re-read/re-stream here.
 
       write({ type: 'done', cached: false, ...(isAppend ? { append: true } : {}) });
     } catch (err) {
@@ -302,8 +337,16 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       if (fallbackRows.length > 0) {
         console.error('[discover] generation failed, serving existing catalogue:', err.message);
         if (!isStaleRefresh) {
-          // Stale-refresh already streamed the stored breadth up front; a
-          // true cache-miss/append path has not streamed anything yet.
+          // Stale-refresh already streamed the stored breadth up front. A
+          // true cache-miss/append path may already have streamed some
+          // categories live (W1.4 — onCategory now fires per completed
+          // category, so a mid-generation throw can leave some categories
+          // already sent). Re-streaming the full current active set here is
+          // harmless rather than wrong: the client replaces a category
+          // outright on a plain chunk, and merges/dedupes by name on an
+          // append chunk, so a category arriving twice with the same content
+          // is a no-op either way — this just guarantees every active
+          // category is shown even if generation died before reaching it.
           for (const cat of groupPlaceRowsByCategory(fallbackRows, prefs)) {
             write({ type: 'category', category: cat.category, items: cat.items });
           }

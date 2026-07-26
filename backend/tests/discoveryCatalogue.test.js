@@ -13,6 +13,8 @@ import {
   enforceCategoryCap,
   getDailyGenerationCount,
   incrementDailyGenerationCount,
+  CATEGORY_ACTIVE_CAP,
+  countActivePlacesByCategory,
 } from '../src/db/discoveryCatalogue.js';
 
 let tmpDir;
@@ -107,7 +109,13 @@ describe('insertPlaces', () => {
     const stored = listActivePlaces(db, dest.id);
     expect(stored).toHaveLength(1);
     expect(stored[0].status).toBe('active');
-    expect(stored[0].provenance).toBe('unverified');
+    // Plan 26 W1.2 (F-26-1/F-26-3): pre-W1 behaviour stamped 'unverified' here,
+    // which collided with the terminal value a FAILED check writes — so
+    // enforceCategoryCap could never distinguish "never checked" from "checked
+    // and failed", and a row archived before the verification worker reached
+    // it could never recover. Freshly inserted rows now stamp 'pending'
+    // ("awaiting a check") instead; this narrows the assertion deliberately.
+    expect(stored[0].provenance).toBe('pending');
   });
 
   it('never stores non-null lat/lng even when provided by the caller', () => {
@@ -132,6 +140,31 @@ describe('insertPlaces', () => {
     const stored = listActivePlaces(db, dest.id);
     expect(stored).toHaveLength(1);
     expect(stored[0].name).toBe('Dujiangyan Scenic Area');
+  });
+
+  // Plan 26 W1.3 (F-26-9): before the /u \p{L}\p{N} fix, normalizeName's
+  // ASCII-only \w folded EVERY pure-CJK name to the same empty-string key, so
+  // the first CJK-named item in a destination claimed normalized_name = ''
+  // and every subsequent one was silently skipped here as a "duplicate" of
+  // it — even though they're two entirely different real places. This is the
+  // actual user-visible bug the fix repairs: prove two differently-named CJK
+  // places now insert as two distinct rows.
+  it('stores two differently-named CJK places as two distinct rows, not a false duplicate', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'beijing', countryCode: 'CN', displayName: 'Beijing' });
+
+    const first = insertPlaces(db, dest.id, [makeItem({ name: '北京烤鸭' })], 0);
+    const second = insertPlaces(db, dest.id, [makeItem({ name: '故宫博物院' })], 1);
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(first[0].normalized_name).not.toBe('');
+    expect(second[0].normalized_name).not.toBe('');
+    expect(first[0].normalized_name).not.toBe(second[0].normalized_name);
+
+    const stored = listActivePlaces(db, dest.id);
+    expect(stored).toHaveLength(2);
+    expect(stored.map((r) => r.name).sort()).toEqual(['北京烤鸭', '故宫博物院'].sort());
   });
 
   it('does not dedupe the same place name across distinct destinations', () => {
@@ -563,6 +596,99 @@ describe('enforceCategoryCap', () => {
     // The 2 archived verified rows must be the two highest (most recent) batches.
     expect(archived.filter((r) => r.provenance === 'verified').map((r) => r.name).sort())
       .toEqual(['Verified 45', 'Verified 46']);
+  });
+
+  // Plan 26 W1.2 (F-26-1/F-26-3): a row that has never completed a check
+  // attempt (provenance='pending') must never be an archivable victim, even
+  // when it's the only surplus available — the whole point is to make
+  // "archived and permanently unverifiable" structurally impossible, since
+  // verifyOne refuses to check a non-active row.
+  it('never archives a pending (never-checked) row, even as the only surplus in the category', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity5', countryCode: 'JP', displayName: 'Capcity5' });
+    for (let i = 0; i < 50; i++) {
+      seedActivePlace(db, dest.id, { category: 'hidden_gems', name: `Pending ${i}`, provenance: 'pending', batch: i });
+    }
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    enforceCategoryCap(db, dest.id, 45);
+    errorSpy.mockRestore();
+
+    const active = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='hidden_gems' AND status='active'`).get(dest.id).c;
+    const archived = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='hidden_gems' AND status='archived'`).get(dest.id).c;
+
+    // The category stays over cap — this is the deliberate trade-off, not a bug.
+    expect(active).toBe(50);
+    expect(archived).toBe(0);
+  });
+
+  it('archives checked (unverified/verified) rows before touching pending rows, leaving the category over cap only by the pending exemption', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'capcity6', countryCode: 'JP', displayName: 'Capcity6' });
+    for (let i = 0; i < 40; i++) {
+      seedActivePlace(db, dest.id, { category: 'essentials', name: `Pending ${i}`, provenance: 'pending', batch: i });
+    }
+    for (let i = 0; i < 3; i++) {
+      seedActivePlace(db, dest.id, { category: 'essentials', name: `Unverified ${i}`, provenance: 'unverified', batch: i });
+    }
+    // total = 43, cap = 45 -> no surplus yet
+    enforceCategoryCap(db, dest.id, 45);
+    let active = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='essentials' AND status='active'`).get(dest.id).c;
+    expect(active).toBe(43);
+
+    // Add 5 more pending rows -> total 48, surplus 3, but only the 3
+    // unverified rows are archivable; the 45 pending rows are exempt.
+    for (let i = 40; i < 45; i++) {
+      seedActivePlace(db, dest.id, { category: 'essentials', name: `Pending ${i}`, provenance: 'pending', batch: i });
+    }
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    enforceCategoryCap(db, dest.id, 45);
+    errorSpy.mockRestore();
+
+    active = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='essentials' AND status='active'`).get(dest.id).c;
+    const archivedUnverified = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='essentials' AND status='archived' AND provenance='unverified'`).get(dest.id).c;
+    const archivedPending = db.prepare(`SELECT COUNT(*) c FROM discovery_places WHERE destination_id=? AND category='essentials' AND status='archived' AND provenance='pending'`).get(dest.id).c;
+
+    expect(archivedUnverified).toBe(3);
+    expect(archivedPending).toBe(0);
+    // 45 pending + 0 unverified left active = 45, one over the surplus math
+    // would predict (48 - 3 = 45) purely because pending absorbed no archival.
+    expect(active).toBe(45);
+  });
+});
+
+describe('CATEGORY_ACTIVE_CAP / countActivePlacesByCategory', () => {
+  it('exports the cap as a named constant equal to 45', () => {
+    expect(CATEGORY_ACTIVE_CAP).toBe(45);
+  });
+
+  it('counts active rows per category across all provenances, including pending', () => {
+    const db = getDb();
+    const dest = getOrCreateDestination(db, { cityKey: 'countcity1', countryCode: 'JP', displayName: 'Countcity1' });
+
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', ?, ?, 0, datetime('now'))
+    `).run(dest.id, 'food', 'A', 'a', 'pending', 'active');
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', ?, ?, 0, datetime('now'))
+    `).run(dest.id, 'food', 'B', 'b', 'verified', 'active');
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', ?, ?, 0, datetime('now'))
+    `).run(dest.id, 'food', 'C', 'c', 'unverified', 'archived');
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', ?, ?, 0, datetime('now'))
+    `).run(dest.id, 'culture', 'D', 'd', 'pending', 'active');
+
+    const counts = countActivePlacesByCategory(db, dest.id);
+    const byCategory = Object.fromEntries(counts.map((r) => [r.category, r.count]));
+
+    // 'food' counts A (pending) + B (verified) but not C (archived) = 2.
+    expect(byCategory.food).toBe(2);
+    expect(byCategory.culture).toBe(1);
   });
 });
 

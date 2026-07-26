@@ -6,6 +6,7 @@ import DayPicker from './DayPicker.jsx';
 import { bookingsApi } from '../../services/bookingsApi.js';
 import { discoveryApi } from '../../services/discoveryApi.js';
 import { canonicalGeoKey } from '../../utils/geoIdentity.js';
+import { normalizeName } from '../../utils/placeNames.js';
 
 const TAG_TO_CATEGORY = {
   'food & drink': 'food',
@@ -35,15 +36,6 @@ const CATEGORY_LABELS = {
 };
 
 const MORE_TAB_KEY = '_more';
-
-function normalizeName(str) {
-  return (str ?? '')
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 // Builds the reachable tab list plus, separately, the set of categories that
 // only surface under the terminal "More" tab (Wave 4 §4.2/Q3-04). Every
@@ -297,7 +289,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const pendingChangeFocusRef = useRef(false);
 
   const { discover, showMore, getDestination } = discovery;
-  const { partialResults: rawPartialResults, completedCategories, loading, error } = getDestination(committedDestination, committedCountry);
+  const { partialResults: rawPartialResults, completedCategories, loading, error, notice } = getDestination(committedDestination, committedCountry);
 
   // Reported places are filtered out at render time rather than mutated into
   // the shared useDiscovery cache — the cache is keyed per-destination and
@@ -590,6 +582,14 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         </>
       ) : 'Show more'}
     </button>
+  ) : null;
+
+  // W1.5: a decline (e.g. the catalogue has no headroom left, or today's
+  // generation limit is spent) is the server honestly saying "not doing this
+  // right now" — it reads calmly, next to the action it applies to, and never
+  // replaces the results already on screen the way the red `error` line does.
+  const showMoreNotice = notice && anyResults && !isSearching ? (
+    <p className="discovery-register-notice">{notice.message}</p>
   ) : null;
 
   return (
@@ -922,18 +922,21 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
         )}
 
         {!error && !isSearching && activeItems.length > 0 && activeCategory !== MORE_TAB_KEY && (
-          <SuggestionGrid
-            items={activeItems}
-            days={days}
-            destination={committedDestination}
-            onAddToDay={handleAddToDay}
-            onReport={handleReportPlace}
-            onOpenCopilot={onOpenCopilot}
-            selectedDetailKey={selectedDetailKey}
-            onDetailSelection={setSelectedDetailKey}
-            showMore={showMoreTile}
-            scopeKey={`category:${activeCategory}`}
-          />
+          <>
+            <SuggestionGrid
+              items={activeItems}
+              days={days}
+              destination={committedDestination}
+              onAddToDay={handleAddToDay}
+              onReport={handleReportPlace}
+              onOpenCopilot={onOpenCopilot}
+              selectedDetailKey={selectedDetailKey}
+              onDetailSelection={setSelectedDetailKey}
+              showMore={showMoreTile}
+              scopeKey={`category:${activeCategory}`}
+            />
+            {showMoreNotice}
+          </>
         )}
 
         {/* "More" tab (Wave 4 §4.2): every returned category not already
@@ -965,6 +968,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
                     showMore={cat === lastMoreCategory ? showMoreTile : null}
                     scopeKey={`more:${cat}`}
                   />
+                  {cat === lastMoreCategory ? showMoreNotice : null}
                 </div>
               );
             })}

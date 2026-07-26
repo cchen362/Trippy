@@ -24,7 +24,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/database.js';
 import { resolvePlace } from './placeResolver.js';
 
-// destinationId -> { items: number[], draining: boolean, promise: Promise }
+// destinationId -> { items: number[], draining: boolean, promise: Promise, inFlightId: number|null }
 const queues = new Map();
 
 // Daily resolver-call budget (Trust criteria: default 500/day, guards cost —
@@ -178,6 +178,12 @@ async function verifyOne(db, id, destination) {
     // before persisting rating/rating_count, so booking/stop resolution (which never
     // sets this) is never affected even when the flag is globally on.
     includeRatingFields: config.discoveryRatingEnrichment,
+    // F-26-5: verification is background work sharing the module-global Nominatim
+    // gate with interactive callers (add-stop, booking-linked resolution, day-
+    // override country inference). Opt into 'background' priority so an
+    // interactive lookup can overtake a draining verification queue instead of
+    // waiting behind it (placeResolver.js waitForNominatimSlot).
+    priority: 'background',
   };
 
   try {
@@ -223,7 +229,14 @@ async function drainQueue(db, destinationId, queue) {
 
   while (queue.items.length > 0) {
     const id = queue.items.shift();
+    // Tracked so a concurrent enqueueForVerification call (now firing once per
+    // completed category rather than once per generation) doesn't re-collect
+    // this row from provenance='pending' and re-add it to the queue while it's
+    // still mid-flight here — that would look it up twice and waste resolver
+    // budget for no benefit (Plan 26 W1.2 follow-on bug).
+    queue.inFlightId = id;
     const outcome = await verifyOne(db, id, destination);
+    queue.inFlightId = null;
 
     if (outcome.budgetExhausted) {
       const remainder = [id, ...queue.items.splice(0, queue.items.length)];
@@ -241,15 +254,23 @@ async function drainQueue(db, destinationId, queue) {
 // drain's promise for tests that want determinism — the route must NEVER
 // await this; it enqueues and returns immediately.
 export function enqueueForVerification(db, destinationId, placeIds = []) {
+  const existingQueue = queues.get(destinationId);
+
   const pendingRows = db.prepare(
     `SELECT id FROM discovery_places WHERE destination_id = ? AND status = 'active' AND provenance = 'pending'`,
-  ).all(destinationId).map((r) => r.id);
+  ).all(destinationId)
+    .map((r) => r.id)
+    // Exclude the row the drain is currently resolving, if any — it's still
+    // provenance='pending' in the DB (only flipped to verified/unverified once
+    // verifyOne finishes) but is already in-flight, so re-collecting it here
+    // would queue a second, wasted lookup for the same row.
+    .filter((id) => id !== existingQueue?.inFlightId);
 
   const combined = [...new Set([...pendingRows, ...placeIds])];
 
-  let queue = queues.get(destinationId);
+  let queue = existingQueue;
   if (!queue) {
-    queue = { items: [], draining: false, promise: Promise.resolve() };
+    queue = { items: [], draining: false, promise: Promise.resolve(), inFlightId: null };
     queues.set(destinationId, queue);
   }
   for (const id of combined) {

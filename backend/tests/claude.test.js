@@ -21,7 +21,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
-const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType } = await import('../src/services/claude.js');
+const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
 // discoverDestination
@@ -963,5 +963,54 @@ describe('coerceSceneType (Plan 10 Wave 3)', () => {
     expect(coerceSceneType(null)).toBeNull();
     expect(coerceSceneType(undefined)).toBeNull();
     expect(coerceSceneType('')).toBeNull();
+  });
+});
+
+// Plan 26 W1.3 (F-26-9): normalizeName used [^\w\s] with no /u flag, so \w was
+// ASCII-only and any pure-CJK name folded to "" — the first such item in a
+// destination claimed normalized_name = '' and every subsequent CJK-named
+// item was silently skipped as a duplicate by insertPlaces (see the
+// insertPlaces dedupe test in discoveryCatalogue.test.js for the user-visible
+// consequence). No coverage existed for this function before Plan 26.
+describe('normalizeName (Plan 26 W1.3 — CJK name folding, F-26-9)', () => {
+  it('folds distinct pure-CJK names to distinct, non-empty keys', () => {
+    const duck = normalizeName('北京烤鸭');
+    const palace = normalizeName('故宫博物院');
+    const oldTown = normalizeName('喀什老城');
+
+    expect(duck).not.toBe('');
+    expect(palace).not.toBe('');
+    expect(oldTown).not.toBe('');
+    expect(new Set([duck, palace, oldTown]).size).toBe(3);
+  });
+
+  it('reproduces the pre-fix bug when run against the old pattern, for contrast', () => {
+    // Not a call into the fixed function — this documents exactly what F-26-9
+    // reported so a future regression back to \w is legible as a diff here.
+    const oldNormalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    expect(oldNormalize('北京烤鸭')).toBe('');
+    expect(oldNormalize('故宫博物院')).toBe('');
+  });
+
+  it('keeps mixed CJK+Latin names intact', () => {
+    const result = normalizeName('Chuan Wei Small Eat 川味小吃 (Xinyi)');
+    expect(result).not.toBe('');
+    expect(result).toContain('chuan wei small eat');
+    expect(result).toContain('川味小吃');
+    expect(result).toContain('xinyi');
+  });
+
+  it('still strips English geographic suffixes exactly as before', () => {
+    expect(normalizeName('Dujiangyan & Scenic Area')).toBe('dujiangyan');
+    expect(normalizeName('Dujiangyan Scenic Area')).toBe('dujiangyan');
+    expect(normalizeName('Old Town Historic District')).toBe('');
+    expect(normalizeName('Yulong Old Town')).toBe('yulong');
+  });
+
+  it('still collapses punctuation and whitespace for Latin names', () => {
+    // Punctuation (apostrophe, "!!") is replaced with a space, not deleted, so
+    // "People's" splits into two tokens — this is existing behaviour, unchanged
+    // by the \p{L}\p{N}/u fix.
+    expect(normalizeName("People's Liberation Monument!!")).toBe('people s liberation monument');
   });
 });

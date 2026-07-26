@@ -507,3 +507,107 @@ describe('resolvePlace', () => {
     await expect(second).resolves.toMatchObject({ locationStatus: 'unresolved' });
   });
 });
+
+// Plan 26 W1.1 (F-26-5): the module-global 1 req/s Nominatim gate now grants by
+// priority rather than plain FIFO, so an interactive caller (add-stop, booking-
+// linked resolution, day-override country inference) doesn't queue behind a
+// draining background verification batch. Background work may be delayed but
+// never starved outright.
+describe('resolvePlace — priority-aware Nominatim gate', () => {
+  it('grants an interactive waiter ahead of already-queued background waiters', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-28T00:00:00Z'));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    // Warm up the gate: the very first lookup after a reset finds the gate
+    // already open and is granted synchronously (no timer needed, matching
+    // the pre-W1.1 fast path) — consume that slot first so the real scenario
+    // below exercises the actual queued-grant path for every waiter.
+    await resolvePlace({ queryText: 'Warm Up', city: 'Chongqing', country: 'CN' });
+
+    const order = [];
+    const bg1 = resolvePlace({ queryText: 'BG One', city: 'Chongqing', country: 'CN', priority: 'background' })
+      .then(() => order.push('bg1'));
+    const bg2 = resolvePlace({ queryText: 'BG Two', city: 'Chongqing', country: 'CN', priority: 'background' })
+      .then(() => order.push('bg2'));
+    const bg3 = resolvePlace({ queryText: 'BG Three', city: 'Chongqing', country: 'CN', priority: 'background' })
+      .then(() => order.push('bg3'));
+
+    // Let all three background waiters enqueue (and the pump's first timer get
+    // scheduled) before the interactive caller arrives — this is the scenario
+    // a plain FIFO gate would get wrong.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const interactive = resolvePlace({ queryText: 'Interactive One', city: 'Chongqing', country: 'CN' })
+      .then(() => order.push('interactive'));
+
+    await vi.advanceTimersByTimeAsync(4000);
+    await Promise.all([bg1, bg2, bg3, interactive]);
+
+    expect(order[0]).toBe('interactive');
+    expect(order).toEqual(expect.arrayContaining(['bg1', 'bg2', 'bg3']));
+  });
+
+  it('does not starve a background waiter indefinitely, even while interactive waiters keep arriving', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-28T00:00:00Z'));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+
+    // Warm up the gate for the same reason as above — otherwise the very
+    // first waiter pushed (here, the background one) would be granted
+    // synchronously for free, defeating the starvation scenario being tested.
+    await resolvePlace({ queryText: 'Warm Up', city: 'Chongqing', country: 'CN' });
+
+    const order = [];
+    const bg = resolvePlace({ queryText: 'Starved BG Place', city: 'Chongqing', country: 'CN', priority: 'background' })
+      .then(() => order.push('bg'));
+
+    // Ten interactive waiters enqueued up front — more than enough to keep
+    // out-competing the background waiter on priority alone for every 1-second
+    // grant until MAX_BACKGROUND_DEFERRAL_MS (10,000ms) elapses since bg was
+    // enqueued: grants at t=1000..9000ms (9 of them) go to interactive
+    // waiters; by the grant at t=10000ms bg's wait has reached the bound and
+    // it must win regardless of how many interactive waiters remain queued.
+    const interactives = Array.from({ length: 10 }, (_, i) => resolvePlace({
+      queryText: `Interactive Place ${i}`,
+      city: 'Chongqing',
+      country: 'CN',
+    }).then(() => order.push(`interactive-${i}`)));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(10000);
+
+    expect(order[9]).toBe('bg');
+    expect(order.slice(0, 9).every((entry) => entry.startsWith('interactive'))).toBe(true);
+
+    await Promise.all([bg, ...interactives.slice(0, 9)]);
+  });
+
+  it('never grants two Nominatim slots inside one interval, regardless of priority mix', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-28T00:00:00Z'));
+    const grantTimes = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      grantTimes.push(Date.now());
+      return { ok: true, json: async () => [] };
+    });
+
+    const calls = Array.from({ length: 5 }, (_, i) => resolvePlace({
+      queryText: `Pacing Place ${i}`,
+      city: 'Chongqing',
+      country: 'CN',
+      priority: i % 2 === 0 ? 'interactive' : 'background',
+    }));
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await Promise.all(calls);
+
+    expect(grantTimes).toHaveLength(5);
+    for (let i = 1; i < grantTimes.length; i += 1) {
+      expect(grantTimes[i] - grantTimes[i - 1]).toBeGreaterThanOrEqual(1000);
+    }
+  });
+});

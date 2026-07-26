@@ -659,6 +659,23 @@ select {
   cursor: default;
 }
 
+/* W1.5: an honest decline (catalogue full, generation limit reached) shown
+   calmly under "Show more" instead of the red retry banner replacing results. */
+.discovery-register-notice {
+  /* Capped and centred so the line stays readable under a wide desktop grid
+     instead of stretching the full row width. Below the cap at 375px, so the
+     mobile treatment is unchanged. */
+  margin: 10px auto 0;
+  max-width: 52ch;
+  padding: 0 4px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  line-height: 1.6;
+  color: var(--cream-dim);
+  text-align: center;
+}
+
 .discovery-register-loading-dots { display: inline-flex; gap: 3px; }
 .discovery-register-loading-dots span {
   width: 3px;
