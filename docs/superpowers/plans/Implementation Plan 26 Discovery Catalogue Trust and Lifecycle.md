@@ -169,13 +169,31 @@ Escalation draws on its own daily sub-budget, logged separately.
 
 ## W3 — Observability, then measurement
 
-**Additive migration — next free sequence number, nullable columns only.**
+**Status:** 2026-07-27 — **NOT STARTED.** W1 and W2 are complete and committed (`347e8f6`, `6428213`), neither deployed. **This is the only wave in the plan with a migration** — additive, next free sequence number (`032`), nullable columns only.
 
-**W3.1** Record per attempt: timestamp, provider attempted, outcome, query variant used, match score, returned candidate name.
+**Line numbers after W2 — use these, not the F-fact citations above (which were read at `ca37222`, two waves ago):**
 
-**W3.2** Re-express the resolver budget in **provider requests**, not lookups (F-26-6), and add the W2.3 sub-budget counter.
+| What | Now |
+| --- | --- |
+| `resolvePlace` signature (all four per-call opt-ins) | `placeResolver.js:683` |
+| `readCache` | `:339` |
+| Cache short-circuit — the W3.3 trap below | `:706-715` |
+| `NEGATIVE_CACHE_TTL_MS` (1 hour) | `:13` |
+| `classifyNameMatch` — shared name check, both providers (W2.1) | `:417` |
+| `searchGooglePlaces` | `:554` |
+| The W2.3 escalation branch (`escalateWeakHit()` call site) | `:743` |
+| `hasResolverBudget` / `consumeResolverBudget` — the 500 LOOKUP budget | `discoveryVerify.js:50` |
+| `tryConsumeEscalationBudget` — the W2.3 sub-budget (exists already) | `:103` |
+| `isConfidentHit` — outcome decision + the empty-country recording log | `:149` |
+| `verifyOne`'s `baseArgs` opt-ins | `:255-265` |
+
+**W3.1** Record per attempt: timestamp, provider attempted, outcome, query variant used, match score, returned candidate name. **Two W2 outcomes are currently console-only and are this item's first customers:** the empty-country recording line (`discoveryVerify.js:149` — W2.2 records the resolved country in a log precisely because no schema surface exists yet) and the escalation line (`placeResolver.js:743`, which logs whether Google won). Both should become rows, not greps.
+
+**W3.2** Re-express the resolver budget in **provider requests**, not lookups (F-26-6). **The W2.3 sub-budget counter already exists** — `config.discoveryEscalationDailyBudget` (`DISCOVERY_ESCALATION_DAILY_BUDGET`, default 50) with its own daily counter and its own once-per-day exhaustion log in `discoveryVerify.js`. W3.2's job is re-expressing the *main* budget and surfacing both counters, not inventing the sub-budget.
 
 **W3.3** Add a bounded re-verification path reaching terminal `unverified` rows (F-26-12), throttled so it can never consume a day's budget in one destination.
+
+> **F-26-12 needs a correction, and it is load-bearing for W3.3.** The fact says a re-check "genuinely re-tries over the network rather than replaying a cached failure" because the negative cache expires after an hour. **That is only true for rows cached as `unresolved`.** `resolvePlace`'s staleness test requires `cached.locationStatus === 'unresolved'` (`placeResolver.js:706`); anything else returns the cached row immediately (`:714`, since discovery does not pass `preferNominatim`). The two largest failure classes in the 706-row corpus — a weak `estimated` hit, and a `resolved` hit whose country mismatched — are both cached as non-`unresolved`, so **a naive re-verification would replay the cache forever: no network call, no new outcome, and W2.3's escalation would never fire either** (the escalation branch sits after the cache short-circuit, on the live Nominatim path). W3.3 must therefore include a scoped way to bypass or refresh the cache entry for a re-verification — implement it as another per-call opt-in on `resolvePlace`, defaulting off, exactly as `includeRatingFields`, `priority` and `escalateWeakHit` are scoped, and prove the same way that `stops.js`/`bookings.js` cannot reach it. Measure the true re-verify cost before running it at corpus scale.
 
 **W3.4 — Measure, then answer Q-26-1 and Q-26-3.** Only after real attempt data exists: is the 44% mostly editorial-name failure, provider coverage, country context, or worker execution? Estimate the true provider cost of repairing the corpus before committing to it.
 
