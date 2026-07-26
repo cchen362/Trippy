@@ -335,3 +335,100 @@ export function incrementDailyGenerationCount(db, destinationId) {
     ON CONFLICT(destination_id, utc_date) DO UPDATE SET count = count + 1
   `).run(destinationId);
 }
+
+// Plan 26 W3.1: persists one row per provider attempt a discoveryVerify.js
+// lookup made (see migrations/032_discovery_verification_attempts.sql for the
+// schema and reason vocabulary), inside a single transaction, then prunes so
+// at most the 10 most recent attempt rows per place survive — without the
+// prune this table grows unbounded across repeated re-verification runs.
+//
+// outcome/reason describe the verification decision for the WHOLE lookup, so
+// they are stamped identically on every attempt row belonging to it — that
+// redundancy is deliberate (see the migration's header comment).
+//
+// When `attempts` is empty (e.g. the resolver budget ran out before any
+// provider was touched), still writes exactly ONE row capturing the
+// outcome/reason with null provider fields and network_requests 0 — a
+// verification that decided something without touching a provider is
+// exactly the thing W3.4 needs to be able to see.
+export function recordVerificationAttempts(db, {
+  placeId, destinationId, sourceField, outcome, reason, reverification = false, attempts = [],
+}) {
+  const insert = db.prepare(`
+    INSERT INTO discovery_verification_attempts (
+      place_id, destination_id, attempted_at, source_field, provider, query_variant,
+      escalated, network_requests, location_status, match_score, returned_name,
+      returned_country, error, outcome, reason, reverification
+    ) VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const prune = db.prepare(`
+    DELETE FROM discovery_verification_attempts
+    WHERE place_id = ? AND id NOT IN (
+      SELECT id FROM discovery_verification_attempts WHERE place_id = ? ORDER BY id DESC LIMIT 10
+    )
+  `);
+
+  const rowsToWrite = attempts.length > 0 ? attempts : [{
+    provider: null,
+    queryVariant: null,
+    escalated: false,
+    networkRequests: 0,
+    locationStatus: null,
+    confidence: null,
+    resolvedName: null,
+    resolvedCountry: null,
+    error: null,
+  }];
+
+  const run = db.transaction(() => {
+    for (const attempt of rowsToWrite) {
+      insert.run(
+        placeId,
+        destinationId,
+        sourceField,
+        attempt.provider ?? null,
+        attempt.queryVariant ?? null,
+        attempt.escalated ? 1 : 0,
+        attempt.networkRequests ?? 0,
+        attempt.locationStatus ?? null,
+        attempt.confidence ?? null,
+        attempt.resolvedName ?? null,
+        attempt.resolvedCountry ?? null,
+        attempt.error ?? null,
+        outcome,
+        reason,
+        reverification ? 1 : 0,
+      );
+    }
+    prune.run(placeId, placeId);
+  });
+  run();
+}
+
+// Read side for the measurement script (W3.4) and tests. Filters combine with
+// AND; omitted filters are not applied. Ordered most-recent-first.
+export function listVerificationAttempts(db, { destinationId, placeId, since, limit = 200 } = {}) {
+  const conditions = [];
+  const params = [];
+  if (destinationId != null) {
+    conditions.push('destination_id = ?');
+    params.push(destinationId);
+  }
+  if (placeId != null) {
+    conditions.push('place_id = ?');
+    params.push(placeId);
+  }
+  if (since) {
+    conditions.push('attempted_at >= ?');
+    params.push(since);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+
+  return db.prepare(`
+    SELECT * FROM discovery_verification_attempts
+    ${where}
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(...params);
+}

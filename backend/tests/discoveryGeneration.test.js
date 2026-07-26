@@ -44,7 +44,10 @@ vi.mock('../src/config.js', () => ({
     dbPath: ':memory:',
     googlePlacesKey: '',
     discoveryRatingEnrichment: false,
-    discoveryResolverDailyBudget: 500,
+    discoveryResolverDailyRequestBudget: 1000,
+    discoveryEscalationDailyBudget: 50,
+    discoveryReverifyDailyRequestBudget: 150,
+    discoveryReverifyPerDestinationDaily: 25,
   },
 }));
 

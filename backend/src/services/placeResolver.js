@@ -272,6 +272,37 @@ function stripInternalFields(resolution) {
   return rest;
 }
 
+// W3.1 (Plan 26): per-attempt telemetry. onAttempt is a per-call opt-in (default null),
+// so every existing caller stays byte-identical. Invoked synchronously once per
+// provider interaction with a plain record — see the field comments in
+// baseAttemptRecord for the exact contract another (persistence-layer) agent is
+// writing against. A throwing callback must never break resolution (CLAUDE.md: fail
+// loudly, never silently) so it is wrapped and logged instead of propagated.
+function emitAttempt(onAttempt, record) {
+  if (typeof onAttempt !== 'function') return;
+  try {
+    onAttempt(record);
+  } catch (error) {
+    console.error('[placeResolver] onAttempt callback threw: %s', error.message);
+  }
+}
+
+function baseAttemptRecord(overrides) {
+  return {
+    provider: null,
+    queryVariant: null,
+    networkRequests: 0,
+    escalated: false,
+    locationStatus: null,
+    confidence: null,
+    resolvedName: null,
+    resolvedCountry: null,
+    providerId: null,
+    error: null,
+    ...overrides,
+  };
+}
+
 function findCuratedPlace({ queryText, city, country }) {
   const query = normalizeText(queryText);
   const normalizedCity = normalizeText(city);
@@ -507,21 +538,51 @@ async function fetchNominatimPayload({ queryText, city, country, priority = 'int
   return response.json();
 }
 
-async function searchNominatim({ queryText, city, country, aliases = [], priority = 'interactive' }) {
+async function searchNominatim({ queryText, city, country, aliases = [], priority = 'interactive', onAttempt = null }) {
   const attempts = [];
 
   for (const candidate of resolverQueryTexts(queryText, aliases)) {
-    const payload = await fetchNominatimPayload({ queryText: candidate, city, country, priority });
+    let payload;
+    try {
+      payload = await fetchNominatimPayload({ queryText: candidate, city, country, priority });
+    } catch (error) {
+      emitAttempt(onAttempt, baseAttemptRecord({
+        provider: 'nominatim',
+        queryVariant: candidate,
+        networkRequests: 1,
+        locationStatus: null,
+        error: error.message,
+      }));
+      throw error;
+    }
     attempts.push({ queryText: candidate, payload });
 
     const place = Array.isArray(payload) ? payload[0] : null;
-    if (!place) continue;
-
-    const lat = Number.parseFloat(place.lat);
-    const lng = Number.parseFloat(place.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const lat = place ? Number.parseFloat(place.lat) : NaN;
+    const lng = place ? Number.parseFloat(place.lon) : NaN;
+    if (!place || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      emitAttempt(onAttempt, baseAttemptRecord({
+        provider: 'nominatim',
+        queryVariant: candidate,
+        networkRequests: 1,
+        locationStatus: 'unresolved',
+      }));
+      continue;
+    }
 
     const classification = classifyNominatimResult(place, { queryText: candidate, city });
+    const resolvedCountry = place.address?.country_code ? place.address.country_code.toUpperCase() : null;
+    const providerId = place.osm_type && place.osm_id ? `${place.osm_type}:${place.osm_id}` : null;
+    emitAttempt(onAttempt, baseAttemptRecord({
+      provider: 'nominatim',
+      queryVariant: candidate,
+      networkRequests: 1,
+      locationStatus: classification.locationStatus,
+      confidence: classification.confidence,
+      resolvedName: classification.name,
+      resolvedCountry,
+      providerId,
+    }));
     return {
       result: formatResolution({
         lat,
@@ -532,9 +593,9 @@ async function searchNominatim({ queryText, city, country, aliases = [], priorit
         confidence: classification.confidence,
         resolvedName: classification.name,
         resolvedAddress: place.display_name || null,
-        providerId: place.osm_type && place.osm_id ? `${place.osm_type}:${place.osm_id}` : null,
+        providerId,
         provider: 'nominatim',
-        countryCode: place.address?.country_code ? place.address.country_code.toUpperCase() : null,
+        countryCode: resolvedCountry,
       }),
       rawJson: attempts,
     };
@@ -680,7 +741,13 @@ function unresolved() {
 // Places attempt instead of being returned immediately — the function is the
 // caller's budget gate (it returns true iff it is willing to spend one Google
 // request) and is called at most once per resolvePlace invocation.
-export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false, priority = 'interactive', escalateWeakHit = null } = {}) {
+//
+// onAttempt is a fourth such opt-in (W3.1): null by default, invoked once per
+// provider interaction — see emitAttempt/baseAttemptRecord above for the record
+// shape. refreshCache is a fifth (W3.3, F-26-12 correction — see the comment at the
+// cache short-circuit below): false by default, so every existing caller keeps
+// replaying the cache exactly as today.
+export async function resolvePlace({ queryText, city, country, aliases = [], allowNetwork = true, preferNominatim = false, includeRatingFields = false, priority = 'interactive', escalateWeakHit = null, onAttempt = null, refreshCache = false } = {}) {
   const query = queryText?.trim();
   if (!query) {
     throw Object.assign(new Error('queryText is required'), { status: 400 });
@@ -697,10 +764,31 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
     const curated = lookupQueries
       .map((candidate) => findCuratedPlace({ queryText: candidate, city, country }))
       .find(Boolean);
-    if (curated) return fromCurated(curated);
+    if (curated) {
+      emitAttempt(onAttempt, baseAttemptRecord({
+        provider: 'curated',
+        queryVariant: query,
+        networkRequests: 0,
+        locationStatus: curated.locationStatus,
+        confidence: curated.confidence,
+        resolvedName: curated.name,
+        resolvedCountry: curated.country ? curated.country.toUpperCase() : null,
+        providerId: curated.providerId,
+      }));
+      return fromCurated(curated);
+    }
   }
 
-  const cached = readCache(queryKey);
+  // refreshCache (W3.3, F-26-12 correction): the staleness test just below only
+  // retries over the network when the cached row is 'unresolved'. The two largest
+  // failure classes in the unverified production corpus — a weak 'estimated' cached
+  // hit, and a 'resolved' hit whose country mismatched — are both non-'unresolved',
+  // so they would replay the cache forever with no network call and no chance for
+  // W2.3's escalation to fire (it sits on the live Nominatim path, past this
+  // short-circuit). A caller doing bounded re-verification opts into refreshCache to
+  // skip the cached short-circuit entirely; the fresh Nominatim result still
+  // overwrites the cache row as normal (writeCache's ON CONFLICT DO UPDATE below).
+  const cached = refreshCache ? null : readCache(queryKey);
   if (cached) {
     const cacheAgeMs = cached.updatedAtMs === null ? Infinity : Date.now() - cached.updatedAtMs;
     const staleUnresolved = cached.locationStatus === 'unresolved'
@@ -708,11 +796,25 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
       && cacheAgeMs > NEGATIVE_CACHE_TTL_MS;
 
     if (!staleUnresolved) {
+      const cacheAttempt = () => baseAttemptRecord({
+        provider: 'cache',
+        queryVariant: query,
+        networkRequests: 0,
+        locationStatus: cached.locationStatus,
+        confidence: cached.confidence,
+        resolvedName: cached.resolvedName,
+        resolvedCountry: cached.countryCode,
+        providerId: cached.providerId,
+      });
       // preferNominatim means "prefer accurate geocoders over AI-estimated sources":
       // short-circuit on successful cached rows from accurate providers (Nominatim or
       // Google Places), but never on unresolved rows so they can retry over the network.
-      if (!preferNominatim) return stripInternalFields(cached);
+      if (!preferNominatim) {
+        emitAttempt(onAttempt, cacheAttempt());
+        return stripInternalFields(cached);
+      }
       if (ACCURATE_PROVIDERS.has(cached.provider) && cached.locationStatus !== 'unresolved') {
+        emitAttempt(onAttempt, cacheAttempt());
         return stripInternalFields(cached);
       }
     }
@@ -724,7 +826,7 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
 
   let nominatimRaw = null;
   try {
-    const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases, priority });
+    const { result, rawJson } = await searchNominatim({ queryText: query, city, country, aliases, priority, onAttempt });
     nominatimRaw = rawJson;
     if (result) {
       // Nominatim always gets cached exactly as before, regardless of what happens
@@ -745,11 +847,19 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
           try {
             const google = await searchGooglePlaces({ queryText: query, city, country, includeRatingFields });
             const won = google?.result?.locationStatus === 'resolved';
-            console.error(
-              '[placeResolver] escalated weak Nominatim hit for "%s" to Google Places (won=%s)',
-              query,
-              won,
-            );
+            // W3.1 (Plan 26): this outcome ("won=%s") used to be console-only —
+            // it is now an attempt record instead of a grep target.
+            emitAttempt(onAttempt, baseAttemptRecord({
+              provider: 'google_places',
+              queryVariant: query,
+              networkRequests: 1,
+              escalated: true,
+              locationStatus: google?.result?.locationStatus ?? 'unresolved',
+              confidence: google?.result?.confidence ?? null,
+              resolvedName: google?.result?.resolvedName ?? null,
+              resolvedCountry: google?.result?.countryCode ?? null,
+              providerId: google?.result?.providerId ?? null,
+            }));
             if (won) {
               // CACHE RULE (load-bearing): the escalated Google result is NEVER
               // written to place_resolution_cache. That cache is shared with
@@ -762,6 +872,14 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
               return google.result;
             }
           } catch (error) {
+            emitAttempt(onAttempt, baseAttemptRecord({
+              provider: 'google_places',
+              queryVariant: query,
+              networkRequests: 1,
+              escalated: true,
+              locationStatus: null,
+              error: error.message,
+            }));
             console.error('[placeResolver] Google Places escalation failed for "%s": %s', query, error.message);
           }
         }
@@ -787,9 +905,35 @@ export async function resolvePlace({ queryText, city, country, aliases = [], all
           result: google.result,
           rawJson: google.rawJson,
         });
+        emitAttempt(onAttempt, baseAttemptRecord({
+          provider: 'google_places',
+          queryVariant: query,
+          networkRequests: 1,
+          escalated: false,
+          locationStatus: google.result.locationStatus,
+          confidence: google.result.confidence,
+          resolvedName: google.result.resolvedName,
+          resolvedCountry: google.result.countryCode,
+          providerId: google.result.providerId,
+        }));
         return google.result;
       }
+      emitAttempt(onAttempt, baseAttemptRecord({
+        provider: 'google_places',
+        queryVariant: query,
+        networkRequests: 1,
+        escalated: false,
+        locationStatus: 'unresolved',
+      }));
     } catch (error) {
+      emitAttempt(onAttempt, baseAttemptRecord({
+        provider: 'google_places',
+        queryVariant: query,
+        networkRequests: 1,
+        escalated: false,
+        locationStatus: null,
+        error: error.message,
+      }));
       console.error('[placeResolver] Google Places searchText failed for "%s": %s', query, error.message);
     }
   }

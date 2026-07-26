@@ -1,6 +1,6 @@
 # Implementation Plan 26 — Discovery Catalogue Trust and Lifecycle
 
-**Status:** 2026-07-26 — **WRITTEN, NOT STARTED.** No code, no migration, nothing deployed. Six owner decisions taken (D-26-1…D-26-6); three questions deliberately left open and scheduled to be answered by measurement in W3, not by guesswork now.
+**Status:** 2026-07-27 — **W1, W2 and W3 COMPLETE and committed; nothing deployed. W4 and W5 not started.** Six owner decisions taken (D-26-1…D-26-6). Q-26-2 was resolved in W1. **Q-26-1 and Q-26-3 now have measured answers and recommendations awaiting an owner call — see W3.4.** W3.4 also surfaced one new defect (F-26-23) that is deliberately not fixed in W3.
 
 **Origin:** [2026-07-26 Discovery catalogue quality assessment](../reviews/2026-07-26-discovery-catalogue-quality-assessment.md) (`ca37222`), which consolidates three review passes over the [original review](../reviews/2026-07-26-discovery-catalogue-quality-review.md) (`3f9db9e`, deepened at `6b4c179`). Triggered by Plan 24 owner production QA, where a Discovery-added stop opened coordinate-only and the owner recognised odd naming and apparent duplicates.
 
@@ -169,7 +169,11 @@ Escalation draws on its own daily sub-budget, logged separately.
 
 ## W3 — Observability, then measurement
 
-**Status:** 2026-07-27 — **NOT STARTED.** W1 and W2 are complete and committed (`347e8f6`, `6428213`), neither deployed. **This is the only wave in the plan with a migration** — additive, next free sequence number (`032`), nullable columns only.
+**Status:** 2026-07-27 — **COMPLETE, verified locally, NOT deployed.** W1 and W2 remain committed and undeployed (`347e8f6`, `6428213`). Migration **032** (`032_discovery_verification_attempts.sql`) is additive — one new table, no change to any existing table — and was proven applying in order (030 → 031 → 032) on a disposable copy of a real database, preserving all 655 existing `discovery_places` rows, with a re-run confirmed to be a no-op. Backend **760/760** (33/33 files; baseline was 737, +23 net new), frontend 43/43 files / 280 tests, `npm run build` clean. Verified beyond the suite by a bounded LIVE measurement against the real production corpus — see W3.4 below. Owner production QA still owed.
+
+**Two production facts checked read-only this wave, both of which retire open plan text.** (1) Production sets *neither* `DISCOVERY_RESOLVER_DAILY_BUDGET` nor `DISCOVERY_ESCALATION_DAILY_BUDGET` — both run on code defaults, which is what made W3.2's config rename safe rather than a silent meaning-change on a deployed variable. (2) `NOMINATIM_USER_AGENT` in production is `Trippy travel planner (contact: ccl_1006@yahoo.com)` — a real identifying contact. **The usage-policy concern recorded at the end of this plan applies only to the local default in `config.js`, not to production.** Checked one variable at a time; `printenv` was never run unfiltered.
+
+**Attempt telemetry is a side channel and is not allowed to break a drain — but it is not blanket-rescued either.** `persistAttempts` handles by name the one *expected* write failure (the place row deleted between enqueue and write, since destination-scoped deletes cascade — migrations 020/021/024 do this today and W5.1 will do it next), and logs anything else as `UNEXPECTED`. A plain try/catch around the whole write would have hidden exactly the schema and reason-vocabulary bugs this table exists to expose.
 
 **Line numbers after W2 — use these, not the F-fact citations above (which were read at `ca37222`, two waves ago):**
 
@@ -196,6 +200,37 @@ Escalation draws on its own daily sub-budget, logged separately.
 > **F-26-12 needs a correction, and it is load-bearing for W3.3.** The fact says a re-check "genuinely re-tries over the network rather than replaying a cached failure" because the negative cache expires after an hour. **That is only true for rows cached as `unresolved`.** `resolvePlace`'s staleness test requires `cached.locationStatus === 'unresolved'` (`placeResolver.js:706`); anything else returns the cached row immediately (`:714`, since discovery does not pass `preferNominatim`). The two largest failure classes in the 706-row corpus — a weak `estimated` hit, and a `resolved` hit whose country mismatched — are both cached as non-`unresolved`, so **a naive re-verification would replay the cache forever: no network call, no new outcome, and W2.3's escalation would never fire either** (the escalation branch sits after the cache short-circuit, on the live Nominatim path). W3.3 must therefore include a scoped way to bypass or refresh the cache entry for a re-verification — implement it as another per-call opt-in on `resolvePlace`, defaulting off, exactly as `includeRatingFields`, `priority` and `escalateWeakHit` are scoped, and prove the same way that `stops.js`/`bookings.js` cannot reach it. Measure the true re-verify cost before running it at corpus scale.
 
 **W3.4 — Measure, then answer Q-26-1 and Q-26-3.** Only after real attempt data exists: is the 44% mostly editorial-name failure, provider coverage, country context, or worker execution? Estimate the true provider cost of repairing the corpus before committing to it.
+
+### W3.4 findings — measured 2026-07-27. Reported, not acted on.
+
+Two independent measurements: a read-only retrospective census of all 706 production unverified rows, and a bounded LIVE re-verification of 47 of them driven through the real W3.3 path.
+
+**F-26-17 — The repairable corpus is 544 rows, not 706.** 162 of the 706 belong to 北京 and 南疆, which D-26-3 deletes outright in W5.1. Any repair costing is against 544.
+
+**F-26-18 — Retrospective classification of all 706, from `place_resolution_cache` fossils.** A verification that actually ran always wrote a cache row (the Nominatim result, or the `unresolved()` fallback), keyed on `normalizeText(name)|city|country`, and nothing in the codebase ever deletes from that table — so the presence and shape of a cache row records whether and how each row was checked, even though pre-W1 `provenance` collapsed "never checked" into "checked and failed".
+
+| Class | Rows | Meaning |
+| --- | ---: | --- |
+| Weak `estimated` hit | **426 (60%)** | Nominatim found a place; `classifyNameMatch` scored it 0.55 |
+| Never looked up at all | **257 (36%)** | No cache row exists |
+| Genuine provider miss | 16 (2.3%) | Nominatim returned nothing |
+| `resolved`, country mismatched | 7 (1%) | Right-shaped place, wrong country |
+
+Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack a cache row under their name key, so "no cache row" over-counts by roughly that background rate. It does not explain destinations sitting at 97–100%.
+
+**F-26-19 — The 257 never-checked rows have a single identifiable cause, and it is not the worker dying.** They are `batch = 0` rows concentrated in 南疆 (92/92), kualalumpur (92/95) and 北京 (70/70). `batch 0` is what migration 016's `backfillFromGlobalCache` created: it calls `insertPlaces` but **never calls `enqueueForVerification`**, so every backfilled row was stamped unverified at insert and no worker was ever dispatched. This is a *dispatch* gap, not a checking failure — 95 such rows survive W5.1 (kualalumpur 92, Chongqing 3) and have never cost a provider request.
+
+**F-26-20 — Answering the W3.4 question directly: the 44% is dominated by name-match scoring, not provider coverage, not country context, not worker execution.** Provider coverage accounts for 2.3% and country mismatch for 1%. Worker execution (F-26-19) accounts for 36% but only 95 rows post-W5.1. The remaining 60% are places the providers *found* and the name check refused.
+
+**F-26-21 — Live measurement, 47 real production rows through the real re-verification path.** Fresh cache (equivalent to what `refreshCache` buys, since without it all 47 would have replayed cached `estimated` rows and produced zero new outcomes): 140 provider requests, **2.98 requests per place**, 105 s wall clock. Outcome: **5 verified, 42 still `weak_match`**. All 5 rescues came from the W2.3 Google escalation, at 25 escalation requests — a **20% escalation rescue rate**. The escalation sub-budget exhausted mid-run exactly as designed and the remaining destinations proceeded unescalated, so D-26-4's structural ceiling was observed working under load.
+
+**F-26-22 — True cost of repairing the corpus, and its honest yield.** Extrapolating 544 rows at the measured rates: **≈1,630 Nominatim requests** (≈27 minutes of the 1 req/s gate, at `'background'` priority so W1 keeps interactive work ahead of it) plus **≈485 Google escalation requests**, which at ~10 escalations/day under the current sub-budget is ~7 weeks of elapsed time, or one deliberate temporary raise. Expected yield: **roughly 100 of 544 rows (≈18%) move to Verified; ≈444 stay Unverified.** Re-verification is therefore a partial recovery, not a fix for the 44% — worth doing, but it does not retire the problem, and the plan should not be read as though it does.
+
+**F-26-23 — NEW DEFECT found by the measurement, not previously in this plan: `cityMatch` is unsatisfiable for destinations whose `display_name` lost its word spacing.** `classifyNameMatch` (`placeResolver.js:417`) requires the normalized destination `display_name` to appear as a substring of the provider's returned address. `normalizeText('kualalumpur')` is `kualalumpur`, which can never occur inside `kuala lumpur, malaysia` — so a KL row fails the city half **even when the provider returns a byte-identical name**. Observed live: `Islamic Arts Museum Malaysia` and `Thean Hou Temple` both came back exact from Google and were still scored 0.55. Of eleven production destinations, `kualalumpur` and `Chong Qing` (vs. `chongqing`) are structurally affected — **95 + 11 = 106 rows that cannot verify regardless of budget spent on them.** Measured incidence in the live sample: 8 of 100 scored attempts returned an exact name match yet scored weak, 5 of them kualalumpur. **Not fixed in W3** — W3.4 is a measurement deliverable and the fix is an owner decision about whether it belongs with W4's country/geography work or as its own item.
+
+**Q-26-3 (split `name` into display vs. search name?) — the evidence now supports splitting, and quantifies why.** Of the 544 repairable names, **307 contain brackets and 182 run to six or more words**; only 185 are plain. Some `name` values are prose, not place names — `Michelin Bib Gourmand: Ay-Chung Flour-Shaping (listed above, but worth the emphasis)` is a display string being handed to a geocoder as a search query. `strongName` requires either exact normalized equality with the returned name or the returned address containing the query, and neither can hold for a six-word editorial phrase. Derived variants (`nominatimQueryTexts`' bracket-stripping) already carry 35 of the 64 `estimated`-grade Nominatim hits, i.e. the stripped forms are already outperforming the stored name — which is the upside the original claim asserted and F-26-6 doubted. **Recommendation: split, so the geocoder query is a place name and `name` stays the card's display string.** Owner decision; not implemented here.
+
+**Q-26-1 (does 45 stay the cap?) — recommend leaving 45 unchanged, and closing the question on evidence rather than deferring it again.** The cap's defect was never the number: W1.2 made "archived before it was ever checked" structurally impossible, and F-26-19 shows the population that looked like cap damage was actually never-dispatched backfill. No destination in the live sample was cap-bound. Changing 45 now would be tuning a mechanism whose observed failure mode has been removed.
 
 ## W4 — Country capture across surfaces
 
@@ -238,7 +273,9 @@ Owner click-script, per standing convention — the agent verifies locally, the 
 
 W1 **reduces** spend — AI output is currently bought and discarded before checking (F-26-2). W1–W3 add no paid calls. W5.2 costs zero. The only increase is W2.3, bounded by its own sub-budget; Plan 7 §2.2 noted usage sits inside Google's monthly free allowance and the sub-budget keeps that true.
 
-**Unresolved operational question:** real Nominatim request volume is unmeasured and materially higher than the lookup counter implies (F-26-6). If W3 shows sustained bulk volume, the choice between a paid endpoint and self-hosting becomes real — decide on measured numbers. Separately, verify `NOMINATIM_USER_AGENT` is set in production; the default (`config.js:47`) carries a placeholder contact that does not meet the usage policy's identifying-contact requirement. **Check that single variable only — never run `printenv` unfiltered, it prints `GOOGLE_PLACES_API_KEY` in cleartext.**
+**Operational question — now answered by W3 measurement.** Real Nominatim volume is **2.98 requests per place** (F-26-21), so the old 500-*lookup* budget was permitting roughly 1,500 requests while reporting 500. W3.2 re-expressed it as `DISCOVERY_RESOLVER_DAILY_REQUEST_BUDGET` (default 1000 **requests**), which is the first time the number has meant what it says. A full corpus repair is ≈1,630 requests (F-26-22) — a one-off spread across days at `'background'` priority, not sustained bulk volume, so **neither a paid endpoint nor self-hosting is justified on these numbers.** Revisit only if routine generation volume rises.
+
+`NOMINATIM_USER_AGENT` **is** set correctly in production (checked read-only 2026-07-27: a real identifying contact). Only the local default in `config.js` carries the placeholder. **When checking, check that single variable only — never run `printenv` unfiltered, it prints `GOOGLE_PLACES_API_KEY` in cleartext.**
 
 ---
 

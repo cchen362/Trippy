@@ -812,7 +812,7 @@ describe('resolvePlace — Plan 24 compatibility proof (stops.js / bookings.js u
     expect(result).toMatchObject({ provider: 'nominatim', locationStatus: 'estimated' });
   });
 
-  it('does not reference escalateWeakHit anywhere in stops.js or bookings.js (structural pin — expected to fail loudly if a future edit opts either file into escalation)', () => {
+  it('does not reference escalateWeakHit, onAttempt, or refreshCache anywhere in stops.js or bookings.js (structural pin — expected to fail loudly if a future edit opts either file into escalation/telemetry/cache-refresh)', () => {
     const stopsSource = readFileSync(
       new URL('../src/services/stops.js', import.meta.url),
       'utf8',
@@ -824,5 +824,290 @@ describe('resolvePlace — Plan 24 compatibility proof (stops.js / bookings.js u
 
     expect(stopsSource).not.toMatch(/escalateWeakHit/);
     expect(bookingsSource).not.toMatch(/escalateWeakHit/);
+    expect(stopsSource).not.toMatch(/onAttempt/);
+    expect(bookingsSource).not.toMatch(/onAttempt/);
+    expect(stopsSource).not.toMatch(/refreshCache/);
+    expect(bookingsSource).not.toMatch(/refreshCache/);
+  });
+
+  it('short-circuits on a cached estimated row with zero fetches when invoked with the exact argument shape stops.js:189/:831 use (proves refreshCache defaults off for real callers)', async () => {
+    const db = getDb();
+    const queryKey = buildPlaceQueryKey({ queryText: 'Weakly Cached Place', city: 'Kuala Lumpur', country: 'MY' });
+    db.prepare(`
+      INSERT INTO place_resolution_cache (
+        query_key, query_text, city, country, provider, provider_id, name, address,
+        lat, lng, coordinate_system, confidence
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      queryKey,
+      'Weakly Cached Place',
+      'Kuala Lumpur',
+      'MY',
+      'nominatim',
+      'node:1',
+      'Weakly Cached Place',
+      'Somewhere, Kuala Lumpur, Malaysia',
+      3.1,
+      101.2,
+      'wgs84',
+      0.55, // < 0.7 -> readCache classifies this as 'estimated'
+    );
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+
+    // Exact shape of the stops.js:189 call (queryText/city/country/aliases/allowNetwork/
+    // preferNominatim) — no refreshCache key at all.
+    const result = await resolvePlace({
+      queryText: 'Weakly Cached Place',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      aliases: [],
+      allowNetwork: true,
+      preferNominatim: false,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'estimated', provider: 'nominatim' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// Plan 26 W3.1 (F-26-6/F-26-7 follow-up): onAttempt is a per-call opt-in that records
+// one attempt per provider interaction so W3.4 can measure the corpus instead of
+// grepping console output. Every existing caller passes none, so these tests opt in
+// explicitly.
+describe('resolvePlace — onAttempt telemetry (opt-in)', () => {
+  it('emits one record per Nominatim query variant tried, in order, only the winner carrying a resolved name', async () => {
+    // "Merdeka Square (Dataran Merdeka)" expands (nominatimQueryTexts) into three
+    // variants: the original, the parenthetical content, and the stripped form.
+    // The full/original variant misses; the parenthetical variant hits.
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{
+          lat: '3.1487688',
+          lon: '101.6936385',
+          display_name: 'Dataran Merdeka, Kuala Lumpur, Malaysia',
+          name: 'Dataran Merdeka',
+          osm_type: 'way',
+          osm_id: '23069513',
+          address: { country_code: 'my' },
+        }],
+      });
+
+    const attempts = [];
+    const result = await resolvePlace({
+      queryText: 'Merdeka Square (Dataran Merdeka)',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      preferNominatim: true,
+      onAttempt: (record) => attempts.push(record),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.resolvedName).toBe('Dataran Merdeka');
+
+    const nominatimAttempts = attempts.filter((a) => a.provider === 'nominatim');
+    expect(nominatimAttempts).toHaveLength(2);
+    expect(nominatimAttempts[0]).toMatchObject({
+      queryVariant: 'Merdeka Square (Dataran Merdeka)',
+      networkRequests: 1,
+      locationStatus: 'unresolved',
+      resolvedName: null,
+    });
+    expect(nominatimAttempts[1]).toMatchObject({
+      queryVariant: 'Dataran Merdeka',
+      networkRequests: 1,
+      locationStatus: 'resolved',
+      resolvedName: 'Dataran Merdeka',
+    });
+    // Exactly the winner carries a non-null resolvedName.
+    expect(nominatimAttempts.filter((a) => a.resolvedName !== null)).toHaveLength(1);
+  });
+
+  it('emits a cache record with networkRequests 0 and issues zero fetches on a cache short-circuit', async () => {
+    const db = getDb();
+    const queryKey = buildPlaceQueryKey({ queryText: 'Cached Cafe', city: 'Chongqing', country: 'CN' });
+    db.prepare(`
+      INSERT INTO place_resolution_cache (
+        query_key, query_text, city, country, provider, provider_id, name, address,
+        lat, lng, coordinate_system, confidence
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      queryKey, 'Cached Cafe', 'Chongqing', 'CN', 'manual_seed', 'cache-1',
+      'Cached Cafe', 'Cached Address', 29.5, 106.5, 'wgs84', 0.9,
+    );
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+
+    const attempts = [];
+    await resolvePlace({
+      queryText: 'Cached Cafe',
+      city: 'Chongqing',
+      country: 'CN',
+      onAttempt: (record) => attempts.push(record),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      provider: 'cache',
+      networkRequests: 0,
+      locationStatus: 'resolved',
+      providerId: 'cache-1',
+    });
+  });
+
+  it('emits records with escalated:true for the escalation Google call and escalated:false for the miss-fallback Google call', async () => {
+    config.googlePlacesKey = 'test-google-key';
+
+    // Escalation path: weak Nominatim hit, escalateWeakHit authorises a Google call
+    // that also comes back weak (so it doesn't win and doesn't short-circuit).
+    const escalationFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return {
+          ok: true,
+          json: async () => [{
+            lat: '3.1000',
+            lon: '101.2000',
+            display_name: 'Random Diner, Somewhere Else, Malaysia',
+            name: 'Random Diner',
+            osm_type: 'node',
+            osm_id: '999',
+          }],
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_still_unrelated',
+            displayName: { text: 'Also Unrelated' },
+            formattedAddress: 'Nowhere Near Kuala Lumpur',
+            location: { latitude: 3.16, longitude: 101.71 },
+            addressComponents: [{ longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] }],
+          }],
+        }),
+      };
+    });
+
+    const escalationAttempts = [];
+    await resolvePlace({
+      queryText: 'Escalation Target',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      escalateWeakHit: () => true,
+      onAttempt: (record) => escalationAttempts.push(record),
+    });
+
+    const escalationGoogleAttempt = escalationAttempts.find((a) => a.provider === 'google_places');
+    expect(escalationGoogleAttempt).toMatchObject({ escalated: true, networkRequests: 1 });
+    escalationFetch.mockRestore();
+
+    // Miss-fallback path: Nominatim misses entirely, Google is consulted as the
+    // ordinary fallback (no escalateWeakHit involved).
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('nominatim')) {
+        return { ok: true, json: async () => [] };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [{
+            id: 'ChIJ_fallback_place',
+            displayName: { text: 'Fallback Place' },
+            formattedAddress: '1 Fallback Place, Kuala Lumpur, Malaysia',
+            location: { latitude: 3.15, longitude: 101.7 },
+            addressComponents: [{ longText: 'Malaysia', shortText: 'MY', types: ['country', 'political'] }],
+          }],
+        }),
+      };
+    });
+
+    const fallbackAttempts = [];
+    await resolvePlace({
+      queryText: 'Fallback Place',
+      city: 'Kuala Lumpur',
+      country: 'MY',
+      onAttempt: (record) => fallbackAttempts.push(record),
+    });
+
+    const fallbackGoogleAttempt = fallbackAttempts.find((a) => a.provider === 'google_places');
+    expect(fallbackGoogleAttempt).toMatchObject({ escalated: false, networkRequests: 1 });
+  });
+
+  it('does not let a throwing onAttempt callback break resolution', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '29.5601096',
+        lon: '106.5733569',
+        display_name: 'Jiefangbei, Chongqing, China',
+        name: 'Jiefangbei',
+        osm_type: 'node',
+        osm_id: '1234',
+      }],
+    });
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await resolvePlace({
+      queryText: 'Throwing Attempt Place',
+      city: 'Chongqing',
+      country: 'CN',
+      onAttempt: () => { throw new Error('onAttempt callback exploded'); },
+    });
+
+    expect(result).toMatchObject({ provider: 'nominatim', resolvedName: 'Jiefangbei' });
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+// Plan 26 W3.3 (F-26-12 correction): the naive staleness test only retries a cached
+// 'unresolved' row over the network. A weak 'estimated' cached hit — one of the two
+// largest failure classes in the unverified corpus — would replay the cache forever
+// without refreshCache. This is the regression test for the whole of W3.3.
+describe('resolvePlace — refreshCache (opt-in scoped cache bypass, W3.3)', () => {
+  it('issues a live Nominatim request against a cached estimated row when refreshCache is true, and zero requests without it', async () => {
+    const db = getDb();
+    const queryKey = buildPlaceQueryKey({ queryText: 'Weak Estimated Hit', city: 'Ipoh', country: 'MY' });
+    db.prepare(`
+      INSERT INTO place_resolution_cache (
+        query_key, query_text, city, country, provider, provider_id, name, address,
+        lat, lng, coordinate_system, confidence
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      queryKey, 'Weak Estimated Hit', 'Ipoh', 'MY', 'nominatim', 'node:5',
+      'Weak Estimated Hit', 'Somewhere, Ipoh, Malaysia', 4.5, 101.0, 'wgs84', 0.55,
+    );
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '4.597479',
+        lon: '101.090106',
+        display_name: 'Weak Estimated Hit, Ipoh, Malaysia',
+        name: 'Weak Estimated Hit',
+        osm_type: 'relation',
+        osm_id: '123',
+      }],
+    });
+
+    const withoutRefresh = await resolvePlace({ queryText: 'Weak Estimated Hit', city: 'Ipoh', country: 'MY' });
+    expect(withoutRefresh).toMatchObject({ locationStatus: 'estimated', provider: 'nominatim' });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const withRefresh = await resolvePlace({
+      queryText: 'Weak Estimated Hit',
+      city: 'Ipoh',
+      country: 'MY',
+      refreshCache: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(withRefresh).toMatchObject({
+      lat: 4.597479,
+      lng: 101.090106,
+      provider: 'nominatim',
+    });
   });
 });

@@ -4,7 +4,24 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 // --- Mock claude.js before importing the route ---
-const mockDiscoverDestination = vi.fn();
+// vi.hoisted is required (not a plain top-level const) because vi.mock
+// factories run before this file's own top-level code executes (ES module
+// imports/const declarations are hoisted ahead of other top-level code) — a
+// plain const here is a latent TDZ hazard: it happens to work when this file
+// shares a worker with certain other test files (whichever ends up importing
+// first "warms" things in the right order) and throws "Cannot access
+// 'mockDiscoverDestination' before initialization" when it runs in a
+// different scheduling context (e.g. its own isolated worker). Every other
+// discovery test file in this suite already uses vi.hoisted for exactly this
+// reason.
+// DISCOVERY_CATEGORIES is bundled into the same vi.hoisted() call for the
+// identical reason — it's referenced directly inside the vi.mock factory
+// below, so it must exist before that factory runs, not merely before this
+// file's own top-level code would otherwise reach it.
+const { mockDiscoverDestination, DISCOVERY_CATEGORIES } = vi.hoisted(() => ({
+  mockDiscoverDestination: vi.fn(),
+  DISCOVERY_CATEGORIES: ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'],
+}));
 
 // Mirrors the real normalizeName in src/services/claude.js closely enough for these tests —
 // the real dedupe behavior is covered separately by discoveryCatalogue.test.js and claude.test.js.
@@ -30,7 +47,7 @@ function coerceSceneType(value) {
 
 // DISCOVERY_CATEGORIES mirrors the real list in src/services/claude.js — W1.5's
 // catalogue_full headroom check (routes/discovery.js) iterates it directly.
-const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
+// (declared above, inside vi.hoisted — see the comment there.)
 
 vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
@@ -50,7 +67,10 @@ vi.mock('../src/config.js', () => ({
     dbPath: ':memory:',
     googlePlacesKey: '',
     discoveryRatingEnrichment: false,
-    discoveryResolverDailyBudget: 500,
+    discoveryResolverDailyRequestBudget: 1000,
+    discoveryEscalationDailyBudget: 50,
+    discoveryReverifyDailyRequestBudget: 150,
+    discoveryReverifyPerDestinationDaily: 25,
   },
 }));
 
