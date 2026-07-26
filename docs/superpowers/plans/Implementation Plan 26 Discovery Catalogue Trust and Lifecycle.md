@@ -108,7 +108,25 @@ Each is scheduled, not deferred indefinitely. None blocks W1.
 
 ## W2 — Verifier integrity
 
-**No migration.**
+**Status:** 2026-07-26 — **NOT STARTED.** W1 is complete and committed at `347e8f6` (not deployed); nothing in W2 depends on W1, and nothing in W1 invalidated a W2 fact. **No migration.**
+
+**Line numbers cited in the F-facts above were read at `ca37222`, before W1. W1 shifted the ones W2 needs — use these:**
+
+| What | Fact cites | Now |
+| --- | --- | --- |
+| `searchGooglePlaces` signature | `placeResolver.js:470` | `:536` |
+| Google's hardcoded `locationStatus:'resolved'`/`confidence:0.9` (F-26-8) | `:548` | `:613-614` |
+| `classifyNominatimResult` — the name check the Nominatim path already does | `:343` | `:409` |
+| `placeNameMatches` — existing name-comparison helper, reuse it | — | `:225` |
+| `resolvePlace` signature | `:572` | `:642` |
+| Nominatim result returned immediately (F-26-7) | `:618` | `:690` |
+| Google consulted only when every variant missed (F-26-7) | `:627` | `:697` |
+| `isConfidentHit` (F-26-7, F-26-8) | `discoveryVerify.js:84` | `:83` |
+| `isConfidentHit`'s empty-country pass (W2.2) | `:87` | `:87` (unchanged) |
+| `verifyOne`'s `baseArgs` opt-ins | `:180` | `:180` (unchanged) |
+| W2.2's pinned test expectation | `discoveryVerify.test.js:174` | `:174` (unchanged) |
+
+**W1 added a second precedent for the W2.3 opt-in pattern.** `resolvePlace` now takes `priority = 'interactive'` alongside `includeRatingFields = false` (`:642`), threaded down to `waitForNominatimSlot`, with `discoveryVerify.js:186` the only caller opting into `'background'`. Follow that shape for W2.3's escalation flag — two working examples now exist in the same function.
 
 **W2.1 — Name-similarity check on the Google path**, matching what the Nominatim path already does (F-26-8). A result failing the check must not be labelled `resolved`.
 
