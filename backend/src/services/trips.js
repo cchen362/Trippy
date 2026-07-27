@@ -448,6 +448,25 @@ function extractGeoFromBooking(booking, tripScopes = []) {
  * `{ label, countryCode, source: 'hotel' }`. It comes ONLY from the active-hotel layer,
  * regardless of which layer actually won the city, and is NEVER carried forward from
  * `previousResolvedGeo` — anchors are per-day evidence, not carried state.
+ *
+ * Plan 26 W4.1 (owner decision D-26-2): the precedence above is UNCHANGED — `city`,
+ * `countryCode`, and `resolutionAnchor` come out byte-identical to before this wave for
+ * every input. This wave only ADDS a layer-source signal alongside them:
+ * - `citySource` / `countrySource`: which named layer ('override'|'hotel'|'transit'|
+ *   'previous'|'seed') supplied the winning city/country, or null if none did.
+ * - `countryEvidenceCity`: the city the COUNTRY-winning layer itself named, or null when
+ *   that layer named no city at all (the hotel-demote case, Rule 4 above — a hotel can
+ *   keep its country while its city nulls out). This is deliberately NOT the same value
+ *   as the winning `city` whenever country and city came from different layers — that
+ *   divergence is exactly the F-26-10 signal: a free-text override ("冲绳") with no
+ *   country attached, following a same-trip day in a different country, carries the
+ *   PREVIOUS day's country forward even though nothing about 冲绳 said "China". Discovery
+ *   (F-26-10) uses `countryEvidenceCity` to decline a country whose evidence names a
+ *   different place than the winning city. Trip destination chips
+ *   (`deriveTripDestinationPairsFromDays`) and `stops.js`'s geocoding-bias anchor
+ *   (`getDayGeo`) deliberately keep cross-layer countries as-is and must NEVER apply that
+ *   decline rule — cross-layer city/country is often correct (the Melaka+MY test below)
+ *   and downstream behaviour for those two callers does not change in this wave.
  */
 export function deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes = []) {
   const overrideGeo = day.cityOverride
@@ -501,11 +520,26 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes = []
   const previousGeo = previousResolvedGeo || { city: null, countryCode: null };
   const seedGeo = { city: day.city, countryCode: day.cityCountry || null };
 
-  const layers = [overrideGeo, hotelGeo, transitGeo, previousGeo, seedGeo];
+  // Tagged explicitly rather than by spreading previousGeo — previousGeo is the PREVIOUS
+  // day's full deriveDayGeo() return (now carrying citySource/countrySource/
+  // countryEvidenceCity of its own), and a spread would leak those stale keys into this
+  // day's layer instead of this day's own city/countryCode pair.
+  const layers = [
+    { source: 'override', city: overrideGeo.city, countryCode: overrideGeo.countryCode },
+    { source: 'hotel', city: hotelGeo.city, countryCode: hotelGeo.countryCode },
+    { source: 'transit', city: transitGeo.city, countryCode: transitGeo.countryCode },
+    { source: 'previous', city: previousGeo.city, countryCode: previousGeo.countryCode },
+    { source: 'seed', city: seedGeo.city, countryCode: seedGeo.countryCode },
+  ];
+  const cityLayer = layers.find((l) => l.city) ?? null;
+  const countryLayer = layers.find((l) => l.countryCode) ?? null;
   return {
-    city: layers.map((l) => l.city).find(Boolean) ?? null,
-    countryCode: layers.map((l) => l.countryCode).find(Boolean) ?? null,
+    city: cityLayer?.city ?? null,
+    countryCode: countryLayer?.countryCode ?? null,
     resolutionAnchor: hotelExtract.anchor ? { ...hotelExtract.anchor, source: 'hotel' } : null,
+    citySource: cityLayer?.source ?? null,
+    countrySource: countryLayer?.source ?? null,
+    countryEvidenceCity: countryLayer?.city ?? null,
   };
 }
 
@@ -1149,6 +1183,9 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
       resolvedCity: geo.city,
       resolvedCountry: geo.countryCode,
       resolutionAnchor: geo.resolutionAnchor,
+      resolvedCitySource: geo.citySource,
+      resolvedCountrySource: geo.countrySource,
+      resolvedCountryEvidenceCity: geo.countryEvidenceCity,
     };
   });
 }
@@ -1162,7 +1199,16 @@ export function listDaysForTrip(tripId, userId, bookings = []) {
 export function getDayGeo(dayId) {
   const db = getDb();
   const targetDay = db.prepare('SELECT * FROM days WHERE id = ?').get(dayId);
-  if (!targetDay) return { city: null, countryCode: null, resolutionAnchor: null };
+  if (!targetDay) {
+    return {
+      city: null,
+      countryCode: null,
+      resolutionAnchor: null,
+      citySource: null,
+      countrySource: null,
+      countryEvidenceCity: null,
+    };
+  }
 
   const bookings = listBookingsForTrip(targetDay.trip_id);
   // Scopes are built from ALL of the trip's days (not just the ones up to the target
@@ -1177,7 +1223,14 @@ export function getDayGeo(dayId) {
   const rows = allRows.filter((row) => row.date <= targetDay.date);
 
   let previousResolvedGeo = null;
-  let geo = { city: null, countryCode: null, resolutionAnchor: null };
+  let geo = {
+    city: null,
+    countryCode: null,
+    resolutionAnchor: null,
+    citySource: null,
+    countrySource: null,
+    countryEvidenceCity: null,
+  };
   for (const row of rows) {
     const day = {
       date: row.date,
@@ -1266,8 +1319,17 @@ async function resolveOverrideCountry(cityOverride) {
   if (fromName) return fromName;
 
   try {
+    // No `priority` here — this call is awaited inline inside the PUT handler
+    // (updateDayCityOverride below) while the user watches a spinner, so it deliberately
+    // keeps resolvePlace's default 'interactive' priority (W1.1). Out of scope for W4.3.
     const resolution = await resolvePlace({ queryText: cityOverride, city: cityOverride });
-    return resolution?.countryCode || null;
+    // Plan 26 W4.3: only accept a 'resolved' hit. W2.1 narrowed the *labelling* of weak
+    // matches to 'estimated' but this function never looked at the label, so it was still
+    // accepting a guess as if it were a fact. An 'estimated' countryCode here is exactly
+    // that — a guess — and a null country is the honest answer; the precedence chain in
+    // deriveDayGeo already tolerates a null-country day (falls through to the next layer).
+    if (resolution?.locationStatus !== 'resolved') return null;
+    return resolution.countryCode || null;
   } catch {
     return null;
   }

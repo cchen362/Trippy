@@ -676,6 +676,107 @@ select {
   text-align: center;
 }
 
+/* W4.5 (F-26-26): inline country confirmation when the server declines to
+   create an unknown-country destination (e.g. the empty-country Suzhou
+   catalogue that could never verify). Boxed off from the results grid it
+   sits above so it reads as a question, not another suggestion card. */
+.discovery-country-confirm {
+  margin: 20px auto 0;
+  max-width: 420px;
+  padding: 20px 18px;
+  border: 1px solid var(--ink-border);
+  border-radius: 4px;
+  background: var(--ink-mid);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.discovery-country-confirm-question {
+  margin: 0;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--cream);
+  text-align: center;
+}
+
+.discovery-country-confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.discovery-country-confirm-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cream-mute);
+}
+
+.discovery-country-confirm-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  background: rgba(26, 20, 16, 0.7);
+  border: 1px solid var(--ink-border);
+  border-radius: 4px;
+  color: var(--cream);
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 16px;
+  outline: none;
+}
+
+.discovery-country-confirm-select:focus-visible {
+  border-color: var(--gold-line);
+}
+
+.discovery-country-confirm-select:disabled {
+  color: var(--cream-mute);
+}
+
+/* Gold used once in this block — the confirm button's border/text, never a
+   background fill (design floor: one accent, sparingly). */
+.discovery-country-confirm-button {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--gold-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gold);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.discovery-country-confirm-button:disabled {
+  color: var(--cream-mute);
+  border-color: var(--ink-border);
+  cursor: default;
+}
+
+.discovery-country-confirm-error {
+  margin: 0;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--cream-dim);
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .discovery-country-confirm-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .discovery-country-confirm-label { flex: 0 0 auto; }
+  .discovery-country-confirm-select { flex: 1; }
+  .discovery-country-confirm-button { flex: 0 0 auto; width: auto; padding: 0 20px; }
+}
+
 .discovery-register-loading-dots { display: inline-flex; gap: 3px; }
 .discovery-register-loading-dots span {
   width: 3px;
@@ -696,7 +797,9 @@ select {
 .discovery-register-header button:focus-visible,
 .discovery-register-controls button:focus-visible,
 .discovery-register-controls input:focus-visible,
-.discovery-register-show-more:focus-visible {
+.discovery-register-show-more:focus-visible,
+.discovery-country-confirm-select:focus-visible,
+.discovery-country-confirm-button:focus-visible {
   outline: 1px solid var(--gold);
   outline-offset: 2px;
 }

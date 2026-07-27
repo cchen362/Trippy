@@ -110,3 +110,33 @@ describe('useDiscovery — decline notices (W1.5)', () => {
     expect(result.current.getDestination('Testville', 'TV').notice).toBeNull();
   });
 });
+
+describe('useDiscovery — country_required decline (W4.5, F-26-26)', () => {
+  it('routes a country_required decline to notice (not error) with destination and suggestedCountryCode', async () => {
+    discoveryApi.discover.mockImplementation(async (tripId, destination, countryCode, interestTags, onChunk) => {
+      onChunk({
+        type: 'error',
+        code: 'country_required',
+        message: "We don't know which country Suzhou is in — confirm it and we'll start its catalogue.",
+        destination: 'Suzhou',
+        suggestedCountryCode: 'MY',
+      });
+    });
+
+    const { result } = renderHook(() => useDiscovery('trip-1'));
+
+    await act(async () => {
+      await result.current.discover('Suzhou', null);
+    });
+
+    const entry = result.current.getDestination('Suzhou', null);
+    expect(entry.error).toBeNull();
+    expect(entry.loading).toBe(false);
+    expect(entry.notice).toEqual({
+      code: 'country_required',
+      message: "We don't know which country Suzhou is in — confirm it and we'll start its catalogue.",
+      destination: 'Suzhou',
+      suggestedCountryCode: 'MY',
+    });
+  });
+});

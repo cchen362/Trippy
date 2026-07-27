@@ -22,6 +22,7 @@ import { bookingsApi } from '../services/bookingsApi.js';
 import { tripsApi } from '../services/tripsApi.js';
 import { tripIsLive } from '../utils/tripStatus.js';
 import { contextForRoute } from '../utils/copilotContext.js';
+import { discoveryCountryForDay } from '../utils/dayGeo.js';
 
 export function useTripContext() {
   return useOutletContext();
@@ -68,15 +69,27 @@ export default function TripPage() {
   // Pre-warm discovery as soon as trip loads — state lives here so it survives tab navigation.
   useEffect(() => {
     if (!tripState.trip || tripState.loading) return;
-    const destination =
-      tripState.days[0]?.resolvedCity ??
-      tripState.days[0]?.city ??
-      tripState.trip.destinations?.[0];
+    // City and country must come from the SAME source (mirrors the identical
+    // fix in DiscoveryPanel.jsx's defaultDestination/defaultCountry). Only
+    // fall through to the trip-level destination/country when day[0] has no
+    // city at all to derive from — NOT whenever discoveryCountryForDay
+    // rejects day[0]'s country, since that rejected country is usually the
+    // very value destinationCountries[0] also holds (a 冲绳 day's country
+    // being dropped, then re-guessed straight back to the trip's own 'CN').
+    const hasGeoDay = Boolean(tripState.days[0]?.resolvedCity ?? tripState.days[0]?.city);
+    const destination = hasGeoDay
+      ? (tripState.days[0].resolvedCity ?? tripState.days[0].city)
+      : tripState.trip.destinations?.[0];
     if (!destination) return;
-    const countryCode =
-      tripState.days[0]?.resolvedCountry ??
-      tripState.trip.destinationCountries?.[0] ??
-      null;
+    // Discovery-only country trust (Plan 26 W4.2, F-26-10): a day-derived
+    // country goes through discoveryCountryForDay so a country whose
+    // evidence layer named a different city than the day (e.g. an Okinawa
+    // override inheriting "China" from yesterday's Shanghai carry) never
+    // reaches Discovery's request — and, once rejected, does not fall
+    // through to destinationCountries (trip-level, not day-derived) either.
+    const countryCode = hasGeoDay
+      ? discoveryCountryForDay(tripState.days[0])
+      : (tripState.trip.destinationCountries?.[0] ?? null);
     discovery.discover(destination, countryCode);
   }, [tripState.trip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

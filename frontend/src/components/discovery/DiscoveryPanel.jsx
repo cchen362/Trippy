@@ -6,6 +6,7 @@ import DayPicker from './DayPicker.jsx';
 import { bookingsApi } from '../../services/bookingsApi.js';
 import { discoveryApi } from '../../services/discoveryApi.js';
 import { canonicalGeoKey } from '../../utils/geoIdentity.js';
+import { discoveryCountryForDay } from '../../utils/dayGeo.js';
 import { normalizeName } from '../../utils/placeNames.js';
 
 const TAG_TO_CATEGORY = {
@@ -257,8 +258,27 @@ function PlaceResultRow({ prediction, days, onAdd }) {
 }
 
 export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClose, discovery, onOpenCopilot }) {
-  const defaultDestination = activeDay?.resolvedCity ?? activeDay?.city ?? days[0]?.resolvedCity ?? days[0]?.city ?? trip.destinations?.[0] ?? '';
-  const defaultCountry = activeDay?.resolvedCountry ?? days[0]?.resolvedCountry ?? trip.destinationCountries?.[0] ?? null;
+  // City and country must come from the SAME source. Two independent `??`
+  // chains (one walking activeDay -> days[0] -> trip.destinations, the other
+  // walking the equivalent country fallbacks) can pair one day's city with a
+  // DIFFERENT day's country — which is F-26-10's defect at panel scope — and,
+  // worse, would let a country discoveryCountryForDay just rejected fall
+  // through to a coarser guess that is usually the very country that was
+  // rejected (a 冲绳 day's country falling through to the Shanghai day, or
+  // further to the trip's own 'CN'). Resolving the source day ONCE and
+  // reading both fields off it means a rejected country stays rejected
+  // instead of being re-guessed from a different geography source.
+  const geoDay = (activeDay?.resolvedCity ?? activeDay?.city)
+    ? activeDay
+    : ((days[0]?.resolvedCity ?? days[0]?.city) ? days[0] : null);
+  const defaultDestination = geoDay
+    ? (geoDay.resolvedCity ?? geoDay.city)
+    : (trip.destinations?.[0] ?? '');
+  // trip.destinationCountries is trip-level, not day-derived, and stays as a
+  // plain fallback only when there's no geo day at all to derive from.
+  const defaultCountry = geoDay
+    ? discoveryCountryForDay(geoDay)
+    : (trip.destinationCountries?.[0] ?? null);
 
   // `destination` is the live input draft (updates every keystroke).
   // `committedDestination` is the lookup/search key — it only changes when the
@@ -276,6 +296,14 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const [surprisePick, setSurprisePick] = useState(null);
   const [reportedIds, setReportedIds] = useState(() => new Set());
   const [selectedDetailKey, setSelectedDetailKey] = useState(null);
+
+  // Country confirmation state (Plan 26 W4.5, F-26-26). `countryOptions` is
+  // `null` until fetched — fetched lazily, only once the confirmation block
+  // actually needs to render, since most sessions never hit an
+  // unknown-country destination and shouldn't pay for the lookup on mount.
+  const [countryOptions, setCountryOptions] = useState(null);
+  const [countriesFetchError, setCountriesFetchError] = useState(null);
+  const [selectedCountryCode, setSelectedCountryCode] = useState('');
 
   // Search-inside-Discover state
   const [searchQuery, setSearchQuery] = useState('');
@@ -308,6 +336,47 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
     await discoveryApi.reportPlace(placeId, trip.id);
     setReportedIds((prev) => new Set(prev).add(placeId));
     setSelectedDetailKey((selected) => selected === `id:${placeId}` ? null : selected);
+  };
+
+  // Country confirmation (Plan 26 W4.5, F-26-26). Every time a fresh
+  // country_required decline arrives (a new destination, or a re-decline),
+  // reset the select's default to whatever the server suggested — a stale
+  // pick from a previous decline must not silently carry over.
+  useEffect(() => {
+    if (notice?.code !== 'country_required') return;
+    setSelectedCountryCode(notice.suggestedCountryCode ?? '');
+  }, [notice?.code, notice?.destination, notice?.suggestedCountryCode]);
+
+  // Lazy country-list fetch: only fires the first time a country_required
+  // decline is seen in this panel session, not on mount — most sessions never
+  // hit an unknown-country destination. `countryOptions !== null` (fetched)
+  // or a prior fetch failure both short-circuit repeat requests.
+  useEffect(() => {
+    if (notice?.code !== 'country_required') return;
+    if (countryOptions !== null || countriesFetchError) return;
+    let cancelled = false;
+    bookingsApi.lookupCountries()
+      .then((res) => {
+        if (!cancelled) setCountryOptions(res?.countries ?? []);
+      })
+      .catch((err) => {
+        console.error('[DiscoveryPanel] failed to load country list', err);
+        if (!cancelled) setCountriesFetchError(err);
+      });
+    return () => { cancelled = true; };
+  }, [notice?.code, countryOptions, countriesFetchError]);
+
+  const handleConfirmCountry = () => {
+    if (!selectedCountryCode) return;
+    // getDestination() reads results via (committedDestination, committedCountry)
+    // together — if notice.destination ever differs from committedDestination,
+    // discover() must stream results in under the SAME key the panel reads,
+    // or the confirmed catalogue arrives invisibly. Compute it once and use
+    // it for both the state update and the discover() call.
+    const confirmedDestination = notice?.destination ?? committedDestination.trim();
+    setCommittedDestination(confirmedDestination);
+    setCommittedCountry(selectedCountryCode);
+    discover(confirmedDestination, selectedCountryCode);
   };
 
   // Recompute the default destination whenever the active day changes (the
@@ -545,6 +614,10 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   );
 
   const isSearching = searchQuery.trim().length >= 2;
+  // Gates the inline country confirmation (Plan 26 W4.5, F-26-26) — placed
+  // ahead of every other results-region branch below, including the "enter a
+  // destination" empty state, which it must never render underneath.
+  const showCountryPrompt = !error && !isSearching && notice?.code === 'country_required';
   const searchMatches = isSearching
     ? Object.values(partialResults).flat().filter((s) => suggestionMatchesQuery(s, searchQuery))
     : [];
@@ -850,6 +923,48 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </p>
         )}
 
+        {/* Country confirmation (Plan 26 W4.5, F-26-26): the server refuses to
+            create a destination whose country isn't known (the live Suzhou
+            defect — an empty-country catalogue that can never verify) and
+            asks instead. Takes precedence over the "enter a destination"
+            empty state below via showCountryPrompt in that condition. */}
+        {showCountryPrompt && (
+          <div className="discovery-country-confirm">
+            <p className="discovery-country-confirm-question">{notice.message}</p>
+            <div className="discovery-country-confirm-row">
+              <label htmlFor="discovery-country-select" className="discovery-country-confirm-label">
+                Country
+              </label>
+              {countriesFetchError ? (
+                <p className="discovery-country-confirm-error">
+                  Couldn’t load the country list. Please try again shortly.
+                </p>
+              ) : (
+                <select
+                  id="discovery-country-select"
+                  className="discovery-country-confirm-select"
+                  value={selectedCountryCode}
+                  onChange={(e) => setSelectedCountryCode(e.target.value)}
+                  disabled={!countryOptions}
+                >
+                  <option value="">{countryOptions ? 'Select a country…' : 'Loading countries…'}</option>
+                  {(countryOptions ?? []).map((c) => (
+                    <option key={c.code} value={c.code}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className="discovery-country-confirm-button"
+                disabled={!selectedCountryCode}
+                onClick={handleConfirmCountry}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        )}
+
         {!error && isSearching && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {searchMatches.length > 0 && (
@@ -975,7 +1090,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </div>
         )}
 
-        {!error && !isSearching && !loading && !anyResults && (
+        {!error && !isSearching && !loading && !anyResults && !showCountryPrompt && (
           <p style={{
             fontFamily: "'Cormorant Garamond', serif",
             fontSize: 20, color: 'rgba(240,234,216,0.35)',

@@ -9,10 +9,18 @@ import {
   lookupDestinationBounds,
   lookupPhotos,
 } from '../services/lookups.js';
+// Static data, no I/O — importing straight from utils/countries.js is correct here
+// (no service passthrough needed) so the country_required confirmation UI (Plan 26 W4.5)
+// reads the exact same code/name table countryCodeFromName/countryNameFromCode use.
+import { listCountries } from '../utils/countries.js';
 
 const router = Router();
 
 router.use(requireAuth);
+
+router.get('/countries', (req, res) => {
+  res.json({ countries: listCountries() });
+});
 
 router.get('/photos', async (req, res, next) => {
   try {

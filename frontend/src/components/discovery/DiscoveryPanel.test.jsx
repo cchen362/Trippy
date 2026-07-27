@@ -23,6 +23,7 @@ vi.mock('../../services/bookingsApi.js', () => ({
   bookingsApi: {
     lookupPlaces: vi.fn(),
     lookupHotelDetails: vi.fn(),
+    lookupCountries: vi.fn(),
   },
 }));
 
@@ -389,6 +390,50 @@ describe('DiscoveryPanel — cross-city country selection (Wave 5 §5.2)', () =>
     const [, payload] = onAddStop.mock.calls[0];
     expect(payload.locationCountry).toBeNull();
     expect(payload.locationCity).toBe('Othertown');
+  });
+});
+
+describe('DiscoveryPanel — city and country resolve from the SAME day (Plan 26 W4.2 defect fix)', () => {
+  // The regression this guards: defaultDestination and defaultCountry used to
+  // be two INDEPENDENT `??` chains (activeDay -> days[0] -> trip-level, each
+  // evaluated separately). That let a country discoveryCountryForDay just
+  // rejected for activeDay fall through to days[0]'s country, or further to
+  // trip.destinationCountries[0] — both of which are typically the exact
+  // country that was just rejected. Here activeDay is the 冲绳-style rejected
+  // day, days[0] is a DIFFERENT day with a good country, and
+  // destinationCountries also holds that same good country — every fallback
+  // hop is primed to silently resurrect 'CN'. The fix must still land on null.
+  it('never falls through to days[0] or trip.destinationCountries when the active day\'s own country is rejected', () => {
+    const rejectedDay = {
+      id: 'day-2',
+      resolvedCity: 'Okinawa',
+      city: 'Okinawa',
+      resolvedCountry: 'CN',
+      resolvedCountryEvidenceCity: 'Shanghai', // different city -> rejected
+    };
+    const goodDay = {
+      id: 'day-1',
+      resolvedCity: 'Shanghai',
+      city: 'Shanghai',
+      resolvedCountry: 'CN',
+      resolvedCountryEvidenceCity: 'Shanghai', // same city -> would be kept
+    };
+    const trip = { ...TRIP, destinationCountries: ['CN'] };
+    const discovery = makeDiscovery();
+
+    render(
+      <DiscoveryPanel
+        trip={trip}
+        days={[goodDay, rejectedDay]}
+        activeDay={rejectedDay}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    expect(discovery.discover).toHaveBeenCalledWith('Okinawa', null);
+    expect(discovery.discover).not.toHaveBeenCalledWith('Okinawa', 'CN');
   });
 });
 
@@ -862,5 +907,84 @@ describe('DiscoveryPanel — presentation follow-up', () => {
     expect(screen.getByRole('button', { name: /^hidden gems/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^architecture/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^wellness/i })).toBeInTheDocument();
+  });
+});
+
+describe('DiscoveryPanel — inline country confirmation (Plan 26 W4.5, F-26-26)', () => {
+  it('renders the confirmation on a country_required notice, pre-selects the suggested country, and confirming calls discover with the chosen code', async () => {
+    bookingsApi.lookupCountries.mockResolvedValue({
+      countries: [{ code: 'CN', name: 'China' }, { code: 'MY', name: 'Malaysia' }],
+    });
+
+    const discovery = makeDiscovery({
+      notice: {
+        code: 'country_required',
+        message: "We don't know which country Suzhou is in — confirm it and we'll start its catalogue.",
+        destination: 'Suzhou',
+        suggestedCountryCode: 'MY',
+      },
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    // The question line renders in the product's voice, and the empty-state
+    // "Enter a destination" line must not render underneath it.
+    expect(screen.getByText(/we don't know which country suzhou is in/i)).toBeInTheDocument();
+    expect(screen.queryByText(/enter a destination and tap go/i)).not.toBeInTheDocument();
+
+    const select = await screen.findByLabelText('Country');
+    await waitFor(() => expect(select).toHaveValue('MY'));
+
+    fireEvent.change(select, { target: { value: 'CN' } });
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    expect(discovery.discover).toHaveBeenCalledWith('Suzhou', 'CN');
+    // Defect fix: confirming must also move committedDestination to
+    // notice.destination ('Suzhou', which differs from the panel's original
+    // 'Testville' default here) — otherwise getDestination() keeps reading
+    // results under the OLD key while discover() streams them in under the
+    // new one, and the confirmed catalogue never appears.
+    await waitFor(() => expect(discovery.getDestination).toHaveBeenLastCalledWith('Suzhou', 'CN'));
+  });
+
+  it('leaves the panel usable and reports the error when the country list fails to load', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bookingsApi.lookupCountries.mockRejectedValue(new Error('network down'));
+
+    const discovery = makeDiscovery({
+      notice: {
+        code: 'country_required',
+        message: "We don't know which country Suzhou is in — confirm it and we'll start its catalogue.",
+        destination: 'Suzhou',
+        suggestedCountryCode: null,
+      },
+    });
+
+    render(
+      <DiscoveryPanel
+        trip={TRIP}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={discovery}
+      />,
+    );
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(screen.getByText(/couldn.t load the country list/i)).toBeInTheDocument();
+    // The panel around the failed control stays intact and usable.
+    expect(screen.getByText(/we don't know which country suzhou is in/i)).toBeInTheDocument();
+
+    consoleError.mockRestore();
   });
 });

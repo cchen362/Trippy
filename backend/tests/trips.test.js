@@ -2,12 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+// Plan 26 W4.3: updateDayCityOverride -> resolveOverrideCountry awaits resolvePlace, which
+// would otherwise attempt a real network lookup. resolvePlace is used by trips.js ONLY
+// through resolveOverrideCountry, so mocking it here is safe for every other test in this
+// file (vi.hoisted required — see the identical pattern/reasoning in discovery.test.js).
+const { mockResolvePlace } = vi.hoisted(() => ({ mockResolvePlace: vi.fn() }));
+vi.mock('../src/services/placeResolver.js', () => ({
+  resolvePlace: mockResolvePlace,
+}));
+
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import {
   createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
-  listTripScopes, getTripDetail, listTripsForUser, boundsCentroid,
+  listTripScopes, getTripDetail, listTripsForUser, boundsCentroid, updateDayCityOverride,
 } from '../src/services/trips.js';
 import { createBooking } from '../src/services/bookings.js';
 import { createExpense } from '../src/services/expenses.js';
@@ -239,6 +249,12 @@ describe('deriveDayGeo / listDaysForTrip resolvedCountry (Plan 6 Wave 2)', () =>
     const day10 = days.find((d) => d.date === '2026-09-10');
     expect(day10.resolvedCity).toBe('Melaka'); // override wins city
     expect(day10.resolvedCountry).toBe('MY'); // no country on the override — falls through to the hotel
+    // Plan 26 W4.1: additive layer-source signal — city and country come from different
+    // layers here, and that's the CORRECT case (owner decision D-26-2 test-pins this: the
+    // decline rule downstream must not fire just because sources differ).
+    expect(day10.resolvedCitySource).toBe('override');
+    expect(day10.resolvedCountrySource).toBe('hotel');
+    expect(day10.resolvedCountryEvidenceCity).toBe('Melaka'); // hotel's own city agrees with the override
   });
 
   it('missing-country trip: a null-country day falls through the whole precedence to null', () => {
@@ -351,7 +367,14 @@ describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
     const trip = makeTrip();
     const dayId = dayIdFor(trip.trip.id, '2026-09-10');
     const geo = getDayGeo(dayId);
-    expect(geo).toEqual({ city: 'Chengdu', countryCode: 'CN', resolutionAnchor: null });
+    expect(geo).toEqual({
+      city: 'Chengdu',
+      countryCode: 'CN',
+      resolutionAnchor: null,
+      citySource: 'seed',
+      countrySource: 'seed',
+      countryEvidenceCity: 'Chengdu',
+    });
   });
 
   it('carries the previous day pair forward when walking to the target day', () => {
@@ -362,7 +385,14 @@ describe('getDayGeo (Plan 6 Wave 2 — geocoding-bias helper)', () => {
     `).run(trip.trip.id, JSON.stringify({ city: 'Chongqing', countryCode: 'CN' }));
     const dayId = dayIdFor(trip.trip.id, '2026-09-12');
     const geo = getDayGeo(dayId);
-    expect(geo).toEqual({ city: 'Chongqing', countryCode: 'CN', resolutionAnchor: null });
+    expect(geo).toEqual({
+      city: 'Chongqing',
+      countryCode: 'CN',
+      resolutionAnchor: null,
+      citySource: 'previous',
+      countrySource: 'previous',
+      countryEvidenceCity: 'Chongqing',
+    });
   });
 });
 
@@ -524,6 +554,11 @@ describe('hotel city promotion ladder (Plan 8 Wave 2 — Task 2.2, audit finding
       '[geo] hotel city demoted to anchor',
       expect.objectContaining({ demoted: 'Sinsing District' }),
     );
+    // Plan 26 W4.1: the country-winning layer is 'hotel', but the hotel's OWN city
+    // demoted to null (the case this test exists to cover) — countryEvidenceCity must
+    // be null, not the seed city 'Kaohsiung' that separately won the city ladder.
+    expect(day.resolvedCountrySource).toBe('hotel');
+    expect(day.resolvedCountryEvidenceCity).toBeNull();
   });
 
   it('F5: legacy city-only evidence unrelated to any scope demotes; seed wins the display city', () => {
@@ -1336,5 +1371,97 @@ describe('destinationsGeo (Plan 22 W1)', () => {
     expect(byName.Singapore.lat).toBeNull();
     expect(byName.Singapore.lng).toBeNull();
     expect(byName.Singapore.coordinateSystem).toBeNull();
+  });
+});
+
+describe('deriveDayGeo — layer-source signal (Plan 26 W4.1)', () => {
+  it('F-26-10: a free-text override with no country, following a same-trip day in a different country, carries the PREVIOUS day\'s country and city as evidence — this is exactly what the frontend decline rule keys on', () => {
+    const trip = createTrip(owner.id, {
+      title: 'Shanghai then Okinawa',
+      destinations: [{ city: 'Shanghai', countryCode: 'CN' }],
+      startDate: '2026-09-10',
+      endDate: '2026-09-11',
+      travellers: 'solo',
+      interestTags: [],
+      pace: 'moderate',
+    });
+    const tripId = trip.trip.id;
+    // Day 1 seeds Shanghai/CN (createTrip default). Day 2 gets a bare free-text override
+    // with no attached country — exactly how a user typing "冲绳" into the day editor
+    // produces a day row, per F-26-10.
+    getDb().prepare('UPDATE days SET city_override = ? WHERE trip_id = ? AND date = ?')
+      .run('冲绳', tripId, '2026-09-11');
+
+    const days = listDaysForTrip(tripId, owner.id, []);
+    const day1 = days.find((d) => d.date === '2026-09-10');
+    const day2 = days.find((d) => d.date === '2026-09-11');
+
+    expect(day1.resolvedCity).toBe('Shanghai');
+    expect(day1.resolvedCountry).toBe('CN');
+
+    // Day 2: override wins the city ladder, but nothing about the override named a
+    // country, so the country carries forward from day 1 (layer 4, 'previous') — the
+    // precedence itself is UNCHANGED (D-26-2). The new signal makes this decidable:
+    // countryEvidenceCity ('Shanghai') is a DIFFERENT place than the winning city
+    // ('冲绳'), which is exactly the divergence the frontend uses to decline the country.
+    expect(day2.resolvedCity).toBe('冲绳');
+    expect(day2.resolvedCountry).toBe('CN');
+    expect(day2.resolvedCitySource).toBe('override');
+    expect(day2.resolvedCountrySource).toBe('previous');
+    expect(day2.resolvedCountryEvidenceCity).toBe('Shanghai');
+  });
+
+  it('listDaysForTrip exposes resolvedCitySource/resolvedCountrySource/resolvedCountryEvidenceCity on every day object', () => {
+    const trip = makeTrip();
+    const days = listDaysForTrip(trip.trip.id, owner.id, []);
+    expect(days.length).toBeGreaterThan(0);
+    for (const day of days) {
+      expect(day).toHaveProperty('resolvedCitySource');
+      expect(day).toHaveProperty('resolvedCountrySource');
+      expect(day).toHaveProperty('resolvedCountryEvidenceCity');
+    }
+    // Single-city seeded trip, no override/hotel/transit evidence anywhere: day 1 has no
+    // previous day to carry, so it resolves from its own seed; every later day's
+    // 'previous' layer already carries the identical Chengdu/CN pair forward, and
+    // 'previous' outranks 'seed' in the ladder, so days 2+ report 'previous' even though
+    // the value never actually changes. Either way the country-evidence city is always
+    // 'Chengdu' — the value never diverges across the whole trip.
+    expect(days[0].resolvedCitySource).toBe('seed');
+    expect(days[0].resolvedCountrySource).toBe('seed');
+    expect(days.slice(1).every((d) => d.resolvedCitySource === 'previous')).toBe(true);
+    expect(days.slice(1).every((d) => d.resolvedCountrySource === 'previous')).toBe(true);
+    expect(days.every((d) => d.resolvedCountryEvidenceCity === 'Chengdu')).toBe(true);
+  });
+});
+
+describe('resolveOverrideCountry confidence gate (Plan 26 W4.3)', () => {
+  beforeEach(() => {
+    mockResolvePlace.mockReset();
+  });
+
+  it('an "estimated" (weak) hit is discarded — city_override_country stored as NULL, not the guessed code', async () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'estimated', countryCode: 'CN' });
+
+    await updateDayCityOverride(owner.id, tripId, '2026-09-10', 'Somewhere Vague');
+
+    const stored = getDb().prepare(
+      'SELECT city_override_country FROM days WHERE trip_id = ? AND date = ?',
+    ).get(tripId, '2026-09-10');
+    expect(stored.city_override_country).toBeNull();
+  });
+
+  it('a "resolved" (strong) hit is accepted — city_override_country stores the real code', async () => {
+    const trip = makeTrip();
+    const tripId = trip.trip.id;
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'resolved', countryCode: 'JP' });
+
+    await updateDayCityOverride(owner.id, tripId, '2026-09-10', 'Okinawa');
+
+    const stored = getDb().prepare(
+      'SELECT city_override_country FROM days WHERE trip_id = ? AND date = ?',
+    ).get(tripId, '2026-09-10');
+    expect(stored.city_override_country).toBe('JP');
   });
 });

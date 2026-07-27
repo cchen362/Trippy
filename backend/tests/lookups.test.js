@@ -20,6 +20,11 @@ const {
   lookupDestinationBounds,
 } = await import('../src/services/lookups.js');
 
+// requireAuth is real middleware — the route-level test below invokes the GET /countries
+// handler directly (same pattern discovery.test.js's callDiscover uses), so auth never
+// actually runs; this only exercises the handler function itself.
+const { default: lookupsRouter } = await import('../src/routes/lookups.js');
+
 beforeEach(() => {
   mockConfig.flightDataProvider = '';
   mockConfig.aerodataboxApiKey = '';
@@ -553,5 +558,26 @@ describe('lookupFlightDetails', () => {
 
     expect(flight.lookupStatus).toBe('manual_only');
     expect(flight.note).toMatch(/Flight schedule lookup is unavailable/i);
+  });
+});
+
+describe('GET /lookups/countries (Plan 26 W4.5 — country_required confirmation UI)', () => {
+  it('returns every entry with a code and name, sorted, and includes MY -> Malaysia', () => {
+    const layer = lookupsRouter.stack.find(
+      (l) => l.route?.path === '/countries' && l.route.methods.get,
+    );
+    expect(layer).toBeDefined();
+
+    let payload;
+    const res = { json: (body) => { payload = body; } };
+    layer.route.stack[0].handle({}, res, () => {});
+
+    expect(Array.isArray(payload.countries)).toBe(true);
+    expect(payload.countries.length).toBeGreaterThan(100);
+    for (const entry of payload.countries) {
+      expect(typeof entry.code).toBe('string');
+      expect(typeof entry.name).toBe('string');
+    }
+    expect(payload.countries.find((c) => c.code === 'MY')).toEqual({ code: 'MY', name: 'Malaysia' });
   });
 });

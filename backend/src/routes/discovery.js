@@ -8,6 +8,7 @@ import { runCatalogueGeneration } from '../services/discoveryGeneration.js';
 import { DISCOVERY_CATEGORIES } from '../services/claude.js';
 import {
   getOrCreateDestination,
+  findDestination,
   listActivePlaces,
   getDailyGenerationCount,
   listCountryCodedRows,
@@ -87,10 +88,10 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     if (countryCode !== undefined && countryCode !== null && !/^[A-Z]{2}$/.test(countryCode)) {
       throw Object.assign(new Error('countryCode must be a 2-letter uppercase code'), { status: 400 });
     }
-    let normalizedCountryCode = countryCode ?? '';
+    const normalizedCountryCode = countryCode ?? '';
 
-    // db handle has no side effects — obtained early so the D6 guard below
-    // (which needs to query the catalogue) can run before it's otherwise
+    // db handle has no side effects — obtained early so the country_required guard
+    // below (which needs to query the catalogue) can run before it's otherwise
     // needed for getOrCreateDestination.
     const db = getDb();
 
@@ -112,26 +113,15 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const claudeDestinationBase = destination.trim().toLowerCase();
     const cacheKey = canonicalGeoKey(destination);
 
-    // D6 (Plan 9 W5.1): an EMPTY-countryCode Discovery request reuses the
-    // single existing country-coded catalogue row for the same city key,
-    // instead of minting a fresh ''-bucket twin (the bug that recreated the
-    // kualalumpur|'' row on 2026-07-09, since the KL trip's days.city_country
-    // is NULL). Zero or multiple country-coded rows keep today's ''-bucket
-    // behavior exactly — multiple is genuinely ambiguous and must not be
-    // guessed at. Adopting the code here (before getOrCreateDestination)
-    // makes it the effective country for the whole request: the catalogue
-    // row lookup, the Claude destination-string composition below, and
-    // anything else keyed on the request's country.
-    if (normalizedCountryCode === '') {
-      const countryCodedRows = listCountryCodedRows(db, cacheKey);
-      if (countryCodedRows.length === 1) {
-        normalizedCountryCode = countryCodedRows[0].country_code;
-        console.log(
-          '[discovery] country-fallback city_key=%s -> %s',
-          cacheKey, normalizedCountryCode,
-        );
-      }
-    }
+    // Plan 26 W4.4: the old D6 single-row country adoption (Plan 9 W5.1) was removed
+    // here. It silently set normalizedCountryCode to whichever country-coded row shared
+    // this city key, on the theory that one prior row was strong-enough identity evidence
+    // about a newly typed label. Per F-26-14 that's wrong: canonicalGeoKey folds homonyms
+    // together (a second, genuinely different Georgetown collapses to the same cacheKey
+    // as the first), so "one row shares the key" is not proof they're the same place — it
+    // silently mis-assigned a country to an unrelated destination. W4.5 below replaces
+    // silent adoption with an explicit decline-and-ask, still using the single-row case
+    // only as a *suggestion* the user can accept or override.
 
     // When the country is known, disambiguate homonym cities (e.g. Chengdu,
     // multiple Georgetowns) by composing it into the STRING sent to Claude
@@ -156,6 +146,42 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       }
     };
+
+    // Plan 26 W4.5 (F-26-26): never mint a NEW empty-country destination row. A '' bucket
+    // can never verify its places — classifyHit in discoveryVerify.js returns
+    // 'empty_destination_country' for every hit, so the row is permanently stuck
+    // unverified/terminal (production already holds three such rows, one 62 places deep,
+    // 0 verified, created 2026-07-27 through ordinary use). Decline honestly and ask the
+    // user to confirm a country instead of guessing one (that guess is exactly what W4.4
+    // just removed) or silently creating an unverifiable row.
+    //
+    // Scoped to CREATION only: an empty-country row that already exists keeps serving its
+    // existing places untouched — W5.1 is the wave that deletes the three that exist, and
+    // blocking reads here would break them before that ships. `findDestination` is the
+    // read-only counterpart of getOrCreateDestination, so checking existence never mints
+    // the row it's checking for.
+    if (normalizedCountryCode === '') {
+      const existingEmpty = findDestination(db, cacheKey, '');
+      if (!existingEmpty) {
+        // Pre-fill only: when exactly one country-coded row already shares this city key,
+        // suggest it rather than adopting it (that's the D6 behavior W4.4 removed) — the
+        // common case becomes one tap to confirm, but the decision stays the user's.
+        const countryCodedRows = listCountryCodedRows(db, cacheKey);
+        const suggestedCountryCode = countryCodedRows.length === 1 ? countryCodedRows[0].country_code : null;
+        console.error(
+          '[discover] country_required city_key=%s suggested=%s',
+          cacheKey, suggestedCountryCode,
+        );
+        write({
+          type: 'error',
+          code: 'country_required',
+          message: `We don't know which country ${destination.trim()} is in — confirm it and we'll start its catalogue.`,
+          destination: destination.trim(),
+          suggestedCountryCode,
+        });
+        return res.end();
+      }
+    }
 
     // Always get-or-create the destination row — this is the persistent,
     // global (non-trip-specific) catalogue entry for this city/country pair.

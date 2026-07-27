@@ -12,7 +12,11 @@ const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loadin
 // that are an honest "not doing this right now" rather than a failure — the
 // UI must keep showing results and explain calmly, not show the generic red
 // retry line (DiscoveryPanel.jsx's `error` rendering).
-const DECLINE_CODES = new Set(['catalogue_full', 'generation_limit']);
+// 'country_required' (Plan 26 W4.5, F-26-26): the server refuses to create a
+// destination whose country isn't known — resolvable by the user picking one,
+// not a failure — so it routes here too, carrying `destination` and
+// `suggestedCountryCode` alongside the usual code/message.
+const DECLINE_CODES = new Set(['catalogue_full', 'generation_limit', 'country_required']);
 
 export function useDiscovery(tripId) {
   // cacheRef is the source of truth: { [normalizedDestination]: DiscoveryEntry }
@@ -64,7 +68,7 @@ export function useDiscovery(tripId) {
           // failure. Route it to `notice`, leaving `error` for the case with
           // no known code, which is a genuine failure.
           cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
-            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message } }
+            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
             : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }
@@ -126,7 +130,7 @@ export function useDiscovery(tripId) {
           // "Show more" button from getting stuck mid-loading on a decline
           // (loading:false is set here either way).
           cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
-            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message } }
+            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
             : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }

@@ -89,3 +89,14 @@ export function countryNameFromCode(code) {
   if (!REGION_CODE_SET.has(upper)) return null;
   return displayNames.of(upper) || null;
 }
+
+// Plan 26 W4.5: code->name list for the frontend's country_required confirmation UI
+// (the user must pick a real country rather than have one guessed at, per F-26-26/F-26-14).
+// Reuses REGION_CODES and the same displayNames instance built above — no second data
+// table, so this list can never drift out of sync with countryCodeFromName/countryNameFromCode.
+export function listCountries() {
+  return REGION_CODES
+    .map((code) => ({ code, name: displayNames.of(code) }))
+    .filter((entry) => Boolean(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}

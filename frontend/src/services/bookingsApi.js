@@ -41,6 +41,11 @@ export const bookingsApi = {
     if (sessionToken) params.set('sessionToken', sessionToken);
     return request(`/api/lookups/destination-bounds?${params}`);
   },
+  // Country picklist for Discovery's inline country confirmation (Plan 26
+  // W4.5, F-26-26) — the server refuses to create an unknown-country
+  // destination, so the panel needs a full country list to let the user
+  // resolve the ambiguity itself.
+  lookupCountries: () => request('/api/lookups/countries'),
   lookupFlight: ({ carrierCode, flightNumber, flightQuery, departureDate }) => {
     const params = new URLSearchParams({ departureDate });
     if (flightQuery) {

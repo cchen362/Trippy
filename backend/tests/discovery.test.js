@@ -279,11 +279,13 @@ describe('POST /trips/:tripId/discover — cache miss', () => {
       return FAKE_CATEGORIES;
     });
 
-    const { events, error } = await callDiscover({ destination: 'Tokyo' });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about the first-generation cache-miss path, not the country_required decline.
+    const { events, error } = await callDiscover({ destination: 'Tokyo', countryCode: 'JP' });
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
-    expect(mockDiscoverDestination.mock.calls[0][0]).toBe('tokyo');
+    expect(mockDiscoverDestination.mock.calls[0][0]).toBe('Tokyo, Japan (JP)');
 
     const doneEvent = events.find((e) => e.type === 'done');
     expect(doneEvent?.cached).toBe(false);
@@ -317,7 +319,9 @@ describe('POST /trips/:tripId/discover — cache miss', () => {
       return FAKE_CATEGORIES;
     });
 
-    const { error } = await callDiscover({ destination: 'Nara' });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about exclusion-list construction, not the country_required decline.
+    const { error } = await callDiscover({ destination: 'Nara', countryCode: 'JP' });
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
@@ -495,7 +499,10 @@ describe('POST /trips/:tripId/discover — merge-on-refresh', () => {
     });
 
     const before = Date.now();
-    const { error } = await callDiscover({ destination: 'Kobe City' });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about the generatedAt stamp on first generation, not the country_required decline,
+    // so it supplies one.
+    const { error } = await callDiscover({ destination: 'Kobe City', countryCode: 'JP' });
     const after = Date.now();
 
     expect(error).toBeUndefined();
@@ -537,7 +544,9 @@ describe('POST /trips/:tripId/discover — more:true (append mode)', () => {
       return FAKE_CATEGORIES;
     });
 
-    const { events, error } = await callDiscover({ destination: 'Nagoya', more: true });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about append-mode's first-generation fallback, not the country_required decline.
+    const { events, error } = await callDiscover({ destination: 'Nagoya', more: true, countryCode: 'JP' });
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).toHaveBeenCalledOnce();
@@ -738,79 +747,103 @@ describe('POST /trips/:tripId/discover — country-qualified destinations', () =
 // country-coded rows keep today's ''-bucket behavior exactly.
 // ---------------------------------------------------------------------------
 
-describe('POST /trips/:tripId/discover — D6 empty-country guard', () => {
-  it('reuses the single existing country-coded row (kualalumpur|MY) for an empty-countryCode request — no "" row created', async () => {
-    const myDest = seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
-    seedPlace(myDest.id, { category: 'culture', name: 'Petronas Towers' });
+describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.4/W4.5)', () => {
+  // Replaces the retired "D6 empty-country guard" describe block: D6's silent
+  // single-row country adoption (Plan 9 W5.1) was removed in W4.4 because
+  // canonicalGeoKey folds homonyms — one prior country-coded row sharing a
+  // folded city key is not identity evidence about a newly typed label
+  // (F-26-14). W4.5 replaces silent adoption AND the old "just create a ''
+  // bucket" fallback with an honest decline: an empty-country request that
+  // would mint a NEW destination row is declined and the user is asked to
+  // confirm a country, because a '' bucket can never verify its places
+  // (F-26-26 — production already holds three such stuck-unverified rows).
+
+  it('declines with country_required and creates no destination row when the city key has no existing row at all', async () => {
+    const db = getDb();
+    const before = db.prepare('SELECT COUNT(*) AS n FROM discovery_destinations WHERE city_key = ?').get('novaria').n;
+
+    const { events, error } = await callDiscover({ destination: 'Novaria' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({
+      type: 'error',
+      code: 'country_required',
+      destination: 'Novaria',
+      suggestedCountryCode: null,
+    });
+
+    const after = db.prepare('SELECT COUNT(*) AS n FROM discovery_destinations WHERE city_key = ?').get('novaria').n;
+    expect(after).toBe(before);
+    expect(before).toBe(0);
+  });
+
+  it('serves normally, without declining, when an empty-country row for that key already exists', async () => {
+    const dest = seedDestination({ cityKey: 'novaria', countryCode: '', displayName: 'Novaria', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'The Old Spire' });
+
+    const { events, error } = await callDiscover({ destination: 'Novaria' });
+
+    expect(error).toBeUndefined();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled(); // cache hit against the existing '' row
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
+    const categoryEvent = events.find((e) => e.type === 'category');
+    expect(categoryEvent?.items[0].name).toBe('The Old Spire');
+  });
+
+  it('suggests the single sharing country-coded row (kualalumpur|MY) but does not silently adopt it', async () => {
+    seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
 
     const { events, error } = await callDiscover({ destination: 'Kuala Lumpur' });
 
     expect(error).toBeUndefined();
-    expect(mockDiscoverDestination).not.toHaveBeenCalled(); // cache hit against the MY row
-    const doneEvent = events.find((e) => e.type === 'done');
-    expect(doneEvent?.cached).toBe(true);
-    const categoryEvent = events.find((e) => e.type === 'category');
-    expect(categoryEvent?.items[0].name).toBe('Petronas Towers');
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({
+      type: 'error',
+      code: 'country_required',
+      destination: 'Kuala Lumpur',
+      suggestedCountryCode: 'MY',
+    });
 
+    // Never silently adopted: no new country-coded row was created, and the
+    // "" bucket for this key was never minted either (creation-only decline).
     const db = getDb();
     const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('kualalumpur');
     expect(allRows).toHaveLength(1);
     expect(allRows[0].country_code).toBe('MY');
   });
 
-  it('falls back to the "" bucket as today when zero country-coded rows exist', async () => {
-    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
-      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
-      return FAKE_CATEGORIES;
-    });
-
-    const { error } = await callDiscover({ destination: 'Novaria' });
-
-    expect(error).toBeUndefined();
-    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
-
-    const db = getDb();
-    const row = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('novaria');
-    expect(row).toBeDefined();
-    expect(row.country_code).toBe('');
-  });
-
-  it('falls back to the "" bucket as today when two country-coded rows exist (georgetown|MY, georgetown|GY)', async () => {
+  it('declines with a null suggestion when two country-coded rows share the key (georgetown|MY, georgetown|GY) — genuinely ambiguous', async () => {
     seedDestination({ cityKey: 'georgetown', countryCode: 'MY', displayName: 'Georgetown' });
     seedDestination({ cityKey: 'georgetown', countryCode: 'GY', displayName: 'Georgetown' });
 
-    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
-      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
-      return FAKE_CATEGORIES;
-    });
-
-    const { error } = await callDiscover({ destination: 'Georgetown' });
+    const { events, error } = await callDiscover({ destination: 'Georgetown' });
 
     expect(error).toBeUndefined();
-    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: null });
 
     const db = getDb();
-    const emptyRow = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ? AND country_code = ?').get('georgetown', '');
-    expect(emptyRow).toBeDefined();
     const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('georgetown');
-    expect(allRows).toHaveLength(3);
+    expect(allRows).toHaveLength(2); // still just the two seeded rows — no '' twin minted
   });
 
-  it('leaves a CJK free-text key (北京) with no country-coded twin in the "" bucket, unchanged', async () => {
-    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
-      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
-      return FAKE_CATEGORIES;
-    });
-
-    const { error } = await callDiscover({ destination: '北京' });
+  it('declines a CJK free-text key (北京) with no country-coded twin the same way', async () => {
+    const db = getDb();
+    const { events, error } = await callDiscover({ destination: '北京' });
 
     expect(error).toBeUndefined();
-    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: null });
 
-    const db = getDb();
     const row = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('北京');
-    expect(row).toBeDefined();
-    expect(row.country_code).toBe('');
+    expect(row).toBeUndefined();
   });
 });
 
@@ -931,7 +964,9 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
     });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { events, error } = await callDiscover({ destination: 'Brand New City' });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about the Claude-call failure path, not the country_required decline.
+    const { events, error } = await callDiscover({ destination: 'Brand New City', countryCode: 'US' });
     errorSpy.mockRestore();
 
     expect(error).toBeUndefined();
@@ -1047,8 +1082,12 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
       return cats;
     });
 
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about the daily-generation counter, not the country_required decline, so every call
+    // supplies the same country consistently (a bare cacheKey lookup on later calls would
+    // otherwise miss the country-coded row this test's own first call creates).
     // Generation 1: brand new destination (cache miss).
-    await callDiscover({ destination: 'Repeatcity' });
+    await callDiscover({ destination: 'Repeatcity', countryCode: 'US' });
     const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('repeatcity');
 
     // Force subsequent calls to also be treated as generations by making the
@@ -1059,13 +1098,13 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
     ).run(staleTime, dest.id);
 
     forceStale();
-    await callDiscover({ destination: 'Repeatcity' }); // generation 2
+    await callDiscover({ destination: 'Repeatcity', countryCode: 'US' }); // generation 2
     forceStale();
-    await callDiscover({ destination: 'Repeatcity' }); // generation 3
+    await callDiscover({ destination: 'Repeatcity', countryCode: 'US' }); // generation 3
     forceStale();
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { events } = await callDiscover({ destination: 'Repeatcity' }); // 4th — blocked
+    const { events } = await callDiscover({ destination: 'Repeatcity', countryCode: 'US' }); // 4th — blocked
     errorSpy.mockRestore();
 
     expect(mockDiscoverDestination).toHaveBeenCalledTimes(3);
@@ -1256,8 +1295,11 @@ describe('pollution invariant', () => {
       return FAKE_CATEGORIES;
     });
 
-    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville' });
-    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville' });
+    // Plan 26 W4.5: a country is required to CREATE a new destination row — this test is
+    // about generation-order pollution, not the country_required decline, so both trips
+    // pass the countryCode their own destinationCountries already declare.
+    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville', countryCode: 'JP' });
+    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville', countryCode: 'JP' });
     const orderAB = snapshotDestination('pollutionville');
 
     getDb().prepare('DELETE FROM discovery_places').run();
@@ -1269,8 +1311,8 @@ describe('pollution invariant', () => {
       return FAKE_CATEGORIES;
     });
 
-    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville' });
-    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville' });
+    await callDiscoverAsTrip(tripB, { destination: 'Pollutionville', countryCode: 'JP' });
+    await callDiscoverAsTrip(tripA, { destination: 'Pollutionville', countryCode: 'JP' });
     const orderBA = snapshotDestination('pollutionville');
 
     expect(orderAB.destinations).toHaveLength(1);
