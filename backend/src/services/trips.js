@@ -1308,37 +1308,77 @@ export function deleteTrip(userId, tripId) {
   return { deleted: true };
 }
 
-// Resolves the override's country from the typed text: first try a trailing-comma-segment
-// country-name/code match ("Melaka, Malaysia" -> "MY"), else fall back to the same place
-// resolver stops.js uses (cache-first, Nominatim/Google Places network lookup keyed on the
-// city text). Returns null if neither yields a country — acceptable, per Wave 2 §2.3 the
-// precedence chain already tolerates a null-country day.
-async function resolveOverrideCountry(cityOverride) {
-  if (!cityOverride) return null;
-  const fromName = countryCodeFromName(cityOverride);
-  if (fromName) return fromName;
+// Shared resolver call behind both resolveCountryForCityText and
+// suggestCountryForDestinationText below (Plan 26 W4.6/W4.7/W4.8). Both need "what country
+// is this typed place text in", both go through the same trailing-comma-segment name match
+// first and the same single resolvePlace call — the ONLY thing that differs between the two
+// callers is what they're ALLOWED TO DO with the answer (silently decide vs. pre-fill a
+// control a human must confirm), and that difference is deliberately left visible in each
+// wrapper's own body rather than folded into a shared parameter, so a reader can see the
+// authority level without cross-referencing a flag.
+//
+// No `priority` here — both callers await this inline while the user watches a spinner
+// (updateDayCityOverride below) or a live SSE stream (routes/discovery.js), so it
+// deliberately keeps resolvePlace's default 'interactive' priority (W1.1). Do not pass
+// escalateWeakHit, onAttempt, or refreshCache either — those are non-interactive opt-ins
+// that a structural test asserts stay out of this call path.
+async function resolveCityTextCountryHit(cityText) {
+  if (!cityText) return { fromName: null, resolution: null };
+  const fromName = countryCodeFromName(cityText);
+  if (fromName) return { fromName, resolution: null };
 
   try {
-    // No `priority` here — this call is awaited inline inside the PUT handler
-    // (updateDayCityOverride below) while the user watches a spinner, so it deliberately
-    // keeps resolvePlace's default 'interactive' priority (W1.1). Out of scope for W4.3.
-    const resolution = await resolvePlace({ queryText: cityOverride, city: cityOverride });
-    // Plan 26 W4.3: only accept a 'resolved' hit. W2.1 narrowed the *labelling* of weak
-    // matches to 'estimated' but this function never looked at the label, so it was still
-    // accepting a guess as if it were a fact. An 'estimated' countryCode here is exactly
-    // that — a guess — and a null country is the honest answer; the precedence chain in
-    // deriveDayGeo already tolerates a null-country day (falls through to the next layer).
-    if (resolution?.locationStatus !== 'resolved') return null;
-    return resolution.countryCode || null;
+    const resolution = await resolvePlace({ queryText: cityText, city: cityText });
+    return { fromName: null, resolution };
   } catch {
-    return null;
+    return { fromName: null, resolution: null };
   }
+}
+
+// Resolves a typed place-text's country for DURABLE day geography
+// (updateDayCityOverride below writes the result into city_override_country, which feeds
+// map tiles, deep-link provider selection and geocoding bias for the rest of the trip). This
+// is the ONLY caller in the codebase allowed to let a geocoder hit silently DECIDE a country
+// — every other caller must treat its answer as a pre-fill a human confirms (see
+// suggestCountryForDestinationText below). Requires a 'resolved' hit — Plan 26 W4.3. W2.1
+// narrowed the *labelling* of weak matches to 'estimated' but this function never looked at
+// the label, so it was still accepting a guess as if it were a fact; a null country is the
+// honest answer, and the precedence chain in deriveDayGeo already tolerates a null-country
+// day (falls through to the next layer). Do not loosen this gate to match
+// suggestCountryForDestinationText's — a wrong country here is silent and durable, not a
+// re-askable prompt. Unchanged by Plan 26 W4.7/W4.8.
+export async function resolveCountryForCityText(cityText) {
+  const { fromName, resolution } = await resolveCityTextCountryHit(cityText);
+  if (fromName) return fromName;
+  if (resolution?.locationStatus !== 'resolved') return null;
+  return resolution.countryCode || null;
+}
+
+// Suggests (never decides) a typed destination's country, for pre-filling the
+// country_required confirmation control in routes/discovery.js. Accepts a country from ANY
+// resolver hit, regardless of locationStatus/confidence — Plan 26 W4.7 first tried using this
+// signal to silently ADOPT a country for catalogue creation and W4.8 (F-26-33) reversed that:
+// live QA found a deliberately-garbage destination ("qwxzptlkvv") missed on Nominatim, fell
+// through to Google Places, and weak-matched an unrelated business ("Equinix Singapore") at
+// the exact same locationStatus/confidence ('estimated'/0.55) that correct weak hits like
+// Kaohsiung/Chongqing/Suzhou/Chengdu/冲绳 also carry. No threshold on this signal can tell
+// those apart — it was silently creating a junk `qwxzptlkvv|SG` catalogue row and spending a
+// paid Google call plus a Claude generation, exactly the failure class W4.5 exists to
+// prevent. So this function's answer may ONLY ever pre-select a value in a dropdown a human
+// actively confirms (routes/discovery.js's country_required decline) — it must never again be
+// used to create a destination row or spend a provider/Claude call on its own authority. Do
+// NOT share this function's leniency with resolveCountryForCityText above, and do NOT call
+// this function anywhere that skips the human-confirmation step.
+export async function suggestCountryForDestinationText(destinationText) {
+  const { fromName, resolution } = await resolveCityTextCountryHit(destinationText);
+  if (fromName) return fromName;
+  return resolution?.countryCode || null;
 }
 
 export async function updateDayCityOverride(userId, tripId, date, cityOverride) {
   assertTripAccess(userId, tripId);
   const db = getDb();
-  const cityOverrideCountry = await resolveOverrideCountry(cityOverride);
+  const cityOverrideCountry = await resolveCountryForCityText(cityOverride);
   const result = db.prepare(`
     UPDATE days SET city_override = ?, city_override_country = ? WHERE trip_id = ? AND date = ?
     RETURNING id, date, city_override, city_override_country

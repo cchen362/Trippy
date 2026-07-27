@@ -3,7 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
 import { countryNameFromCode } from '../utils/countries.js';
-import { assertTripAccess } from '../services/trips.js';
+import { assertTripAccess, suggestCountryForDestinationText } from '../services/trips.js';
 import { runCatalogueGeneration } from '../services/discoveryGeneration.js';
 import { DISCOVERY_CATEGORIES } from '../services/claude.js';
 import {
@@ -88,7 +88,10 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     if (countryCode !== undefined && countryCode !== null && !/^[A-Z]{2}$/.test(countryCode)) {
       throw Object.assign(new Error('countryCode must be a 2-letter uppercase code'), { status: 400 });
     }
-    const normalizedCountryCode = countryCode ?? '';
+    // Reassigned below (Plan 26 W4.8) only in the single-existing-row adoption case (case 2
+    // of the decision table) — the geocoder is NEVER allowed to set this (see the comment
+    // block above the guard for why).
+    let normalizedCountryCode = countryCode ?? '';
 
     // db handle has no side effects — obtained early so the country_required guard
     // below (which needs to query the catalogue) can run before it's otherwise
@@ -113,15 +116,56 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     const claudeDestinationBase = destination.trim().toLowerCase();
     const cacheKey = canonicalGeoKey(destination);
 
-    // Plan 26 W4.4: the old D6 single-row country adoption (Plan 9 W5.1) was removed
-    // here. It silently set normalizedCountryCode to whichever country-coded row shared
-    // this city key, on the theory that one prior row was strong-enough identity evidence
-    // about a newly typed label. Per F-26-14 that's wrong: canonicalGeoKey folds homonyms
-    // together (a second, genuinely different Georgetown collapses to the same cacheKey
-    // as the first), so "one row shares the key" is not proof they're the same place — it
-    // silently mis-assigned a country to an unrelated destination. W4.5 below replaces
-    // silent adoption with an explicit decline-and-ask, still using the single-row case
-    // only as a *suggestion* the user can accept or override.
+    // Plan 26 W4.8 (F-26-33) — the no-country decision table, in order. A destination is
+    // NEVER created without a human confirming its country; the geocoder is consulted only
+    // to pre-fill a control the human must still confirm, never to decide.
+    //
+    // 1. An empty-country row already exists for (cacheKey, '') -> serve it exactly as
+    //    today. No geocoder call, no decline. (Unchanged; W5.1 deletes the three that exist.)
+    // 2. Exactly one country-coded row already exists for cacheKey -> adopt that country and
+    //    proceed normally, SILENTLY (no geocoder call). The destination already exists in the
+    //    shared catalogue; re-asking on every panel open was the recurring-nag defect QA
+    //    found. This is deliberately narrower than the D6 adoption W4.4 removed: D6 also
+    //    fired on the CREATION path, where a folded-homonym cacheKey (canonicalGeoKey collapses
+    //    a second, genuinely different Georgetown onto the first) could mint a wrong-country
+    //    catalogue row that didn't exist before. Here it only ever reuses a row that already
+    //    exists — there is nothing left to mis-create.
+    // 3. Zero country-coded rows, or MORE THAN ONE -> we would be CREATING a new row, or the
+    //    catalogue itself is ambiguous (the London-Ontario/London-UK, Georgetown-MY/
+    //    Georgetown-GY case). Always decline with country_required; never adopt.
+    //
+    // W4.6/W4.7 both tried letting the geocoder decide the country in case 3 (first only when
+    // 'resolved', then for any hit). Live QA against the real resolver broke the second
+    // version: a deliberately-garbage destination ("qwxzptlkvv") missed on Nominatim, fell
+    // through to Google Places, and weak-matched an unrelated business ("Equinix Singapore")
+    // at the exact same locationStatus/confidence ('estimated'/0.55) that correct weak hits
+    // like Kaohsiung/Chongqing carry — no threshold on that signal can tell them apart. That
+    // silently created a junk `qwxzptlkvv|SG` row and spent a paid Google call plus a Claude
+    // generation, exactly the failure class W4.5 exists to prevent. So the geocoder is now
+    // used ONLY to compute suggestedCountryCode below (case 3's decline payload) — a
+    // pre-filled default the user must actively confirm, never a silent decision. The Equinix
+    // case is now harmless: it can only ever pre-select "Singapore" in a dropdown, and the
+    // decline returns before getOrCreateDestination or any Claude call.
+    let existingEmptyDestination = null;
+    let countryRequiredSuggestion = null;
+    let mustDeclineCountryRequired = false;
+    if (normalizedCountryCode === '') {
+      existingEmptyDestination = findDestination(db, cacheKey, ''); // case 1
+      if (!existingEmptyDestination) {
+        const countryCodedRows = listCountryCodedRows(db, cacheKey);
+        if (countryCodedRows.length === 1) {
+          normalizedCountryCode = countryCodedRows[0].country_code; // case 2 — silent adoption
+        } else {
+          // case 3 (0 or >1 rows): always decline. suggestedCountryCode is a pre-fill only —
+          // countryCodeFromName first (free, no network), then the geocoder's raw answer
+          // regardless of locationStatus (suggestCountryForDestinationText's whole point is
+          // that this is safe now that it can never create a row or spend a Claude call on
+          // its own authority).
+          mustDeclineCountryRequired = true;
+          countryRequiredSuggestion = await suggestCountryForDestinationText(destination.trim());
+        }
+      }
+    }
 
     // When the country is known, disambiguate homonym cities (e.g. Chengdu,
     // multiple Georgetowns) by composing it into the STRING sent to Claude
@@ -152,35 +196,23 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     // 'empty_destination_country' for every hit, so the row is permanently stuck
     // unverified/terminal (production already holds three such rows, one 62 places deep,
     // 0 verified, created 2026-07-27 through ordinary use). Decline honestly and ask the
-    // user to confirm a country instead of guessing one (that guess is exactly what W4.4
-    // just removed) or silently creating an unverifiable row.
-    //
-    // Scoped to CREATION only: an empty-country row that already exists keeps serving its
-    // existing places untouched — W5.1 is the wave that deletes the three that exist, and
-    // blocking reads here would break them before that ships. `findDestination` is the
-    // read-only counterpart of getOrCreateDestination, so checking existence never mints
-    // the row it's checking for.
-    if (normalizedCountryCode === '') {
-      const existingEmpty = findDestination(db, cacheKey, '');
-      if (!existingEmpty) {
-        // Pre-fill only: when exactly one country-coded row already shares this city key,
-        // suggest it rather than adopting it (that's the D6 behavior W4.4 removed) — the
-        // common case becomes one tap to confirm, but the decision stays the user's.
-        const countryCodedRows = listCountryCodedRows(db, cacheKey);
-        const suggestedCountryCode = countryCodedRows.length === 1 ? countryCodedRows[0].country_code : null;
-        console.error(
-          '[discover] country_required city_key=%s suggested=%s',
-          cacheKey, suggestedCountryCode,
-        );
-        write({
-          type: 'error',
-          code: 'country_required',
-          message: `We don't know which country ${destination.trim()} is in — confirm it and we'll start its catalogue.`,
-          destination: destination.trim(),
-          suggestedCountryCode,
-        });
-        return res.end();
-      }
+    // user to confirm a country instead of guessing one or silently creating an unverifiable
+    // row. The decision table above (W4.8) already resolved cases 1 and 2 without reaching
+    // here — this fires only for case 3 (zero or multiple country-coded rows), where
+    // `countryRequiredSuggestion` is a pre-fill only, never an adopted decision.
+    if (mustDeclineCountryRequired) {
+      console.error(
+        '[discover] country_required city_key=%s suggested=%s',
+        cacheKey, countryRequiredSuggestion,
+      );
+      write({
+        type: 'error',
+        code: 'country_required',
+        message: `We don't know which country ${destination.trim()} is in — confirm it and we'll start its catalogue.`,
+        destination: destination.trim(),
+        suggestedCountryCode: countryRequiredSuggestion,
+      });
+      return res.end();
     }
 
     // Always get-or-create the destination row — this is the persistent,

@@ -747,18 +747,28 @@ describe('POST /trips/:tripId/discover — country-qualified destinations', () =
 // country-coded rows keep today's ''-bucket behavior exactly.
 // ---------------------------------------------------------------------------
 
-describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.4/W4.5)', () => {
-  // Replaces the retired "D6 empty-country guard" describe block: D6's silent
-  // single-row country adoption (Plan 9 W5.1) was removed in W4.4 because
-  // canonicalGeoKey folds homonyms — one prior country-coded row sharing a
-  // folded city key is not identity evidence about a newly typed label
-  // (F-26-14). W4.5 replaces silent adoption AND the old "just create a ''
-  // bucket" fallback with an honest decline: an empty-country request that
-  // would mint a NEW destination row is declined and the user is asked to
-  // confirm a country, because a '' bucket can never verify its places
-  // (F-26-26 — production already holds three such stuck-unverified rows).
+describe('POST /trips/:tripId/discover — no-country decision table (Plan 26 W4.4/W4.5/W4.8)', () => {
+  // The final decision table (F-26-33): a destination is NEVER created without a human
+  // confirming its country. In order:
+  //   1. Empty-country row already exists for (cacheKey, '') -> serve it. No geocoder call,
+  //      no decline.
+  //   2. Exactly one country-coded row already exists for cacheKey -> adopt it SILENTLY. No
+  //      geocoder call, no decline (the no-nag guarantee QA required).
+  //   3. Zero rows, or MORE THAN ONE -> always decline with country_required; the geocoder is
+  //      consulted only to pre-fill suggestedCountryCode, never to decide.
+  //
+  // History: D6's silent single-row adoption (Plan 9 W5.1) was removed in W4.4 because
+  // canonicalGeoKey folds homonyms — adopting on the CREATION path let a folded key mint a
+  // wrong-country row (F-26-14). W4.5 replaced it with an always-decline. W4.6/W4.7 then let
+  // the geocoder decide case 3 (first strictly, then leniently) to kill a recurring re-prompt
+  // — W4.7's lenient version broke live: a garbage destination ("qwxzptlkvv") weak-matched an
+  // unrelated Google business ("Equinix Singapore") at the SAME locationStatus/confidence as
+  // genuinely-correct weak hits, silently creating a junk catalogue row and spending a paid
+  // Google call plus a Claude generation. W4.8 is the final shape: case 2 (a row that already
+  // exists) kills the re-prompt safely by construction — there's nothing left to mis-create —
+  // and case 3 never adopts, only suggests.
 
-  it('declines with country_required and creates no destination row when the city key has no existing row at all', async () => {
+  it('case 3, zero rows: declines with country_required and creates no destination row', async () => {
     const db = getDb();
     const before = db.prepare('SELECT COUNT(*) AS n FROM discovery_destinations WHERE city_key = ?').get('novaria').n;
 
@@ -771,7 +781,7 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
       type: 'error',
       code: 'country_required',
       destination: 'Novaria',
-      suggestedCountryCode: null,
+      suggestedCountryCode: null, // default mock resolver returns no country
     });
 
     const after = db.prepare('SELECT COUNT(*) AS n FROM discovery_destinations WHERE city_key = ?').get('novaria').n;
@@ -779,13 +789,104 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
     expect(before).toBe(0);
   });
 
-  it('serves normally, without declining, when an empty-country row for that key already exists', async () => {
+  it('case 3, zero rows, with a weak geocoder hit that DOES carry a country: still declines, but suggestedCountryCode carries it', async () => {
+    // This is the case the coordinator's correction targets directly: a weak/'estimated' hit
+    // must never be allowed to CREATE a row on its own authority, no matter how plausible —
+    // it may only pre-fill the confirmation control the human still has to accept.
+    mockResolvePlace.mockResolvedValue({
+      lat: 22.62, lng: 120.31, coordinateSystem: 'wgs84', coordinateSource: 'nominatim',
+      locationStatus: 'estimated', confidence: 0.55, resolvedName: '高雄市', resolvedAddress: null,
+      providerId: 'osm:node/3', provider: 'nominatim', countryCode: 'TW',
+      businessStatus: null, rating: null, ratingCount: null,
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Kaohsiung' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled(); // no Claude call
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: 'TW' });
+
+    const rows = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('kaohsiung');
+    expect(rows).toHaveLength(0); // getOrCreateDestination never reached
+  });
+
+  it('the Equinix regression: a garbage destination whose only hit is a weak Google business match creates no row and triggers no generation', async () => {
+    // Reproduces the live QA finding verbatim: "qwxzptlkvv" missed Nominatim, fell through
+    // to Google Places, and weak-matched an unrelated data centre ("Equinix Singapore") at
+    // 'estimated'/0.55 — the exact same signal a genuinely correct weak hit (e.g. Kaohsiung)
+    // carries. Before this fix that silently created a junk `qwxzptlkvv|SG` catalogue row and
+    // spent a paid Google call plus a Claude generation. After this fix it can only ever
+    // pre-select "Singapore" in a decline the user must confirm.
+    mockResolvePlace.mockResolvedValue({
+      lat: 1.29, lng: 103.85, coordinateSystem: 'wgs84', coordinateSource: 'google_places',
+      locationStatus: 'estimated', confidence: 0.55, resolvedName: 'Equinix Singapore', resolvedAddress: 'addr',
+      providerId: 'google:ChIJ_equinix', provider: 'google_places', countryCode: 'SG',
+      businessStatus: 'OPERATIONAL', rating: null, ratingCount: null,
+    });
+
+    const { events, error } = await callDiscover({ destination: 'qwxzptlkvv' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled(); // no Claude generation spent
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: 'SG' });
+
+    const rows = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('qwxzptlkvv');
+    expect(rows).toHaveLength(0); // no junk row created
+  });
+
+  it('case 3, zero rows: countryCodeFromName short-circuits — the geocoder is never called when the typed text already names its country', async () => {
+    // "the first of countryCodeFromName(destination), then the geocoder" — this pins the
+    // "first of" ordering: a trailing-comma country segment resolves for free, with no
+    // network call at all, before suggestCountryForDestinationText would ever reach resolvePlace.
+    const { events, error } = await callDiscover({ destination: 'Melaka, Malaysia' });
+
+    expect(error).toBeUndefined();
+    expect(mockResolvePlace).not.toHaveBeenCalled();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: 'MY' });
+
+    // canonicalGeoKey folds to alphanumerics only, lowercased: "Melaka, Malaysia" -> "melakamalaysia".
+    const rows = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('melakamalaysia');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('case 3, two country-coded rows: even a full-confidence "resolved" geocoder hit is still only a suggestion — never adopted, still declines', async () => {
+    // Hardens the authority split, not just the leniency: this proves suggestCountryForDestinationText's
+    // answer can never act on its own even at maximum confidence — only case 2 (a row that
+    // ALREADY exists) may adopt silently. Two existing rows means case 3 applies regardless of
+    // what the geocoder returns.
+    seedDestination({ cityKey: 'georgetown', countryCode: 'MY', displayName: 'Georgetown' });
+    seedDestination({ cityKey: 'georgetown', countryCode: 'GY', displayName: 'Georgetown' });
+    mockResolvePlace.mockResolvedValue({
+      lat: 5.41, lng: 100.34, coordinateSystem: 'wgs84', coordinateSource: 'nominatim',
+      locationStatus: 'resolved', confidence: 0.95, resolvedName: 'George Town', resolvedAddress: 'addr',
+      providerId: 'osm:node/4', provider: 'nominatim', countryCode: 'MY',
+      businessStatus: null, rating: null, ratingCount: null,
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Georgetown' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: 'MY' });
+
+    const db = getDb();
+    const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('georgetown');
+    expect(allRows).toHaveLength(2); // still just the two seeded rows — no adoption, no '' twin
+  });
+
+  it('case 1: serves normally, without declining or calling the geocoder, when an empty-country row for that key already exists', async () => {
     const dest = seedDestination({ cityKey: 'novaria', countryCode: '', displayName: 'Novaria', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'The Old Spire' });
 
     const { events, error } = await callDiscover({ destination: 'Novaria' });
 
     expect(error).toBeUndefined();
+    expect(mockResolvePlace).not.toHaveBeenCalled();
     expect(events.find((e) => e.type === 'error')).toBeUndefined();
     expect(mockDiscoverDestination).not.toHaveBeenCalled(); // cache hit against the existing '' row
     const doneEvent = events.find((e) => e.type === 'done');
@@ -794,30 +895,26 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
     expect(categoryEvent?.items[0].name).toBe('The Old Spire');
   });
 
-  it('suggests the single sharing country-coded row (kualalumpur|MY) but does not silently adopt it', async () => {
-    seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
+  it('case 2: exactly one country-coded row already exists — adopts it SILENTLY, no decline, geocoder never called (the no-nag guarantee)', async () => {
+    const dest = seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Thean Hou Temple' });
 
     const { events, error } = await callDiscover({ destination: 'Kuala Lumpur' });
 
     expect(error).toBeUndefined();
-    expect(mockDiscoverDestination).not.toHaveBeenCalled();
-    const errorEvent = events.find((e) => e.type === 'error');
-    expect(errorEvent).toMatchObject({
-      type: 'error',
-      code: 'country_required',
-      destination: 'Kuala Lumpur',
-      suggestedCountryCode: 'MY',
-    });
+    expect(mockResolvePlace).not.toHaveBeenCalled(); // silent adoption never consults the geocoder
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    // Cache is fresh (seeded lastGeneratedAt = now) — served from the existing MY row.
+    const doneEvent = events.find((e) => e.type === 'done');
+    expect(doneEvent?.cached).toBe(true);
 
-    // Never silently adopted: no new country-coded row was created, and the
-    // "" bucket for this key was never minted either (creation-only decline).
     const db = getDb();
     const allRows = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('kualalumpur');
-    expect(allRows).toHaveLength(1);
+    expect(allRows).toHaveLength(1); // no new row minted, the existing MY row was reused
     expect(allRows[0].country_code).toBe('MY');
   });
 
-  it('declines with a null suggestion when two country-coded rows share the key (georgetown|MY, georgetown|GY) — genuinely ambiguous', async () => {
+  it('case 3, two country-coded rows sharing the key (georgetown|MY, georgetown|GY): declines, does not guess, and does not adopt either row', async () => {
     seedDestination({ cityKey: 'georgetown', countryCode: 'MY', displayName: 'Georgetown' });
     seedDestination({ cityKey: 'georgetown', countryCode: 'GY', displayName: 'Georgetown' });
 
@@ -826,6 +923,8 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).not.toHaveBeenCalled();
     const errorEvent = events.find((e) => e.type === 'error');
+    // Default mock resolver returns no country, so suggestedCountryCode is null here too —
+    // the point of this test is that MORE-THAN-ONE never silently picks one of the two rows.
     expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: null });
 
     const db = getDb();
@@ -833,7 +932,7 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
     expect(allRows).toHaveLength(2); // still just the two seeded rows — no '' twin minted
   });
 
-  it('declines a CJK free-text key (北京) with no country-coded twin the same way', async () => {
+  it('case 3, zero rows: declines a CJK free-text key (北京) with no country-coded twin the same way', async () => {
     const db = getDb();
     const { events, error } = await callDiscover({ destination: '北京' });
 
@@ -844,6 +943,43 @@ describe('POST /trips/:tripId/discover — country_required decline (Plan 26 W4.
 
     const row = db.prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('北京');
     expect(row).toBeUndefined();
+  });
+
+  it('case 3: declines with country_required when the resolver throws (no country to suggest)', async () => {
+    mockResolvePlace.mockRejectedValue(new Error('network exploded'));
+
+    const { events, error } = await callDiscover({ destination: 'Explodeville' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toMatchObject({ type: 'error', code: 'country_required', suggestedCountryCode: null });
+
+    const rows = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').all('explodeville');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('invariant: no path (case 1, 2, or 3, with any geocoder outcome) ever creates a discovery_destinations row with country_code = ""', async () => {
+    // Case 2 with a resolved country-coded row to adopt from.
+    seedDestination({ cityKey: 'resolvedcity', countryCode: 'SG', displayName: 'Resolved City', lastGeneratedAt: nowSql() });
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      FAKE_CATEGORIES.forEach((cat) => onCategory(cat));
+      return FAKE_CATEGORIES;
+    });
+    await callDiscover({ destination: 'Resolved City' });
+
+    // Case 3, zero rows, weak-but-plausible geocoder hit — must decline, not create.
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'estimated', confidence: 0.55, countryCode: 'SG' });
+    await callDiscover({ destination: 'Some Plausible City' });
+
+    // Case 3, zero rows, no geocoder answer at all.
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'unresolved', countryCode: null });
+    await callDiscover({ destination: 'Another Unresolved City' });
+
+    const emptyCountryRows = getDb()
+      .prepare("SELECT COUNT(*) AS n FROM discovery_destinations WHERE country_code = ''")
+      .get().n;
+    expect(emptyCountryRows).toBe(0);
   });
 });
 

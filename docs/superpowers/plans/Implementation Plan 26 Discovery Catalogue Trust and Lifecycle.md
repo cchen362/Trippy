@@ -248,7 +248,58 @@ Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack
 
 ## W4 — Country capture across surfaces
 
-**Status:** 2026-07-27 — **NOT STARTED.** W1–W3 are deployed and production-QA'd (`4921dd2`). **This is the riskiest wave in the plan** and the only one adjacent to the Plan 6/7/8 geography model. No migration is expected: every item is additive or a narrowing of an existing inference.
+**Status:** 2026-07-27 — **COMPLETE and LOCALLY VERIFIED IN A REAL BROWSER. NOT DEPLOYED.** All five items (W4.1–W4.5) plus the W4.5 decision-table correction forced by QA (F-26-32/F-26-33). No migration. Backend **784/784** (33 files; baseline was 768) and frontend **293/293** (43 files; baseline was 280); `npm run build` clean. Appendix A's second opinion was run before any code was written and cleared the core risk.
+
+**Browser QA results (375px and desktop, dev DB, real resolver).** The suite did **not** catch three of these; two were found only by driving real trip data.
+- **F-26-10 reproduced live and then fixed live.** A 冲绳 override on a Shanghai/CN day resolved to `{city: 冲绳, countryCode: CN, countryEvidenceCity: 'Shanghai'}`. Discovery declined `CN`, the confirmation resolved to `JP`, and that day now serves **73 Okinawan places** — Shuri Castle (首里城), Okinawa World, Gyokusendo. Before W4 the same day asked Claude for places in *"冲绳, China (CN)"*.
+- **W4.3 held:** `city_override_country` stored `null` rather than a guess; 1135 ms round-trip confirms the call kept `'interactive'` priority (W1.1).
+- **W4.5 creation path closed:** confirming a country created `冲绳|JP`, **not** an empty-country row.
+- **No-nag guarantee (F-26-33 case 2) proven by latency:** a repeat Kaohsiung request served 8 categories / 56 items in **14 ms**, twice. A geocoder call costs ~700–1000 ms, so the timing itself proves none was made.
+- **Equinix regression closed:** `qwxzptlkvv` declines with `SG` as pre-fill only, creating **zero** rows and spending **zero** Claude/Google calls.
+- **Case 1 verified incidentally:** a request against the existing `hanoi|''` row served and refreshed it without a decline and created nothing new.
+- **Design floor:** confirmation block verified at 375px (stacked, 44px targets) and desktop (row at the 640px breakpoint), `--gold` resolved to `rgb(201,168,76)` = `#c9a84c` exactly, no horizontal overflow.
+- **Cost incurred:** proving the creation path end to end spent one real Claude generation on the dev DB (new `冲绳|JP`, destination id 20). Dev-only.
+- **Left in the dev DB deliberately:** the 冲绳 override on the "Shanghai - Hangzhou (W3 verify)" trip's 2026-07-28 day, and destination id 20. Remove them if a later session needs a clean fixture.
+
+Owner production QA click-script: **Appendix D**.
+
+**Appendix A was run first and returned three results worth keeping.** (1) **No conflict with Plans 6/8/9.** Plan 8 and Plan 6 Wave 2 both already document independent city/country selection as *intentional*, and `deriveDayGeo`'s own docstring states it — W4.1 formalises a fact those plans assert, rather than introducing one. (2) **Exactly two consumers treat cross-layer city/country as load-bearing rather than incidental**: the trip destination-chip/scope pairing (`deriveTripDestinationPairsFromDays`) and `stops.js`'s geocoding-bias resolution anchor (`stops.js:152-153`), the latter being the entire point of Plan 8's resolution-anchor design. Generalising Discovery's decline rule to either would regress documented, test-pinned behaviour. This is why D-26-2 scopes the rule to Discovery alone, and W4 honours it. (3) **W4.3's extra nulls break nothing** — `getMapConfigForCountry(null)`, the deep-link provider, share's `.filter(Boolean)` and `resolvePlace`'s country bias are all already null-tolerant and already exercised by the KL trip. The real cost is a *visible downgrade*, recorded as F-26-29 below.
+
+**F-26-27 — W4.2's rule had to be a CITY comparison, not a LAYER comparison, and the plan's literal wording was wrong.** W4.2 was written as "Discovery declines a country whose layer differs from the city's layer." Implemented literally, that also declines two correct, deliberate cases: (a) the pinned Melaka case (`tests/trips.test.js:220`) — override city "Melaka" with no country plus a same-night hotel reporting `{Melaka, MY}` — where city and country come from different layers *and name the same place*; and (b) `extractGeoFromBooking`'s Rule 4 demote path (`trips.js:382-398`), which deliberately keeps a hotel's country when its city nulls out. Owner-approved refinement, taken 2026-07-27: **decline the country only when the layer that supplied it also named a city that is a different place** (by `canonicalGeoKey`) from the winning city. 冲绳-after-Shanghai declines (previous layer names Shanghai); Melaka does not (hotel layer names Melaka); hotel-demote does not (that layer named no city, so nothing contradicts the day's city). This is a strict subset of the literal rule, still Discovery-only, still additive — D-26-2 is untouched.
+
+**F-26-28 — the same defect existed one level up, in the UI, and W4.2 nearly shipped on top of it.** `DiscoveryPanel.jsx` and `TripPage.jsx` each resolved the Discovery destination and its country through two *independent* `??` chains (`activeDay → days[0] → trip.destinations[0]` and the country equivalent). Two consequences: (a) the panel could pair one day's city with a **different day's** country — F-26-10's own defect at panel scope; and (b) once `discoveryCountryForDay` correctly rejected a country, `??` fell straight through to the next candidate, which for a Shanghai trip is *the Shanghai day's `CN`*, and failing that `trip.destinationCountries[0]`, which is **also `CN`**. The rule fired, was correct, and was then undone twice by the chain it sat in. Root cause: `null` acquired a second meaning ("rejected") in a chain built when it only meant "absent". Fixed by resolving the geography **source day once** and reading both city and country off it; the trip-level fallback now applies only when there is no geo day at all. Pinned by regression tests in both files that assert `discover` is called with `null` even when `days[0]` and `destinationCountries` both hold the rejected country.
+
+**F-26-29 — W4.3's accepted cost: predicted, and NOT observed in QA. Stated as prediction, not as measurement.** A day whose override text previously resolved to a *correct but low-confidence* country now gets `null` in `city_override_country`. Nothing crashes — every consumer is null-tolerant — but where the override was the day's **only** country source, that day's map tiles and deep-link provider downgrade from Amap/Naver to the generic OSM/Google default. **This did not occur in local QA**, because the dev trip used to reproduce F-26-10 has a hotel booking supplying `CN` at layer 2, so the day's resolved country was never null despite `city_override_country` being correctly nulled. It is recorded here as a predicted consequence with no observed instance; the owner QA script should watch for it rather than assume it is impossible.
+
+**F-26-30a — the deliberate, and initially surprising, consequence of D-26-2: only Discovery changes.** Verified live on the 冲绳 day. `city_override_country` is `null` (W4.3 held), Discovery correctly declines `CN` and serves an **Okinawa** catalogue — but the day header still reads its resolved country and `/map-config` still returns **Amap / GCJ-02 / `deepLinkProvider: amap`** for that day, because the hotel layer still supplies `CN` and precedence is unchanged. So an Okinawa day continues to render Chinese map tiles and Amap deep links. **This is not a W4 regression** — it is exactly what D-26-2 mandates, and it is unchanged from before the wave. It is recorded because it *looks* like a bug in QA and will be reported as one otherwise. Whether the day header and map should also stop trusting a cross-layer country is a **precedence** question the owner has ruled out for this plan; reopening it would need a separate decision.
+
+**F-26-30 — production census re-derived 2026-07-27 (read-only), superseding D-26-3's list.** Twelve `discovery_destinations` rows. Empty-country: **北京 (id 4, 70 places), 南疆 (id 5, 92 places), Suzhou (id 18, 62 places, 0 verified)** — three, not two, confirming F-26-26 and fixing W5.1's delete list. Second finding: **no production `city_key` currently has both a country-coded row and an empty-country row**, so W4.4's retirement of the D6 adoption is a **no-op for the entire live corpus** — it changes future behaviour only. (The *dev* database does have the collision, `chongqing` at both `''` and `CN`, which is what made the "existing empty row keeps serving" branch verifiable locally.)
+
+**F-26-32 — `locationStatus` cannot gate country inference, in EITHER direction, and browser QA proved both halves.** W4.5 originally declined to the user whenever the day's evidence gave no country. Measured against the owner's five real dev trips, **five days decline and four are false** — every one an ordinary city-change day where the new city came from a hotel/transit booking carrying no country, so the country fell through to the previous day's carry whose city differs. Worse, nothing persists a confirmation (`committedCountry` is component state), so **the prompt recurs on every panel open**. The fix attempted was to infer the country server-side, gated as W4.3 gates `resolveOverrideCountry`. Both bars then failed, measured live against the real resolver:
+
+| Destination | `locationStatus` | conf | country returned | correct? |
+| --- | --- | ---: | --- | --- |
+| Kuala Lumpur | `resolved` | 0.78 | MY | yes |
+| Singapore | `resolved` | 0.78 | SG | yes |
+| Kaohsiung | `estimated` | 0.55 | TW | yes |
+| Chongqing | `estimated` | 0.55 | CN | yes |
+| Suzhou | `estimated` | 0.55 | CN | yes |
+| Chengdu | `estimated` | 0.55 | CN | yes |
+| 冲绳 | `estimated` | 0.55 | JP | yes |
+| Georgetown | `resolved` | 0.78 | US | **ambiguous homonym** |
+| `qwxzptlkvv` (gibberish) | `estimated` | 0.55 | SG | **"Equinix Singapore", a data centre** |
+
+**Strict is too strict:** five real cities score `estimated` purely because the returned name is CJK or suffixed (高雄市, "Chengdu City") and `classifyNameMatch` cannot match the romanised query — the *country* was right every time. **Lenient is unsafe:** `qwxzptlkvv` missed on Nominatim, fell through to Google Places, matched a data centre, and — before this was caught — **created a junk `qwxzptlkvv|SG` destination and spent a paid Google call plus a Claude generation**, the exact failure class W4.5 exists to prevent. And the strict gate buys no homonym protection: `Georgetown` passes at 0.78 and confidently returns US. **`locationStatus` measures place *identity*, not *country*; no threshold on it is both safe and useful.**
+
+**F-26-33 — resolution (owner decision, 2026-07-27): a shared-catalogue destination is never CREATED without a human confirming its country.** The geocoder became a *pre-fill*, never an authority. For a request with no country: (1) an existing `(cacheKey, '')` row serves unchanged; (2) **exactly one** country-coded row for the key is adopted silently — the destination already exists, and re-asking was the nag; (3) **zero, or more than one**, always declines with `country_required`, pre-filled from `countryCodeFromName` then the geocoder's returned country *regardless of `locationStatus`*. Case 2 is deliberately narrower than the D6 rule W4.4 removed: D6 also fired on the **creation** path, where a `canonicalGeoKey`-folded homonym could mint a wrong-country catalogue; case 2 only ever reuses a row that already exists, and >1 row — the London-Ontario / Georgetown case — is never guessed. The Equinix result is now harmless: it can only pre-select an entry in a dropdown the user must actively confirm, and cannot create a row or spend a Claude call, because the decline returns before both. Two resolver policies now exist deliberately and must not be merged: **strict** (`resolved` only) guards `updateDayCityOverride`, which writes durable day geography; **lenient** only pre-fills a control the user confirms.
+
+**F-26-34 — the free-text destination chip in create/edit trip is the same gap, on a surface W4 does not touch.** Picking an autocomplete suggestion captures a country (`DestinationChipPicker.jsx:36`), but committing free text produces `{ countryCode: null, kind: 'freetext' }` (`CityInput.jsx:46`, `DestinationChipPicker.jsx:58`) — visibly tagged `FREETEXT` in the chip, with nothing asking for a country. That null reaches day geography, so besides Discovery it silently downgrades the day's map provider per F-26-29, with **no prompt anywhere to catch a London-Ontario-vs-London-UK mistake**. **Deliberately out of W4** (owner call, 2026-07-27): the chip editor is a different surface with its own modal/scope-reconcile QA, and W4 is already the wave adjacent to the test-pinned geography model. Proposed as a standalone follow-on applying F-26-33's pre-filled confirmation at chip-commit time.
+
+**F-26-35 — the pre-fill is often wrong for exactly the destinations the owner worried about, and that is now harmless by construction.** Observed live at desktop width: typing **Penang** pre-selects **Indonesia (ID)**; Penang is in Malaysia. `Georgetown` resolves confidently to **US**. These are the London-Ontario class. Under the rejected lenient rule each would have silently created a wrong-country catalogue — `penang|ID` generating Indonesian suggestions for a Malaysian island, every row unverifiable. As a **pre-fill** the same wrong guess costs one dropdown change. This is the measured justification for F-26-33: the guess did not get better, its **blast radius** did. Improving pre-fill accuracy is a separate, optional optimisation and is **not** a correctness dependency.
+
+**F-26-31 — a fourth AI-facing surface exists and is NOT guarded by W4.** `importer.js:238-256` (`runExtraction`'s `tripContext.destinations`) builds the same per-day `{city, countryCode}` pairs, deduped by city in day order, and feeds them straight into the Claude **booking-extraction** prompt. It is structurally identical to the Discovery problem — a wrong cross-layer country composed into an LLM prompt as ambient trip context, where it can steer how an extracted booking's addresses and dates are interpreted. Found by the Appendix A second opinion. **Deliberately out of W4** (owner call, 2026-07-27): W4 is already the riskiest wave, and booking extraction is a separate risk surface needing its own verification pass. Proposed as a standalone follow-on; the guard is the same `discoveryCountryForDay`-shaped rule at one more call site.
+
+**No migration.** Every item is additive or a narrowing of an existing inference, exactly as forecast.
 
 **W4.5 is now the highest-priority item in the whole plan, and its justification changed during W3 QA.** It was written to explain 北京 and 南疆 — the owner's old CJK free-text tests, dismissible as not-real-demand. Then Appendix C's F-26-26 recorded a **new** empty-country destination, **Suzhou**, created through ordinary use on 2026-07-27, holding 11 places that can never verify. The creation path is live, not historical. Consider leading the wave with W4.5.
 
@@ -270,19 +321,40 @@ Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack
 
 **W4.3's gate is precisely identifiable.** `resolveOverrideCountry` returns `resolution?.countryCode || null` with **no reference to `locationStatus` or `confidence`** — it accepts any country from any hit. W2.1 did not change this, because W2.1 narrowed the *labelling* and this function ignores the label. The gate is to require `locationStatus === 'resolved'`. Note this call does not pass `priority`, so it correctly defaults to `'interactive'` (W1.1) — do not change that.
 
-**W4.1** `deriveDayGeo` additionally reports which layer supplied `city` and which supplied `countryCode`. Existing return fields and precedence are untouched; every current consumer keeps reading exactly what it reads today.
+**W4.1 — DONE.** `deriveDayGeo` additionally returns `citySource`, `countrySource` (`'override'|'hotel'|'transit'|'previous'|'seed'|null`) and `countryEvidenceCity` — the city named by the country-winning layer, or `null` when that layer named no city. Precedence and the three existing return fields are byte-identical for every input; the layers array is tagged explicitly rather than by spreading `previousGeo`, which is the previous day's full return object and would otherwise leak its stale source keys into this day's layer. Surfaced on `listDaysForTrip` and `getDayGeo` as `resolvedCitySource` / `resolvedCountrySource` / `resolvedCountryEvidenceCity`. **`share.js` and `mapData.js` deliberately untouched** — the public share payload is intentionally reduced and the map does not need the signal.
 
-**W4.2** Discovery declines a country whose layer differs from the city's layer, falling back to the empty-country path rather than composing a wrong country into the prompt (`discovery.js:141`).
+**W4.2 — DONE**, per the F-26-27 refinement. One shared frontend helper, `discoveryCountryForDay` (`frontend/src/utils/dayGeo.js:30`), used at both call sites so there is a single definition of the rule. See F-26-28 for the `??`-chain defect fixed alongside it.
 
-**W4.3** Add a confidence gate to `resolveOverrideCountry` (F-26-10). **Must ship in the same wave as W4.1/W4.2**, never alone.
+**W4.3 — DONE.** `resolveOverrideCountry` requires `locationStatus === 'resolved'`. W2.1 narrowed the *labelling* of weak matches to `estimated`; this function never read the label, so it was still accepting a guess as a fact. The call deliberately keeps `resolvePlace`'s default `'interactive'` priority (W1.1) — it is awaited inside the PUT while the user watches a spinner. Shipped in the same commit as W4.1/W4.2, as required.
 
-**W4.4** Retire the D6 single-row country adoption (F-26-14).
+**W4.4 — DONE.** The D6 single-row country adoption is retired (F-26-14): `canonicalGeoKey` folds homonyms, so "one prior row shares this key" was never identity evidence about a newly typed label. The single-row case survives **only as a pre-filled suggestion** the user can accept or override. No-op for the live corpus (F-26-30).
 
-**W4.5** Inline country confirmation when the country cannot be determined confidently, and block shared-catalogue creation for unknown-country destinations — this is what produced 北京 and 南疆.
+**W4.5 — DONE.** `POST /discover` refuses to **create** an empty-country destination and streams a `country_required` decline instead; `useDiscovery` routes it to the calm `notice` channel (the W1.5 pattern), and the Discovery panel renders an inline country confirmation, pre-filled with `suggestedCountryCode`. Scoped to creation only: an empty-country row that **already exists keeps serving its places**, because W5.1 is what deletes the three that exist and blocking reads here would break them first. `findDestination` (the read-only counterpart of `getOrCreateDestination`) is what makes the existence check safe — it cannot mint the row it is checking for. The decline fires before `getOrCreateDestination`, before the daily-generation counter, and before any Claude call. New endpoint `GET /api/lookups/countries` serves the picker from the existing `REGION_CODES`/`Intl.DisplayNames` table, so the list cannot drift from `countryCodeFromName`.
 
 ## W5 — Legacy repair
 
-**W5.1** Delete the 北京 and 南疆 destinations and their places (D-26-3).
+**Line numbers after W4 — every table above this point predates it. Use these:**
+
+| What | Now |
+| --- | --- |
+| `deriveDayGeo` signature | `services/trips.js:471` |
+| The tagged layers array (precedence — **do not reorder**, D-26-2) | `:527` |
+| `listDaysForTrip` — where `resolved*Source` are stamped | `:1145` |
+| `getDayGeo` | `:1199` |
+| `resolveOverrideCountry` + its W4.3 gate | `:1316` |
+| `updateDayCityOverride` (the awaited caller) | `:1338` |
+| `deriveTripDestinationPairsFromDays` (cross-layer country is LOAD-BEARING here — never apply W4.2's rule) | `:558` |
+| W4.5's `country_required` decline | `routes/discovery.js:163-184` |
+| `findDestination` existence check (creation-only scoping) | `routes/discovery.js:164` |
+| `catalogue_full` decline (the W1.5 precedent) | `routes/discovery.js:272` |
+| `GET /api/lookups/countries` | `routes/lookups.js:20` |
+| `listCountries` | `utils/countries.js:94` |
+| `discoveryCountryForDay` — the single definition of W4.2's rule | `frontend/src/utils/dayGeo.js:30` |
+| `DECLINE_CODES` (now includes `country_required`) | `frontend/src/hooks/useDiscovery.js:19` |
+| `geoDay` same-source resolution (F-26-28) | `frontend/src/components/discovery/DiscoveryPanel.jsx:271` |
+| The country-confirmation render gate | `frontend/src/components/discovery/DiscoveryPanel.jsx:620` |
+
+**W5.1** Delete the empty-country destinations and their places (D-26-3). **Re-derive the list at execution time — it is now THREE, not two:** 北京 (id 4), 南疆 (id 5) and **Suzhou (id 18)**, per F-26-30. Ids are from the 2026-07-27 census and must be re-confirmed against production before any delete runs. W4.5 has closed the path that creates new ones, so the list should not grow again — verify that it has not before deleting.
 
 **W5.2** Un-archive the 78 rows archived before they were ever checked (F-26-3) and let the queue pick them up. Sequenced strictly after W1.2, or they will simply be re-archived. Zero API cost.
 
@@ -363,6 +435,48 @@ Section A3 created **Suzhou with `country_code = ''`** — a 12th empty-country 
 - **W1.4 progressive reveal** (A3), **W1.1 interactive pre-emption** (A5 — a stop resolved in seconds while a Taipei generation ran), **trust labels** (B6), **Discovery-added and manually-added stops** (B7/B8/B9) all pass.
 - **D-26-4's structural budget separation proved itself:** the main resolver budget was fully exhausted (1001/1000) while re-verification still ran, because its counter is genuinely independent.
 - **A4 was correct behaviour, not a bug — Appendix B's wording was wrong.** W1.5's decline fires only when **no** category has headroom (see the W1.5 scope note); Taipei had a few full categories and headroom elsewhere, so a normal generation ran and no notice was due. Appendix B step 4 has been corrected.
+
+---
+
+## Appendix D — Owner production QA click-script (W4)
+
+Standing convention: the agent verifies locally, the owner verifies production. **No migration in this deploy** — a backup is still wise, but there is no schema change to confirm.
+
+**What actually changes for you.** Almost all of W4 is invisible. Three things are not:
+- **Discovery stops trusting a country that came from somewhere else.** If a day's country was inherited from a *different city* (yesterday's carry, a booking for another place), Discovery ignores it rather than asking Claude for places in the wrong country.
+- **A brand-new destination now asks you which country it is**, once, pre-filled. This replaces silently creating a catalogue that could never verify — the Suzhou defect.
+- **Typing a day's city by hand no longer guesses its country** from a weak match. It leaves it blank instead.
+
+**Two things that look like bugs and are not — do not report these:**
+1. **An overridden day still shows its old country in the day header and still uses that country's map tiles.** W4 gives *Discovery alone* permission to decline a cross-layer country (owner decision D-26-2); day headers, the Map tab and deep links deliberately keep reading exactly what they read before. Verified: a 冲绳 day still returns Amap/GCJ-02 tiles because a Shanghai hotel supplies `CN`. This is unchanged pre-existing behaviour, not a W4 regression (F-26-30a).
+2. **The pre-filled country in the confirmation is sometimes wrong** — Penang pre-fills Indonesia, Georgetown pre-fills the US (F-26-35). It is a suggestion, not a decision; change it in the dropdown. It can no longer create anything on its own.
+
+### A — The country confirmation (W4.5, the Suzhou fix)
+
+1. Open a trip → **Plan** → **Discover** → **Change** → type a city the catalogue has **never seen** (production currently knows kualalumpur, 北京, 南疆, chengdu, chongqing, denpasar, bali, taipei, kaohsiung, shanghai, hangzhou, suzhou — pick anything else) → **Go**.
+   **Expect** a calm boxed question, *not* a red error: *"We don't know which country X is in — confirm it and we'll start its catalogue."* with a **Country** dropdown and a **Confirm** button.
+   **Check the pre-fill is sane but do not trust it** — correct it if wrong, then Confirm. **Expect** the catalogue to generate normally afterwards.
+2. **The regression that matters most.** Reopen Discovery on that same destination. **Expect NO second prompt** — it must serve the catalogue directly. A prompt that returns on every open is the defect W4 was corrected for; report it immediately.
+3. Open Discovery on a destination that already exists in production (Taipei, Shanghai). **Expect no prompt at all, ever.**
+
+### B — Cross-layer country decline (W4.1/W4.2)
+
+4. On a multi-city trip, open Discovery on a day in the **second** city (one reached by a hotel or flight booking). **Expect** suggestions for that city, correct country, and — per step 3 — no prompt, because that destination already exists.
+   **Report if:** you get suggestions for the *wrong city*, or a prompt for a destination that clearly already exists.
+5. **The headline case.** On a day, set a free-text city override to somewhere in a **different country from the day before** (e.g. a Japanese city on a China trip). Open Discovery on that day.
+   **Expect** either a country confirmation (if that destination is new) or a correct-country catalogue — **never** suggestions from the previous day's country. This is F-26-10, the bug the wave exists for.
+   **Remember point 1 above:** that day's header and map tiles will still show the old country. That is intended.
+
+### C — The day-override country gate (W4.3)
+
+6. Set a day override to something obscure or non-English. **Expect** it to save in about a second and simply show the name. It may now show **no** country where it previously guessed one — that is the fix, not a failure.
+7. **Watch for the one predicted side effect (F-26-29, not observed locally):** if a day's country becomes blank *and nothing else supplies one*, that day's map tiles may fall back from Amap/Naver to generic OSM. Report it if you see it, with the day and the text you typed — it is expected-but-unconfirmed, and a real instance is worth recording.
+
+### D — Nothing unverifiable is being created (the invariant)
+
+8. After doing A–C, confirm no new empty-country destination exists:
+   `docker exec -w /app/backend trippy-trippy-1 node -e "const D=require('better-sqlite3');const db=new D('/app/data/trippy.db',{readonly:true});console.log(db.prepare(\"SELECT id, city_key, display_name FROM discovery_destinations WHERE country_code = ''\").all())"`
+   **Expect exactly three rows — 北京, 南疆, Suzhou** (the pre-existing ones W5.1 deletes). **Any fourth row means W4.5 has a hole; report it.**
 
 ---
 

@@ -18,6 +18,7 @@ import * as authService from '../src/services/auth.js';
 import {
   createTrip, updateTrip, listDaysForTrip, getDayGeo, listBookingsForTrip, buildTripScopes,
   listTripScopes, getTripDetail, listTripsForUser, boundsCentroid, updateDayCityOverride,
+  resolveCountryForCityText, suggestCountryForDestinationText,
 } from '../src/services/trips.js';
 import { createBooking } from '../src/services/bookings.js';
 import { createExpense } from '../src/services/expenses.js';
@@ -1463,5 +1464,60 @@ describe('resolveOverrideCountry confidence gate (Plan 26 W4.3)', () => {
       'SELECT city_override_country FROM days WHERE trip_id = ? AND date = ?',
     ).get(tripId, '2026-09-10');
     expect(stored.city_override_country).toBe('JP');
+  });
+});
+
+// Plan 26 W4.7/W4.8 (F-26-32/F-26-33): browser QA against the live resolver found the
+// day-override gate's strict 'resolved'-only bar was wrongly copied onto Discovery's
+// country-SUGGESTION call too. 'estimated' there measures place-NAME-identity confidence (a
+// romanised query against the geocoder's local-script/administrative-suffix name), not
+// country correctness — every 'estimated' hit measured (Kaohsiung, Chongqing, Suzhou,
+// Chengdu, 冲绳) carried the correct country, while the one genuinely ambiguous label measured
+// ("Georgetown") came back 'resolved' at full confidence with a plausible-but-wrong country.
+// W4.7 then tried using the lenient signal to silently ADOPT a country for catalogue
+// creation, and live QA broke that too: a deliberately-garbage destination ("qwxzptlkvv")
+// weak-matched an unrelated Google business ("Equinix Singapore") at the identical
+// locationStatus/confidence a correct weak hit carries — no threshold on this signal
+// separates them. W4.8's fix is authority, not confidence: resolveCountryForCityText (day
+// override) may silently DECIDE a country and stays strict; suggestCountryForDestinationText
+// (Discovery) may only ever PRE-FILL a control a human confirms, so it is safe to be lenient
+// with locationStatus precisely because it is never allowed to act alone. This block asserts
+// the split directly, side by side, against the identical mocked resolver response — see also
+// trips.test.js:1437 above for the still-unchanged strict-path tests, and discovery.test.js
+// for the route-level behaviour (including the Equinix regression test).
+describe('resolveCountryForCityText vs suggestCountryForDestinationText — deliberate authority split (Plan 26 W4.7/W4.8)', () => {
+  beforeEach(() => {
+    mockResolvePlace.mockReset();
+  });
+
+  it('the same "estimated" (weak) hit is REJECTED by the strict day-override path and ACCEPTED as a suggestion by Discovery', async () => {
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'estimated', countryCode: 'TW' });
+
+    const strictResult = await resolveCountryForCityText('Kaohsiung');
+    const suggestedResult = await suggestCountryForDestinationText('Kaohsiung');
+
+    expect(strictResult).toBeNull();
+    expect(suggestedResult).toBe('TW');
+  });
+
+  it('a hit with no country at all is rejected by both paths', async () => {
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'estimated', countryCode: null });
+
+    expect(await resolveCountryForCityText('Nowhereland')).toBeNull();
+    expect(await suggestCountryForDestinationText('Nowhereland')).toBeNull();
+  });
+
+  it('a resolvePlace throw is treated as no-answer by both paths (no unhandled rejection)', async () => {
+    mockResolvePlace.mockRejectedValue(new Error('network exploded'));
+
+    expect(await resolveCountryForCityText('Explodeville')).toBeNull();
+    expect(await suggestCountryForDestinationText('Explodeville')).toBeNull();
+  });
+
+  it('a "resolved" (strong) hit is accepted by both paths identically', async () => {
+    mockResolvePlace.mockResolvedValue({ locationStatus: 'resolved', countryCode: 'SG' });
+
+    expect(await resolveCountryForCityText('Singapore City')).toBe('SG');
+    expect(await suggestCountryForDestinationText('Singapore City')).toBe('SG');
   });
 });
