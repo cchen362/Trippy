@@ -1,6 +1,7 @@
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { gcj02ToWgs84 } from './coordinates.js';
+import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const NOMINATIM_INTERVAL_MS = 1000;
@@ -445,15 +446,52 @@ function waitForNominatimSlot({ priority = 'interactive' } = {}) {
 // (vacuously true when no city was given). Confidence/status thresholds are the
 // Nominatim-tier values (0.78 resolved / 0.55 estimated) that every caller already
 // round-trips through readCache's `< 0.7 -> 'estimated'` rule.
+// The city half of the identity check (F-26-23). The city string here is a
+// Discovery destination's free-text display_name, and production holds
+// 'kualalumpur' (no space) and 'Chong Qing' (extra space) — so a plain
+// normalizeText substring test could never match 'kuala lumpur, malaysia', and
+// those two destinations' rows failed the city half even when the provider
+// returned a byte-identical name. The geography-identity layer already treats
+// 'Kuala Lumpur' and 'kualalumpur' as one place (canonicalGeoKey — which is why
+// there is one 'kualalumpur' destination row and not two), so this check
+// disagreeing with it was the bug.
+//
+// But simply folding separators out of BOTH sides is wrong in the opposite
+// direction, and measurably so: canonicalGeoKey('Xi'an, Shanxi, China') contains
+// 'anshan', so the real city Anshan would match an address in an unrelated
+// province. That is a false 'resolved' — precisely the failure W2.1 closed on
+// the Google path — manufactured by concatenating across two unrelated address
+// components.
+//
+// So separators are folded only WITHIN the address's own word boundaries: the
+// city must either be the prefix of a single address token ('chengdu' matching a
+// 'chengdushi' component, or 'york' matching 'new york'), or exactly equal a run
+// of consecutive tokens ('kualalumpur' == 'kuala'+'lumpur'). 'anshan' is neither
+// a token prefix nor a whole run of 'xi'+'an'+'shanxi', so it correctly fails.
+function cityMatchesAddress(city, returnedAddress) {
+  const cityKey = canonicalGeoKey(city);
+  if (!cityKey) return true;
+
+  const tokens = normalizeText(returnedAddress).split(' ').filter(Boolean);
+  for (let start = 0; start < tokens.length; start += 1) {
+    if (tokens[start].startsWith(cityKey)) return true;
+    let run = tokens[start];
+    for (let end = start + 1; end < tokens.length && run.length < cityKey.length; end += 1) {
+      run += tokens[end];
+      if (run === cityKey) return true;
+    }
+  }
+  return false;
+}
+
 function classifyNameMatch({ queryText, city, returnedName, returnedAddress }) {
   const normalizedName = normalizeText(returnedName);
   const normalizedQuery = normalizeText(queryText);
   const normalizedAddress = normalizeText(returnedAddress);
-  const normalizedCity = normalizeText(city);
   const strongName = normalizedName === normalizedQuery
     || normalizedAddress.startsWith(normalizedQuery)
     || normalizedAddress.includes(normalizedQuery);
-  const cityMatch = !normalizedCity || normalizedAddress.includes(normalizedCity);
+  const cityMatch = cityMatchesAddress(city, returnedAddress);
 
   return {
     locationStatus: strongName && cityMatch ? 'resolved' : 'estimated',

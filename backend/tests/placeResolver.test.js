@@ -1111,3 +1111,186 @@ describe('resolvePlace — refreshCache (opt-in scoped cache bypass, W3.3)', () 
     });
   });
 });
+
+// F-26-23: classifyNameMatch's city half used to compare via normalizeText, which
+// preserves spaces, while a Discovery destination's free-text display_name can be
+// spaced arbitrarily ('kualalumpur', 'Chong Qing'). That made the city half fail even
+// when the provider's name/address came back byte-identical, permanently capping 106
+// production rows at estimated/0.55. The fix reuses canonicalGeoKey (the same folding
+// the geography-identity layer already uses to treat 'Kuala Lumpur' and 'kualalumpur'
+// as one destination) for the city comparison only.
+//
+// The fold is boundary-aware on the ADDRESS side, and the Anshan case below is why:
+// folding separators out of the whole address string makes 'Xi'an, Shanxi, China'
+// contain 'anshan', which would hand the real city Anshan a false 'resolved' in an
+// unrelated province — the same wrongly-Verified failure W2.1 closed on the Google
+// path, manufactured across two unrelated address components.
+describe('resolvePlace — city-match folding (F-26-23)', () => {
+
+  it('does NOT resolve when the city only appears by straddling two unrelated address components', async () => {
+    // 'Anshan' is a real city. Folding all separators out of "Xi'an, Shanxi, China" gives
+    // 'xianshanxichina', which CONTAINS 'anshan' — so a whole-string fold would
+    // label an Anshan query resolved/0.9 against an address 1,500 km away. The
+    // match must align to the address's own word boundaries.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '34.3416',
+        lon: '108.9398',
+        display_name: "Bell Tower, Xi'an, Shanxi, China",
+        name: 'Bell Tower',
+        osm_type: 'way',
+        osm_id: '999',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Bell Tower',
+      city: 'Anshan',
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'estimated', confidence: 0.55 });
+  });
+
+  it('still matches a city that is the prefix of a single address token', async () => {
+    // Guards the opposite over-tightening: requiring whole-run equality alone would
+    // break 'Chengdu' against a 'Chengdushi' address component.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '30.6570',
+        lon: '104.0658',
+        display_name: 'Wuhou Shrine, Chengdushi, Sichuan, China',
+        name: 'Wuhou Shrine',
+        osm_type: 'way',
+        osm_id: '1000',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Wuhou Shrine',
+      city: 'Chengdu',
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'resolved', confidence: 0.78 });
+  });
+
+  it('resolves when the caller city is the unspaced production form ("kualalumpur") and the name matches exactly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '3.1390',
+        lon: '101.6869',
+        display_name: 'Islamic Arts Museum Malaysia, Kuala Lumpur, Malaysia',
+        name: 'Islamic Arts Museum Malaysia',
+        osm_type: 'way',
+        osm_id: '111',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Islamic Arts Museum Malaysia',
+      city: 'kualalumpur',
+      country: 'MY',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'resolved', confidence: 0.78 });
+  });
+
+  it('resolves when the caller city has extra internal spacing ("Chong Qing") and the name matches exactly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '29.5630',
+        lon: '106.5516',
+        display_name: 'Jiefangbei, Chongqing, China',
+        name: 'Jiefangbei',
+        osm_type: 'node',
+        osm_id: '222',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Jiefangbei',
+      city: 'Chong Qing',
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'resolved', confidence: 0.78 });
+  });
+
+  it('still resolves a well-formed city ("Shanghai") with an exact name match, unchanged by the fold', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '31.2323',
+        lon: '121.4762',
+        display_name: 'The Bund, Shanghai, China',
+        name: 'The Bund',
+        osm_type: 'way',
+        osm_id: '333',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'The Bund',
+      city: 'Shanghai',
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'resolved', confidence: 0.78 });
+  });
+
+  it('still classifies estimated when the name matches exactly but the address is in a genuinely different city (regression guard)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '1.3521',
+        lon: '103.8198',
+        display_name: 'The Bund, Singapore, Singapore',
+        name: 'The Bund',
+        osm_type: 'way',
+        osm_id: '444',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'The Bund',
+      city: 'Shanghai',
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'estimated', confidence: 0.55 });
+  });
+
+  it('stays vacuously true (resolved) when no city is given at all', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        lat: '29.5630',
+        lon: '106.5516',
+        display_name: 'Jiefangbei, Chongqing, China',
+        name: 'Jiefangbei',
+        osm_type: 'node',
+        osm_id: '555',
+      }],
+    });
+
+    const result = await resolvePlace({
+      queryText: 'Jiefangbei',
+      city: null,
+      country: 'CN',
+      preferNominatim: true,
+    });
+
+    expect(result).toMatchObject({ locationStatus: 'resolved', confidence: 0.78 });
+  });
+});

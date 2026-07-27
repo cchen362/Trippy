@@ -1,6 +1,8 @@
 # Implementation Plan 26 — Discovery Catalogue Trust and Lifecycle
 
-**Status:** 2026-07-27 — **W1, W2 and W3 COMPLETE and committed; nothing deployed. W4 and W5 not started.** Six owner decisions taken (D-26-1…D-26-6). Q-26-2 was resolved in W1. **Q-26-1 and Q-26-3 now have measured answers and recommendations awaiting an owner call — see W3.4.** W3.4 also surfaced one new defect (F-26-23) that is deliberately not fixed in W3.
+**Status:** 2026-07-27 — **W1, W2, W3 and the F-26-23 follow-on COMPLETE and committed; READY TO DEPLOY, not yet deployed. W4 and W5 not started.** Six owner decisions taken (D-26-1…D-26-6). Q-26-2 was resolved in W1. **Q-26-1 and Q-26-3 now have measured answers and recommendations awaiting an owner call — see W3.4.**
+
+**Deploy boundary, owner-approved 2026-07-27: W1 + W2 + W3 + F-26-23 ship as one release, before W4.** W4 touches `deriveDayGeo` — the Plan 6/7/8 geography model, test-pinned and load-bearing across day headers, map, share and geocoding bias — and W5 is a data operation; neither should share a release with three waves that have never run in production. W3's own runtime delta is small (its opt-ins are off by default and re-verification runs only from a script), so the risk in this bundle is concentrated in W1's lifecycle changes and W2.1's global name check. Owner click-script: **Appendix B**.
 
 **Origin:** [2026-07-26 Discovery catalogue quality assessment](../reviews/2026-07-26-discovery-catalogue-quality-assessment.md) (`ca37222`), which consolidates three review passes over the [original review](../reviews/2026-07-26-discovery-catalogue-quality-review.md) (`3f9db9e`, deepened at `6b4c179`). Triggered by Plan 24 owner production QA, where a Discovery-added stop opened coordinate-only and the owner recognised odd naming and apparent duplicates.
 
@@ -226,7 +228,15 @@ Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack
 
 **F-26-22 — True cost of repairing the corpus, and its honest yield.** Extrapolating 544 rows at the measured rates: **≈1,630 Nominatim requests** (≈27 minutes of the 1 req/s gate, at `'background'` priority so W1 keeps interactive work ahead of it) plus **≈485 Google escalation requests**, which at ~10 escalations/day under the current sub-budget is ~7 weeks of elapsed time, or one deliberate temporary raise. Expected yield: **roughly 100 of 544 rows (≈18%) move to Verified; ≈444 stay Unverified.** Re-verification is therefore a partial recovery, not a fix for the 44% — worth doing, but it does not retire the problem, and the plan should not be read as though it does.
 
-**F-26-23 — NEW DEFECT found by the measurement, not previously in this plan: `cityMatch` is unsatisfiable for destinations whose `display_name` lost its word spacing.** `classifyNameMatch` (`placeResolver.js:417`) requires the normalized destination `display_name` to appear as a substring of the provider's returned address. `normalizeText('kualalumpur')` is `kualalumpur`, which can never occur inside `kuala lumpur, malaysia` — so a KL row fails the city half **even when the provider returns a byte-identical name**. Observed live: `Islamic Arts Museum Malaysia` and `Thean Hou Temple` both came back exact from Google and were still scored 0.55. Of eleven production destinations, `kualalumpur` and `Chong Qing` (vs. `chongqing`) are structurally affected — **95 + 11 = 106 rows that cannot verify regardless of budget spent on them.** Measured incidence in the live sample: 8 of 100 scored attempts returned an exact name match yet scored weak, 5 of them kualalumpur. **Not fixed in W3** — W3.4 is a measurement deliverable and the fix is an owner decision about whether it belongs with W4's country/geography work or as its own item.
+**F-26-23 — NEW DEFECT found by the measurement, not previously in this plan: `cityMatch` is unsatisfiable for destinations whose `display_name` lost its word spacing.** `classifyNameMatch` (`placeResolver.js:417`) requires the normalized destination `display_name` to appear as a substring of the provider's returned address. `normalizeText('kualalumpur')` is `kualalumpur`, which can never occur inside `kuala lumpur, malaysia` — so a KL row fails the city half **even when the provider returns a byte-identical name**. Observed live: `Islamic Arts Museum Malaysia` and `Thean Hou Temple` both came back exact from Google and were still scored 0.55. Of eleven production destinations, `kualalumpur` and `Chong Qing` (vs. `chongqing`) are structurally affected — **95 + 11 = 106 rows that cannot verify regardless of budget spent on them.** Measured incidence in the live sample: 8 of 100 scored attempts returned an exact name match yet scored weak, 5 of them kualalumpur.
+
+> **FIXED 2026-07-27 as a W3 follow-on, owner-approved, shipping in the same deploy.** The city half of `classifyNameMatch` now folds separators, because the geography-identity layer already treats `Kuala Lumpur` and `kualalumpur` as one place (`canonicalGeoKey` — which is why production has one `kualalumpur` destination row, not two). The check disagreeing with the identity layer was the bug.
+>
+> **The first attempt at this fix was wrong and the error is worth recording.** Folding separators out of the whole address string — `canonicalGeoKey(address).includes(canonicalGeoKey(city))` — creates a *new* false-positive class by matching across unrelated address components: `canonicalGeoKey("Xi'an, Shanxi, China")` contains `anshan`, so the real city **Anshan** would earn `resolved`/0.9 against an address 1,500 km away. That is exactly the wrongly-`Verified` failure W2.1 closed on the Google path, reintroduced through the city half. The claim "substring matching already lets `york` match `new york`, so folding separators adds no new false-positive class" was asserted during review and is **false** — it holds for matches inside one token, not for matches straddling two.
+>
+> The shipped fix is boundary-aware: the city must be the prefix of a single address token (`chengdu` against a `chengdushi` component, `york` against `new york`) **or** exactly equal a run of consecutive tokens (`kualalumpur` == `kuala` + `lumpur`). `anshan` is neither, so it correctly fails. Both directions are pinned by test.
+>
+> **This does not retroactively verify anything.** The 106 rows are terminal `unverified`; the fix makes them *eligible*, and they only flip when W3.3's re-verification is deliberately run — Appendix B step 13.
 
 **Q-26-3 (split `name` into display vs. search name?) — the evidence now supports splitting, and quantifies why.** Of the 544 repairable names, **307 contain brackets and 182 run to six or more words**; only 185 are plain. Some `name` values are prose, not place names — `Michelin Bib Gourmand: Ay-Chung Flour-Shaping (listed above, but worth the emphasis)` is a display string being handed to a geocoder as a search query. `strongName` requires either exact normalized equality with the returned name or the returned address containing the query, and neither can hold for a six-word editorial phrase. Derived variants (`nominatimQueryTexts`' bracket-stripping) already carry 35 of the 64 `estimated`-grade Nominatim hits, i.e. the stripped forms are already outperforming the stored name — which is the upside the original claim asserted and F-26-6 doubted. **Recommendation: split, so the geocoder query is a place name and `name` stays the card's display string.** Owner decision; not implemented here.
 
@@ -267,7 +277,9 @@ Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack
 
 ## Production QA
 
-Owner click-script, per standing convention — the agent verifies locally, the owner verifies production. To be written as Appendix B when W1 is ready, covering: a Show-more on a full category, a fresh destination's progressive reveal, a free-text CJK destination on a day following a known-country day, and the trust signal on a browse card.
+Owner click-script, per standing convention — the agent verifies locally, the owner verifies production. **Written: see [Appendix B](#appendix-b--owner-production-qa-click-script-w1--w2--w3--the-f-26-23-fix)**, covering the combined W1+W2+W3+F-26-23 deploy.
+
+One item from this section's original outline is deliberately **not** in Appendix B: the free-text CJK destination on a day following a known-country day. That is F-26-10's previous-day country inheritance, which W4 fixes and which W4.3 must ship alongside W4.1/W4.2 — it belongs in W4's own QA pass, not this deploy's.
 
 ## Cost
 
@@ -290,3 +302,57 @@ W4 is the only wave adjacent to the Plan 6/7/8 geography model. It is written to
 > The problem: a free-text day override whose country cannot be inferred inherits the previous day's country, so a 冲绳 day after a Shanghai/CN day resolves to `{ city: 冲绳, countryCode: 'CN' }`. The owner has ruled out changing the layer precedence.
 >
 > Questions: does the additive layer-source signal conflict with any design intent in Plans 6/8/9? Is there a consumer of `deriveDayGeo` for which "country came from a different layer than city" is *load-bearing* rather than incidental — i.e. where Discovery's rule would be wrong if generalised? Is there a fourth surface beyond trip chips, day overrides, and Discovery that needs the same guard? Answer with file:line evidence; propose no code.
+
+---
+
+## Appendix B — Owner production QA click-script (W1 + W2 + W3 + the F-26-23 fix)
+
+Standing convention: the agent verifies locally, the owner verifies production. This covers the **first deploy of Plan 26** — three waves plus one follow-on fix shipping together. Sequencing rationale: W4 touches `deriveDayGeo` (the Plan 6/7/8 geography model, test-pinned, load-bearing across day headers, map, share and geocoding bias) and W5 is a data operation, so both belong in later, separately-verifiable deploys.
+
+**What is actually changing for a user.** Most of this bundle is invisible plumbing. Three things are not:
+- **Interactive lookups no longer queue behind background checking** (W1.1). Measured locally at ~1.0 s versus ~60.6 s under a loaded queue.
+- **A place whose name does not match what the provider returned no longer earns "Verified"** (W2.1). This is the one change that reaches non-Discovery surfaces — it affects the pin and confidence of any stop you add.
+- **Discovery declines honestly instead of erroring** when every category is full (W1.5).
+
+### Pre-deploy ops
+
+1. **Back up first — this deploy carries migration 032.** Prod `~/Trippy/data` is root-owned with no passwordless sudo, so take the backup into the chee-owned `~/Trippy/backups/` via `sqlite3 .backup`, not a file copy.
+2. After the container comes up, confirm the migration applied and nothing else did:
+   `docker exec -w /app/backend trippy-trippy-1 node -e "const D=require('better-sqlite3');const db=new D('/app/data/trippy.db',{readonly:true});console.log(db.prepare('SELECT filename FROM _migrations ORDER BY id DESC LIMIT 3').all())"`
+   Expect `032_discovery_verification_attempts.sql` at the top.
+
+### A — Discovery lifecycle (W1)
+
+3. Open a trip → **Plan** → Discovery on a destination that has never been generated (a fresh city). **Expect:** categories fill in **one at a time as each completes**, not all at once after a long blank wait. This is W1.4's progressive reveal.
+4. On a heavily-used destination (Taipei is the most saturated in production), press **Show more**. If every category is full, **expect a calm grey notice**, not a red error, reading: *"Every category here is already full. There's nothing new to surface right now — try again once some of these places have had time to prove themselves."*
+   **Regression to watch for:** the notice must appear *below/alongside the existing results*. If the grid of suggestions vanishes and is replaced by a red line, that is the W1.5 bug returning — report it.
+5. While a generation is still streaming, switch to a day and **add a stop by name**. **Expect it to resolve in a few seconds**, not to hang until the generation finishes. This is the single most user-visible W1 improvement.
+
+### B — Trust labelling (W2) — the highest-risk part of this deploy
+
+6. Open any suggestion's **Details** panel and confirm it still reads **Verified** or **Unverified** (wording unchanged by design, D-26-1).
+7. **Add a stop from a Discovery card** that shows *Verified*. Open it on the **Map** tab. **Expect** the pin to sit on the actual place.
+8. **Add a stop manually** (type a place name yourself, not from Discovery). This exercises the same global name check. **Expect** normal behaviour — a recognisable pin and name.
+   **What would be a real regression:** a stop you add manually that previously landed correctly now landing with a vaguer pin or losing its name. W2.1 deliberately downgrades a provider result whose returned name does not match what was asked for, so a *wrong* place becoming vague is the fix working; a *correct* place becoming vague is a bug. Report any instance with the exact text you typed.
+9. Check a couple of previously-added stops still render as before. W2.1 does not rewrite stored rows, so nothing should have moved.
+
+### C — Observability is actually recording (W3)
+
+10. After doing A and B, confirm attempt rows exist:
+    `docker exec -w /app/backend trippy-trippy-1 node -e "const D=require('better-sqlite3');const db=new D('/app/data/trippy.db',{readonly:true});console.log(db.prepare('SELECT reason, COUNT(*) c FROM discovery_verification_attempts GROUP BY reason').all())"`
+    **Expect** a non-empty result. Empty after a fresh generation means the telemetry is not wired in production — report it.
+11. Confirm the budget line appears in the container logs once per drain: `docker logs --tail 200 trippy-trippy-1 | grep "budget status"`. Expect `resolverRequests=…/1000 escalationRequests=…/50 reverifyRequests=…/150`.
+
+### D — The F-26-23 city fix (needs one deliberate ops step)
+
+The 106 affected rows (kualalumpur, Chong Qing) are terminal `unverified`; the fix makes them *eligible* to verify but does not retroactively re-check them. Re-verification never runs from a request path — it is invoked deliberately:
+
+12. Dry run first, which touches no provider and writes nothing:
+    `docker exec -w /app/backend trippy-trippy-1 node scripts/discoveryReverify.js --dry-run`
+13. Then a bounded live run against Kuala Lumpur only (`--destination=<id>` from the dry-run output, `--limit=10`). **Expect** some rows to flip to `verified` where previously none could. Per F-26-22 the overall rescue rate is ~18–20%, so a handful out of ten is the *expected* result, not a disappointment.
+
+### Known-and-accepted, do not report as bugs
+
+- Rows still showing **Unverified** after re-verification. Expected: ~80% stay unverified (F-26-22), and the underlying cause is Q-26-3's display-name-as-search-query problem, which is not fixed in this deploy.
+- 北京 and 南疆 still present with zero verified rows — they are deleted in W5.1 (D-26-3).
+- Duplicate-looking entries such as the three Kaohsiung Lotus Pond rows — D-26-5 keeps these deliberately; the arrangement fix is not in this deploy.
