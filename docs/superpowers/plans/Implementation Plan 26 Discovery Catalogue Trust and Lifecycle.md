@@ -248,7 +248,27 @@ Known confound, measured not assumed: 63 of 881 `verified` rows (7.1%) also lack
 
 ## W4 — Country capture across surfaces
 
-**Additive only, per D-26-2. Ships as one unit — see F-26-10.**
+**Status:** 2026-07-27 — **NOT STARTED.** W1–W3 are deployed and production-QA'd (`4921dd2`). **This is the riskiest wave in the plan** and the only one adjacent to the Plan 6/7/8 geography model. No migration is expected: every item is additive or a narrowing of an existing inference.
+
+**W4.5 is now the highest-priority item in the whole plan, and its justification changed during W3 QA.** It was written to explain 北京 and 南疆 — the owner's old CJK free-text tests, dismissible as not-real-demand. Then Appendix C's F-26-26 recorded a **new** empty-country destination, **Suzhou**, created through ordinary use on 2026-07-27, holding 11 places that can never verify. The creation path is live, not historical. Consider leading the wave with W4.5.
+
+**Additive only, per D-26-2. W4.1/W4.2/W4.3 ship as ONE unit — see F-26-10. This is a hard sequencing constraint, not a preference:** W4.3 alone increases the rate of null countries, which makes the previous-day inheritance in W4.1/W4.2 fire *more* often. Shipping W4.3 first makes the bug it is meant to help worse.
+
+**Line numbers after W3 — the F-fact citations above were read at `ca37222`, three waves ago. Use these:**
+
+| What | Fact cites | Now |
+| --- | --- | --- |
+| `deriveDayGeo` signature | `trips.js:504-509` | `services/trips.js:452` |
+| The layers array (precedence order — **do not reorder**, D-26-2) | — | `:504` |
+| **F-26-10's mechanism**: `city` and `countryCode` each selected by an INDEPENDENT `.find(Boolean)` over `layers` | `:504-509` | `:505-509` |
+| Documented precedence comment | `:440-443` | `:430-450` |
+| `resolveOverrideCountry` — W4.3's target | `:1263-1274` | `:1263` (unchanged) |
+| `updateDayCityOverride` — the awaited caller inside the PUT | `:1269` | `:1276` |
+| Discovery's D6 single-row country adoption (W4.4, F-26-14) | `discovery.js:122-131` | `routes/discovery.js:115-131` |
+| Where the adopted country enters `getOrCreateDestination` (W4.2/W4.5) | `discovery.js:141` | `routes/discovery.js:164` |
+| `deriveDayGeo`'s pinned test suite | `tests/trips.test.js:220` | `tests/trips.test.js:183` (describe block) |
+
+**W4.3's gate is precisely identifiable.** `resolveOverrideCountry` returns `resolution?.countryCode || null` with **no reference to `locationStatus` or `confidence`** — it accepts any country from any hit. W2.1 did not change this, because W2.1 narrowed the *labelling* and this function ignores the label. The gate is to require `locationStatus === 'resolved'`. Note this call does not pass `priority`, so it correctly defaults to `'interactive'` (W1.1) — do not change that.
 
 **W4.1** `deriveDayGeo` additionally reports which layer supplied `city` and which supplied `countryCode`. Existing return fields and precedence are untouched; every current consumer keeps reading exactly what it reads today.
 
