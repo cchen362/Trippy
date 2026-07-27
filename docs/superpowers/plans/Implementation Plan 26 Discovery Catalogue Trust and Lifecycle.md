@@ -1,6 +1,6 @@
 # Implementation Plan 26 — Discovery Catalogue Trust and Lifecycle
 
-**Status:** 2026-07-27 — **W1, W2, W3 and the F-26-23 follow-on COMPLETE and DEPLOYED at `c69c806`. Owner production QA (Appendix B) owed. W4 and W5 not started.**
+**Status:** 2026-07-27 — **W1, W2, W3 and the F-26-23 follow-on COMPLETE, DEPLOYED and production-QA'd (`4921dd2`). W4 and W5 not started.** QA passed sections A–D after two defects in the W3.3 operator script were found by section D and fixed — full results, and four new facts (F-26-24…F-26-26), in **Appendix C**. **W4.5 is now the highest-priority remaining item:** a new empty-country destination (Suzhou) was created through ordinary use during QA, proving that path is still open.
 
 **Deploy record — 2026-07-27, `31f806a` → `c69c806`.** Pre-migration backup taken to the chee-owned `~/Trippy/backups/trippy-pre-plan26-20260726-220714.db`, `PRAGMA integrity_check` = `ok`, 2,014 places / 5 trips. Migration **032 applied cleanly and alone** (31 → 32 migrations); post-deploy row counts unchanged at 2,014 / 5. Health 200, frontend 200, no errors in startup logs. Infra-verified in the running image, not just locally: `cityMatchesAddress` present, `resolvePlace`'s `onAttempt`/`refreshCache` opt-ins present, and **the Plan 24 guard re-proven against the deployed code** — `stops.js` and `bookings.js` each mention `escalateWeakHit`/`onAttempt`/`refreshCache` zero times. `scripts/discoveryReverify.js --dry-run` runs correctly in production and reports 706 terminal-unverified rows across 11 destinations, matching F-26-16 exactly. **Kuala Lumpur is `destination_id=3`** — the id Appendix B step 13 needs. Six owner decisions taken (D-26-1…D-26-6). Q-26-2 was resolved in W1. **Q-26-1 and Q-26-3 now have measured answers and recommendations awaiting an owner call — see W3.4.**
 
@@ -307,6 +307,43 @@ W4 is the only wave adjacent to the Plan 6/7/8 geography model. It is written to
 
 ---
 
+## Appendix C — Production QA results, 2026-07-27
+
+Owner ran Appendix B sections A and B; the agent ran C and D. **Sections A, B and C pass. Section D failed and exposed two real defects in shipped code**, both fixed at `4921dd2` and redeployed.
+
+### Two defects in `scripts/discoveryReverify.js`, found only by running section D
+
+Both were invisible to `--dry-run`, because the dry run never drains — **it skips the only asynchronous path in the feature.** A smoke test that avoids the thing being tested proves nothing, and this plan treated a passing dry run as evidence the operator path worked.
+
+**D-1 — the process exited mid-drain, cleanly.** `placeResolver`'s Nominatim pacing timer is `unref()`'d (W1.1) so the shared gate can never hold the Express server or a test run open. That is correct in the server and fatal in a short-lived CLI: between two paced lookups nothing refs the event loop, so Node exits with **code 0** — partial work written, no summary, no error. In a deploy log it is indistinguishable from success. Fixed by having the job runner hold a ref'd handle for exactly as long as it has outstanding work; the `unref()` in the resolver is correct and unchanged.
+
+**D-2 — the run summary always reported zero.** The script marked its start with `new Date().toISOString()` and passed it as `since`, but `attempted_at` is written by `datetime('now')` as `YYYY-MM-DD HH:MM:SS` and the filter compares TEXT, where `' '` (0x20) sorts before `'T'` (0x54) — so the marker excluded **every row the run had just written**. Fixed by reading the marker from SQLite itself, so there is no format to convert between. This is the same SQLite-format trap `placeResolver.js`'s `cacheTimestampToEpochMs` already exists to handle. Pinned by regression test.
+
+The script now fails loudly instead of silently: candidates available plus zero attempt rows written is a non-zero exit that states whether the budget was the cause. **That guard is what surfaced D-2 immediately after D-1 was fixed** — without it, D-2 would have shipped as a permanently empty summary.
+
+### F-26-24 — Measured production cost is ~4.1 requests per place, not 2.98
+
+Real generation traffic on 2026-07-27: **253 places, 1,001 provider requests, 4.14 per place** (Taipei alone: 180 places / 751 requests). W3.4's sample measured 2.98 on a fresh cache, so **F-26-22's cost estimate is ~38% low**; a full 544-row repair is ≈2,230 requests, not ≈1,630.
+
+**The re-expressed budget is honest but tight: 1,000 requests is about two generations.** One Taipei "Show more" plus one new destination exhausted the day, leaving 51 rows at `pending` (Taipei 40, Denpasar 11). Those are not lost — W1's pending re-collection picks them up on the next browse — but the owner should expect a same-day second generation to leave rows unchecked until tomorrow. Whether 1,000 is the right ceiling is now an evidence-backed owner decision rather than a guess.
+
+### F-26-25 — Re-verification rescues far more than F-26-22 projected, for the city-bug subset
+
+Kuala Lumpur, 12 places attempted, 55 requests: **6 verified (50%)**, including `Islamic Arts Museum Malaysia` and `Thean Hou Temple` — the exact two rows W3.4 identified as blocked by F-26-23. All six wins came through W2.3's Google escalation being allowed to pass classification once the city check was fixed. F-26-22's ~18% projection was measured *before* the F-26-23 fix existed and on a sample dominated by destinations that were never city-bug-affected; **it remains the right expectation for Shanghai/Taipei/Hangzhou and is far too pessimistic for the kualalumpur/Chong Qing subset.** Note also 39 Nominatim variant misses against 16 Google hits here — for KL specifically, OSM coverage genuinely is weak and Google is doing the work.
+
+### F-26-26 — W4.5 is now urgent: a NEW empty-country destination was created during QA
+
+Section A3 created **Suzhou with `country_code = ''`** — a 12th empty-country destination, joining 北京 and 南疆. Eleven of its places already recorded `empty_destination_country` and **can never verify**. D-26-3 deletes the two known ones in W5.1, but Suzhou proves the *path that creates them is still open*: this is exactly what W4.5 ("block shared-catalogue creation for unknown-country destinations") exists to close, and it is now demonstrably reachable through ordinary use, not just through the owner's old CJK free-text tests. **W5.1's delete list must be re-derived at execution time, not copied from D-26-3.**
+
+### Confirmed working in production
+
+- **W1's core invariant holds:** `archived + pending` = **0**. No never-checked row was archived by the cap. The `reason=category_cap provenance=unverified` archives in the logs are correct — those rows were checked and failed, which the cap is allowed to archive.
+- **W1.4 progressive reveal** (A3), **W1.1 interactive pre-emption** (A5 — a stop resolved in seconds while a Taipei generation ran), **trust labels** (B6), **Discovery-added and manually-added stops** (B7/B8/B9) all pass.
+- **D-26-4's structural budget separation proved itself:** the main resolver budget was fully exhausted (1001/1000) while re-verification still ran, because its counter is genuinely independent.
+- **A4 was correct behaviour, not a bug — Appendix B's wording was wrong.** W1.5's decline fires only when **no** category has headroom (see the W1.5 scope note); Taipei had a few full categories and headroom elsewhere, so a normal generation ran and no notice was due. Appendix B step 4 has been corrected.
+
+---
+
 ## Appendix B — Owner production QA click-script (W1 + W2 + W3 + the F-26-23 fix)
 
 Standing convention: the agent verifies locally, the owner verifies production. This covers the **first deploy of Plan 26** — three waves plus one follow-on fix shipping together. Sequencing rationale: W4 touches `deriveDayGeo` (the Plan 6/7/8 geography model, test-pinned, load-bearing across day headers, map, share and geocoding bias) and W5 is a data operation, so both belong in later, separately-verifiable deploys.
@@ -326,7 +363,8 @@ Standing convention: the agent verifies locally, the owner verifies production. 
 ### A — Discovery lifecycle (W1)
 
 3. Open a trip → **Plan** → Discovery on a destination that has never been generated (a fresh city). **Expect:** categories fill in **one at a time as each completes**, not all at once after a long blank wait. This is W1.4's progressive reveal.
-4. On a heavily-used destination (Taipei is the most saturated in production), press **Show more**. If every category is full, **expect a calm grey notice**, not a red error, reading: *"Every category here is already full. There's nothing new to surface right now — try again once some of these places have had time to prove themselves."*
+4. On a heavily-used destination (Taipei is the most saturated in production), press **Show more**.
+   **Precondition, and it is strict:** the decline fires only when **NO** category has headroom, not when the category you happen to be viewing is full (W1.5 scope note). If a few categories sit at 45 but others do not, a normal generation runs and takes a minute or two — **that is correct, not a failure of this step.** Only when every one of the eight categories is full should you **expect a calm grey notice**, not a red error, reading: *"Every category here is already full. There's nothing new to surface right now — try again once some of these places have had time to prove themselves."*
    **Regression to watch for:** the notice must appear *below/alongside the existing results*. If the grid of suggestions vanishes and is replaced by a red line, that is the W1.5 bug returning — report it.
 5. While a generation is still streaming, switch to a day and **add a stop by name**. **Expect it to resolve in a few seconds**, not to hang until the generation finishes. This is the single most user-visible W1 improvement.
 
