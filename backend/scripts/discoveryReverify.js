@@ -131,20 +131,60 @@ function printCounts(label, map) {
 async function runLive(db, destinations, limit) {
   printBudgetStatus('budget before this run');
 
-  const since = new Date().toISOString();
+  // Take the run's start marker FROM SQLITE, not from JS. attempted_at is written
+  // by datetime('now') as 'YYYY-MM-DD HH:MM:SS', while new Date().toISOString()
+  // yields 'YYYY-MM-DDTHH:MM:SS.sssZ' — and listVerificationAttempts compares
+  // `attempted_at >= since` as TEXT, where ' ' (0x20) sorts before 'T' (0x54). An
+  // ISO marker therefore excludes every row the run just wrote, so the summary
+  // reported zero regardless of what happened. Reading the marker from the same
+  // clock and the same format that writes the column removes the conversion
+  // entirely rather than translating between two representations.
+  const since = db.prepare("SELECT datetime('now') AS t").get().t;
 
-  console.log(`\n[discoveryReverify] enqueuing re-verification for ${destinations.length} destination(s)...`);
-  for (const destination of destinations) {
-    const terminalCount = countTerminalUnverified(db, destination.id);
-    if (terminalCount === 0) continue;
-    console.log(`  destination_id=${destination.id} display_name=${destination.display_name} terminal_unverified=${terminalCount}`);
-    await enqueueForReverification(db, destination.id, limit != null ? { limit } : {});
-    await waitForVerificationDrain(destination.id);
+  // The Nominatim pacing timer inside placeResolver is deliberately unref()'d
+  // (placeResolver.js, pumpNominatimQueue) so that gate can never hold the Express
+  // server — or a test run — open. That is correct there and fatal here: this
+  // script's ONLY pending work is a paced drain, so between two lookups there is
+  // nothing ref'ing the event loop and Node exits *cleanly* mid-run — exit code 0,
+  // partial work written, no summary, no error. A job runner has to assert its own
+  // liveness rather than borrow it from a timer that has disclaimed exactly that.
+  const keepAlive = setInterval(() => {}, 1000);
+  let admittedAny = false;
+
+  try {
+    console.log(`\n[discoveryReverify] enqueuing re-verification for ${destinations.length} destination(s)...`);
+    for (const destination of destinations) {
+      const terminalCount = countTerminalUnverified(db, destination.id);
+      if (terminalCount === 0) continue;
+      admittedAny = true;
+      console.log(`  destination_id=${destination.id} display_name=${destination.display_name} terminal_unverified=${terminalCount}`);
+      await enqueueForReverification(db, destination.id, limit != null ? { limit } : {});
+      await waitForVerificationDrain(destination.id);
+    }
+  } finally {
+    clearInterval(keepAlive);
   }
 
   const attempts = destinations
     .flatMap((destination) => listVerificationAttempts(db, { destinationId: destination.id, since, limit: 5000 }))
     .filter((attempt) => attempt.reverification === 1);
+
+  // Loud failure on the silent-no-op shape. The bug this guards against exited 0
+  // with partial work and no summary, which reads exactly like a clean run in a
+  // deploy log. If candidates existed and the budgets had room, a run that wrote
+  // nothing did not succeed — say so and fail the exit code.
+  if (admittedAny && attempts.length === 0) {
+    const status = getDiscoveryBudgetStatus();
+    const budgetBound = status.reverifyRequests.used >= status.reverifyRequests.budget;
+    console.error(
+      '[discoveryReverify] FAILED: candidates were available but no attempt row was written. %s',
+      budgetBound
+        ? 'Cause: the re-verify daily request budget is exhausted.'
+        : 'Budgets had room — the drain did not run to completion.',
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   console.log(`\n[discoveryReverify] ${attempts.length} attempt row(s) written this run.`);
   const { byReason, byProvider, bySourceField, byVariantKind } = summarizeAttempts(attempts);

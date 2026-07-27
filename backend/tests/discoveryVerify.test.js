@@ -424,6 +424,35 @@ describe('discoveryVerify — per-attempt persistence (Plan 26 W3.1)', () => {
     expect(rows[0].network_requests).toBe(0);
   });
 
+  // Regression pin for a production defect in scripts/discoveryReverify.js: the
+  // script marked its start with new Date().toISOString() and passed that as
+  // `since`. attempted_at is written by SQLite's datetime('now') as
+  // 'YYYY-MM-DD HH:MM:SS', and the filter compares TEXT, where ' ' (0x20) sorts
+  // before 'T' (0x54) — so an ISO marker excluded every row the run had just
+  // written and the summary always reported zero work. A `since` taken from
+  // datetime('now') must see rows recorded after it.
+  it('filters by `since` using SQLite datetime format, not JS ISO format', () => {
+    const dest = makeDestination({ cityKey: 'verifytest-attempts-since' });
+    const place = insertOne(dest.id, { name: 'Since Target' });
+    const db = getDb();
+
+    const sqliteSince = db.prepare("SELECT datetime('now') AS t").get().t;
+    const isoSince = new Date().toISOString();
+
+    recordVerificationAttempts(db, {
+      placeId: place.id,
+      destinationId: dest.id,
+      sourceField: 'name',
+      outcome: 'unverified',
+      reason: 'no_result',
+      attempts: [{ provider: 'nominatim', queryVariant: 'q', networkRequests: 1, locationStatus: 'unresolved' }],
+    });
+
+    expect(listVerificationAttempts(db, { placeId: place.id, since: sqliteSince, limit: 100 })).toHaveLength(1);
+    // Documents WHY the script must not use an ISO marker — this is the bug shape.
+    expect(listVerificationAttempts(db, { placeId: place.id, since: isoSince, limit: 100 })).toHaveLength(0);
+  });
+
   it('prunes so at most the 10 most recent attempt rows per place survive', () => {
     const dest = makeDestination({ cityKey: 'verifytest-attempts4' });
     const place = insertOne(dest.id, { name: 'Prune Target' });
