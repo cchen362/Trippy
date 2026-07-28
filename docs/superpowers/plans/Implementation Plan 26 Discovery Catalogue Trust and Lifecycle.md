@@ -382,6 +382,16 @@ Owner production QA click-script: **Appendix D**.
 
 ---
 
+## Carried forward out of this plan — 2026-07-28
+
+This plan is closed, but three of its own items never shipped. They are recorded here so the next plan inherits them with their evidence rather than rediscovering them. **All three were verified still-unimplemented against live code on 2026-07-28**, not assumed from the doc.
+
+- **F-26-42 — `pending` renders as "Unverified".** `SuggestionCard.jsx:36` derives `isVerified = provenance === 'verified'` and `:250` renders a binary `Verified`/`Unverified`. D-26-1 called for three internally-distinct states to be separated; the browse-card half shipped in W1.4, the three-state half did not. W5.2 sharpened the cost: 45 rows became visible again, all labelled as though they had been checked and failed, when in fact none of them has been checked at all.
+- **D-26-5 — near-match adjacency was an owner DECISION, not an open question, and it was never assigned to a wave.** It appears at line 83 and again only in this plan's Verification checklist. Nothing in `discoveryRank.js` or `components/discovery/` implements it (grep for adjacency/group-position returns nothing). The decision stands as written: keep genuinely-different things at one place adjacent within their category, ranking unchanged, group position set by the strongest member — a sorting rule only.
+- **Q-26-3 — split display name from geocoder search name.** Still awaiting an owner call; no `searchName`/`search_name` exists anywhere in the codebase. W3.4 quantified the case and it is the only identified lever on the 44% unverified figure: of 544 repairable names, **307 contain brackets and 182 run to six or more words**, and some stored `name` values are editorial prose being handed to a geocoder as a query.
+
+**Also folded forward, from Plan 24 rather than this plan:** coincident map markers are invisible. `StopMarker.jsx:54` renders a plain react-leaflet `<Marker position={[lat, lng]}>` with no offset, spiderfy or clustering, so two stops at identical coordinates stack exactly and only the top one is tappable. Production holds exactly one such pair — `Qinghefang Antique Street` and `Qinghefang Night Market & Street Food` — both resolved by the resolver onto the same real place (`google:ChIJIyHi70OdTDQRmQAg6H8E-WU`), hence identical `lat`/`lng`/`provider_id`. Needs an owner decision on treatment (nudge / cluster / merge) before any code.
+
 ## Verification
 
 - `cd backend; npm test` — note the known Windows teardown segfault *after* results print; it is not a failure.
