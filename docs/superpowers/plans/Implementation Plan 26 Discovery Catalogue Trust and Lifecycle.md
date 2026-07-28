@@ -364,9 +364,13 @@ Owner production QA click-script: **Appendix D**.
 
 **W5.1** Delete the empty-country destinations and their places (D-26-3). **Re-derive the list at execution time — it is now THREE, not two:** 北京 (id 4), 南疆 (id 5) and **Suzhou (id 18)**, per F-26-30. Ids are from the 2026-07-27 census and must be re-confirmed against production before any delete runs. W4.5 has closed the path that creates new ones, so the list should not grow again — verify that it has not before deleting.
 
-**W5.2** Un-archive the 78 rows archived before they were ever checked (F-26-3) and let the queue pick them up. Sequenced strictly after W1.2, or they will simply be re-archived. Zero API cost.
+**W5.2** Un-archive the 78 rows archived before they were ever checked (F-26-3) and let the queue pick them up. Sequenced strictly after W1.2, or they will simply be re-archived. **That gate is now SATISFIED — W1 shipped and was production-QA'd on 2026-07-27 (`4921dd2`), with the `archived + pending = 0` invariant confirmed live — so W5.2 is unblocked.** Zero API cost. Re-count the 78 against production before acting; the figure is from the 2026-07-26 census and W1/W2/W3 have run in production since.
 
-**Ops:** take a `sqlite3 .backup` into the chee-owned `~/Trippy/backups/` first — prod `~/Trippy/data` is root-owned with no passwordless sudo.
+**W5 status: 2026-07-28 — NOT STARTED.** It is the only remaining wave; W1–W4 are all deployed and production-QA'd.
+
+**W5.1 must not try to geocode its way to a country for 北京 or 南疆 — F-26-38 is a direct warning, not background.** Both are CJK strings with no country, which is precisely the class that resolved 乌镇 to a road in Osaka (F-26-37) once the country bias was absent. A brand-new or country-less destination has no bias by construction. D-26-3 says **delete, do not regenerate**, and F-26-38 is the mechanical reason that decision is also the safe one: any "recover the country first" alternative would be running the exact lookup W4 exists to distrust. Suzhou (id 18) is covered by the same reasoning — it holds 62 places and **zero** verified rows, so there is nothing to preserve.
+
+**Ops:** take a `sqlite3 .backup` into the chee-owned `~/Trippy/backups/` first — prod `~/Trippy/data` is root-owned with no passwordless sudo. The delete is the first genuinely destructive data operation in this plan: every prior wave was additive or a narrowing. Treat the backup as mandatory, not optional, and get owner sign-off on the re-derived delete list before it runs.
 
 ---
 
