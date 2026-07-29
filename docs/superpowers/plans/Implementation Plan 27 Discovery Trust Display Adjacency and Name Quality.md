@@ -1,6 +1,6 @@
 # Implementation Plan 27 — Discovery Trust Display, Near-Match Adjacency, Name Quality and Coincident Map Pins
 
-**Status:** 2026-07-29 — **W1, W2 and W3 COMPLETE (not deployed). Release 1 (W1+W2+W3) is whole and ready for the owner's production QA via Appendix A. W4 NOT STARTED.** Four waves, **no migration in the entire plan** (see F-27-1). All four owner decisions are taken (D-27-1…D-27-4); no wave is blocked on a product question. Investigation was read-only: no product code was written in the session that produced this document.
+**Status:** 2026-07-29 — **Release 1 (W1 + W2 + W3, plus the W1.2 reversal) is COMPLETE and DEPLOYED to production at `80e9e82`.** No migration ran — `_migrations` still tops out at id 32 with `run_at` unchanged at `2026-07-27 04:07:54`. Container `trippy-trippy-1` healthy, `/api/health` 200, pre-deploy backup `~/Trippy/backups/trippy-pre-80e9e82-20260728-235356.db` verified (`integrity_check` ok, 5 trips / 105 stops / 2,227 places). **Owner production QA via Appendix A is OWED — note step 4 was corrected post-deploy and step 8 gained exact identifiers.** W4 NOT STARTED. Four waves, **no migration in the entire plan** (see F-27-1). All four owner decisions are taken (D-27-1…D-27-4); no wave is blocked on a product question. Investigation was read-only: no product code was written in the session that produced this document.
 
 **Origin:** the three items [Plan 26](Implementation%20Plan%2026%20Discovery%20Catalogue%20Trust%20and%20Lifecycle.md) carried forward when it closed on 2026-07-28 (F-26-42, D-26-5, Q-26-3), plus the coincident-marker item folded forward from [Plan 24](Implementation%20Plan%2024%20Google%20Maps%20Deep%20Link%20Place%20Identity.md). Evidence base: the [2026-07-26 discovery catalogue quality assessment](../reviews/2026-07-26-discovery-catalogue-quality-assessment.md), Plan 26's W3.4 measurements and Appendix F, and a fresh read-only production census taken 2026-07-28 for this plan.
 
@@ -280,7 +280,12 @@ Standing convention: the agent verifies locally, the owner verifies production. 
 
 ### B — Adjacency (W2)
 
-4. Open Discovery on **Kaohsiung** → the attractions category. **Expect** `Lotus Pond`, `Dragon and Tiger Pagodas (Lotus Pond)` and `Zuoying Scenic Area (Lotus Pond Watershed)` to appear **next to each other**, not scattered.
+4. **CORRECTED 2026-07-29 — the original step 4 asked for something that cannot happen, in production as well as dev. Do not use the old wording.** It said to expect `Lotus Pond`, `Dragon and Tiger Pagodas (Lotus Pond)` and `Zuoying Scenic Area (Lotus Pond Watershed)` together in "the attractions category". Verified against the live DB immediately after this release deployed: Kaohsiung's six Lotus Pond rows sit in **four different categories** — `architecture` ×2, `essentials` ×1 (the bare `Lotus Pond`), `nature` ×2, `wellness` ×1. W2 groups strictly within `(destination, category)` (W2.1), so cross-category rows are structurally unreachable by the rule and always will be. The original step would have produced a false bug report.
+
+   **What to actually check on Kaohsiung** — confirmed by running the shipped `groupAdjacentNearMatches` over the live corpus post-deploy:
+   - **`architecture` tab:** `Dragon and Tiger Pagodas (Lotus Pond)` immediately followed by `Dragon and Tiger Pagodas (Lotus Pond) – Colorful Folk Architecture`.
+   - **`nature` tab:** `Zuoying Scenic Area (Lotus Pond Watershed)` immediately followed by `Zuoying Scenic Area (Lotus Pond Watershed) – Ecology Overview`.
+   - `essentials` shows a lone `Lotus Pond` and `wellness` a lone Tai Chi entry — **both correctly ungrouped.** Nothing to report there.
 5. Open **Kuala Lumpur**. **Expect** `Jamek Mosque` and `Jamek Mosque (Masjid Jamek)` adjacent, and the three `House of Matahari` entries adjacent.
 6. **The regression that matters most.** Scan for a group that has pulled together things that are *not* the same place — the failure mode would look like `Kuala Lumpur War Cemetery` sitting next to `Kuala Lumpur Railway Station` purely because both say "Kuala Lumpur". If you see unrelated places grouped, report it with both names — that means the rule shipped looser than containment.
    **Exception, already known and accepted — do NOT report this one:** a run of same-city, same-type institutions whose short name is a token-subset of a longer one, e.g. Shanghai showing `Shanghai Museum`, `Shanghai Museum of Glass`, `Shanghai Natural History Museum`, `Shanghai Museum Celadon Collection` and `Shanghai History Museum` together. Those are genuinely different museums, and containment cannot tell them apart because `Shanghai Museum` really is a subset of `Shanghai Museum of Glass`. Measured at **2 groups / 8 rows out of 1,274 (0.6%)** and accepted by the owner on 2026-07-29 — see **Q-27-5**. Report anything that is *not* this shape.
@@ -288,9 +293,11 @@ Standing convention: the agent verifies locally, the owner verifies production. 
 
 ### C — Coincident map pins (W3)
 
-8. Open the **Hangzhou** trip → the **2026-07-29** day → **Map**.
-   **Expect** to see **two** separate numbered pins near Qinghefang, slightly offset from each other, and to be able to tap **each** one and get its own popup — `Qinghefang Antique Street` and `Qinghefang Night Market & Street Food`. Before this release only one was tappable.
-   **Check** the route line still connects sensibly and does not visibly detach from either pin.
+8. Open the **Shanghai - Hangzhou** trip → the **2026-07-29** day → **Map**. (Trip `d2813bc528519dfaa90c6ae8be5a17b0`, day `c046c2a28efe92a549818aa69c53b797` — confirmed still present and still coordinate-identical immediately after this release deployed.)
+   That day has **four** stops, and it is a complete acceptance screen on its own: pin **1** `Park Hyatt Hangzhou`, pins **2** and **3** the coincident Qinghefang pair, pin **4** `Qianjiang Century City at Night`.
+   **Expect** pins **2** and **3** to be two separate numbered pins, one directly above the other and about a fingertip apart, and to be able to tap **each** and get its own popup — `Qinghefang Antique Street` (2) and `Qinghefang Night Market & Street Food` (3). Before this release only one was tappable.
+   **Expect pins 1 and 4 to be exactly where they have always been** — they are the control, and they must not have moved at all.
+   **Check** the route line still connects sensibly. It is drawn to the *true* shared point, so it ends inside both pins of the pair rather than touching their exact centres; that is intended. Report it only if the line visibly stops short of a pin with clear space between.
 9. On any other day with normal, well-separated stops: **expect nothing to have changed at all.** A single stop's pin must sit exactly where it always did. If ordinary pins have shifted, the offset is being applied when it should not be — report it.
 10. Check step 8 at **375px** as well as desktop.
 
