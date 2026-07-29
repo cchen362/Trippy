@@ -199,7 +199,17 @@ Frontend **301/301** (43 files; baseline 295, +6 in `TripMap.test.jsx`), backend
 
 ## W4 — Generation name quality
 
-**Status:** 2026-07-28 — **NOT STARTED. Gated on the A/B diff below; ships in its own release, after W1–W3.** Prompt text and validation only. No migration, no schema change, no rewrite of any stored row.
+**Status:** 2026-07-28 — **NOT STARTED. Gated on the A/B diff below; ships in its own release, after W1–W3** (Release 1 deployed and owner-QA-passed 2026-07-29). Prompt text and validation only. No migration, no schema change, no rewrite of any stored row.
+
+**Five facts in this wave were re-checked against the live tree and the dev DB on 2026-07-29. Four were wrong. Use these, not the versions written below them.**
+
+1. **W4.3's destination ids are PRODUCTION ids, but W4.3 runs on the DEV DB — and the ids do not match.** "Taipei (id 11)" and "ChengDu (id 6)" are production. In **dev**, Taipei is **id 7** and Chengdu is **id 5**; dev **id 11 is Hangzhou** and dev **id 6 is Ipoh**. Following the wave text literally regenerates the wrong city and bills for it. Match on `city_key`, never on a hardcoded id.
+2. **`claude.js:143` does not hold the `photoQuery` `.slice(0, 8)`.** It is at **`claude.js:397`**. The cited precedent is real, just mislocated.
+3. **There are TWO `photoQuery` instructions, not one.** `claude.js:218` inside `DISCOVER_SYSTEM`, and a second at **`claude.js:360`** in a different prompt. W4.1 must decide deliberately whether a `name` constraint belongs in both; the wave text assumes one.
+4. **`discoveryCatalogue.js` lives at `backend/src/db/`, not `backend/src/services/`.** `MAX_GENERATIONS_PER_DESTINATION_PER_DAY = 3` is at `src/db/discoveryCatalogue.js:317`, and the cap is enforced at `routes/discovery.js:252` and `services/copilotGrounding.js:166`.
+5. **`generation_count` is a LIFETIME counter and does NOT gate the cap** — the per-UTC-day counter is the separate `discovery_generation_daily` table (`getDailyGenerationCount`, `src/db/discoveryCatalogue.js:324`). To know whether an A/B run will be refused, query that table, not `generation_count`.
+
+**Dev fixture state as of 2026-07-29 (relevant to the cost trap).** Every large dev catalogue was regenerated on 2026-07-29 during Release 1 QA and is therefore **fresh** — Shanghai id 9 (325 active), Taipei id 7 (268), Chengdu id 5 (241), Kuala Lumpur id 1 (187), Hangzhou id 11 (136), Ipoh id 6 (84). Kaohsiung id 15 (56 active) is fresh from 2026-07-26. Today's per-day counts were Taipei 2/3 and Chengdu 1/3, so both had headroom; that table resets at UTC midnight. **The stale-refresh trap is currently disarmed on those destinations, but re-check freshness before opening the panel rather than trusting this line.**
 
 **The user-visible symptom this fixes.** Discovery currently offers a place called `Michelin Bib Gourmand: Ay-Chung Flour-Shaping (listed above, but worth the emphasis)`, and another called `Sichuan University Campus – Architectural Vernacular & Student Life`. That is an AI writing a caption where a name belongs — the "no AI slop, microcopy in the product's voice" line in CLAUDE.md, visible on the card. The same string is then typed into the map lookup, where no provider has an entry for "listed above, but worth the emphasis", so the place never earns coordinates and its pin is a guess (F-27-17, F-27-22).
 
