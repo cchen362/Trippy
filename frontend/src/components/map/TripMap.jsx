@@ -1,5 +1,5 @@
 import L from 'leaflet';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import StopMarker from './StopMarker.jsx';
 
@@ -7,6 +7,46 @@ function hasDisplayCoordinates(stop) {
   return stop?.canRenderMarker
     && Number.isFinite(Number(stop.displayLat))
     && Number.isFinite(Number(stop.displayLng));
+}
+
+// Plan 27 W3: two stops resolved to the identical coordinate stack in DOM order and only
+// the top one is hit-testable, so the lower stop's popup/actions become unreachable. Fan
+// coincident stops evenly around the true point in pixel space (screen-space radius
+// stays constant across zoom levels, unlike a fixed lat/lng offset). `project`/`unproject`
+// are injected so this stays a pure, unit-testable function; the component supplies
+// Leaflet's latLngToLayerPoint/layerPointToLatLng.
+const COINCIDENT_OFFSET_RADIUS_PX = 15;
+const COINCIDENT_COORD_PRECISION = 5; // ~1.1m — stops within this are treated as coincident
+
+export function applyCoincidentOffsets(stops, project, unproject) {
+  const groups = new Map();
+  stops.forEach((stop) => {
+    const key = `${Number(stop.displayLat).toFixed(COINCIDENT_COORD_PRECISION)}:${Number(stop.displayLng).toFixed(COINCIDENT_COORD_PRECISION)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(stop);
+  });
+
+  const hasCoincidence = Array.from(groups.values()).some((group) => group.length > 1);
+  if (!hasCoincidence) return stops;
+
+  const offsetByStop = new Map();
+  groups.forEach((group) => {
+    if (group.length <= 1) return;
+    const n = group.length;
+    const [first] = group;
+    const center = project({ lat: Number(first.displayLat), lng: Number(first.displayLng) });
+    group.forEach((stop, i) => {
+      const angle = (2 * Math.PI * i / n) - Math.PI / 2;
+      const point = {
+        x: center.x + COINCIDENT_OFFSET_RADIUS_PX * Math.cos(angle),
+        y: center.y + COINCIDENT_OFFSET_RADIUS_PX * Math.sin(angle),
+      };
+      const latlng = unproject(point);
+      offsetByStop.set(stop, { ...stop, displayLat: latlng.lat, displayLng: latlng.lng });
+    });
+  });
+
+  return stops.map((stop) => offsetByStop.get(stop) ?? stop);
 }
 
 function MapBounds({ stops, boundsKey }) {
@@ -124,6 +164,39 @@ function ArrowMarker({ connector }) {
   );
 }
 
+// Plan 27 W3 cont'd: pinnedStops is computed in TripMap's body, outside <MapContainer>, but
+// useMap()/useMapEvents() only work for components rendered inside it — so the offset
+// math has to live in its own child component here, mirroring MapBounds/MapCenterReporter/
+// CorrectionTargetPan above. latLngToLayerPoint is zoom-dependent but pan-invariant, so
+// subscribing to zoomend (not move/moveend) is enough to keep offsets correct across zoom
+// changes without rerendering markers on every pan.
+function StopMarkerLayer({ stops, isMuted, onStartCorrection }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+  });
+
+  const offsetStops = useMemo(() => {
+    const project = (latlng) => map.latLngToLayerPoint(latlng);
+    const unproject = (point) => map.layerPointToLatLng(point);
+    return applyCoincidentOffsets(stops, project, unproject);
+  }, [stops, map, zoom]);
+
+  // A clone is a spread of its original, so id/deepLinkProvider/routeSegmentId read
+  // identically off either — only displayLat/displayLng differ.
+  return offsetStops.map((stop) => (
+    <StopMarker
+      key={stop.id}
+      stop={stop}
+      deepLinkProvider={stop.deepLinkProvider}
+      muted={isMuted(stop)}
+      onStartCorrection={onStartCorrection}
+    />
+  ));
+}
+
 export default function TripMap({
   stops,
   mapConfig,
@@ -198,15 +271,7 @@ export default function TripMap({
       {connectors.map((connector) => (
         <ArrowMarker key={`${connector.id}:arrow`} connector={connector} />
       ))}
-      {pinnedStops.map(stop => (
-        <StopMarker
-          key={stop.id}
-          stop={stop}
-          deepLinkProvider={stop.deepLinkProvider}
-          muted={isMuted(stop)}
-          onStartCorrection={onStartCorrection}
-        />
-      ))}
+      <StopMarkerLayer stops={pinnedStops} isMuted={isMuted} onStartCorrection={onStartCorrection} />
     </MapContainer>
   );
 }

@@ -1,6 +1,6 @@
 # Implementation Plan 27 — Discovery Trust Display, Near-Match Adjacency, Name Quality and Coincident Map Pins
 
-**Status:** 2026-07-29 — **W1 and W2 COMPLETE (not deployed). W3 and W4 NOT STARTED.** Release 1 needs W3 before it ships. Four waves, **no migration in the entire plan** (see F-27-1). All four owner decisions are taken (D-27-1…D-27-4); no wave is blocked on a product question. Investigation was read-only: no product code was written in the session that produced this document.
+**Status:** 2026-07-29 — **W1, W2 and W3 COMPLETE (not deployed). Release 1 (W1+W2+W3) is whole and ready for the owner's production QA via Appendix A. W4 NOT STARTED.** Four waves, **no migration in the entire plan** (see F-27-1). All four owner decisions are taken (D-27-1…D-27-4); no wave is blocked on a product question. Investigation was read-only: no product code was written in the session that produced this document.
 
 **Origin:** the three items [Plan 26](Implementation%20Plan%2026%20Discovery%20Catalogue%20Trust%20and%20Lifecycle.md) carried forward when it closed on 2026-07-28 (F-26-42, D-26-5, Q-26-3), plus the coincident-marker item folded forward from [Plan 24](Implementation%20Plan%2024%20Google%20Maps%20Deep%20Link%20Place%20Identity.md). Evidence base: the [2026-07-26 discovery catalogue quality assessment](../reviews/2026-07-26-discovery-catalogue-quality-assessment.md), Plan 26's W3.4 measurements and Appendix F, and a fresh read-only production census taken 2026-07-28 for this plan.
 
@@ -159,7 +159,25 @@ Backend **808/808** (35 files; baseline 798/34, +10 tests in `backend/tests/disc
 
 ## W3 — Coincident map pins
 
-**Status:** 2026-07-28 — **NOT STARTED.** Frontend-only, one file, no new dependency, no migration, no animation. Ships with W1 and W2.
+**Status:** 2026-07-29 — **COMPLETE, not deployed.** Frontend-only, one source file plus its test, no new dependency, no migration, no animation, no CSS. `StopMarker.jsx` is byte-identical, as W3.1 predicted — the fix reaches it entirely through cloned stop objects.
+
+**One structural deviation from W3.1's wording, and it is forced.** W3.1 says "group `pinnedStops` (`TripMap.jsx:135`) … before the `.map()` at `:201`". That is not possible: `pinnedStops` is computed in `TripMap`'s component body, **outside `<MapContainer>`**, and `useMap()` only resolves for components *rendered inside* it — so there is no map instance at line 135 to convert pixels into degrees with. The marker layer therefore moved into a new child component, `StopMarkerLayer`, rendered inside `<MapContainer>`, which calls `useMap()` and subscribes to `zoomend` via the already-imported `useMapEvents`. This mirrors the three components in the same file that exist for exactly this reason (`MapBounds`, `MapCenterReporter`, `CorrectionTargetPan`). Everything else is as specified.
+
+Shipped as an exported pure function `applyCoincidentOffsets(stops, project, unproject)` plus that component. `project`/`unproject` are injected (the component supplies `map.latLngToLayerPoint` / `map.layerPointToLatLng`) so the geometry is unit-testable without Leaflet. Groups key on `displayLat`/`displayLng` rounded to **5 decimals** (~1.1 m); a group of one returns the **identical object reference**, test-pinned with `toBe` — the common path is byte-identical. A group of `n` fans onto a **15 px** radius at angle `(2πi/n) − π/2`. `latLngToLayerPoint` is zoom-dependent but pan-invariant, so `zoomend` alone is the correct subscription; subscribing to `moveend` too would rerender the marker layer on every pan for no benefit.
+
+**Load-bearing scope boundary held:** `boundsStops`/`boundsKey` (`:136-140`) and `buildConnectors(stops)` (`:141`) still receive true coordinates. Only the markers see offsets.
+
+Frontend **301/301** (43 files; baseline 295, +6 in `TripMap.test.jsx`), backend **808/808** unchanged (no backend file touched), `npm run build` clean.
+
+**Browser-verified at a real 375×812 viewport and at 1280×800**, against the dev fixture below (Chengdu - Chongqing, day 2026-06-16), with the live Leaflet map instance pulled out of the React fiber so rendered pixels could be compared against independently computed truth:
+- **Separated pins are provably unmoved, not merely "look fine".** `Wenshu Monastery` and `Du Fu Thatched Cottage Museum` render at **exactly** the pixel `map.latLngToContainerPoint()` gives for their true display coordinates — zero delta on both axes. (Computing that truth requires each stop's own `coordinate_system`: Wenshu is stored `gcj02`, Du Fu `wgs84`, the coincident pair `unknown`. Assuming one system for all four produces a spurious ~5 px "drift" that is an artifact of the check, not of the code.)
+- **The pair separates by exactly 30.00 px** and its **midpoint is exactly the true projected point** — the fan is symmetric and does not drag the location.
+- **Separation stays 30.00 px at zoom 9, 11, 13, 15 and 17.** This is the check a fixed-degree implementation fails, and the reason the offset had to be recomputed on `zoomend`.
+- **The actual bug is gone at the hit-test layer:** `document.elementFromPoint()` at each of the four pin centres returns that pin's own icon. Real clicks open **two distinct popups** — `Hot Pot at Haidilao (Chunxi Road Branch)` (Stop 3) and `Chunxi Road & Taikoo Li Night Walk` (Stop 4) — each with its own title, its own "Open in Amap" link and its own "Check location" action. Before this, only the top one was reachable.
+- **The route line cannot visibly detach.** The connector's vertex sits at distance **0** from the true point and therefore **15 px** from each pin centre — inside both 32 px pin glyphs, so each line end terminates within its pin rather than beside it.
+- No console errors (only the pre-existing React Router v7 future-flag warnings).
+
+**Note for future readers:** the `// L<n>` comment convention in this file refers to Plan 4's findings list, where **L8 is already taken** (`AddPlaceModal` city bias). W3's comments are labelled `Plan 27 W3`, not `L8`.
 
 **The user-visible symptom this fixes.** On day 2026-07-29 of the Hangzhou trip, `Qinghefang Antique Street` and `Qinghefang Night Market & Street Food` sit at the identical coordinate. The map draws two numbered gold pins exactly on top of each other; only the upper one can be tapped, so one stop's popup, its "Open in maps" link and its "Move pin" action are unreachable from the map (F-27-26, F-27-27).
 
@@ -203,8 +221,8 @@ Backend **808/808** (35 files; baseline 798/34, +10 tests in `backend/tests/disc
 
 ## Verification
 
-- `cd backend; npm test` — baseline 798/798 (34 files). The Windows teardown segfault *after* results print is not a failure (F-27-31).
-- `cd frontend; npm test` and `npm run build` — baseline 293/293 (43 files), build clean.
+- `cd backend; npm test` — plan-open baseline 798/798 (34 files); **now 808/808 (35 files)** after W2. The Windows teardown segfault *after* results print is not a failure (F-27-31).
+- `cd frontend; npm test` and `npm run build` — plan-open baseline 293/293 (43 files); **now 301/301 (43 files)** after W1 (+2) and W3 (+6). Build clean.
 - New coverage required: W1's absent-trust-line cases for `pending` and `unverified`; W2's containment rule in **both** directions plus group-position and no-score-change pins; W3's two-distinct-positions and lone-stop-unchanged cases.
 - UI: verify at 375px first, then desktop, for W1 (metadata row with a missing first child), W2 (category counts unchanged, no card lost) and W3 (both Qinghefang pins tappable). Use the Chrome extension against a logged-in localhost tab — the in-app Browser pane freezes Leaflet.
 
