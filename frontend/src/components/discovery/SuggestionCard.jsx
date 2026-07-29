@@ -3,19 +3,11 @@ import { Flag, X } from 'lucide-react';
 import { useIsPresent } from 'framer-motion';
 import DayPicker from './DayPicker.jsx';
 import { canonicalGeoKey } from '../../utils/geoIdentity.js';
+import { normalizeName } from '../../utils/placeNames.js';
 
 function parseLocalDateParts(dateStr) {
   const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day);
-}
-
-function normalizeName(str) {
-  return (str ?? '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\b(scenic area|& area|& park|national park|historic district|old town|city centre|city center)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 export default function SuggestionCard({

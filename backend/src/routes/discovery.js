@@ -19,6 +19,7 @@ import {
   MAX_GENERATIONS_PER_DESTINATION_PER_DAY,
 } from '../db/discoveryCatalogue.js';
 import { rankPlaces, orderCategories, buildFitLine } from '../services/discoveryRank.js';
+import { groupAdjacentNearMatches } from '../services/discoveryAdjacency.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
 
 const router = Router();
@@ -58,7 +59,10 @@ function serializePlaceRow(row, prefs) {
 // shape the SSE contract expects. Category order comes from orderCategories
 // (essentials, then interest-tag order, then the rest, family demotes
 // nightlife) and items within each category are ranked by score(item, prefs)
-// via rankPlaces before serialization.
+// via rankPlaces before serialization. After ranking, groupAdjacentNearMatches
+// (Plan 27 Wave 2) reorders near-match rows (e.g. "Lotus Pond" / "Dragon and
+// Tiger Pagodas (Lotus Pond)") to sit next to each other — it never changes
+// which rows exist or their scores, only their position.
 function groupPlaceRowsByCategory(rows, prefs) {
   const categoriesPresent = [];
   const byCategory = new Map();
@@ -73,7 +77,9 @@ function groupPlaceRowsByCategory(rows, prefs) {
   const orderedCategories = orderCategories(categoriesPresent, prefs);
   return orderedCategories.map((category) => ({
     category,
-    items: rankPlaces(byCategory.get(category), prefs).map((row) => serializePlaceRow(row, prefs)),
+    items: groupAdjacentNearMatches(rankPlaces(byCategory.get(category), prefs)).map((row) =>
+      serializePlaceRow(row, prefs),
+    ),
   }));
 }
 
