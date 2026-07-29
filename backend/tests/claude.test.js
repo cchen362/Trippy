@@ -21,7 +21,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
-const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName } = await import('../src/services/claude.js');
+const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
 // discoverDestination
@@ -77,6 +77,122 @@ const FOUR_HEALTHY_CATEGORIES = [
   { category: 'food', items: [{ name: 'Ramen Alley' }] },
   { category: 'nature', items: [{ name: 'Arashiyama', lat: 35.0, lng: 135.6 }] },
 ];
+
+// ---------------------------------------------------------------------------
+// stripEditorialNamePrefix (Plan 27 W4.1b) — enforcement of the "name" prompt
+// instruction, not the wording. See M2 in claude.js for why this is colon-only.
+// ---------------------------------------------------------------------------
+
+describe('stripEditorialNamePrefix', () => {
+  it('strips a real editorial/award prefix', () => {
+    expect(stripEditorialNamePrefix('Michelin Bib Gourmand: Ay-Chung Flour-Shaping'))
+      .toBe('Ay-Chung Flour-Shaping');
+  });
+
+  it('preserves a trailing CJK bracket when stripping the prefix', () => {
+    expect(stripEditorialNamePrefix('Michelin Bib Gourmand: Lao Deng Beef Noodles (老鄧牛肉麵)'))
+      .toBe('Lao Deng Beef Noodles (老鄧牛肉麵)');
+  });
+
+  it('does not fire on a colon inside brackets (protects opening-hours ranges)', () => {
+    expect(stripEditorialNamePrefix('Some Temple (open 9:00-17:00)'))
+      .toBe('Some Temple (open 9:00-17:00)');
+  });
+
+  it('does not fire when a digit sits directly next to the colon', () => {
+    expect(stripEditorialNamePrefix('Ratio 9:16 Rooftop Bar')).toBe('Ratio 9:16 Rooftop Bar');
+  });
+
+  it('does not fire when the head exceeds 5 words (more likely a real name than a label)', () => {
+    const name = 'One Two Three Four Five Six: Something';
+    expect(stripEditorialNamePrefix(name)).toBe(name);
+  });
+
+  it('does not fire when the tail has no letters or numbers', () => {
+    expect(stripEditorialNamePrefix('Editorial Label: ---')).toBe('Editorial Label: ---');
+  });
+
+  // Negative case that matters most: M2 measured that ~10% of dash-shaped names put the real
+  // place name on the RIGHT of the dash. Stripping on dash would destroy those names with no
+  // way to tell which side is real, so this function must never act on a dash — only a colon.
+  it('does not touch a dash-shaped name (dashes are handled by the prompt alone, not this function)', () => {
+    expect(stripEditorialNamePrefix('Sichuan University Campus – Architectural Vernacular & Student Life'))
+      .toBe('Sichuan University Campus – Architectural Vernacular & Student Life');
+    expect(stripEditorialNamePrefix('Rooftop Cocktail Bar — Yu Shang (玉尚)'))
+      .toBe('Rooftop Cocktail Bar — Yu Shang (玉尚)');
+  });
+
+  it('returns a name with no colon unchanged (identity)', () => {
+    expect(stripEditorialNamePrefix('Fushimi Inari Taisha')).toBe('Fushimi Inari Taisha');
+  });
+
+  it('returns non-string/empty input unchanged without throwing', () => {
+    expect(stripEditorialNamePrefix('')).toBe('');
+    expect(stripEditorialNamePrefix(null)).toBe(null);
+    expect(stripEditorialNamePrefix(undefined)).toBe(undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeGeneratedAliases (Plan 27 W4.3) — structural half of the "aliases"
+// instruction. See the comment above the function in claude.js for the measured
+// 5/98 A/B defect and why removing a name-identical alias is lossless.
+// ---------------------------------------------------------------------------
+
+describe('sanitizeGeneratedAliases', () => {
+  it('drops an alias identical to the name (the measured Plan 27 W4.3 A/B defect: 5/98 items)', () => {
+    expect(sanitizeGeneratedAliases(['Taipei Story House'], 'Taipei Story House')).toEqual([]);
+  });
+
+  it('drops an alias identical to the name after normalization (punctuation/case differ)', () => {
+    expect(sanitizeGeneratedAliases(['taipei   STORY house!'], 'Taipei Story House')).toEqual([]);
+  });
+
+  it('keeps a genuine alias', () => {
+    expect(sanitizeGeneratedAliases(['IAMM'], 'Islamic Arts Museum Malaysia')).toEqual(['IAMM']);
+  });
+
+  // This must NOT be treated as identical-to-name — it is the single most valuable alias shape
+  // (the bare name when "name" carries a branch/location qualifier) and a regression here would
+  // be silent, since it looks superficially similar to the name-identical case above.
+  it('keeps the bare-name alias when the name carries a branch/location qualifier', () => {
+    expect(sanitizeGeneratedAliases(['Din Tai Fung'], 'Din Tai Fung (Taipei Nanjing Location)'))
+      .toEqual(['Din Tai Fung']);
+  });
+
+  it('drops within-list duplicates, keeping the first occurrence in order', () => {
+    expect(sanitizeGeneratedAliases(['IAMM', 'Islamic Arts Museum', 'iamm'], 'Museum X'))
+      .toEqual(['IAMM', 'Islamic Arts Museum']);
+  });
+
+  it('drops non-strings, empty, and whitespace-only entries, and trims survivors', () => {
+    expect(sanitizeGeneratedAliases([42, null, undefined, '', '   ', '  Real Alias  '], 'Place'))
+      .toEqual(['Real Alias']);
+  });
+
+  it('caps the result at 4 entries', () => {
+    expect(sanitizeGeneratedAliases(['A', 'B', 'C', 'D', 'E'], 'Place')).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('returns [] for undefined, null, or non-array input', () => {
+    expect(sanitizeGeneratedAliases(undefined, 'Place')).toEqual([]);
+    expect(sanitizeGeneratedAliases(null, 'Place')).toEqual([]);
+    expect(sanitizeGeneratedAliases('not an array', 'Place')).toEqual([]);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = ['Alias One', 'Place', 'Alias One'];
+    const inputCopy = [...input];
+    sanitizeGeneratedAliases(input, 'Place');
+    expect(input).toEqual(inputCopy);
+  });
+
+  it('still dedupes and caps when name is not a usable string', () => {
+    expect(sanitizeGeneratedAliases(['A', 'A', 'B'], null)).toEqual(['A', 'B']);
+    expect(sanitizeGeneratedAliases(['A', 'A', 'B'], undefined)).toEqual(['A', 'B']);
+    expect(sanitizeGeneratedAliases(['A', 'A', 'B'], '')).toEqual(['A', 'B']);
+  });
+});
 
 describe('discoverDestination — NDJSON streaming', () => {
   beforeEach(() => {
@@ -135,6 +251,60 @@ describe('discoverDestination — NDJSON streaming', () => {
     expect(names.filter((n) => n.toLowerCase().includes('dujiangyan')).length).toBe(1);
     expect(names).toContain('Fushimi Inari');
     expect(names).toContain('Nijo Castle');
+  });
+
+  it('sanitizes an editorial-prefixed name before it reaches onCategory and the accumulated result (W4.1b integration)', async () => {
+    const cats = [
+      { category: 'essentials', items: [{ name: 'Michelin Bib Gourmand: Ay-Chung Flour-Shaping' }] },
+      ...FOUR_HEALTHY_CATEGORIES.slice(1),
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const received = [];
+    const result = await discoverDestination('taipei', [], (cat) => received.push(cat));
+
+    const essentialsFromCallback = received.find((c) => c.category === 'essentials');
+    const essentialsFromResult = result.find((c) => c.category === 'essentials');
+    expect(essentialsFromCallback.items[0].name).toBe('Ay-Chung Flour-Shaping');
+    expect(essentialsFromResult.items[0].name).toBe('Ay-Chung Flour-Shaping');
+  });
+
+  it('sanitizes aliases against the STRIPPED name, not the raw editorial-prefixed one (W4.3 ordering)', async () => {
+    const cats = [
+      {
+        category: 'essentials',
+        items: [{
+          name: 'Michelin Bib Gourmand: Lao Deng Beef Noodles',
+          aliases: ['Lao Deng Beef Noodles'],
+        }],
+      },
+      ...FOUR_HEALTHY_CATEGORIES.slice(1),
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const received = [];
+    await discoverDestination('taipei', [], (cat) => received.push(cat));
+
+    const essentials = received.find((c) => c.category === 'essentials');
+    expect(essentials.items[0].name).toBe('Lao Deng Beef Noodles');
+    expect(essentials.items[0].aliases).toEqual([]);
+  });
+
+  it('dedupes two items that differ only by their editorial prefix onto the sanitized name', async () => {
+    const cats = [
+      { category: 'essentials', items: [{ name: 'Michelin Bib Gourmand: Ay-Chung Flour-Shaping' }] },
+      // 'culture' here duplicates the essentials item (post-sanitization) AND carries a second,
+      // distinct item so it still counts toward MIN_CATEGORIES_WITH_ITEMS after the duplicate
+      // is dropped.
+      { category: 'culture', items: [{ name: 'Award Winner: Ay-Chung Flour-Shaping' }, { name: 'Longshan Temple' }] },
+      ...FOUR_HEALTHY_CATEGORIES.slice(2),
+    ];
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+    const result = await discoverDestination('taipei', []);
+
+    const allNames = result.flatMap((c) => c.items).map((i) => i.name);
+    expect(allNames.filter((n) => n === 'Ay-Chung Flour-Shaping')).toHaveLength(1);
   });
 
   it('drops unparseable lines, logs them loudly, and keeps the rest of the stream intact', async () => {

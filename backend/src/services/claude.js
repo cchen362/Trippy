@@ -214,7 +214,10 @@ Each item: { "name": string, "description": string (1-2 sentences, specific and 
 
 Additional item fields:
 - Include "localName": string|null and "aliases": string[] on every item.
-- For places whose common indexed/local name is not English, put the traveler-friendly English or romanized name in "name", the local-script/common local name in "localName", and useful alternate spellings/official names in "aliases". Use null/[] when no meaningful local variant exists.
+- For places whose common indexed/local name is not English, put the traveler-friendly English or romanized name in "name", the local-script/common local name in "localName", and alternate names in "aliases" (specified below). Use null/[] when no meaningful local variant exists.
+- "name" must be the place's proper name only — what a local would see on the sign, on a map, or on a booking. Anything describing what the place offers, what it feels like, when to go, or why it is interesting belongs in "description" or "whyItFits", NEVER in "name". Wrong, in every position: "Michelin Bib Gourmand: Ay-Chung Flour-Shaping" (award label), "Sichuan University Campus – Architectural Vernacular & Student Life" (appended description), "Yongkang Street (for coffee and pastry)" / "Zhongshan Hall (post-war neoclassicism)" / "Taipei Prison (tours by appointment)" (description hidden in brackets — moving editorial into parentheses does not make it a name).
+- A bracket in "name" may contain ONLY one of: a branch or street/district that distinguishes this outlet from others of the same name; the local-script or romanized form of the same name; or a well-known alternate name. Nothing else. Right: "Din Tai Fung (Taipei Nanjing Location)", "Chen Mapo Tofu (Xuanhuang Street Location)", "Elephant Mountain (Xiangshan)". If the bracket does not carry one of those three things, delete it — a bare "Yongkang Street" is correct and complete.
+- "aliases": every OTHER name this exact place is known by, so it can still be found when "name" fails a map search. Include each kind that applies: the official/registered name; the romanized form; the common local name written in Latin script; a well-known short form or acronym; and the bare name when "name" carries a branch or location qualifier. Worked examples: "Islamic Arts Museum Malaysia" → ["IAMM"]; "Sultan Abdul Samad Building" → ["Bangunan Sultan Abdul Samad"]; "Din Tai Fung (Taipei Nanjing Location)" → ["Din Tai Fung"]. Most real places have at least one — use [] only for a place that genuinely has no other name, such as an unnamed street stall. HARD RULES: never repeat "name" verbatim as an alias; never use the name of a DIFFERENT place, even a similar or nearby one (aliases are searched against real maps, so a wrong one pins this suggestion to the wrong location); never a description, category, or marketing text. At most 4.
 - Include "photoQuery": a culturally specific English search string for stock-photo search (at most 8 words, referencing the actual place/cuisine/activity — never generic terms like "nice place" or "travel photo").
 - Include "sceneType": exactly one of temple_shrine, market, street_neighborhood, nature_outdoors, museum_gallery, landmark_architecture, food_drink, nightlife, beach_water, viewpoint, wellness, hotel_stay, entertainment, generic. Choose the closest match; use "generic" if unsure.
 
@@ -246,6 +249,81 @@ function canonicalizeCategoryName(raw) {
   if (typeof raw !== 'string') return null;
   const normalized = raw.trim().toLowerCase().replace(/\s+/g, '_');
   return DISCOVERY_CATEGORIES.includes(normalized) ? normalized : null;
+}
+
+// Backstop for the "name" instruction in DISCOVER_SYSTEM (W4.1a) — not the primary fix, the
+// prompt is. Strips an editorial/award label prefix ending in a colon at bracket depth zero
+// (e.g. "Michelin Bib Gourmand: Ay-Chung Flour-Shaping" -> "Ay-Chung Flour-Shaping").
+//
+// Colon-only, deliberately: dashes are NOT stripped here. Measured evidence (Plan 27 W4, M2) —
+// of 60 dash-shaped names in the dev catalogue, roughly 10% put the real place name on the
+// RIGHT of the dash ("Rooftop Cocktail Bar — Yu Shang (玉尚)", "Craft Beer Brewery — Xiaofeng
+// Brewing (小风精酿)"). A deterministic dash strip would destroy those real names with no way
+// to tell which side is which. Dashes are handled by the prompt alone.
+//
+// Forward-only: existing stored names are never rewritten by this function.
+export function stripEditorialNamePrefix(name) {
+  if (typeof name !== 'string' || !name) return name;
+
+  let depth = 0;
+  let colonIndex = -1;
+  for (let i = 0; i < name.length; i += 1) {
+    const ch = name[i];
+    if (ch === '(' || ch === '[' || ch === '【' || ch === '（') {
+      depth += 1;
+    } else if (ch === ')' || ch === ']' || ch === '】' || ch === '）') {
+      depth = Math.max(0, depth - 1);
+    } else if ((ch === ':' || ch === '：') && depth === 0) {
+      colonIndex = i;
+      break;
+    }
+  }
+
+  if (colonIndex === -1) return name;
+
+  const before = name[colonIndex - 1];
+  const after = name[colonIndex + 1];
+  if ((before && /\d/.test(before)) || (after && /\d/.test(after))) return name;
+
+  const head = name.slice(0, colonIndex).trim();
+  const tail = name.slice(colonIndex + 1).trim();
+
+  if (!head || head.split(/\s+/).length > 5) return name;
+  if (!tail || !/[\p{L}\p{N}]/u.test(tail)) return name;
+
+  return tail;
+}
+
+// Structural half of the "aliases" instruction in DISCOVER_SYSTEM (W4.3) — same
+// stated-then-enforced pattern as photoQuery's word cap. The prompt already forbids repeating
+// "name" verbatim as an alias, but a Plan 27 W4.3 A/B run measured the model doing it anyway in
+// 5 of 98 generated items (e.g. name "Taipei Story House", aliases ["Taipei Story House"]).
+// Removing an alias identical to the name is lossless: aliases are query variants the resolver
+// tries only after "name" has already failed a geocoder lookup (resolverQueryTexts in
+// placeResolver.js issues one HTTP request per variant), so a name-identical alias is guaranteed
+// to repeat a query that has already failed — never a scenario where it helps.
+export function sanitizeGeneratedAliases(aliases, name) {
+  if (!Array.isArray(aliases)) return [];
+
+  const normalizedName = typeof name === 'string' && name ? normalizeName(name) : null;
+  const seen = new Set();
+  const result = [];
+
+  for (const alias of aliases) {
+    if (typeof alias !== 'string') continue;
+    const trimmed = alias.trim();
+    if (!trimmed) continue;
+
+    const n = normalizeName(trimmed);
+    if (normalizedName !== null && n === normalizedName) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+
+    result.push(trimmed);
+    if (result.length >= 4) break;
+  }
+
+  return result;
 }
 
 // Streams discovery results as NDJSON. Calls onCategory({ category, items }) for each
@@ -311,14 +389,26 @@ export async function discoverDestination(destination, existingStopTitles = [], 
       return;
     }
 
-    // Deduplicate items by normalized name across all categories
-    const deduped = obj.items.filter((item) => {
-      if (!item?.name) return false;
-      const n = normalizeName(item.name);
-      if (seen.has(n)) return false;
-      seen.add(n);
-      return true;
-    });
+    // Sanitize name (strip editorial prefix, W4.1b) before dedupe so the stored name and its
+    // dedupe key agree — apply first, so both accumulated (cached/persisted) and the object
+    // handed to onCategory (streamed to the client) carry the same sanitized name. Aliases are
+    // sanitized against the already-stripped name (W4.3) so an alias matching the editorial
+    // prefix's real name is also caught, not just one matching the raw unstripped string. Build
+    // a new item object rather than mutating the caller's parsed one — always a clone, since
+    // sanitizeGeneratedAliases returns a fresh array on every call anyway.
+    const deduped = obj.items
+      .filter((item) => !!item?.name)
+      .map((item) => {
+        const sanitizedName = stripEditorialNamePrefix(item.name);
+        const sanitizedAliases = sanitizeGeneratedAliases(item.aliases, sanitizedName);
+        return { ...item, name: sanitizedName, aliases: sanitizedAliases };
+      })
+      .filter((item) => {
+        const n = normalizeName(item.name);
+        if (seen.has(n)) return false;
+        seen.add(n);
+        return true;
+      });
 
     const categoryObj = { category: canonicalCategory, items: deduped };
     accumulated.push(categoryObj);
