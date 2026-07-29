@@ -132,10 +132,17 @@ function formatFitHours(hours) {
 }
 
 // Composes the deterministic, honesty-gated trip-fit line (Wave 3, review
-// doc §2.4/§6.3): "Matches food · ~2h · verified place". Each clause is only
-// included when it's actually true of this trip's declared preferences —
-// never claims an interest/pace the trip didn't declare. Empty string when
-// nothing honest applies.
+// doc §2.4/§6.3): "Matches food · ~2h". Each clause is only included when
+// it's actually true of this trip's declared preferences — never claims an
+// interest/pace the trip didn't declare. Empty string when nothing honest
+// applies.
+//
+// Plan 27 follow-up: this used to append "verified place" for a verified row.
+// Plan 27 W1 made the Details metadata row the single trust surface (D-27-1),
+// so the clause was saying the same thing one line above the "Verified" label
+// — and on a card where no interest/pace clause applied, the fit line reduced
+// to nothing but that duplicate. Trust is not a match against the traveller's
+// declared preferences, which is the only thing this line is about.
 export function buildFitLine(row, prefs) {
   const parts = [];
 
@@ -157,10 +164,6 @@ export function buildFitLine(row, prefs) {
         parts.push(`~${formatFitHours(hours)}h`);
       }
     }
-  }
-
-  if (row.provenance === 'verified') {
-    parts.push('verified place');
   }
 
   return parts.join(' · ');

@@ -307,16 +307,27 @@ describe('buildFitLine', () => {
     expect(buildFitLine(row, prefs)).toBe('');
   });
 
-  it('includes "verified place" when the row is verified', () => {
+  // Plan 27 follow-up: the fit line no longer makes a trust claim. The Details
+  // metadata row owns that (D-27-1), and duplicating it here meant a verified
+  // card with no interest/pace match rendered "verified place" directly above
+  // the word "Verified". A verified row now contributes nothing on its own.
+  it('adds no trust clause for a verified row, so a verified-only row yields an empty line', () => {
     const row = { category: 'culture', estimated_duration: null, provenance: 'verified' };
     const prefs = { interestTags: [], pace: 'moderate', travellers: undefined };
-    expect(buildFitLine(row, prefs)).toBe('verified place');
+    expect(buildFitLine(row, prefs)).toBe('');
+  });
+
+  it('produces an identical line for a verified and an unverified row (provenance is not a fit signal)', () => {
+    const prefs = { interestTags: ['food & drink'], pace: 'fast', travellers: undefined };
+    const verified = { category: 'food', estimated_duration: '1 hour', provenance: 'verified' };
+    const unverified = { category: 'food', estimated_duration: '1 hour', provenance: 'unverified' };
+    expect(buildFitLine(verified, prefs)).toBe(buildFitLine(unverified, prefs));
   });
 
   it('joins multiple honest clauses with " · "', () => {
     const row = { category: 'food', estimated_duration: '1 hour', provenance: 'verified' };
     const prefs = { interestTags: ['food & drink'], pace: 'fast', travellers: undefined };
-    expect(buildFitLine(row, prefs)).toBe('Matches food · ~1h · verified place');
+    expect(buildFitLine(row, prefs)).toBe('Matches food · ~1h');
   });
 
   it('returns an empty string when nothing honest applies', () => {

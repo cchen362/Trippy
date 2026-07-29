@@ -1573,8 +1573,9 @@ describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
     const foodEvent = events.find((e) => e.type === 'category' && e.category === 'food');
     const ramen = foodEvent.items.find((i) => i.name === 'Tempting Ramen Stall');
     expect(ramen.fitLine).not.toContain('Matches food');
-    // Moderate pace is neutral, so no duration claim either; unverified, so
-    // no "verified place" claim. Nothing honest applies -> empty fitLine.
+    // Moderate pace is neutral, so no duration claim either. Nothing honest
+    // applies -> empty fitLine. (Provenance stopped contributing to this line
+    // in the Plan 27 follow-up; trust lives in the Details metadata row.)
     expect(ramen.fitLine).toBe('');
 
     // The declared interest (history -> culture) DOES get an honest claim.
