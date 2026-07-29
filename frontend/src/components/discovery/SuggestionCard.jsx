@@ -247,7 +247,7 @@ export default function SuggestionCard({
             )}
             {fitLine && <p className="discovery-card-fit-line">{fitLine}</p>}
             <div className="discovery-card-metadata">
-              <span>{isVerified ? 'Verified' : 'Unverified'}</span>
+              {isVerified && <span>Verified</span>}
               {estimatedDuration && <span>{estimatedDuration}</span>}
               {openingHours && (
                 <span title="Hours may be outdated — confirm before you go">

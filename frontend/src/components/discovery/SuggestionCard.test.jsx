@@ -290,6 +290,40 @@ describe('SuggestionCard — Option 1b Details contract (Plan 14 Wave 1)', () =>
     await waitFor(() => expect(screen.getByRole('button', { name: /^add to day$/i })).not.toBeDisabled());
   });
 
+  // Plan 27 W1.1 / D-27-1: the Details panel states trust only when it can be
+  // proven. `unverified` (checked, did not pass) and `pending` (never checked)
+  // have identical user-facing consequences (F-27-7), so neither renders a
+  // trust line at all — not a label, not an empty span.
+  it.each([
+    ['unverified', 'unverified'],
+    ['pending', 'pending'],
+  ])('renders no trust line for a %s suggestion while keeping duration and hours', (_label, provenance) => {
+    render(
+      <SuggestionCard
+        suggestion={{ ...DETAILED_SUGGESTION, provenance }}
+        days={days}
+        onAddToDay={vi.fn()}
+        destination="Chengdu"
+        onReport={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^details/i }));
+    const details = screen.getByRole('region', { name: /details for panda base/i });
+
+    expect(within(details).queryByText(/unverified/i)).not.toBeInTheDocument();
+    expect(within(details).queryByText(/^verified$/i)).not.toBeInTheDocument();
+
+    const metadata = details.querySelector('.discovery-card-metadata');
+    expect(metadata).not.toBeNull();
+    expect(within(metadata).getByText(DETAILED_SUGGESTION.estimatedDuration)).toBeInTheDocument();
+    expect(within(metadata).getByText(/07:30–18:00/)).toBeInTheDocument();
+    // The absent label must leave no placeholder child behind — duration is
+    // now the row's first element.
+    expect(metadata.children).toHaveLength(2);
+    expect(metadata.firstElementChild).toHaveTextContent(DETAILED_SUGGESTION.estimatedDuration);
+  });
+
   it('retains every matching day in the compact multi-day In trip display', () => {
     const inTripDays = [
       {
