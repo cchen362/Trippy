@@ -21,6 +21,25 @@ When documents disagree, use this order:
 
 Do not describe planned work as shipped. Plans 1–14 are historical implementation records; always read their status headers.
 
+## Settled Decisions — how they are marked
+
+Some behaviour in this codebase looks arbitrary and is not. Those choices are **owner decisions**, and they are marked in two places:
+
+- **In the code they govern**, as a `D-<plan>-<n>` comment (e.g. `D-26-2` in the `deriveDayGeo` JSDoc, `D-27-1` in the discovery display path). The marker sits in the same file as the behaviour, so it cannot drift out of sync with it.
+- **In `docs/DECISIONS.md`**, for decisions with no single code home — external service tiers, quotas, "do not re-propose" rulings.
+
+**Before proposing a change to existing behaviour, grep for a decision marker near the code you would touch:**
+
+```bash
+grep -rnE "D-[0-9]{2}-[0-9]+|owner decision" <the file or directory>
+```
+
+If you find one, the decision **stands** until the owner reopens it. Surface it and ask; do not draft a plan that silently reverses it. Explaining *why* the decision was made is welcome — reversing it unasked is not.
+
+Coverage is honest, not universal: markers currently span Plans 24–27 (76 across 14 files). Older settled designs may carry no marker at all, so the absence of one is **not** evidence that a design is open — check the plan doc and `docs/DECISIONS.md` too. When a wave settles something new, stamp the marker as part of that wave.
+
+**Notation for pre-Plan-24 decisions (owner ruling):** use **the plan's own notation verbatim** — `Plan 6 owner decision 3`, `Plan 17 D2`, `Plan 20 decision (c)`. Do **not** retrofit a `D-<plan>-<n>` id onto a plan that never used one: the marker's job is to send a reader to the real decision, and an invented id points at a reference the plan doesn't contain. This means the grep above needs the `owner decision` alternate to catch older markers — that is deliberate, not an oversight.
+
 ---
 
 ## Non-Negotiable Engineering Rules
