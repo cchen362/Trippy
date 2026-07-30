@@ -22,7 +22,7 @@ One line each. The code marker is authoritative; follow the pointer for the reas
 | **D-25-1 (pin precedence)** | When booking sync and a user-confirmed pin disagree, the **pin wins, silently**. No conflict UI. | `syncStopWithBooking`; Plan 25 |
 | **Plan 21 D3 (error channel)** | A mutation failure has exactly one owner. `useStops` opts into the shared page banner via `onError`; `useBookings` does not. Action hooks are namespaced, never flat-spread. | `// D3 CONTRACT:` comment, `frontend/src/pages/TripPage.jsx` |
 | **Plan 20 (expenses store)** | The expenses store stays **per-route** and is never lifted into `TripPage` — a ~700ms FX budget would otherwise be paid on every trip screen. | Plan 20 review §9 |
-| **Co-pilot v1** | No undo. A loss-warning before applying is the chosen treatment. Booking-linked stops are untouchable by co-pilot proposals. | Plan 11 / co-pilot v1 decisions |
+| **Co-pilot v1** | No undo. A loss-warning before applying is the chosen treatment. Booking-linked stops are untouchable by co-pilot proposals. A proposal applies as one unit — no selective per-operation apply. | Clause by clause: `Plan 11 D5` above `applyProposal` (no undo) and `Plan 11 D6` above the booking-linked guard, both `backend/src/services/copilotProposals.js`; `computeLossWarnings` in the same file (the loss warning); `Plan 11 D11` in `frontend/src/components/copilot/MutationPreview.jsx` (one unit) |
 
 ## Decisions with no code home
 
