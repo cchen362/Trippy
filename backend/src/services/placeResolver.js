@@ -642,6 +642,13 @@ async function searchNominatim({ queryText, city, country, aliases = [], priorit
   return { result: null, rawJson: attempts };
 }
 
+// Place-naming coverage / resolver strategy — CLOSED 2026-07-26 (owner decision;
+// see docs/DECISIONS.md). This ordering is SETTLED: precision over polish, no resolver
+// change. Do not re-propose reordering the chain, adding a Google-first path, or
+// widening naming coverage. Only ~28% of production stops get a named card, and that
+// is the intended output, not a defect — discovery already pays Google (~96% Nominatim
+// miss rate), so a "Discovery-first" reordering measures out as a +3.8% no-op.
+//
 // Google Places Text Search fallback — only used when Nominatim (OSM) produces no result.
 // Text Search is a single billed request per query and does not use session tokens.
 //

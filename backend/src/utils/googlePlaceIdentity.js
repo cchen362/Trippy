@@ -4,6 +4,12 @@
 // The frontend receives the pre-decided, nullable `googlePlaceId` and never
 // re-derives the rule (review §4, Plan 24 D-24-3).
 //
+// Returning null here is a CORRECT outcome, not a coverage gap: an OSM or
+// `user_pin` stop has no Google place identity, so it gets a coordinate-only
+// Google link — the right output for that stop, and settled by the same
+// 2026-07-26 place-naming ruling recorded in docs/DECISIONS.md. Do not treat a
+// null return as something to backfill or "improve" with a Google lookup.
+//
 // Pure function over a raw snake_case `stops` DB row. No DB access, no I/O, and
 // deliberately no camelCase fallback: both callers pass raw rows, so accepting
 // a camelCase shape too would silently return null for a mis-shaped caller

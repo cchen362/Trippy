@@ -22,11 +22,14 @@ One line each. The code marker is authoritative; follow the pointer for the reas
 | **D-25-1 (pin precedence)** | When booking sync and a user-confirmed pin disagree, the **pin wins, silently**. No conflict UI. | `syncStopWithBooking`; Plan 25 |
 | **Plan 21 D3 (error channel)** | A mutation failure has exactly one owner. `useStops` opts into the shared page banner via `onError`; `useBookings` does not. Action hooks are namespaced, never flat-spread. | `// D3 CONTRACT:` comment, `frontend/src/pages/TripPage.jsx` |
 | **Plan 20 (expenses store)** | The expenses store stays **per-route** and is never lifted into `TripPage` — a ~700ms FX budget would otherwise be paid on every trip screen. | Plan 20 review §9 |
+| **Place-naming / resolver strategy — CLOSED** | **Precision over polish. No resolver change.** Nominatim first, Google Places only as fallback. Do not re-propose reordering the chain, a Google-first path, or wider naming coverage. ~28% named-card coverage is the intended output. | The `searchGooglePlaces` fallback comment, `backend/src/services/placeResolver.js`; owner, 2026-07-26 |
 | **Co-pilot v1** | No undo. A loss-warning before applying is the chosen treatment. Booking-linked stops are untouchable by co-pilot proposals. A proposal applies as one unit — no selective per-operation apply. | Clause by clause: `Plan 11 D5` above `applyProposal` (no undo) and `Plan 11 D6` above the booking-linked guard, both `backend/src/services/copilotProposals.js`; `computeLossWarnings` in the same file (the loss warning); `Plan 11 D11` in `frontend/src/components/copilot/MutationPreview.jsx` (one unit) |
 
 ## Decisions with no code home
 
-These live here because nothing in the codebase records them.
+These live here because nothing in the codebase records them — each is an external-service fact, a corpus-level policy, or an ops detail that no single file governs.
+
+**This section is complete by design, not a backlog.** Prose here does not mean "not yet backfilled with a code marker"; it means a code marker would have nowhere honest to sit. Do not hunt for code homes for these entries. If a future change *gives* one of them a real code home, move it up to the table above and leave a marker at the anchor — that is what happened to the place-naming ruling on 2026-07-30.
 
 ### Unsplash API tier — CLOSED
 
@@ -34,11 +37,7 @@ These live here because nothing in the codebase records them.
 
 Standing constraints (how it works, not a decision): a single app-wide key is shared with agent diagnostics; each photo action costs a fetch; a throttled fetch leaves the photo `NULL`, recoverable via `backfillTripPhotos`.
 
-### Place-naming coverage / resolver strategy — CLOSED
-
-**2026-07-26, owner.** Ruling: **precision over polish. No resolver change.** Do not re-propose reordering the resolver, adding a Google-first path, or widening naming coverage.
-
-Reason: the resolver tries Nominatim first and Google Places only as a fallback, so only ~28% of production stops get a named card — by design, not a defect. Discovery already pays Google (~96% Nominatim miss rate), so a "Discovery-first" reordering measures out as a +3.8% no-op. Coordinate-only Google links are the correct output for OSM and `user_pin` stops.
+The tier itself is an account fact with no code home, so it stays here — but the "no demo-tier workarounds" half of the ruling *does* govern code, and is marked above `search()` in `backend/src/services/unsplash.js`.
 
 ### Discovery catalogue — no rebuild
 

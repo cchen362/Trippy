@@ -44,6 +44,10 @@ export async function trackDownload(photo) {
   }
 }
 
+// Unsplash production tier is GRANTED at 1,000 requests/hour — CLOSED 2026-07-28
+// (owner decision; see docs/DECISIONS.md). Do not add rate-limit workarounds,
+// queues, or backoff premised on the old 50/hr demo tier. A throttled fetch simply
+// leaves the photo NULL, which backfillTripPhotos (services/stops.js) recovers.
 async function search(query) {
   if (!config.unsplashAccessKey) {
     throw Object.assign(new Error('Unsplash access key is not configured'), {
