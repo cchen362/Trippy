@@ -295,7 +295,9 @@ const RESOLVED_COPY = {
 };
 
 // Plan 11 D11: a proposal applies as ONE coherent unit. No selective per-operation
-// apply — the traveller rejects and re-asks instead.
+// apply — cross-operation dependencies make partial application hazardous (a move
+// that assumes an add landed, a remove that assumes a reorder did). This is a
+// correctness constraint, not a UX preference: the traveller rejects and re-asks.
 export default function MutationPreview({ proposal, days, onApply, onReject, applying }) {
   const operations = proposal?.operations || [];
   const warnings = proposal?.warnings || [];
