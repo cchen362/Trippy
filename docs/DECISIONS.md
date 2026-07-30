@@ -25,6 +25,17 @@ One line each. The code marker is authoritative; follow the pointer for the reas
 | **Place-naming / resolver strategy — CLOSED** | **Precision over polish. No resolver change.** Nominatim first, Google Places only as fallback. Do not re-propose reordering the chain, a Google-first path, or wider naming coverage. ~28% named-card coverage is the intended output. | The `searchGooglePlaces` fallback comment, `backend/src/services/placeResolver.js`; owner, 2026-07-26 |
 | **Co-pilot v1** | No undo. A loss-warning before applying is the chosen treatment. Booking-linked stops are untouchable by co-pilot proposals. A proposal applies as one unit — no selective per-operation apply. | Clause by clause: `Plan 11 D5` above `applyProposal` (no undo) and `Plan 11 D6` above the booking-linked guard, both `backend/src/services/copilotProposals.js`; `computeLossWarnings` in the same file (the loss warning); `Plan 11 D11` in `frontend/src/components/copilot/MutationPreview.jsx` (one unit) |
 
+## Superseded or hollowed-out — do not re-stamp
+
+The 2026-07-30 Plan 1–23 marker backfill deliberately left these unmarked. They are recorded here so a future triage does not rediscover them in the plan docs, see no marker, and stamp a ruling that no longer holds.
+
+| Decision | Status |
+|---|---|
+| **Plan 7 decision 1** — "show unverified items with an *Unverified* badge, rank-penalized" | **Half superseded.** The badge is dead: `D-27-1` shows "Verified" or no label at all, and never surfaces `pending`/`unverified` as user-facing words. The rank penalty is **still live** — `computeScore`'s `3.0 · verified` term in `backend/src/services/discoveryRank.js`. Do not stamp the badge half; it would contradict `D-27-1`. |
+| **Plan 10 D5** — "no scene-pool caching initially" | **Behaviour stands, premise is gone.** There is still no scene pool. But the stated reason was the Unsplash *demo* tier, and production is now granted 1,000 req/hr, so this is no longer a settled decision — it is an unexamined default. Treat it as open, not closed, if it ever comes up. |
+
+**Not superseded, despite looking it:** Plan 7 decision 3 (report ⇒ immediate global suppress + audit log) is live and already marked at `backend/src/routes/discovery.js` — Plan 26's archive/suppress split sits alongside it, it did not replace it.
+
 ## Decisions with no code home
 
 These live here because nothing in the codebase records them — each is an external-service fact, a corpus-level policy, or an ops detail that no single file governs.
