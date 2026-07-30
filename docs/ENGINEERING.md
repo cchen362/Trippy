@@ -25,20 +25,24 @@ Do not describe planned work as shipped. Plans 1–14 are historical implementat
 
 Some behaviour in this codebase looks arbitrary and is not. Those choices are **owner decisions**, and they are marked in two places:
 
-- **In the code they govern**, as a `D-<plan>-<n>` comment (e.g. `D-26-2` in the `deriveDayGeo` JSDoc, `D-27-1` in the discovery display path). The marker sits in the same file as the behaviour, so it cannot drift out of sync with it.
+- **In the code they govern**, as a comment citing the decision by its own id — `D-<plan>-<n>` for Plans 24 onward (e.g. `D-26-2` in the `deriveDayGeo` JSDoc, `D-27-1` in the discovery display path), or the plan's own notation for earlier plans (e.g. `Plan 9 D4`, `Plan 6 owner decision 1`). The marker sits in the same file as the behaviour, so it cannot drift out of sync with it. **A citation is only useful if it names its plan** — a bare `(D4)` sends the reader nowhere, so always qualify it.
 - **In `docs/DECISIONS.md`**, for decisions with no single code home — external service tiers, quotas, "do not re-propose" rulings.
 
 **Before proposing a change to existing behaviour, grep for a decision marker near the code you would touch:**
 
 ```bash
-grep -rnE "D-[0-9]{2}-[0-9]+|owner decision" <the file or directory>
+grep -rnE "D-[0-9]{2}-[0-9]+|Plan [0-9]+[A-Z]?( Wave [0-9]+)? (D|G|P)[0-9]+|owner decision|Plan [0-9]+[A-Z]? decision" <the file or directory>
 ```
+
+The pattern has four alternates because the notation is genuinely not uniform, and it cannot be made uniform without breaking the rule below. `D-<plan>-<n>` catches Plans 24–27. `Plan <n> [Wave <n>] D<n>` catches the plans that numbered their own decisions (`D`, and also `G` in Plan 12, `P` in Plan 13). `owner decision` and `Plan <n> decision` catch the plans that wrote them out in prose (Plans 6, 7, 20).
+
+**Keep a citation on one line.** This grep is line-based, so a marker whose id wraps mid-citation (`… Plan 9 Wave 3` / `D5) …`) is invisible to it even though the comment is perfectly correct. When a citation would wrap, break the line before it instead.
 
 If you find one, the decision **stands** until the owner reopens it. Surface it and ask; do not draft a plan that silently reverses it. Explaining *why* the decision was made is welcome — reversing it unasked is not.
 
-Coverage is honest, not universal: markers currently span Plans 24–27 (76 across 14 files). Older settled designs may carry no marker at all, so the absence of one is **not** evidence that a design is open — check the plan doc and `docs/DECISIONS.md` too. When a wave settles something new, stamp the marker as part of that wave.
+Coverage is honest, not universal: markers span Plans 2A–27 — **74 marker lines across 38 of 179 source files**, measured 2026-07-30, after the Plan 1–23 backfill. Plans **2, 4, 5, 16, and 23** carry no code marker (their decisions were judged self-evident from the code, scope/process notes, or superseded), and the backfill deliberately marked only decisions where *behaviour looks arbitrary and is not* — roughly a third of the ~91 decision notations in Plans 1–23. So the absence of a marker is **not** evidence that a design is open — check the plan doc and `docs/DECISIONS.md` too. When a wave settles something new, stamp the marker as part of that wave.
 
-**Notation for pre-Plan-24 decisions (owner ruling):** use **the plan's own notation verbatim** — `Plan 6 owner decision 3`, `Plan 17 D2`, `Plan 20 decision (c)`. Do **not** retrofit a `D-<plan>-<n>` id onto a plan that never used one: the marker's job is to send a reader to the real decision, and an invented id points at a reference the plan doesn't contain. This means the grep above needs the `owner decision` alternate to catch older markers — that is deliberate, not an oversight.
+**Notation for pre-Plan-24 decisions (owner ruling):** use **the plan's own notation verbatim** — `Plan 6 owner decision 3`, `Plan 17 D2`, `Plan 20 decision (c)`. Do **not** retrofit a `D-<plan>-<n>` id onto a plan that never used one: the marker's job is to send a reader to the real decision, and an invented id points at a reference the plan doesn't contain. This is why the grep above carries four alternates instead of one — the ragged notation is the cost of every marker resolving to something real, and it was paid deliberately.
 
 ---
 

@@ -50,7 +50,7 @@ function fromExpense(expense) {
 }
 
 // Add/edit sheet on ModalShell. Amount + currency + category are always
-// visible and gate Save; date is visible-but-defaulted (D2); payer/note/
+// visible and gate Save; date is visible-but-defaulted (Plan 19 D2); payer/note/
 // booking-link/manual-rate/owed-rows live in a collapsed "More" section.
 export default function ExpenseSheet({
   open,
@@ -408,6 +408,9 @@ export default function ExpenseSheet({
             </label>
 
             <div>
+              {/* Plan 19 D6: no equal-split shortcut. Exact amounts only — a split
+                  button is the first step onto the Splitwise slope and was
+                  explicitly cut from scope. */}
               <span className="modal-label">Someone owes me</span>
               <div className="space-y-2">
                 {form.owed.map((row, i) => {

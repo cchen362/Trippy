@@ -242,6 +242,10 @@ export default function TripRouteCover({ destinationsGeo = [], status = 'upcomin
   const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
   const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
 
+  // Plan 22 D4: air-vs-ground is INFERRED from countryCode clustering — a hop
+  // between country clusters draws as a dashed lofted arc, a hop within one draws
+  // solid. This is an honest heuristic on available data, not a claim about the
+  // actual transport mode. It is not a bug that a long domestic leg reads as ground.
   const segments = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1];

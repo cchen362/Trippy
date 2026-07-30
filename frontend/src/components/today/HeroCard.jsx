@@ -34,7 +34,7 @@ export default function HeroCard({ item, mapConfig }) {
   const eyebrow = isHotel ? 'Tonight' : (booking?.type || stop?.type || 'Next');
   const title = booking?.title || stop?.title || 'Untitled';
   const timeLabel = isHotel ? null : item.time;
-  // Status is a flight-only extension point (D6) — trains/others deep-link out instead.
+  // Status is a flight-only extension point (Plan 3 D6) — trains/others deep-link out instead.
   const showStatus = booking?.type === 'flight';
 
   const navLabel = title;

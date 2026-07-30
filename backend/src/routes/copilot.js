@@ -137,7 +137,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   }
 });
 
-// DELETE /trips/:tripId/copilot/history — owner-only (D8)
+// DELETE /trips/:tripId/copilot/history — owner-only (Plan 11 D8)
 router.delete('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     if (req.trip.owner_id !== req.user.id) {
@@ -179,7 +179,7 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
   `).run(tripId, userId, req.body.message, messageContext ? JSON.stringify(messageContext) : null);
 
   // Load the most recent COPILOT_MESSAGE_WINDOW messages for conversation context,
-  // re-ordered chronologically. This must match the history endpoint's display limit (D4).
+  // re-ordered chronologically. This must match the history endpoint's display limit (Plan 15 D4).
   const contextRows = db.prepare(`
     SELECT role, content, context_json FROM (
       SELECT role, content, context_json, created_at FROM copilot_messages
@@ -244,6 +244,9 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
       summary.cacheWriteTokens, summary.cacheReadTokens, summary.ttfdMs, summary.totalMs,
       summary.iterations, summary.queryCalls, summary.stopReason, summary.proposalOps, summary.error,
     );
+    // Plan 15 D2: 90-day telemetry retention, pruned opportunistically on write. No cron
+    // by design — at this scale a scheduled job is more moving parts than the problem
+    // deserves.
     db.prepare(`DELETE FROM copilot_turn_metrics WHERE created_at < datetime('now', '-90 days')`).run();
   };
 

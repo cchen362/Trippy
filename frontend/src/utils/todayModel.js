@@ -17,7 +17,7 @@ function addDaysIso(iso, n) {
 }
 
 // Absolute instant for a booking's naive wall-clock datetime, preferring its
-// own timezone (D1) so "has passed" is correct even if the device clock is in
+// own timezone (Plan 3 D1) so "has passed" is correct even if the device clock is in
 // a different zone than the booking (e.g. the day of a long-haul flight).
 // Falls back to device-local interpretation when no tz is stored.
 function bookingInstant(iso, tz) {
@@ -91,7 +91,7 @@ function emptyResult(days, bookings, todayIso) {
   };
 }
 
-// Pure anchor-flow derivation (D2). Anchors are today's bookings (by their
+// Pure anchor-flow derivation (Plan 3 D2). Anchors are today's bookings (by their
 // departure/relevant local date — never arrival, so overnight bookings only
 // anchor their departure day) plus any stop with an explicit time. Activities
 // (untimed stops) are never individually clock-judged — one collapses only

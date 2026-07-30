@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 
+// Plan 18 D2: this stays a full-screen overlay and must NOT become a ModalShell
+// sheet. The near-white pane is deliberate — scanners need to read a QR code off
+// the phone. Semantics (role, Escape, scroll lock, focus) were added; the chrome
+// was not.
 export default function DocumentViewer({ document, onClose }) {
   const closeButtonRef = useRef(null);
 

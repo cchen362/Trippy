@@ -4,7 +4,7 @@ import ErrorBanner from '../common/ErrorBanner.jsx';
 import { COMMON_CURRENCIES } from '../../utils/currency.js';
 
 // First-open prompt when trip.summaryCurrency is null — one select, saves via
-// the trip edit endpoint's `summaryCurrency` field (D7).
+// the trip edit endpoint's `summaryCurrency` field (Plan 19 D7).
 export default function SummaryCurrencyPrompt({ open, onSave, saving }) {
   const [currency, setCurrency] = useState('SGD');
   const [error, setError] = useState(null);

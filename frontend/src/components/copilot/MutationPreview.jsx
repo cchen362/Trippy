@@ -294,6 +294,8 @@ const RESOLVED_COPY = {
   invalid: 'This suggestion no longer matches your current trip. Ask the co-pilot again for an up-to-date version.',
 };
 
+// Plan 11 D11: a proposal applies as ONE coherent unit. No selective per-operation
+// apply — the traveller rejects and re-asks instead.
 export default function MutationPreview({ proposal, days, onApply, onReject, applying }) {
   const operations = proposal?.operations || [];
   const warnings = proposal?.warnings || [];

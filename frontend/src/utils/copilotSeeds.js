@@ -1,3 +1,6 @@
+// Plan 13 P6: seed prompts are derived deterministically from the real trip,
+// client-side. An LLM call here would add cost and latency to every panel open
+// for copy the trip data already implies.
 const FALLBACK_PROMPT = "What's worth knowing about this trip?";
 const FOOD_TYPES = new Set(['food', 'restaurant', 'meal']);
 

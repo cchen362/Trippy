@@ -11,6 +11,9 @@ function getClient() {
 
 export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
 
+// Plan 2A D3: extraction uses Sonnet, not Haiku. Messy screenshots and
+// date-ambiguity reasoning are exactly where Haiku degrades, and extraction
+// errors are user-facing.
 export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
 
 export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001';
@@ -35,6 +38,9 @@ export function coerceSceneType(value) {
   return SCENE_TYPES.includes(value) ? value : null;
 }
 
+// Plan 2A D6: the schema's city fields below (details.originCity/destinationCity/city)
+// must come back as canonical English — this is what deriveDayGeo's seed layer reads.
+// Local-script names are preserved in the title/station fields, not here.
 const EXTRACTION_SYSTEM = `You are a travel-booking extraction engine. You receive raw content (pasted text, email text, screenshots, or PDFs of travel confirmations) and must extract every distinct booking as structured JSON.
 
 Output ONLY a single fenced JSON code block (\`\`\`json fence). No prose before or after it.
@@ -452,7 +458,7 @@ Rules:
 - Output nothing outside the single fenced JSON block.`;
 
 // Single cheap Haiku call generating { photoQuery, sceneType } for a manually-added
-// stop that carries no descriptor of its own (D3). Must never block stop creation:
+// stop that carries no descriptor of its own (Plan 10 D3). Must never block stop creation:
 // every failure mode (missing key, network error, malformed output, invalid schema)
 // is caught and returns null so the caller falls through to resolvedName+city.
 export async function generatePhotoDescriptor({ title, resolvedName, city, country, type }) {
@@ -496,7 +502,7 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
 // never terminal. The loop itself is already generic over this set.
 const QUERY_TOOL_NAMES = new Set([SEARCH_DISCOVERY_CATALOGUE_TOOL.name, CHECK_TRIP_HEALTH_TOOL.name]);
 
-// Max EXECUTED query-tool calls per user turn (G2). Once hit, further query tool_use blocks
+// Max EXECUTED query-tool calls per user turn (Plan 12 G2). Once hit, further query tool_use blocks
 // are answered with a budget-notice tool_result instead of being executed — the model gets one
 // post-cap response to answer with what it already has before the hard stop below kicks in.
 const QUERY_TOOL_CAP = 5;

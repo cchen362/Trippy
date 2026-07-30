@@ -11,6 +11,8 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 router.get('/', (req, res, next) => {
   try {
+    // Plan 3 D1: the device clock is ground truth for the traveller, so "today" is
+    // client-supplied. Server-local is the fallback, not the authority.
     const today = ISO_DATE.test(req.query.today || '') ? req.query.today : undefined;
     res.json({ trips: listTripsForUser(req.user.id, today ? { today } : undefined) });
   } catch (error) {

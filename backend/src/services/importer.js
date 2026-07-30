@@ -54,6 +54,9 @@ function validateInputs(inputs) {
       throw Object.assign(new Error(`Input ${i}: exceeds max size for ${kind}`), { status: 400 });
     }
 
+    // Plan 2A D1: artifact bytes live in SQLite as BLOBs deliberately — one Docker
+    // volume, one backup story, FK CASCADE cleanup. The size caps above are what
+    // make this safe.
     const contentBuffer = kind === 'text'
       ? Buffer.from(input.content, 'utf8')
       : Buffer.from(input.content, 'base64');

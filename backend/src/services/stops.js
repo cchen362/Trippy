@@ -341,6 +341,10 @@ const EMPTY_PHOTO = { url: null, photoId: null, attribution: null, photoQuery: n
 // existing, when provided, is the { url, photoId, attribution, photoQuery, sceneType }
 // to keep unchanged (explicit override from input, or the stop's own stored photo when
 // a refresh isn't warranted) — no search is performed in that case.
+//
+// Plan 10 D6: photo stability — a stored photo survives every field change EXCEPT
+// title or type. Never re-fetch a stored selection merely to render it (Unsplash
+// cost discipline).
 async function resolvePhotoUrl({ title, type, city, countryCode, resolvedName, photoQuery, sceneType, excludeIds = [], existing }) {
   if (existing !== undefined) {
     return {

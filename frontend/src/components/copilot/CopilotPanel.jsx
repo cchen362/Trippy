@@ -11,6 +11,11 @@ const TOOL_ACTIVITY_LABELS = {
   check_trip_health: 'Checking your trip…',
 };
 
+// Plan 13 P2: the sheet NEVER changes height except by explicit user action
+// (drag or the expand/collapse control). Long replies scroll inside it at its
+// current height — no auto-expand, ever. This is the standing no-uninitiated-motion
+// rule.
+//
 // Height as a fraction of the layout viewport. Resolved to pixels at render so
 // framer animates a numeric height reliably (vh strings animate unpredictably),
 // and so the on-screen keyboard — which shrinks only the *visual* viewport, not
@@ -231,6 +236,9 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
         }}
       >
         {/* Inner: the visible sheet + drag gesture (mobile). No animate.y → no conflict. */}
+        {/* Plan 13 P3: gestures never port across form factors. Mobile gets handle-led
+            drag; desktop gets an explicit expand/collapse control — no drag emulation,
+            no hover-triggered motion. */}
         <motion.div
           drag={isDesktop ? false : 'y'}
           dragControls={dragControls}

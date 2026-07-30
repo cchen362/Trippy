@@ -15,7 +15,7 @@ import { buildTripScopes, listTripScopes } from './trips.js';
 // The same validation runs at creation AND again at apply (fact 3: the cross-trip hole is
 // closed by matching every referenced day/stop against :tripId; D6: booking-linked stops are
 // off-limits; D7: time is HH:MM|null; D12: unknown actions/fields fail loudly; D11/D12: the
-// whole proposal is all-or-nothing). Apply is atomic (D4): every external call happens before
+// whole proposal is all-or-nothing). Apply is atomic (Plan 11 D4): every external call happens before
 // a single better-sqlite3 transaction that commits all writes + the status flip or nothing.
 
 const HHMM_RE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -234,7 +234,7 @@ export function validateProposalOperations(operations, tripId) {
   return { ok: true };
 }
 
-// Shared stop-membership + booking-linked (D6) check for remove/move/update.
+// Shared stop-membership + booking-linked (Plan 11 D6) check for remove/move/update.
 function requireInTripStop(label, action, stopId, tripId) {
   if (typeof stopId !== 'string' || !stopId) {
     return { error: { ok: false, reason: `${label} (${action}) is missing a valid stopId.` } };
@@ -361,7 +361,7 @@ function sanitizeAndStampOperations(operations, tripId) {
 
 // Creates the audit record the instant a tool call arrives. A schema/trip/booking/time
 // violation still produces a row — status 'invalid' with the reason — so the failure is
-// visible and auditable rather than a silent no-op (D12).
+// visible and auditable rather than a silent no-op (Plan 11 D12).
 export function createProposal({ tripId, userId, messageId, operations }) {
   const db = getDb();
   const sanitizedOperations = sanitizeAndStampOperations(operations, tripId);
@@ -474,9 +474,13 @@ function applyMove(db, op) {
   }
 }
 
-// Applies a pending proposal atomically (D4). Throws with a status code on any refusal:
-// 404 not found / wrong trip, 409 already resolved or stale fingerprint, 422 re-validation
-// failure. On success every write and the status→applied flip commit in one transaction.
+// Applies a pending proposal atomically (Plan 11 D4). Throws with a status code on any
+// refusal: 404 not found / wrong trip, 409 already resolved or stale fingerprint, 422
+// re-validation failure. On success every write and the status→applied flip commit in
+// one transaction.
+//
+// Plan 11 D5: there is no undo in co-pilot v1. Preview + explicit confirm + the audit
+// record IS the safety model — do not add a rollback path without reopening this.
 export async function applyProposal({ tripId, userId, proposalId }) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM copilot_proposals WHERE id = ?').get(proposalId);
@@ -497,7 +501,7 @@ export async function applyProposal({ tripId, userId, proposalId }) {
     throw Object.assign(new Error(validation.reason), { status: 422 });
   }
 
-  // Re-fingerprint: any structural drift since creation → stale (D3).
+  // Re-fingerprint: any structural drift since creation → stale (Plan 11 D3).
   if (computeTripFingerprint(tripId) !== row.trip_fingerprint) {
     const reason = 'The trip changed since this suggestion was made. Ask again to get a fresh one.';
     markStatus(proposalId, 'stale', reason, userId);

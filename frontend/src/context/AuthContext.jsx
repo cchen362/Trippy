@@ -42,6 +42,10 @@ export function AuthProvider({ children }) {
           window.localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
         } catch (err) {
           if (cancelled) return;
+          // Plan 3 D8: offline auth fails OPEN on a network error only — hydrate the
+          // cached user and let the traveller keep reading their itinerary. A real
+          // HTTP 401 still clears the cache and logs out. This asymmetry is the whole
+          // decision; do not "simplify" it into one path.
           if (err.status === 401) {
             clearCachedUser();
           } else {
@@ -52,7 +56,7 @@ export function AuthProvider({ children }) {
           }
         }
       } catch {
-        // status() itself failed to reach the network — same offline fallback.
+        // status() itself failed to reach the network — same offline fallback (Plan 3 D8).
         if (cancelled) return;
         const cached = readCachedUser();
         if (cached) setUser(cached);

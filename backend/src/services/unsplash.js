@@ -1,5 +1,8 @@
 import { config } from '../config.js';
 
+// Plan 10 D1: Unsplash is the sole photo source. Google Place Photos was evaluated
+// and rejected (mediocre UGC) even though the project already pays Google for place
+// resolution.
 const UNSPLASH_BASE_URL = 'https://api.unsplash.com';
 const APP_NAME = 'trippy';
 

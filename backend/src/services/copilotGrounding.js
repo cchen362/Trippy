@@ -2,7 +2,7 @@
 // search_discovery_catalogue tool (services/copilotTools.js): the model proposes a
 // destination/query/category, and this module answers strictly from what is already
 // stored in the discovery catalogue — it never calls Claude directly and the READ
-// path here never mints a new discovery_destinations row itself. Wave 2 (G3) adds
+// path here never mints a new discovery_destinations row itself. Wave 2 (Plan 12 G3) adds
 // the background-generation kick: when the catalogue for an in-scope destination is
 // empty or stale, this module fires runCatalogueGeneration in the background (never
 // awaited by the search) and answers with whatever it already has plus a
@@ -108,7 +108,7 @@ export async function searchDiscoveryCatalogue(tripDetail, input) {
   // Resolve the free-text destination against this trip's own scopes (stored
   // trip_scopes rows plus any day-derived label buildTripScopes appends). Anything
   // that doesn't match a scope is out of scope for this trip — no catalogue read,
-  // no row creation (G4).
+  // no row creation (Plan 12 G4).
   const storedScopes = listTripScopes(trip.id);
   const scopes = buildTripScopes(days, storedScopes);
   const matchedScope = scopes.find((scope) => scopesMatch(scope.label, destinationQuery));
@@ -154,7 +154,7 @@ export async function searchDiscoveryCatalogue(tripDetail, input) {
     dailyGenerationCount = getDailyGenerationCount(db, destinationRow.id);
   }
 
-  // G3 (Wave 2, owner decision): the model never sees raw 'empty'/'stale' — both
+  // Plan 12 G3 (Wave 2, owner decision): the model never sees raw 'empty'/'stale' — both
   // resolve to either 'generation_capped' (today's generation budget for this
   // destination is spent — no kick fires) or 'generating' (a background kick just
   // fired, or one for this same destination was already in flight). Both still

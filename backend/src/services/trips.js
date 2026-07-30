@@ -429,8 +429,8 @@ function extractGeoFromBooking(booking, tripScopes = []) {
  * Priority (unchanged from the original deriveDayCity):
  * 1. Manual city_override (+ city_override_country) on the day row
  * 2. Hotel booking active that night (check-in date ≤ day.date < check-out date). When
- *    more than one hotel is active the same night (overlapping bookings, Plan 9 Wave 3
- *    D5), the LATEST check-in date wins; a tie on check-in date is broken by the LATEST
+ *    more than one hotel is active the same night (overlapping bookings,
+ *    Plan 9 Wave 3 D5), the LATEST check-in date wins; a tie on check-in is broken by the LATEST
  *    `createdAt` (a booking with no `createdAt` compares as the empty string, so it loses
  *    every tie).
  * 3. Last same-day transit arrival (flight/train/bus/ferry departing that day)
@@ -543,6 +543,10 @@ export function deriveDayGeo(day, bookings, previousResolvedGeo, tripScopes = []
   };
 }
 
+// Plan 6 owner decision 5: destinations are derived from resolved day geo on every read,
+// never stored. Migration 015 retired trips.destinations/destination_countries; do not
+// restore them as competing truth.
+//
 // Derives the legacy trips.destinations/destinationCountries response shape from a list of
 // {city, cityCountry} pairs, unique by city, first-seen-in-day-order; a country is paired
 // with its city's first occurrence and dropped (not nulled) if absent, matching the prior
@@ -642,6 +646,9 @@ function seedTripScopesFromChips(db, tripId, destinationPairs) {
   }
 }
 
+// Plan 9 D1: a chip stores planning SCOPE vocabulary, never a day allocation. Adding a
+// chip must not create, assign, or re-assign days.
+//
 // Reconciles a trip's persisted scope rows against a freshly submitted chip list
 // (updateTrip's destination chip editor — Plan 9 Wave 2 §2.2). Days are never touched:
 // this only adds/updates/removes trip_scopes rows. A submitted chip that matches an
@@ -935,6 +942,8 @@ export function createTrip(userId, input) {
     countryCode: pair.countryCode || destinationCountries[index] || null,
   }));
   const interestTags = normalizeArray(input.interestTags);
+  // Plan 9 D4: every created day seeds from chip #1. An even split across chips was
+  // evaluated and rejected — it guesses an itinerary the traveller has not made yet.
   const defaultCity = destinations[0] || title;
   const defaultCityCountry = destinationPairs[0]?.countryCode || destinationCountries[0] || null;
   const tripDates = eachDate(startDate, endDate);
@@ -1014,6 +1023,10 @@ export function updateTrip(userId, tripId, input) {
   // city_country on matching-seed days is removed; see git history for that block).
   // When `destinations` isn't part of this input, no reconcile runs and getTripDetail's
   // scope+day merge reflects whatever scopes already exist.
+  //
+  // Plan 6 owner decision 1: editing the chip list rewrites the SEED layer only. Days
+  // carrying an override, and every derivation layer above seed, are deliberately left
+  // untouched.
   if (input.destinations !== undefined) {
     const newPairs = normalizeDestinationPairs(input.destinations);
     const reconcile = db.transaction(() => {

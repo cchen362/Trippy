@@ -478,6 +478,10 @@ export function setOwedSettled(userId, tripId, expenseId, owedId, settled) {
 
 // Totals scope to the SIGNED-IN user's own expenses (D1: spent-primary from the
 // viewer's own outlay, not a trip-wide ledger). See the frozen contract's Totals spec.
+//
+// Plan 20 decision 4: rows are shared, totals are personal. computeTotals is
+// viewer-scoped ON PURPOSE — the diary shows every collaborator's expenses, the
+// summary shows only yours. Do not widen it to all payers.
 export function computeTotals(tripId, userId, tripSummaryCurrency) {
   const db = getDb();
   const summaryCurrency = tripSummaryCurrency || null;

@@ -1,4 +1,4 @@
-// Single source of truth for provider deep links (D7) — was previously
+// Single source of truth for provider deep links (Plan 3 D7) — was previously
 // duplicated inline in OpenInMapsButton.jsx.
 //
 // `googlePlaceId` (Plan 24 Wave 2) is a pre-decided, nullable, bare place ID

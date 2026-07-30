@@ -1,6 +1,6 @@
 import { formatMinor } from '../../utils/currency.js';
 
-// Spent-primary headline (D1): everything the current user paid, including
+// Spent-primary headline (Plan 19 D1): everything the current user paid, including
 // fronted purchases, never silently excluded. Secondary lines break out what's
 // still owed back and the user's true net share.
 export default function ExpenseSummary({ totals }) {

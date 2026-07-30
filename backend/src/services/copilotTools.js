@@ -103,7 +103,7 @@ export const PROPOSE_ITINERARY_CHANGES_TOOL = {
 
 // Read-only query tool (Plan 12 Wave 1, G1/G2/G8). Executed server-side via a tool_result
 // round-trip in the agentic loop (claude.js) — never terminal. destination is free text
-// matched against the trip's own scopes; anything off-trip returns out_of_scope (G4) with
+// matched against the trip's own scopes; anything off-trip returns out_of_scope (Plan 12 G4) with
 // no catalogue read and no generation.
 export const SEARCH_DISCOVERY_CATALOGUE_TOOL = {
   name: 'search_discovery_catalogue',

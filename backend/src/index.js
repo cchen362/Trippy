@@ -33,6 +33,9 @@ app.use(cors({
   origin: config.frontendUrl,
   credentials: true,
 }));
+// Plan 2A D2: capture uploads ride base64 JSON, not multipart — Claude needs base64
+// anyway, so multipart would add a dependency and buy nothing. This limit is what
+// makes that work.
 app.use(express.json({ limit: '16mb' }));
 app.use(cookieParser());
 

@@ -184,6 +184,9 @@ export default function ModalShell({
   // sticky backdrop-blur header that hosts the admin/account triggers) would otherwise
   // become the containing block for this fixed overlay and trap it in-flow.
   return createPortal(
+    // Plan 18 D1: sheets close via explicit ✕ + Escape only. Overlay-click-to-close
+    // was REMOVED deliberately for consistency with Plan 17 — do not add a
+    // closeOnOverlay prop.
     <div
       className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm"
       style={{ zIndex }}

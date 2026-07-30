@@ -36,7 +36,7 @@ export default function TripPage() {
   const tripState = useTrip(tripId);
   const [pageError, setPageError] = useState(null);
   const reportError = useCallback((err, fallback) => setPageError(err?.message || fallback), []);
-  // D3 CONTRACT: useStops opts into the shared page banner via onError; useBookings does NOT.
+  // Plan 21 D3 CONTRACT: useStops opts into the shared page banner via onError; useBookings does NOT.
   // Four stop call sites depend on this banner surfacing their failures — do not remove onError
   // without re-homing them: PlanTab.handleReorder, PlanTab.handleDeleteStop,
   // StopCard.handleNoteBlur, TransitStop.handleNoteBlur.
@@ -55,7 +55,7 @@ export default function TripPage() {
     if (tripId) window.localStorage.setItem('trippy:lastTripId', tripId);
   }, [tripId]);
 
-  // A banner must not outlive the screen that produced it (D4). Every current producer
+  // A banner must not outlive the screen that produced it (Plan 21 D4). Every current producer
   // leaves the user on its originating tab, so clearing on pathname change is safe.
   useEffect(() => {
     setPageError(null);

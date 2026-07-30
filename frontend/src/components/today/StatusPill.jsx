@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { bookingsApi } from '../../services/bookingsApi.js';
 
+// Plan 3 D6: flight status is a refresh, not a feed. On-demand only — no polling
+// on render, no storage beyond the tap. Failures degrade to the deep link and
+// never block the card.
+//
 // L1: AeroDataBox lookups are a paid call. StatusPill previously re-fetched
 // on every mount (i.e. every Today-tab visit/tab switch), re-billing for data
 // that hadn't changed. Cache the result in sessionStorage — survives tab
