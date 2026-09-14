@@ -54,6 +54,10 @@ The tier itself is an account fact with no code home, so it stays here — but t
 
 **2026-07-26 → 2026-07-28, Plan 26.** The catalogue is repaired incrementally, never rebuilt. The verified corpus is large (880+ active verified rows) and a rebuild would spend real provider money to regress it. Repair work is bounded and idempotent.
 
+### Hosted MCP ownership — assessment direction
+
+**2026-09-15, owner.** A future Trippy MCP is a hosted, client-independent Trippy feature developed in this repository. It must not depend on Edward or grant another client access to the owner's trips merely because that client can connect. Edward's ability to use a remote MCP belongs to Edward's separate capability assessment and implementation. This settles repository ownership and product boundary, not the MCP tool catalogue, authentication design, rollout, or permission to implement. The advisory assessment is `docs/superpowers/reviews/2026-09-15-hosted-mcp-assessment.md`.
+
 ### Production server facts
 
 Not a decision, but facts agents keep re-deriving: the app runs on port **6768** (not 3001), in container `trippy-trippy-1`. Production `~/Trippy/data` is root-owned with no passwordless sudo — take backups with the **host** `/usr/bin/sqlite3` (the container has none) into chee-owned `~/Trippy/backups/`. The production migrations table is `_migrations`.
