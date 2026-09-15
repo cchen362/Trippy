@@ -1,6 +1,6 @@
 # Hosted Trippy MCP — planning recommendation
 
-**Status: planning recommendation, 2026-09-16. Nothing in this document is shipped. No MCP endpoint, token table, draft table, migration, dependency, or deployment exists.** It reviews `docs/superpowers/reviews/2026-09-15-hosted-mcp-assessment.md` (committed locally as `8cfe009`, not pushed) against the checkout at `8cfe009`, the published MCP specification revision 2026-07-28, and the published TypeScript SDK v2.0.0. An implementation plan (Plan 28) may be written only after the owner decisions in §9 are settled. Live code and `docs/ENGINEERING.md` win if this document drifts.
+**Status: planning recommendation, 2026-09-16 — owner decisions settled the same day (§9). Nothing in this document is shipped. No MCP endpoint, token table, draft table, migration, dependency, or deployment exists.** It reviews `docs/superpowers/reviews/2026-09-15-hosted-mcp-assessment.md` (committed locally as `8cfe009`, not pushed) against the checkout at `8cfe009`, the published MCP specification revision 2026-07-28, and the published TypeScript SDK v2.0.0. The owner decisions in §9 are settled; the next step is writing Plan 28 from this document. Live code and `docs/ENGINEERING.md` win if this document drifts.
 
 Settled product boundary (owner, recorded in `docs/DECISIONS.md` → "Hosted MCP ownership"): Trippy-owned, client-independent, developed in this repo, never dependent on Edward; every connection maps to one Trippy user and sees only that user's owned/collaborated trips; business actions only; preview before any trip/booking write; client-side interpretation of screenshots with Trippy validating structured fields (no second model extraction); original screenshot/PDF retained when transferable, structured booking still saved otherwise with the result saying so; pasted email text is input, not an attachment.
 
@@ -34,7 +34,7 @@ Everything here was read from live code, not inferred.
 | F12 | Provider daily budgets (`discoveryResolverDailyRequestBudget`, `discoveryEscalationDailyBudget`, `discoveryReverifyDailyRequestBudget`, per-destination cap) are **in-memory per process, reset per UTC day**. | `config.js` comments, Plan 26 W2.3/W3.2/W3.3 |
 | F13 | `better-sqlite3` 9.6.0 nests `db.transaction()` calls as savepoints: an inner service transaction rolls back with the outer one (proved with a throwaway script, 2026-09-16). | dependency behaviour |
 | F14 | Highest applied migration is 032; the runner applies `.sql` and `.js` in name order into `_migrations`. Next free number: **033**. | `db/migrations/`, `db/migrations.js` |
-| F15 | Production: Docker `node:20-alpine`, container port 3001 → host 6768, DB volume outside the container. A public HTTPS host `https://trippy.zyroi.com` is referenced by `.env.example` and the Plan 20 click-script; **how TLS terminates (which proxy, where) is not recorded anywhere in the repo.** | `Dockerfile`, `docker-compose.yml`, `.env.example`, `docs/superpowers/plans/2026-07-21-plan20-wave1-owner-click-script.md` |
+| F15 | Production: Docker `node:20-alpine`, container port 3001 → host 6768, DB volume outside the container. Public host `https://trippy.zyroi.com` is a **Cloudflare Tunnel**: DNS resolves to Cloudflare, TLS terminates at the Cloudflare edge, a host-level `trippy-cloudflared.service` (token-run, ingress managed remotely in the Cloudflare dashboard) forwards to the container's host port. **No nginx/Caddy sits in Trippy's path** — the `nginx-proxy-manager` container on the box serves other apps. Verified over SSH 2026-09-16 (`docker ps`, `systemctl cat trippy-cloudflared.service`, `curl -I https://trippy.zyroi.com/api/health` → `server: cloudflare`). | `Dockerfile`, `docker-compose.yml`, `.env.example`, server inspection |
 | F16 | Backend tests: vitest, real SQLite in a temp dir with migrations, Anthropic SDK mocked. 36 test files. | `backend/tests/` |
 | F17 | Express is 4.22.2 (`^4.19.2`); Node 20 in Docker. | `backend/package.json`, `node_modules/express/package.json`, `Dockerfile` |
 
@@ -215,7 +215,7 @@ Numbers 034–036 are relative; if waves ship in a different order the *next fre
 
 ### 5.10 Operational requirements
 
-- **HTTPS/proxy**: owner records how `trippy.zyroi.com` terminates TLS (F15). Plan gate: proxy passes `text/event-stream` unbuffered (`X-Accel-Buffering: no` honoured or equivalent), read timeout ≥ 120 s on `/mcp`, body limit ≥ 10 MB on `/mcp/uploads/*`, and forwards `Authorization`.
+- **HTTPS/proxy**: Cloudflare Tunnel (F15). Consequences: (1) TLS is Cloudflare's — nothing to configure in Trippy; `trust proxy 1` already matches the single hop. (2) Cloudflare streams SSE but drops a proxied response that goes **100 s without bytes** (HTTP 524); the `apply_draft` progress notification per booking plus an SSE keep-alive comment every ≤ 30 s keeps every long tool under that limit — this becomes a W2 test, not an assumption. (3) Request bodies up to 100 MB pass on the free plan, so 10 MB uploads are fine. (4) The tunnel's ingress is configured in the Cloudflare dashboard, not on the server — a new path prefix (`/mcp`) needs **no** ingress change since the whole hostname forwards to one origin; verify once in W1. (5) Bot-protection rules must not challenge non-browser clients on `/mcp` and `/mcp/uploads/*`; a plain `curl` to `/api/health` already passes today, re-check after W1 deploy. `X-Accel-Buffering: no` is still emitted (harmless, helps any future nginx).
 - **Request limits**: `/mcp` JSON 1 MB; uploads 10 MB raw; per-token 120 req/min; per-IP 30 unauthenticated/min.
 - **Logs without secrets**: one line per tool call — `ts, tokenPrefix, userId, tool, durationMs, outcome, draftId?` — never arguments, never bytes, never the token. Errors ≥ 500 through the existing `errorHandler`.
 - **Startup/shutdown**: nothing to warm. Add a `SIGTERM` handler (keep the `http.Server` reference, `server.close()`, then `db.close()`) — absent today (F1) and worth having regardless; an in-flight apply that has not reached its transaction simply leaves the draft `pending`.
@@ -262,17 +262,36 @@ Numbers 034–036 are relative; if waves ship in a different order the *next fre
 | **W0 Spike** (throwaway branch, not merged) | SDK v2 + Express 4.22 handshake in a scratch route; header-token auth; three clients: MCP Inspector, Claude Code, one hand-written client on the 2025-11-25 era | — | `tools/list` and one tool call succeed from all three; 2025-era client is served or the gap is named | delete branch | none — produces the go/no-go on SDK v2 and the era question (I1) |
 | **W1 Tokens + read tools** | migration 033; settings → Integrations UI (create/revoke/list, 375px first); `requireBearerAuth` verifier; `/mcp` with `list_trips`, `get_trip`; RFC 9728 metadata; per-token rate limit; `MCP_ENABLED` flag; health field | W0 | unit: hash/verify, expiry, revoke→401, scope 403 shape; isolation: user B's token cannot read A's trip (404) or a shared trip A is not on; tools/list schema snapshot; real Claude Code lists the owner's trips on prod | `MCP_ENABLED=0` → 404; table is inert | tests green; `git diff --check`; owner click-script for the settings page; backup per deploy skill |
 | **W2 Drafts + apply (existing trip)** | migration 034; `prepare_draft`, `apply_draft`, `get_apply_status`; validation issue codes; booking fingerprint; `syncStopWithBooking` resolve/write split; progress notifications | W1 | idempotent prepare (same key → same draft); apply twice → `already_applied`, one booking; stale after manual booking add; blocker refuses apply; resolve-phase failure writes nothing; `no_day_for_date` reported; real screenshot end-to-end via Claude Code creates booking + stop visible in the PWA | flag off; drafts inert; stop-sync split is behaviour-preserving (covered by existing `stops`/`bookings` tests) | plus: prod QA on a dedicated verify trip, then delete via UI |
-| **W3 New trip, multi-booking, documents** | migration 035; `newTrip` target (client supplies title/dates/destinations — Trippy never infers a trip from one booking); N-booking all-or-nothing; `request_upload_ticket`; `/mcp/uploads/:ticket`; `sourceDocument` reporting; attachment hash dedupe | W2 | two-leg draft → 2 bookings + 2 stops or nothing; ticket expiry/size/hash mismatch rejected; re-upload same hash → same attachment; email_text never stored; document visible under the booking in Logistics | flag off; tickets inert | owner verifies the image opens in the PWA |
-| **W4 OAuth 2.1** (conditional on D-1) | migration 036; AS endpoints, PKCE, CIMD + allowlist, refresh rotation, RFC 8707/9207; consent page; token list shows OAuth grants alongside PITs | W1 | conformance checklist from X2; Claude.ai custom connector connects, lists, prepares, applies; revocation from settings kills the grant | keep PIT path; disable AS routes | security review of the AS before public exposure |
+| **W3 New trip, multi-booking, documents, delete** | migration 035; `newTrip` target (client supplies title/dates/destinations — Trippy never infers a trip from one booking); N-booking all-or-nothing; `request_upload_ticket`; `/mcp/uploads/:ticket`; `sourceDocument` reporting; attachment hash dedupe; `prepare_delete` draft type + apply (D-28-8) | W2 | two-leg draft → 2 bookings + 2 stops or nothing; ticket expiry/size/hash mismatch rejected; re-upload same hash → same attachment; email_text never stored; document visible under the booking in Logistics | flag off; tickets inert | owner verifies the image opens in the PWA |
+| **W4 OAuth 2.1** (NOT planned — D-28-1; kept for the record) | migration 036; AS endpoints, PKCE, CIMD + allowlist, refresh rotation, RFC 8707/9207; consent page; token list shows OAuth grants alongside PITs | W1 | conformance checklist from X2; Claude.ai custom connector connects, lists, prepares, applies; revocation from settings kills the grant | keep PIT path; disable AS routes | security review of the AS before public exposure |
 | **W5 Hardening + docs** | SIGTERM handler; structured tool logs; proxy timeouts verified; `D-28-n` markers; `DECISIONS.md` rows; ENGINEERING.md "MCP" section; handoff click-script | W3 (and W4 if built) | restart mid-apply leaves draft pending and retry succeeds; logs contain no token/args | — | final owner QA |
 
 Each wave ends with the plan status line updated and a commit. Test files: `tests/mcpTokens.test.js`, `tests/mcpTools.test.js`, `tests/mcpDrafts.test.js`, `tests/mcpUploads.test.js`, `tests/migration033.test.js` (+034/035), and a `tests/mcpClient.e2e.test.js` that drives the real SDK client against the Express app in-process.
 
 ---
 
-## 9. Open owner decisions (concrete choices)
+## 9. Owner decisions — SETTLED 2026-09-16
 
-Answer these before Plan 28 is written. Recommended option first.
+All ten were answered by the owner on 2026-09-16 (recorded as `D-28-1` … `D-28-10` for Plan 28 to cite; the markers land in code when the governing code exists):
+
+| ID | Ruling |
+|---|---|
+| **D-28-1** | Auth = personal integration tokens (option a). OAuth 2.1 is **not** built; it stays a conditional future wave, re-opened only if a connector-only client (Claude.ai / Claude Desktop) becomes wanted. |
+| **D-28-2** | Must-work clients for v1: Claude Code, Codex CLI, MCP Inspector, the owner's own bot/scripts. |
+| **D-28-3** | Multi-booking apply is all-or-nothing per draft. |
+| **D-28-4** | Draft TTL 30 minutes. |
+| **D-28-5** | New trip: client supplies title, dates, destinations; Trippy validates and never infers a trip range from a booking. |
+| **D-28-6** | Three coarse scopes: `trips:read`, `trips:write`, `documents:write`. |
+| **D-28-7** | Collaborator parity with the UI: a collaborator's token may write on shared trips. |
+| **D-28-8** | `delete_booking` **is** in v1, but only as a draft: `prepare_delete` shows exactly what disappears (booking, linked stop, linked expenses) and `apply_draft` performs it. Scope `trips:write`. No other destructive tool. |
+| **D-28-9** | No `cost`/expense on booking drafts in v1. |
+| **D-28-10** | Missing time zone is an *info* issue, never a blocker; clock times are stored as local wall-clock exactly as the UI does today; suggestion via `geo-tz`/IATA when available. |
+
+The original choices are kept below for the reasoning behind each ruling.
+
+### Choices as they were put to the owner
+
+Recommended option first.
 
 - **D-1 Auth stage.** (a) **Personal integration tokens in W1, OAuth 2.1 as conditional W4** — recommended; the owner's bot scenario works on day one, OAuth is bought only if needed. (b) OAuth 2.1 in v1 — needed only if the Claude.ai/Desktop connector is a must-have from the start (X6); adds a wave before anything ships. (c) Tokens only, never OAuth — fine until a connector-only client matters.
 - **D-2 Must-work clients for v1.** (a) **Claude Code + MCP Inspector + scripts** — recommended, matches D-1(a). (b) Also Claude.ai / Claude Desktop connector — forces D-1(b).
@@ -285,7 +304,7 @@ Answer these before Plan 28 is written. Recommended option first.
 - **D-9 Cost/expense on booking drafts.** (a) **Out of v1** — recommended; expenses store is per-route by Plan 20 and FX costs time. (b) Accept `cost` and route through `prepareExpenseCreate` — reuse exists, adds FX latency to apply.
 - **D-10 Time-zone handling when the client omits tz.** (a) **Accept, flag `timezone_unknown` as info, suggest via `geo-tz` when a place resolves, store NULL** — recommended; matches how the UI treats tz today. (b) Make tz a blocker for flights — stricter data, more friction.
 
-Facts to collect (not decisions): how `trippy.zyroi.com` terminates TLS and what its SSE/timeout/body-size behaviour is (F15, 5.10).
+Fact collected 2026-09-16: `trippy.zyroi.com` is a Cloudflare Tunnel (F15, §5.10). No open facts remain; Plan 28 can be written.
 
 ---
 
