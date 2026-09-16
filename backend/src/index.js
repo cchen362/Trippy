@@ -18,11 +18,13 @@ import discoveryRoutes, { discoveryPlacesRouter } from './routes/discovery.js';
 import expenseRoutes from './routes/expenses.js';
 import healthRoutes from './routes/health.js';
 import importRoutes from './routes/imports.js';
+import integrationRoutes from './routes/integrations.js';
 import lookupRoutes from './routes/lookups.js';
 import mapRoutes from './routes/map.js';
 import shareRoutes from './routes/share.js';
 import stopRoutes from './routes/stops.js';
 import tripRoutes from './routes/trips.js';
+import { createMcpRouter } from './routes/mcp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +35,17 @@ app.use(cors({
   origin: config.frontendUrl,
   credentials: true,
 }));
+
+// F-28-22: /mcp mounts its own 1MB JSON parser inside createMcpRouter, which
+// must run before the global 16MB parser below claims the body first.
+if (config.mcpEnabled) {
+  const mcp = createMcpRouter({ publicUrl: config.mcpPublicUrl, frontendUrl: config.frontendUrl, appUrl: config.frontendUrl });
+  app.use('/mcp', mcp.router);
+  app.use(mcp.metadataRouter);
+  // Kept reachable so a shutdown hook can close open subscription streams cleanly.
+  app.locals.mcpHandler = mcp.handler;
+}
+
 // Plan 2A D2: capture uploads ride base64 JSON, not multipart — Claude needs base64
 // anyway, so multipart would add a dependency and buy nothing. This limit is what
 // makes that work.
@@ -40,6 +53,7 @@ app.use(express.json({ limit: '16mb' }));
 app.use(cookieParser());
 
 app.use('/api/health', healthRoutes);
+app.use('/api/integrations', integrationRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/trips', collaborationRoutes);

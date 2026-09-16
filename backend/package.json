@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.0",
+    "@modelcontextprotocol/express": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^9.6.0",
     "cookie-parser": "^1.4.6",
@@ -20,6 +23,7 @@
     "geo-tz": "^8.1.6"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "vitest": "^1.6.0"
   }
 }

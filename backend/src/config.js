@@ -83,4 +83,11 @@ export const config = {
   // itself and starve every other destination's re-verification for the rest of the day.
   discoveryReverifyPerDestinationDaily: parseInt(process.env.DISCOVERY_REVERIFY_PER_DESTINATION_DAILY || '25', 10),
   isProd: process.env.NODE_ENV === 'production',
+  // Plan 28 W1 (D-28-1): the hosted MCP server is off by default. When enabled,
+  // mcpPublicUrl must be the exact externally-reachable /mcp URL (no trailing
+  // slash) — it is echoed back in the WWW-Authenticate resource_metadata
+  // pointer and the RFC 9728 protected-resource document, so it must match
+  // what a client actually dialed.
+  mcpEnabled: process.env.MCP_ENABLED === '1',
+  mcpPublicUrl: process.env.MCP_PUBLIC_URL || '',
 };

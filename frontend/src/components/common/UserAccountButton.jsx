@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, KeyRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import ModalShell from '../shell/ModalShell.jsx';
+import IntegrationsPanel from '../integrations/IntegrationsPanel.jsx';
 
 function getInitials(displayName) {
   if (!displayName) return '?';
@@ -18,6 +19,7 @@ export default function UserAccountButton() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
 
   if (!user) return null;
 
@@ -45,6 +47,20 @@ export default function UserAccountButton() {
             <p className="font-mono text-[10px] tracking-[0.18em] uppercase mb-5" style={{ color: 'var(--cream-mute)' }}>
               @{user.username}
             </p>
+            <button
+              type="button"
+              onClick={() => setIntegrationsOpen(true)}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border font-mono text-xs tracking-[0.22em] uppercase mb-3"
+              style={{
+                borderColor: 'var(--ink-border)',
+                color: 'var(--cream-dim)',
+                background: 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <KeyRound size={15} />
+              Integrations
+            </button>
+
             <div className="border-t mb-5" style={{ borderColor: 'var(--ink-border)' }} />
 
             <button
@@ -63,6 +79,8 @@ export default function UserAccountButton() {
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
       </ModalShell>
+
+      <IntegrationsPanel open={integrationsOpen} onRequestClose={() => setIntegrationsOpen(false)} />
     </>
   );
 }

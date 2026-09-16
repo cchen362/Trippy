@@ -89,9 +89,9 @@ describe('migrations', () => {
     // 023 (trip_scopes), 024 (geo_data_repair), 025 (stop_photo_attribution),
     // 026 (discovery_place_photo_descriptor), 027 (stop_photo_source), and
     // 028 (copilot_proposals), 029 (copilot message context), 030
-    // (copilot_turn_metrics), 031 (expenses), and 032
-    // (discovery_verification_attempts).
-    expect(count.c).toBe(32);
+    // (copilot_turn_metrics), 031 (expenses), 032
+    // (discovery_verification_attempts), and 033 (integration_tokens).
+    expect(count.c).toBe(33);
   });
 
   it('adds nullable co-pilot message context storage', () => {

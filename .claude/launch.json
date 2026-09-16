@@ -14,7 +14,7 @@
       "runtimeArgs": ["--watch", "src/index.js"],
       "port": 3002,
       "cwd": "backend",
-      "env": { "NODE_ENV": "test", "PORT": "3002" }
+      "env": { "NODE_ENV": "test", "PORT": "3002", "MCP_ENABLED": "1", "MCP_PUBLIC_URL": "http://localhost:3002/mcp" }
     },
     {
       "name": "mockups",
