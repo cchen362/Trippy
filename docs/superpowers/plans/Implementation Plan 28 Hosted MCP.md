@@ -288,7 +288,7 @@ Also proven on the branch: (a) **Node 20.20.2** — the same `mcpSpike.js` run i
 
 ## W2 — Durable drafts + apply on an existing trip
 
-**Status:** NOT STARTED. Depends on W1 deployed.
+**Status:** NOT STARTED. Depends on W1 complete locally (done 2026-09-16 — see the owner ruling under Releases; deploy is deferred to the end).
 
 **Goal.** `prepare_draft` / `apply_draft` / `get_apply_status` for a single booking on an existing trip, with the full issue-code list, a booking fingerprint, all-or-nothing resolve-then-write, idempotent retry, and progress that keeps Cloudflare's 100 s timer alive — proven through the public host.
 
@@ -374,6 +374,8 @@ Also proven on the branch: (a) **Node 20.20.2** — the same `mcpSpike.js` run i
 ---
 
 ## Releases and sequencing
+
+**Owner ruling 2026-09-16 (supersedes the per-wave release cadence below):** deploy **once, when W1–W3 (and W5) are complete and fully functioning locally** — not after each wave. Consequences: W2's "Depends on W1 deployed" and W3's "Depends on W2 deployed" read as *depends on W1/W2 complete locally*; every production-only check (W2's Cloudflare 100 s keep-alive test, W3's upload through the public host, Appendix A §A–§C) moves into one final deploy QA run through the `deploy` skill. W3's row-rewriting migration still gets its pre-deploy backup; the "must not share a release" rule is satisfied by taking that backup immediately before the single deploy. The release descriptions below are kept as the QA checklist each wave must still pass locally.
 
 **Release 1 — W1 alone.** Carries a migration and the first public surface (`/mcp` 401s and the metadata document). It is the decision gate the recommendation asked for: if `/mcp` through the tunnel, the Integrations panel, and Claude Code listing trips all behave, W2 is authorised by that evidence; if not, nothing has been written that a flag cannot switch off.
 
