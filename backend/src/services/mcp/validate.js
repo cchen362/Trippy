@@ -7,7 +7,7 @@
 // apply.js re-runs this exact function before writing anything, so the two
 // call sites can never drift.
 import { getDb } from '../../db/database.js';
-import { assertTripAccess } from '../trips.js';
+import { assertTripAccess, eachDate } from '../trips.js';
 import { defaultShowInItinerary } from '../bookings.js';
 import {
   BOOKING_TYPES,
@@ -22,6 +22,8 @@ import { find as tzFind } from 'geo-tz';
 
 const IATA_RE = /^[A-Z]{3}$/;
 const SOURCE_KINDS = ['screenshot', 'pdf', 'email_text', 'manual'];
+const SHA256_HEX = /^[0-9a-f]{64}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const TYPE_REQUIRED_FIELDS = {
   flight: ['title', 'startDatetime', 'origin', 'destination'],
@@ -80,7 +82,7 @@ async function suggestTimezoneForField(detailsJson, locationValue) {
   return null;
 }
 
-function validateSourceShape(source, issues) {
+function validateSourceShape(source, issues, bookingsLength) {
   if (!source || typeof source !== 'object' || !SOURCE_KINDS.includes(source.kind)) {
     issues.push({
       severity: 'blocker',
@@ -90,16 +92,51 @@ function validateSourceShape(source, issues) {
     });
     return null;
   }
+
+  // W3.4: which of the draft's N bookings the document belongs to. Defaults to 0
+  // (the common single-booking case) so older callers need not supply it.
+  let sourceBookingIndex = 0;
+  if (source.sourceBookingIndex !== undefined) {
+    const n = source.sourceBookingIndex;
+    if (!Number.isInteger(n) || n < 0 || (Number.isInteger(bookingsLength) && n >= bookingsLength)) {
+      issues.push({
+        severity: 'blocker',
+        code: 'missing_required_field',
+        field: 'source.sourceBookingIndex',
+        message: 'source.sourceBookingIndex must be an integer index into bookings.',
+      });
+    } else {
+      sourceBookingIndex = n;
+    }
+  }
+
+  // W3.4: sha256 is the ticket's expected hash — never any raw content. A malformed
+  // hex string is refused outright rather than silently dropped.
+  let sha256 = null;
+  if (source.sha256 !== undefined && source.sha256 !== null) {
+    if (typeof source.sha256 !== 'string' || !SHA256_HEX.test(source.sha256)) {
+      issues.push({
+        severity: 'blocker',
+        code: 'missing_required_field',
+        field: 'source.sha256',
+        message: 'source.sha256 must be a 64-character hex SHA-256 when supplied.',
+      });
+    } else {
+      sha256 = source.sha256.toLowerCase();
+    }
+  }
+
   // Store exactly these fields — never email text or any other raw content (W3).
   return {
     kind: source.kind,
-    sha256: source.sha256 ?? null,
+    sha256,
     mediaType: source.mediaType ?? null,
     sizeBytes: source.sizeBytes ?? null,
+    sourceBookingIndex,
   };
 }
 
-async function validateOneBooking(booking, index, { tripRow, existingBookingRows, dayDates }) {
+async function validateOneBooking(booking, index, { tripRow, existingBookingRows, dayDates, targetResolved }) {
   const issues = [];
 
   if (!booking || typeof booking !== 'object') {
@@ -262,7 +299,7 @@ async function validateOneBooking(booking, index, { tripRow, existingBookingRows
   }));
 
   let plannedEffect = null;
-  if (tripRow && startDatetime) {
+  if (targetResolved && startDatetime) {
     const startDate = startDatetime.slice(0, 10);
     if (!showInItinerary) {
       plannedEffect = { bookingIndex: index, stop: { willCreate: false, date: startDate, reason: 'not_shown_in_itinerary' } };
@@ -296,16 +333,65 @@ async function validateOneBooking(booking, index, { tripRow, existingBookingRows
   return { normalized, issues, plannedEffect };
 }
 
+// D-28-5: the client supplies title/dates/destinations; Trippy validates and NEVER
+// infers a date range from a booking — an omitted date is new_trip_invalid, not a guess.
+function validateNewTrip(newTrip, issues) {
+  if (!newTrip || typeof newTrip !== 'object') {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip', message: 'newTrip is required.' });
+    return null;
+  }
+
+  const title = typeof newTrip.title === 'string' ? newTrip.title.trim() : '';
+  if (!title) {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip.title', message: 'newTrip.title is required.' });
+  }
+
+  const startDate = newTrip.startDate;
+  const startValid = typeof startDate === 'string' && DATE_RE.test(startDate) && !Number.isNaN(Date.parse(`${startDate}T00:00:00Z`));
+  if (!startValid) {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip.startDate', message: 'newTrip.startDate must be an ISO date (YYYY-MM-DD).' });
+  }
+
+  const endDate = newTrip.endDate;
+  const endValid = typeof endDate === 'string' && DATE_RE.test(endDate) && !Number.isNaN(Date.parse(`${endDate}T00:00:00Z`));
+  if (!endValid) {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip.endDate', message: 'newTrip.endDate must be an ISO date (YYYY-MM-DD).' });
+  }
+
+  if (startValid && endValid && endDate < startDate) {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip.endDate', message: 'newTrip.endDate must be on or after newTrip.startDate.' });
+  }
+
+  const rawDestinations = Array.isArray(newTrip.destinations) ? newTrip.destinations : [];
+  const validDestinations = rawDestinations.filter((d) => d && typeof d.city === 'string' && d.city.trim());
+  if (validDestinations.length === 0) {
+    issues.push({ severity: 'blocker', code: 'new_trip_invalid', field: 'newTrip.destinations', message: 'newTrip.destinations must include at least one entry with a city.' });
+  }
+
+  if (!title || !startValid || !endValid || (startValid && endValid && endDate < startDate) || validDestinations.length === 0) {
+    return null;
+  }
+
+  return {
+    title,
+    startDate,
+    endDate,
+    destinations: validDestinations.map((d) => ({
+      city: d.city.trim(),
+      countryCode: typeof d.countryCode === 'string' && d.countryCode.trim() ? d.countryCode.trim().toUpperCase() : null,
+    })),
+  };
+}
+
 export async function validateBookingDraft({ userId, target, bookings, source }) {
   const issues = [];
   let tripRow = null;
+  let normalizedNewTrip = null;
 
   if (!target || typeof target !== 'object') {
     issues.push({ severity: 'blocker', code: 'missing_required_field', field: 'target', message: 'target is required.' });
   } else if (target.newTrip) {
-    // W3 fills this in (D-28-5). W2 refuses unconditionally — never partially
-    // validate a newTrip shape here, that would imply support that doesn't exist.
-    issues.push({ severity: 'blocker', code: 'new_trip_invalid', message: 'Creating a new trip over MCP is not available yet.' });
+    normalizedNewTrip = validateNewTrip(target.newTrip, issues);
   } else if (target.tripId) {
     try {
       // D-28-7: the only membership check on this path — never a raw query.
@@ -320,7 +406,8 @@ export async function validateBookingDraft({ userId, target, bookings, source })
     issues.push({ severity: 'blocker', code: 'missing_required_field', field: 'target', message: 'target must include tripId or newTrip.' });
   }
 
-  const normalizedSource = validateSourceShape(source, issues);
+  const bookingsLength = Array.isArray(bookings) ? bookings.length : undefined;
+  const normalizedSource = validateSourceShape(source, issues, bookingsLength);
 
   let existingBookingRows = [];
   let dayDates = new Set();
@@ -331,6 +418,27 @@ export async function validateBookingDraft({ userId, target, bookings, source })
       FROM bookings WHERE trip_id = ?
     `).all(tripRow.id);
     dayDates = new Set(db.prepare('SELECT date FROM days WHERE trip_id = ?').all(tripRow.id).map((r) => r.date));
+
+    // source_already_attached: only meaningful once a real trip and its attachments
+    // exist — a newTrip target has no bookings/attachments to collide with yet.
+    if (normalizedSource?.sha256) {
+      const existingAttachment = db.prepare(`
+        SELECT ba.id, ba.booking_id
+        FROM booking_attachments ba
+        JOIN bookings b ON b.id = ba.booking_id
+        WHERE b.trip_id = ? AND ba.content_hash = ?
+      `).get(tripRow.id, normalizedSource.sha256);
+      if (existingAttachment) {
+        issues.push({
+          severity: 'warning', code: 'source_already_attached',
+          existingBookingId: existingAttachment.booking_id,
+          attachmentId: existingAttachment.id,
+          message: 'A document with this content is already attached to a booking on this trip.',
+        });
+      }
+    }
+  } else if (normalizedNewTrip) {
+    dayDates = new Set(eachDate(normalizedNewTrip.startDate, normalizedNewTrip.endDate));
   }
 
   if (!Array.isArray(bookings) || bookings.length === 0) {
@@ -339,37 +447,33 @@ export async function validateBookingDraft({ userId, target, bookings, source })
 
   const normalizedBookings = [];
   const plannedEffects = [];
+  // "A target resolved" gates plannedEffects/no_day_for_date — either an existing
+  // trip (tripRow) or a validated newTrip, so a newTrip draft gets the same
+  // "will a stop be created" preview an existing-trip draft gets.
+  const targetResolved = Boolean(tripRow || normalizedNewTrip);
 
   if (Array.isArray(bookings) && bookings.length > 0) {
-    // Deviation from the plan's closed issue-code list (recorded for the plan
-    // orchestrator): the catalogue lists `multi_leg_detected` as the only signal
-    // for >1 booking, but this version's write path (apply.js) only ever inserts
-    // one booking — so >1 booking is refused outright with its own blocker, and
-    // multi_leg_detected still fires alongside it as the informational signal the
-    // catalogue describes.
-    if (bookings.length > 1) {
-      issues.push({
-        severity: 'blocker', code: 'multi_booking_not_available',
-        message: 'This version accepts one booking per draft.',
-      });
-      outer: for (let a = 0; a < bookings.length; a += 1) {
-        for (let b = a + 1; b < bookings.length; b += 1) {
-          const ba = bookings[a];
-          const bb = bookings[b];
-          if (ba?.type && ba.type === bb?.type && ba?.confirmationRef && bb?.confirmationRef
-            && ba.confirmationRef.toLowerCase() === bb.confirmationRef.toLowerCase()) {
-            issues.push({
-              severity: 'info', code: 'multi_leg_detected',
-              message: 'Multiple bookings in this draft share the same type and confirmation reference.',
-            });
-            break outer;
-          }
+    // W3.2 retires the W2-only multi_booking_not_available blocker: the write path
+    // now inserts every booking in one transaction, so N > 1 is allowed outright.
+    // multi_leg_detected still fires as the informational signal when ≥ 2 bookings
+    // share type and case-insensitive confirmationRef.
+    outer: for (let a = 0; a < bookings.length; a += 1) {
+      for (let b = a + 1; b < bookings.length; b += 1) {
+        const ba = bookings[a];
+        const bb = bookings[b];
+        if (ba?.type && ba.type === bb?.type && ba?.confirmationRef && bb?.confirmationRef
+          && ba.confirmationRef.toLowerCase() === bb.confirmationRef.toLowerCase()) {
+          issues.push({
+            severity: 'info', code: 'multi_leg_detected',
+            message: 'Multiple bookings in this draft share the same type and confirmation reference.',
+          });
+          break outer;
         }
       }
     }
 
     for (let i = 0; i < bookings.length; i += 1) {
-      const result = await validateOneBooking(bookings[i], i, { tripRow, existingBookingRows, dayDates });
+      const result = await validateOneBooking(bookings[i], i, { tripRow, existingBookingRows, dayDates, targetResolved });
       issues.push(...result.issues);
       normalizedBookings.push(result.normalized);
       if (result.plannedEffect) plannedEffects.push(result.plannedEffect);
@@ -377,10 +481,12 @@ export async function validateBookingDraft({ userId, target, bookings, source })
   }
 
   const applyAllowed = issues.every((issue) => issue.severity !== 'blocker');
+  const normalizedTarget = normalizedNewTrip ? { newTrip: normalizedNewTrip } : target;
 
   return {
-    target,
+    target: normalizedTarget,
     tripRow,
+    newTrip: normalizedNewTrip,
     bookings: normalizedBookings,
     issues,
     plannedEffects,

@@ -19,8 +19,10 @@ let owner;
 let collaborator;
 let stranger;
 
+const PUBLIC_URL = 'http://localhost:3002/mcp';
+
 async function connectClient(authInfo) {
-  const server = createTrippyMcpServer({ authInfo, appUrl: APP_URL });
+  const server = createTrippyMcpServer({ authInfo, appUrl: APP_URL, publicUrl: PUBLIC_URL });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test-client', version: '1.0.0' });
   await Promise.all([
@@ -62,7 +64,7 @@ describe('tools/list', () => {
     try {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_draft']);
+      expect(names).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_delete', 'prepare_draft', 'request_upload_ticket']);
 
       const listTrips = tools.find((t) => t.name === 'list_trips');
       expect(listTrips.inputSchema.properties).toHaveProperty('query');

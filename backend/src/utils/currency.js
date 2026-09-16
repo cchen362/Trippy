@@ -49,3 +49,19 @@ export function minorUnitsFor(currency) {
   if (!currency || typeof currency !== 'string') return 2;
   return ZERO_DECIMAL_CURRENCIES.has(currency.trim().toUpperCase()) ? 0 : 2;
 }
+
+// Plan 28 W3.5: the backend has no symbol table (frontend/src/utils/currency.js's
+// formatMinor is a display concern that must not grow here) — prepareDelete.js's
+// summaries need a currency-labelled amount, so this formats as
+// "CURRENCY 1,234.56" using minorUnitsFor's decimal-place rule, with thousands
+// separators via toLocaleString.
+export function formatMinor(amountMinor, currency) {
+  const code = (currency || '').toUpperCase();
+  const decimals = minorUnitsFor(code);
+  const major = amountMinor / 10 ** decimals;
+  const formatted = major.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${code} ${formatted}`;
+}

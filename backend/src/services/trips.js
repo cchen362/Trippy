@@ -104,7 +104,9 @@ function mapBooking(row) {
   };
 }
 
-function eachDate(startDate, endDate) {
+// Plan 28 W3.1: exported so services/mcp/validate.js can build a newTrip draft's
+// dayDates set from the client-supplied range without re-deriving this logic.
+export function eachDate(startDate, endDate) {
   const dates = [];
   const cursor = new Date(`${startDate}T00:00:00Z`);
   const end = new Date(`${endDate}T00:00:00Z`);

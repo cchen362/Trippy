@@ -162,7 +162,7 @@ describe('SDK client', () => {
     const client = await connect(readToken);
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_draft']);
+      expect(tools.map((t) => t.name).sort()).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_delete', 'prepare_draft', 'request_upload_ticket']);
 
       const result = await client.callTool({ name: 'list_trips', arguments: {} });
       expect(result.isError).toBeFalsy();
@@ -228,7 +228,7 @@ describe('anonymous rate limit', () => {
     const client = await connect(readToken);
     try {
       const { tools } = await client.listTools();
-      expect(tools.length).toBe(5);
+      expect(tools.length).toBe(7);
     } finally {
       await client.close();
     }

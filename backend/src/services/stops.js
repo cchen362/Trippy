@@ -150,7 +150,11 @@ async function resolveLocationForStop({ day, title, input, existing = null }) {
   // bias (Plan 8 Wave 5 §5.1). Explicit caller overrides (discovery) still win first.
   const dayGeo = getDayGeo(day.id);
   const resolutionCity = input.locationCity ?? input.city ?? dayGeo.resolutionAnchor?.label ?? dayGeo.city ?? day.city;
-  const resolutionCountry = input.locationCountry ?? input.country ?? dayGeo.resolutionAnchor?.countryCode ?? dayGeo.countryCode;
+  // Plan 28 W3.1: `?? day.city_country` is a no-op for a real day (deriveDayGeo's
+  // layer 5 already yields the seeded city_country when nothing above it is set) and
+  // is the only country evidence for a provisional newTrip day, whose id is null so
+  // getDayGeo returns an all-null geo.
+  const resolutionCountry = input.locationCountry ?? input.country ?? dayGeo.resolutionAnchor?.countryCode ?? dayGeo.countryCode ?? day.city_country;
   const locationAliases = locationAliasesForInput(input);
   const inputHasCoordinates = hasCoordinates(input);
   const trustedCoordinates = inputHasCoordinates && hasTrustedCoordinateMetadata(input);
@@ -940,7 +944,12 @@ function linkedStopHoldsConfirmedLocation(existingStop) {
 // writeBookingStop inside one atomic transaction alongside its other writes; the app
 // path (syncStopWithBooking) composes both and is behaviourally identical to before
 // the split.
-export async function resolveBookingStopData(booking) {
+// Plan 28 W3.1: `{ day }` lets a newTrip apply pass a provisional day (the trip and its
+// real days don't exist yet — createTrip runs inside the same outer transaction,
+// F-28-12/D-28-3) — undefined (the default, every other caller) means "look the day up
+// in the DB" as before; an explicit `null` means "this booking's date falls outside the
+// client-supplied range", which resolves the same way a missing DB row always has.
+export async function resolveBookingStopData(booking, { day: providedDay } = {}) {
   const db = getDb();
   const existingStop = db.prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
   const inferred = inferBookingStop(booking);
@@ -949,8 +958,9 @@ export async function resolveBookingStopData(booking) {
     return { ok: false, reason: 'not_shown_in_itinerary', existingStop };
   }
 
-  const day = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date = ? LIMIT 1')
-    .get(booking.trip_id, inferred.date);
+  const day = providedDay !== undefined
+    ? providedDay
+    : db.prepare('SELECT * FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(booking.trip_id, inferred.date);
   if (!day) {
     return { ok: false, reason: 'no_day_for_date', existingStop };
   }

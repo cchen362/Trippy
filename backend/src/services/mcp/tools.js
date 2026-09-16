@@ -5,8 +5,11 @@ import { fromJsonSchema } from '@modelcontextprotocol/server';
 import { assertTripAccess, getTripDetail, listTripsForUser } from '../trips.js';
 import { validateBookingDraft, summarizeDraft } from './validate.js';
 import { BOOKING_TYPES } from '../importer.js';
+import { MEDIA_TYPE_WHITELIST } from '../attachments.js';
 import { createDraft, getDraftForUser, findDraftByIdempotencyKey, computeBookingFingerprint } from './drafts.js';
 import { applyDraft } from './apply.js';
+import { issueUploadTicket, getUploadTicket, uploadUrlFor } from './uploads.js';
+import { validateDelete, computeDeleteFingerprint, summarizeDelete } from './prepareDelete.js';
 
 function requireScope(scopes, needed) {
   if (scopes.includes(needed)) return null;
@@ -33,6 +36,14 @@ function draftNotFoundResult() {
   };
 }
 
+function bookingNotFoundResult() {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: 'Booking not found.' }],
+    structuredContent: { error: 'not_found' },
+  };
+}
+
 function errorResult(text, structuredContent) {
   return { isError: true, content: [{ type: 'text', text }], structuredContent };
 }
@@ -55,6 +66,22 @@ function applyErrorResult(error) {
   const structuredContent = { error: error.code };
   if (error.issues) structuredContent.issues = error.issues;
   return errorResult(error.message, structuredContent);
+}
+
+// Plan 28 W3.4: a stored sourceDocument only ever freezes what apply_draft learned at
+// apply time — a ticket's status can move on (used/expired) after that, so both
+// apply_draft (already_applied replay) and get_apply_status read the ticket's LIVE
+// status through this one place rather than trusting the frozen result_json.
+function presentSourceDocument(stored, publicUrl) {
+  if (!stored || stored.status !== 'pending_upload' || !stored.ticket) return stored;
+  const live = getUploadTicket(stored.ticket.id);
+  if (!live) return { status: 'failed', reason: 'ticket_not_found' };
+  if (live.status === 'used') return { status: 'saved', attachmentId: live.attachmentId };
+  if (live.status === 'expired') return { status: 'failed', reason: 'ticket_expired' };
+  return {
+    status: 'pending_upload',
+    ticket: { ...stored.ticket, uploadUrl: uploadUrlFor(publicUrl, stored.ticket.id) },
+  };
 }
 
 function tripSummary(trip, appUrl) {
@@ -208,20 +235,26 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
 // Plan 28 W2: durable-draft write tools. Every write goes through
 // validateBookingDraft/createDraft/applyDraft in services/mcp/ — never a
 // second copy of the normalization, fingerprint, or transaction logic here.
-export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) {
+export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, publicUrl }) {
   server.registerTool(
     'prepare_draft',
     {
-      title: 'Preview a booking before it is saved',
+      title: 'Preview one or more bookings before they are saved',
       description:
         'Preview only — prepare_draft never writes anything. It validates the booking(s) ' +
         'against the target trip and returns a draftId, a plain-language summary, and any ' +
         'issues found. Call apply_draft with that draftId only after the user has reviewed ' +
-        'the preview and explicitly confirmed. This version accepts exactly one booking per ' +
-        'draft and one existing trip as the target (creating a new trip over MCP is not yet ' +
-        'available). A `cost` field is never accepted — costs are added in the app. A missing ' +
-        'origin/destination time zone is allowed and only produces an informational note: pass ' +
-        'the wall-clock time exactly as printed on the confirmation, with no conversion.',
+        'the preview and explicitly confirmed. Multiple bookings per draft are allowed (e.g. ' +
+        'a two-leg flight screenshot); bookings sharing type and confirmationRef are flagged ' +
+        'as a probable multi-leg itinerary. target is either { tripId } for an existing trip, ' +
+        'or { newTrip: { title, startDate, endDate, destinations: [{ city, countryCode? }] } } ' +
+        'to create a trip in the same apply — Trippy NEVER infers a new trip\'s dates from a ' +
+        'booking; the client must supply title/startDate/endDate/destinations explicitly, or ' +
+        'the draft is refused. A `cost` field is never accepted on a booking — costs are added ' +
+        'in the app. A missing origin/destination time zone is allowed and only produces an ' +
+        'informational note: pass the wall-clock time exactly as printed on the confirmation, ' +
+        'with no conversion. source describes where the booking came from; for a screenshot or ' +
+        'PDF, sha256/mediaType/sizeBytes let apply_draft issue an upload ticket afterward.',
       inputSchema: fromJsonSchema({
         type: 'object',
         properties: {
@@ -231,12 +264,12 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
           },
           target: {
             type: 'object',
-            description: 'Either { tripId } for an existing trip, or { newTrip: {...} } (not yet available in this version).',
+            description: 'Either { tripId } for an existing trip, or { newTrip: { title, startDate, endDate, destinations: [{ city, countryCode? }] } } to create the trip on apply. Dates are never inferred — both are required for newTrip.',
           },
           bookings: {
             type: 'array',
             minItems: 1,
-            description: 'Exactly one BookingInput object in this version.',
+            description: 'One or more BookingInput objects. Bookings sharing type and confirmationRef are treated as one multi-leg itinerary.',
             items: {
               type: 'object',
               properties: {
@@ -259,7 +292,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
           },
           source: {
             type: 'object',
-            description: '{ kind: "screenshot" | "pdf" | "email_text" | "manual", sha256?, mediaType?, sizeBytes? }',
+            description: '{ kind: "screenshot" | "pdf" | "email_text" | "manual", sha256?, mediaType?, sizeBytes?, sourceBookingIndex? }. sourceBookingIndex (default 0) names which booking in this draft the document belongs to.',
           },
         },
         required: ['idempotencyKey', 'target', 'bookings', 'source'],
@@ -368,7 +401,29 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
 
       const draft = getDraftForUser(userId, draftId);
       const tripUrl = `${appUrl}/trips/${result.tripId}`;
+
+      // A delete-kind result carries `deleted`/`unlinked`, never `bookings` — branch on
+      // that shape rather than draft.kind, since get_apply_status's stored result_json
+      // for an already-applied draft carries the same distinction.
+      if (result.deleted) {
+        const stopPart = result.deleted.stopId ? '1 stop removed' : 'no stop removed';
+        const unlinkedPart = result.unlinked.expenseIds.length
+          ? `${result.unlinked.expenseIds.length} linked cost${result.unlinked.expenseIds.length === 1 ? '' : 's'} kept and unlinked`
+          : null;
+        const deletedPart = result.deleted.expenseIds.length
+          ? `${result.deleted.expenseIds.length} linked cost${result.deleted.expenseIds.length === 1 ? '' : 's'} deleted`
+          : null;
+        const text = result.status === 'already_applied'
+          ? `Already deleted earlier — booking ${result.deleted.bookingId}.`
+          : `Deleted booking ${result.deleted.bookingId} (${[stopPart, unlinkedPart, deletedPart].filter(Boolean).join('; ')}).`;
+        return {
+          content: [{ type: 'text', text }],
+          structuredContent: { ...result, tripUrl },
+        };
+      }
+
       const bookings = result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` }));
+      const sourceDocument = presentSourceDocument(result.sourceDocument, publicUrl);
 
       const lines = bookings.map((booking, index) => {
         const source = draft?.bookings?.[index];
@@ -379,13 +434,19 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
           : `no stop created${booking.stopReason ? ` (${booking.stopReason})` : ''}`;
         return `${label} (${stopPart})`;
       });
-      const text = result.status === 'already_applied'
+      const createdTripPart = result.createdTrip ? 'Created the trip. ' : '';
+      let text = result.status === 'already_applied'
         ? `Already applied earlier — same booking id${bookings.length === 1 ? '' : 's'} ${bookings.map((b) => b.bookingId).join(', ')}.`
-        : `Applied: ${lines.join('; ')}.`;
+        : `${createdTripPart}Applied: ${lines.join('; ')}.`;
+      if (sourceDocument?.status === 'pending_upload') {
+        text += ` Document pending: upload with curl -T <file> -H "Content-Type: <type>" ${sourceDocument.ticket.uploadUrl} within 15 minutes.`;
+      } else if (sourceDocument?.status === 'failed') {
+        text += ` The document could not be transferred (${sourceDocument.reason}); the booking was saved regardless.`;
+      }
 
       return {
         content: [{ type: 'text', text }],
-        structuredContent: { ...result, tripUrl, bookings },
+        structuredContent: { ...result, tripUrl, bookings, sourceDocument },
       };
     },
   );
@@ -431,11 +492,20 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
       }
 
       // Same shape as apply_draft's output (URLs included) so a client recovering
-      // from a dropped apply response can act on either identically.
+      // from a dropped apply response can act on either identically. A delete-kind
+      // result has no `bookings` array to attach a logistics URL to — guard on its
+      // presence rather than draft.kind, matching apply_draft's own branch.
       const tripUrl = draft.tripId ? `${appUrl}/trips/${draft.tripId}` : undefined;
-      const result = draft.result
-        ? { ...draft.result, bookings: draft.result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` })) }
-        : {};
+      let result = {};
+      if (draft.result?.bookings) {
+        result = {
+          ...draft.result,
+          bookings: draft.result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` })),
+          sourceDocument: presentSourceDocument(draft.result.sourceDocument, publicUrl),
+        };
+      } else if (draft.result) {
+        result = { ...draft.result };
+      }
       return {
         content: [{ type: 'text', text: `Draft ${draft.id} is ${draft.status}.` }],
         structuredContent: {
@@ -444,6 +514,152 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) 
           tripId: draft.tripId,
           ...(tripUrl ? { tripUrl } : {}),
           ...result,
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    'request_upload_ticket',
+    {
+      title: 'Request an upload ticket for a booking attachment',
+      description:
+        'Issues a one-time upload ticket for a booking the user can access. The HOST — not ' +
+        'this tool — must then PUT the file bytes directly to the returned uploadUrl with ' +
+        '`curl -T <file> -H "Content-Type: <mediaType>" <uploadUrl>`: no bearer token on that ' +
+        'request, the ticket id in the URL is the credential. The ticket expires after 15 ' +
+        'minutes; mediaType, sizeBytes, and sha256 must match the actual file exactly, or the ' +
+        'upload is refused. Uploading the same bytes twice is safe and returns the same ' +
+        'attachment rather than a duplicate.',
+      inputSchema: fromJsonSchema({
+        type: 'object',
+        properties: {
+          bookingId: { type: 'string' },
+          mediaType: { type: 'string', enum: MEDIA_TYPE_WHITELIST },
+          sizeBytes: { type: 'integer', minimum: 1, description: 'Exact file size in bytes.' },
+          sha256: { type: 'string', description: '64-character hex SHA-256 of the file bytes.' },
+        },
+        required: ['bookingId', 'mediaType', 'sizeBytes', 'sha256'],
+      }),
+    },
+    async (args) => {
+      const scopeError = requireScope(scopes, 'documents:write');
+      if (scopeError) return scopeError;
+
+      let ticket;
+      try {
+        ticket = issueUploadTicket({
+          userId, tokenId, bookingId: args?.bookingId, mediaType: args?.mediaType,
+          sizeBytes: args?.sizeBytes, sha256: args?.sha256,
+        });
+      } catch (error) {
+        if (error.code === 'not_found') return bookingNotFoundResult();
+        if (error.code) return errorResult(error.message, { error: error.code });
+        throw error;
+      }
+
+      const uploadUrl = uploadUrlFor(publicUrl, ticket.id);
+      return {
+        content: [{
+          type: 'text',
+          text: `Upload with: curl -T <file> -H "Content-Type: ${ticket.mediaType}" ${uploadUrl} (expires ${ticket.expiresAt}).`,
+        }],
+        structuredContent: {
+          ticket: { uploadUrl, expiresAt: ticket.expiresAt, maxBytes: ticket.maxBytes },
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    'prepare_delete',
+    {
+      title: 'Preview deleting a booking',
+      description:
+        'Preview only — prepare_delete never deletes anything, and this pair is the ONLY way ' +
+        'to delete a booking over MCP. Shows exactly what disappears: the booking, its ' +
+        'itinerary stop (if any), and any linked costs. Linked costs are KEPT and unlinked ' +
+        'from the booking by default, exactly like the app\'s own delete review — pass their ' +
+        'ids in deleteExpenseIds to delete them too. Call apply_draft with the returned ' +
+        'draftId only after the user has reviewed this preview and explicitly confirmed.',
+      inputSchema: fromJsonSchema({
+        type: 'object',
+        properties: {
+          idempotencyKey: {
+            type: 'string', minLength: 1, maxLength: 200,
+            description: 'A client-generated key. Calling prepare_delete again with the same key returns the original draft rather than creating a second one.',
+          },
+          bookingId: { type: 'string' },
+          deleteExpenseIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Linked expense ids to delete along with the booking. Omitted or empty keeps every linked cost, unlinked from the booking.',
+          },
+        },
+        required: ['idempotencyKey', 'bookingId'],
+      }),
+    },
+    async (args) => {
+      const scopeError = requireScope(scopes, 'trips:write');
+      if (scopeError) return scopeError;
+
+      const idempotencyKey = args?.idempotencyKey;
+      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+        return errorResult('idempotencyKey is required.', { error: 'missing_required_field', field: 'idempotencyKey' });
+      }
+
+      let validation;
+      try {
+        validation = validateDelete({ userId, bookingId: args?.bookingId, deleteExpenseIds: args?.deleteExpenseIds });
+      } catch (error) {
+        if (error.code === 'not_found') return bookingNotFoundResult();
+        if (error.code === 'invalid_argument') {
+          return errorResult(error.message, { error: error.code, field: 'deleteExpenseIds' });
+        }
+        throw error;
+      }
+
+      const fingerprint = validation.applyAllowed
+        ? computeDeleteFingerprint(validation.booking, validation.linkedStopIds, validation.linkedExpenseIds)
+        : null;
+
+      const draft = createDraft({
+        userId,
+        tokenId,
+        idempotencyKey,
+        kind: 'delete',
+        target: { tripId: validation.booking.tripId, bookingId: validation.booking.id, deleteExpenseIds: validation.deleteExpenseIds },
+        bookings: [validation.booking],
+        issues: validation.issues,
+        plannedEffects: { linkedStop: validation.linkedStop, linkedExpenses: validation.linkedExpenses },
+        source: { kind: 'manual' },
+        tripId: validation.booking.tripId,
+        fingerprint,
+      });
+
+      const summary = summarizeDelete(validation);
+      const bookingUrl = `${appUrl}/trips/${validation.booking.tripId}/logistics`;
+
+      return {
+        content: [{ type: 'text', text: summary }],
+        structuredContent: {
+          draftId: draft.id,
+          expiresAt: draft.expiresAt,
+          draftStatus: draft.status,
+          kind: 'delete',
+          booking: {
+            id: validation.booking.id,
+            type: validation.booking.type,
+            title: validation.booking.title,
+            confirmationRef: validation.booking.confirmationRef,
+            startDatetime: validation.booking.startDatetime,
+            url: bookingUrl,
+          },
+          linkedStop: validation.linkedStop,
+          linkedExpenses: validation.linkedExpenses,
+          issues: validation.issues,
+          applyAllowed: validation.applyAllowed,
+          summary,
         },
       };
     },

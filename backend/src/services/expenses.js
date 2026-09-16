@@ -82,7 +82,9 @@ function fetchExpenseRow(db, expenseId) {
   `).get(expenseId);
 }
 
-function fetchOwedRows(db, expenseId) {
+// Exported for services/mcp/prepareDelete.js's linked-expense preview, which
+// needs the same owed rows a delete would surface — one query, one home.
+export function fetchOwedRows(db, expenseId) {
   return db.prepare('SELECT * FROM expense_owed WHERE expense_id = ? ORDER BY rowid ASC').all(expenseId);
 }
 

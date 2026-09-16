@@ -17,7 +17,7 @@ const packageJson = JSON.parse(readFileSync(join(__dirname, '../../../package.js
 // see the server's full supported range in one place.
 export const MCP_PROTOCOL_VERSIONS = ['2026-07-28', ...SUPPORTED_PROTOCOL_VERSIONS];
 
-export function createTrippyMcpServer({ authInfo, appUrl }) {
+export function createTrippyMcpServer({ authInfo, appUrl, publicUrl }) {
   const userId = authInfo?.extra?.userId;
   if (!userId) {
     // The factory must never run unauthenticated — routes/mcp.js's bearer
@@ -34,6 +34,6 @@ export function createTrippyMcpServer({ authInfo, appUrl }) {
   const server = new McpServer({ name: 'trippy', version: packageJson.version }, { capabilities: { logging: {} } });
   const tokenId = authInfo.clientId;
   registerReadTools(server, { userId, scopes: authInfo.scopes || [], appUrl });
-  registerWriteTools(server, { userId, tokenId, scopes: authInfo.scopes || [], appUrl });
+  registerWriteTools(server, { userId, tokenId, scopes: authInfo.scopes || [], appUrl, publicUrl });
   return server;
 }

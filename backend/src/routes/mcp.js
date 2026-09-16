@@ -13,6 +13,8 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { verifyToken as defaultVerify, SCOPES } from '../services/integrationTokens.js';
 import { createTrippyMcpServer } from '../services/mcp/server.js';
 import { mcpAnonLimiter, mcpTokenLimiter } from '../middleware/rateLimit.js';
+import { MEDIA_TYPE_WHITELIST } from '../services/attachments.js';
+import { consumeUploadTicket } from '../services/mcp/uploads.js';
 
 function requireAbsoluteHttpUrl(value, label) {
   if (!value) {
@@ -36,7 +38,7 @@ export function createMcpRouter({ publicUrl, frontendUrl, verify = defaultVerify
 
   const nodeHandler = toNodeHandler(
     createMcpHandler(
-      (ctx) => createTrippyMcpServer({ authInfo: ctx.authInfo, appUrl }),
+      (ctx) => createTrippyMcpServer({ authInfo: ctx.authInfo, appUrl, publicUrl }),
       { legacy: 'stateless', onerror: (error) => console.error('[mcp]', error) },
     ),
   );
@@ -114,6 +116,45 @@ export function createMcpRouter({ publicUrl, frontendUrl, verify = defaultVerify
     },
     mcpTokenLimiter,
     (req, res) => nodeHandler(req, res, req.body),
+  );
+
+  // Plan 28 W3.4: the ticket id in the URL IS the credential for this one PUT —
+  // deliberately no bearer check and no Origin check, unlike POST / above.
+  // F-28-24: this is also why the global 16MB express.json() parser in
+  // index.js must never reach this route — a JSON body-parser would choke on
+  // (or silently drop) raw binary attachment bytes, so the raw parser below
+  // is mounted ahead of it via the same /mcp-first mount order that already
+  // protects POST /'s 1MB json() parser. A Content-Type outside
+  // MEDIA_TYPE_WHITELIST leaves req.body as `{}` (not a Buffer);
+  // consumeUploadTicket turns that into a clean 415. A body over the 10MB
+  // limit here throws body-parser's own `entity.too.large` (413), rendered as
+  // JSON by the app's errorHandler below — Cloudflare itself passes up to
+  // 100MB (F-28-14 c), so this 10MB cap is Trippy's own ceiling, sized to the
+  // largest attachment kind (SIZE_CAPS.pdf in services/attachments.js).
+  router.put(
+    '/uploads/:ticket',
+    express.raw({ limit: '10mb', type: MEDIA_TYPE_WHITELIST }),
+    (req, res, next) => {
+      try {
+        const contentType = (req.headers['content-type'] || '').split(';')[0].trim();
+        const { httpStatus, attachment, alreadyAttached } = consumeUploadTicket(req.params.ticket, {
+          body: req.body,
+          contentType,
+        });
+        res.status(httpStatus).json({
+          attachmentId: attachment.id,
+          bookingId: attachment.bookingId,
+          mediaType: attachment.mediaType,
+          sizeBytes: attachment.sizeBytes,
+          alreadyAttached,
+        });
+      } catch (err) {
+        if (err.code && err.status) {
+          return res.status(err.status).json({ error: err.code, message: err.message });
+        }
+        next(err);
+      }
+    },
   );
 
   const metadataRouter = Router();
