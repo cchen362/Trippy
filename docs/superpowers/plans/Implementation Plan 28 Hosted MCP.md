@@ -371,7 +371,7 @@ Also proven on the branch: (a) **Node 20.20.2** — the same `mcpSpike.js` run i
 - W5.5 Handoff: Appendix B refreshed with the exact client-config keys W0 verified.
 - W5.6 **Delete a revoked token** (owner request, 2026-09-16, after Deploy A QA): revoked rows currently stay listed forever (a deliberate W1 deviation so §A5 reads literally), so the Integrations list only grows. Add a `DELETE /api/integrations/tokens/:id` + a Delete action **on revoked rows only** — revoke stays the instant-kill-plus-audit-trail step, delete is the separate cleanup. Refusing to delete a live token avoids the footgun of removing the row while the hash keeps working. **Not** a change to show-once: the plaintext is unrecoverable by design (F-28-25, `integrationTokens.js` header) and the owner confirmed that reading as correct.
 
-**Validation gates.** Suites green; grep audit clean; restart test passes; log test passes; owner reads the ENGINEERING.md section and confirms it says nothing is shipped that is not.
+**Validation gates.** Suites green; grep audit clean; restart test passes; log test passes; **W5.6: deleting a revoked token removes the row and a `DELETE` against a *live* token is refused** (both covered by a test, and the refusal verified against the real endpoint — not just the button being hidden); owner reads the ENGINEERING.md section and confirms it says nothing is shipped that is not.
 
 **Rollback.** None needed (no behaviour change for clients).
 
