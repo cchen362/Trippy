@@ -13,7 +13,7 @@ function parseJson(value) {
   }
 }
 
-function formatBooking(row, expenseSummary = null) {
+export function formatBooking(row, expenseSummary = null) {
   const detailsJson = parseJson(row.details_json);
   return {
     id: row.id,
@@ -78,7 +78,9 @@ function validateBookingPayload(input, { partial = false } = {}) {
   }
 }
 
-function defaultShowInItinerary(input) {
+// Exported for the MCP draft validator (Plan 28 W2.3), whose preview must show the
+// same "will a stop be created" answer the insert will produce — one rule, one home.
+export function defaultShowInItinerary(input) {
   if (input.showInItinerary !== undefined) return input.showInItinerary ? 1 : 0;
   if (input.type === 'hotel' || input.type === 'train' || input.type === 'flight') return 1;
   if (input.type === 'other') return input.startDatetime && input.destination ? 1 : 0;
@@ -96,6 +98,35 @@ export function listBookings(userId, tripId) {
   `).all(tripId);
   const summaries = computeBookingExpenseSummaries(tripId);
   return rows.map((row) => formatBooking(row, summaries.get(row.id) || null));
+}
+
+// Plan 28 W2: the raw INSERT lives here alone so the MCP write phase can insert a
+// booking through the exact same row shape the app uses — never a second copy.
+export function writeBookingRow(tripId, input) {
+  return getDb().prepare(`
+    INSERT INTO bookings (
+      trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
+      origin, destination, terminal_or_station, details_json, show_in_itinerary,
+      origin_tz, destination_tz
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `).get(
+    tripId,
+    input.type,
+    input.title.trim(),
+    input.confirmationRef || null,
+    input.bookingSource || null,
+    input.startDatetime || null,
+    input.endDatetime || null,
+    input.origin || null,
+    input.destination || null,
+    input.terminalOrStation || null,
+    normalizeDetailsJson(input.detailsJson),
+    defaultShowInItinerary(input),
+    input.originTz      || null,
+    input.destinationTz || null,
+  );
 }
 
 export async function createBooking(userId, tripId, input) {
@@ -117,30 +148,7 @@ export async function createBooking(userId, tripId, input) {
   let row;
   let expenseId;
   const run = db.transaction(() => {
-    row = db.prepare(`
-      INSERT INTO bookings (
-        trip_id, type, title, confirmation_ref, booking_source, start_datetime, end_datetime,
-        origin, destination, terminal_or_station, details_json, show_in_itinerary,
-        origin_tz, destination_tz
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING *
-    `).get(
-      tripId,
-      input.type,
-      input.title.trim(),
-      input.confirmationRef || null,
-      input.bookingSource || null,
-      input.startDatetime || null,
-      input.endDatetime || null,
-      input.origin || null,
-      input.destination || null,
-      input.terminalOrStation || null,
-      normalizeDetailsJson(input.detailsJson),
-      defaultShowInItinerary(input),
-      input.originTz      || null,
-      input.destinationTz || null,
-    );
+    row = writeBookingRow(tripId, input);
 
     if (preparedCost) {
       expenseId = insertPreparedExpense(db, preparedCost, row.id);

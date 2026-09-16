@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { McpServer, SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/server';
-import { registerReadTools } from './tools.js';
+import { registerReadTools, registerWriteTools } from './tools.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(join(__dirname, '../../../package.json'), 'utf8'));
@@ -26,7 +26,14 @@ export function createTrippyMcpServer({ authInfo, appUrl }) {
     throw Object.assign(new Error('createTrippyMcpServer requires an authenticated authInfo'), { status: 500 });
   }
 
-  const server = new McpServer({ name: 'trippy', version: packageJson.version });
+  // Plan 28 W2: `logging` capability declared so a client that sends no
+  // progressToken (e.g. a raw fetch tools/call) still gets the SSE upgrade
+  // apply_draft's notifications/message fallback needs to keep Cloudflare's
+  // keep-alive flowing — without a declared capability the SDK would refuse
+  // to emit notifications/message at all.
+  const server = new McpServer({ name: 'trippy', version: packageJson.version }, { capabilities: { logging: {} } });
+  const tokenId = authInfo.clientId;
   registerReadTools(server, { userId, scopes: authInfo.scopes || [], appUrl });
+  registerWriteTools(server, { userId, tokenId, scopes: authInfo.scopes || [], appUrl });
   return server;
 }

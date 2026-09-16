@@ -3,6 +3,10 @@
 // already uses — no parallel read path, no ad-hoc SQL (F-28-11).
 import { fromJsonSchema } from '@modelcontextprotocol/server';
 import { assertTripAccess, getTripDetail, listTripsForUser } from '../trips.js';
+import { validateBookingDraft, summarizeDraft } from './validate.js';
+import { BOOKING_TYPES } from '../importer.js';
+import { createDraft, getDraftForUser, findDraftByIdempotencyKey, computeBookingFingerprint } from './drafts.js';
+import { applyDraft } from './apply.js';
 
 function requireScope(scopes, needed) {
   if (scopes.includes(needed)) return null;
@@ -19,6 +23,38 @@ function notFoundResult() {
     content: [{ type: 'text', text: 'Trip not found.' }],
     structuredContent: { error: 'not_found' },
   };
+}
+
+function draftNotFoundResult() {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: 'Draft not found.' }],
+    structuredContent: { error: 'not_found' },
+  };
+}
+
+function errorResult(text, structuredContent) {
+  return { isError: true, content: [{ type: 'text', text }], structuredContent };
+}
+
+// Every thrown { code } from validate/drafts/apply becomes one of these shapes;
+// not_found always reads as "Draft not found" here — the only not_found this
+// maps is getDraftForUser's, never validateBookingDraft's (that one uses
+// notFoundResult() directly at its own call site since it means "trip not found").
+const APPLY_ERROR_CODES = new Set(['not_found', 'apply_refused', 'expired', 'stale', 'invalid', 'rejected', 'cancelled']);
+
+function applyErrorResult(error) {
+  // Only a deliberate refusal (one of validate/drafts/apply's own thrown { code }
+  // values) becomes a graceful tool result. Anything else — a real provider/DB
+  // failure with no code — is rethrown so the SDK reports it as a protocol-level
+  // error instead of a normal (isError: true) result the client could mistake
+  // for "the draft was refused" (it wasn't; the draft is left pending, and a
+  // retry is expected to succeed once the underlying failure clears).
+  if (!error.code || !APPLY_ERROR_CODES.has(error.code)) throw error;
+  if (error.code === 'not_found') return draftNotFoundResult();
+  const structuredContent = { error: error.code };
+  if (error.issues) structuredContent.issues = error.issues;
+  return errorResult(error.message, structuredContent);
 }
 
 function tripSummary(trip, appUrl) {
@@ -164,6 +200,251 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
       return {
         content: [{ type: 'text', text }],
         structuredContent: result,
+      };
+    },
+  );
+}
+
+// Plan 28 W2: durable-draft write tools. Every write goes through
+// validateBookingDraft/createDraft/applyDraft in services/mcp/ — never a
+// second copy of the normalization, fingerprint, or transaction logic here.
+export function registerWriteTools(server, { userId, tokenId, scopes, appUrl }) {
+  server.registerTool(
+    'prepare_draft',
+    {
+      title: 'Preview a booking before it is saved',
+      description:
+        'Preview only — prepare_draft never writes anything. It validates the booking(s) ' +
+        'against the target trip and returns a draftId, a plain-language summary, and any ' +
+        'issues found. Call apply_draft with that draftId only after the user has reviewed ' +
+        'the preview and explicitly confirmed. This version accepts exactly one booking per ' +
+        'draft and one existing trip as the target (creating a new trip over MCP is not yet ' +
+        'available). A `cost` field is never accepted — costs are added in the app. A missing ' +
+        'origin/destination time zone is allowed and only produces an informational note: pass ' +
+        'the wall-clock time exactly as printed on the confirmation, with no conversion.',
+      inputSchema: fromJsonSchema({
+        type: 'object',
+        properties: {
+          idempotencyKey: {
+            type: 'string', minLength: 1, maxLength: 200,
+            description: 'A client-generated key. Calling prepare_draft again with the same key returns the original draft rather than creating a second one.',
+          },
+          target: {
+            type: 'object',
+            description: 'Either { tripId } for an existing trip, or { newTrip: {...} } (not yet available in this version).',
+          },
+          bookings: {
+            type: 'array',
+            minItems: 1,
+            description: 'Exactly one BookingInput object in this version.',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', enum: BOOKING_TYPES },
+                title: { type: 'string', description: 'Hotel name, flight number, train service, or a short label.' },
+                confirmationRef: { type: 'string' },
+                bookingSource: { type: 'string', description: 'Who issued it, e.g. Booking.com, Trip.com, the airline.' },
+                startDatetime: { type: 'string', description: 'Local wall-clock time as printed, YYYY-MM-DDTHH:MM (check-in / departure).' },
+                endDatetime: { type: 'string', description: 'Local wall-clock time as printed, YYYY-MM-DDTHH:MM (check-out / arrival).' },
+                origin: { type: 'string', description: 'Departure airport/station/city (flight, train, bus, ferry).' },
+                destination: { type: 'string', description: 'Arrival airport/station/city, or the hotel city/address.' },
+                terminalOrStation: { type: 'string' },
+                originTz: { type: 'string', description: 'IANA zone, optional.' },
+                destinationTz: { type: 'string', description: 'IANA zone, optional.' },
+                detailsJson: { type: 'object', description: 'Free-form extras (seat, room type, lat/lng if known).' },
+                showInItinerary: { type: 'boolean' },
+              },
+              required: ['type', 'title', 'startDatetime'],
+            },
+          },
+          source: {
+            type: 'object',
+            description: '{ kind: "screenshot" | "pdf" | "email_text" | "manual", sha256?, mediaType?, sizeBytes? }',
+          },
+        },
+        required: ['idempotencyKey', 'target', 'bookings', 'source'],
+      }),
+    },
+    async (args) => {
+      const scopeError = requireScope(scopes, 'trips:write');
+      if (scopeError) return scopeError;
+
+      const idempotencyKey = args?.idempotencyKey;
+      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+        return errorResult('idempotencyKey is required.', { error: 'missing_required_field', field: 'idempotencyKey' });
+      }
+
+      let validation;
+      try {
+        validation = await validateBookingDraft({
+          userId, target: args?.target, bookings: args?.bookings, source: args?.source,
+        });
+      } catch (error) {
+        if (error.code === 'not_found') return notFoundResult();
+        throw error;
+      }
+
+      // Only a fully-valid draft against a real trip gets a fingerprint — a blocked
+      // draft (e.g. cost_not_accepted, or the newTrip refusal) is never eligible to
+      // apply anyway, and apply.js's own re-validation is what actually refuses it.
+      const fingerprint = validation.applyAllowed && validation.tripRow
+        ? computeBookingFingerprint(validation.tripRow.id)
+        : null;
+
+      const draft = createDraft({
+        userId,
+        tokenId,
+        idempotencyKey,
+        target: validation.target,
+        bookings: validation.bookings,
+        issues: validation.issues,
+        plannedEffects: validation.plannedEffects,
+        source: validation.source,
+        tripId: validation.tripRow?.id ?? null,
+        fingerprint,
+      });
+
+      const summary = summarizeDraft(validation);
+
+      return {
+        content: [{ type: 'text', text: summary }],
+        structuredContent: {
+          draftId: draft.id,
+          expiresAt: draft.expiresAt,
+          draftStatus: draft.status,
+          target: draft.target,
+          bookings: draft.bookings,
+          issues: draft.issues,
+          plannedEffects: draft.plannedEffects,
+          applyAllowed: validation.applyAllowed,
+          summary,
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    'apply_draft',
+    {
+      title: 'Apply a previously prepared booking draft',
+      description:
+        'Writes the booking (and its itinerary stop, when applicable) for a draft created by ' +
+        'prepare_draft. Only call this after the user has seen the prepare_draft preview and ' +
+        'explicitly confirmed. Calling apply_draft again on an already-applied draft is safe ' +
+        'and returns the same result rather than creating a duplicate booking.',
+      inputSchema: fromJsonSchema({
+        type: 'object',
+        properties: { draftId: { type: 'string' } },
+        required: ['draftId'],
+      }),
+    },
+    async (args, ctx) => {
+      const scopeError = requireScope(scopes, 'trips:write');
+      if (scopeError) return scopeError;
+
+      const draftId = args?.draftId;
+      const mcpReq = ctx?.mcpReq;
+      const progressToken = mcpReq?._meta?.progressToken;
+
+      // Either notification upgrades an 'auto' responseMode transport to SSE the
+      // moment it is sent — before any slow provider call in apply.js's resolve
+      // phase — which is what keeps Cloudflare's 100s no-bytes timer from firing
+      // (F-28-14(b)). A client with no progressToken still gets the keep-alive via
+      // notifications/message, which is why McpServer declares { logging: {} }.
+      const report = ({ progress, total, message }) => {
+        if (!mcpReq?.notify) return Promise.resolve();
+        if (progressToken !== undefined) {
+          return mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress, total, message } });
+        }
+        return mcpReq.notify({ method: 'notifications/message', params: { level: 'info', logger: 'trippy.apply', data: message } });
+      };
+
+      let result;
+      try {
+        result = await applyDraft({ userId, draftId, signal: mcpReq?.signal, report });
+      } catch (error) {
+        return applyErrorResult(error);
+      }
+
+      const draft = getDraftForUser(userId, draftId);
+      const tripUrl = `${appUrl}/trips/${result.tripId}`;
+      const bookings = result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` }));
+
+      const lines = bookings.map((booking, index) => {
+        const source = draft?.bookings?.[index];
+        const label = source?.title ? `"${source.title}"` : 'the booking';
+        const date = source?.startDatetime?.slice(0, 10);
+        const stopPart = booking.stopId
+          ? `stop created on ${date || 'the linked day'}`
+          : `no stop created${booking.stopReason ? ` (${booking.stopReason})` : ''}`;
+        return `${label} (${stopPart})`;
+      });
+      const text = result.status === 'already_applied'
+        ? `Already applied earlier — same booking id${bookings.length === 1 ? '' : 's'} ${bookings.map((b) => b.bookingId).join(', ')}.`
+        : `Applied: ${lines.join('; ')}.`;
+
+      return {
+        content: [{ type: 'text', text }],
+        structuredContent: { ...result, tripUrl, bookings },
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_apply_status',
+    {
+      title: 'Check a draft or apply status',
+      description:
+        'Looks up a draft by draftId or idempotencyKey and reports whether it is still ' +
+        'pending, was applied, or failed (expired/stale/invalid/rejected). Use this to recover ' +
+        'the result of an apply_draft call whose response was lost (e.g. a dropped connection).',
+      inputSchema: fromJsonSchema({
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+          idempotencyKey: { type: 'string' },
+        },
+      }),
+    },
+    async (args) => {
+      const scopeError = requireScope(scopes, 'trips:read');
+      if (scopeError) return scopeError;
+
+      const draftId = args?.draftId;
+      const idempotencyKey = args?.idempotencyKey;
+      if ((draftId && idempotencyKey) || (!draftId && !idempotencyKey)) {
+        return errorResult('Pass exactly one of draftId or idempotencyKey.', {
+          error: 'missing_required_field', field: 'draftId|idempotencyKey',
+        });
+      }
+
+      const draft = draftId
+        ? getDraftForUser(userId, draftId)
+        : findDraftByIdempotencyKey(userId, idempotencyKey);
+      if (!draft) return draftNotFoundResult();
+
+      if (draft.status === 'pending') {
+        return {
+          content: [{ type: 'text', text: `Draft ${draft.id} is still pending (expires ${draft.expiresAt}).` }],
+          structuredContent: { draftStatus: 'pending', draftId: draft.id, expiresAt: draft.expiresAt },
+        };
+      }
+
+      // Same shape as apply_draft's output (URLs included) so a client recovering
+      // from a dropped apply response can act on either identically.
+      const tripUrl = draft.tripId ? `${appUrl}/trips/${draft.tripId}` : undefined;
+      const result = draft.result
+        ? { ...draft.result, bookings: draft.result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` })) }
+        : {};
+      return {
+        content: [{ type: 'text', text: `Draft ${draft.id} is ${draft.status}.` }],
+        structuredContent: {
+          draftStatus: draft.status,
+          draftId: draft.id,
+          tripId: draft.tripId,
+          ...(tripUrl ? { tripUrl } : {}),
+          ...result,
+        },
       };
     },
   );

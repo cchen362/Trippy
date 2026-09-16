@@ -62,7 +62,7 @@ describe('tools/list', () => {
     try {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['get_trip', 'list_trips']);
+      expect(names).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_draft']);
 
       const listTrips = tools.find((t) => t.name === 'list_trips');
       expect(listTrips.inputSchema.properties).toHaveProperty('query');

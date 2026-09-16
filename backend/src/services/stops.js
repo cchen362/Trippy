@@ -934,21 +934,25 @@ function linkedStopHoldsConfirmedLocation(existingStop) {
   return existingStop?.location_status === 'user_confirmed';
 }
 
-export async function syncStopWithBooking(booking) {
+// Plan 28 W2.2 (F-28-5): split, like resolveCreateStopData/writeCreateStop, into an
+// async resolve phase (external geocode/photo I/O) and a sync write phase (DB only).
+// The MCP apply path runs resolveBookingStopData outside a transaction and
+// writeBookingStop inside one atomic transaction alongside its other writes; the app
+// path (syncStopWithBooking) composes both and is behaviourally identical to before
+// the split.
+export async function resolveBookingStopData(booking) {
   const db = getDb();
   const existingStop = db.prepare('SELECT * FROM stops WHERE booking_id = ?').get(booking.id);
   const inferred = inferBookingStop(booking);
 
   if (!inferred) {
-    cleanupLinkedStop(existingStop);
-    return null;
+    return { ok: false, reason: 'not_shown_in_itinerary', existingStop };
   }
 
   const day = db.prepare('SELECT * FROM days WHERE trip_id = ? AND date = ? LIMIT 1')
     .get(booking.trip_id, inferred.date);
   if (!day) {
-    cleanupLinkedStop(existingStop);
-    return null;
+    return { ok: false, reason: 'no_day_for_date', existingStop };
   }
 
   // Skip bookingPlaceLocation entirely for a pinned stop — it's the only path that
@@ -996,6 +1000,18 @@ export async function syncStopWithBooking(booking) {
       }
       : undefined,
   });
+
+  return { ok: true, booking, existingStop, day, inferred, location, photo };
+}
+
+export function writeBookingStop(resolved) {
+  if (!resolved.ok) {
+    cleanupLinkedStop(resolved.existingStop);
+    return null;
+  }
+
+  const { booking, existingStop, day, inferred, location, photo } = resolved;
+  const db = getDb();
 
   if (existingStop) {
     const row = db.prepare(`
@@ -1131,4 +1147,8 @@ export async function syncStopWithBooking(booking) {
   );
 
   return formatStop(row);
+}
+
+export async function syncStopWithBooking(booking) {
+  return writeBookingStop(await resolveBookingStopData(booking));
 }

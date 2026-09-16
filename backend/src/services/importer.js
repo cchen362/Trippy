@@ -11,7 +11,9 @@ const MEDIA_TYPE_WHITELIST = {
   pdf: ['application/pdf'],
 };
 const MAX_INPUTS = 4;
-const VALID_TYPES = ['flight', 'train', 'bus', 'ferry', 'hotel', 'other'];
+// Shared with the MCP draft validator (Plan 28 W2.1) — the importer and MCP
+// must never carry two independent copies of the valid booking-type list.
+export const BOOKING_TYPES = ['flight', 'train', 'bus', 'ferry', 'hotel', 'other'];
 // Accepts Claude's wall-clock "YYYY-MM-DDTHH:MM" as well as the already-normalized
 // "YYYY-MM-DDTHH:MM:SS" form, so re-running this on the extraction API's own output
 // (as confirmArtifact does for client-edited bookings) is idempotent.
@@ -118,13 +120,17 @@ function findCachedArtifact(userId, tripId, fileHashes) {
   return null;
 }
 
-function normalizeDatetime(value) {
+// Shared with the MCP draft validator (Plan 28 W2.1) — never duplicate this
+// normalization logic in the MCP write path.
+export function normalizeDatetime(value) {
   if (!value || typeof value !== 'string') return null;
   if (!DATETIME_RE.test(value)) return null;
   return value.length === 16 ? `${value}:00` : value;
 }
 
-function normalizeTz(tz) {
+// Shared with the MCP draft validator (Plan 28 W2.1) — never duplicate this
+// normalization logic in the MCP write path.
+export function normalizeTz(tz) {
   if (!tz || typeof tz !== 'string') return null;
   try {
     new Intl.DateTimeFormat(undefined, { timeZone: tz });
@@ -137,7 +143,7 @@ function normalizeTz(tz) {
 // Maps one extracted-booking object (Claude's schema) into createBooking()'s payload shape.
 // Exported so confirmArtifact() can re-run it on client-edited bookings before persisting.
 export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt }) {
-  const type = VALID_TYPES.includes(raw.type) ? raw.type : 'other';
+  const type = BOOKING_TYPES.includes(raw.type) ? raw.type : 'other';
   const title = (raw.title || '').trim() || 'Untitled booking';
 
   // raw.details is Claude's extraction schema; raw.detailsJson is this function's own
@@ -169,6 +175,29 @@ export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt 
   };
 }
 
+// Shared with the MCP draft validator (Plan 28 W2.1) — the importer and MCP
+// must apply the exact same duplicate-confirmation rule, never two copies.
+// `existingBookings` are rows `{ id, type, confirmation_ref }`; `candidate` is
+// `{ type, confirmationRef }`. Returns the matching existing row or null.
+export function findDuplicateConfirmationRef(existingBookings, candidate) {
+  if (!candidate.confirmationRef) return null;
+  return existingBookings.find((eb) =>
+    eb.type === candidate.type &&
+    eb.confirmation_ref &&
+    eb.confirmation_ref.toLowerCase() === candidate.confirmationRef.toLowerCase()) || null;
+}
+
+// Shared with the MCP draft validator (Plan 28 W2.1) — the importer and MCP
+// must apply the exact same trip-date-bounds rule, never two copies.
+// `tripRow` is `{ start_date, end_date }`; `candidate` is `{ startDatetime }`.
+export function bookingDatePosition(tripRow, candidate) {
+  const startDate = candidate.startDatetime?.slice(0, 10);
+  if (!startDate) return null;
+  if (startDate < tripRow.start_date) return { side: 'before', date: startDate };
+  if (startDate > tripRow.end_date) return { side: 'after', date: startDate };
+  return null;
+}
+
 function computeWarnings(tripId, extraction) {
   const warnings = [];
 
@@ -194,22 +223,17 @@ function computeWarnings(tripId, extraction) {
       warnings.push({ type: 'lowConfidence', bookingIndex: index });
     }
 
-    if (b.confirmationRef) {
-      const match = existingBookings.find((eb) =>
-        eb.type === b.type &&
-        eb.confirmation_ref &&
-        eb.confirmation_ref.toLowerCase() === b.confirmationRef.toLowerCase());
-      if (match) {
-        warnings.push({ type: 'duplicate', bookingIndex: index, existingBookingId: match.id });
-      }
+    const match = findDuplicateConfirmationRef(existingBookings, { type: b.type, confirmationRef: b.confirmationRef });
+    if (match) {
+      warnings.push({ type: 'duplicate', bookingIndex: index, existingBookingId: match.id });
     }
 
-    const startDate = b.startDatetime?.slice(0, 10);
-    if (startDate && startDate < trip.start_date) {
-      warnings.push({ type: 'beforeTripStart', bookingIndex: index, suggestedStartDate: startDate });
+    const position = bookingDatePosition(trip, { startDatetime: b.startDatetime });
+    if (position?.side === 'before') {
+      warnings.push({ type: 'beforeTripStart', bookingIndex: index, suggestedStartDate: position.date });
     }
-    if (startDate && startDate > trip.end_date) {
-      warnings.push({ type: 'afterTripEnd', bookingIndex: index, suggestedEndDate: startDate });
+    if (position?.side === 'after') {
+      warnings.push({ type: 'afterTripEnd', bookingIndex: index, suggestedEndDate: position.date });
     }
   });
 

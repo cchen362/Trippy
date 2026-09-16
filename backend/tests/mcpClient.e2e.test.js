@@ -2,12 +2,32 @@
 // a scratch Express app (F-28-15 — tests never import src/index.js). Covers the
 // HTTP edge (401/403/405/metadata/rate limit) with raw fetch and the MCP
 // handshake + tool calls with the SDK client.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import express from 'express';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+
+// Plan 28 W2: same external-I/O mocks as tests/copilotProposals.test.js and
+// tests/mcpDrafts.test.js — must precede the imports below so stops.js picks up
+// the mocked modules. The real resolve/write split, validation, fingerprint, and
+// transaction all run for real against this file's scratch Express app + DB.
+vi.mock('../src/services/placeResolver.js', () => ({
+  resolvePlace: vi.fn().mockResolvedValue({
+    lat: 35.0116, lng: 135.7681, resolvedName: 'Resolved Place', resolvedAddress: 'Some Address',
+    coordinateSystem: 'wgs84', coordinateSource: 'nominatim', locationStatus: 'resolved',
+    confidence: 0.9, providerId: 'osm:1', countryCode: 'JP',
+  }),
+}));
+vi.mock('../src/services/unsplash.js', () => ({
+  selectPhoto: vi.fn().mockResolvedValue(null),
+  trackDownload: vi.fn(),
+}));
+vi.mock('../src/services/claude.js', () => ({
+  generatePhotoDescriptor: vi.fn().mockResolvedValue(null),
+}));
+
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
@@ -26,6 +46,7 @@ let owner;
 let trip;
 let readToken;
 let docsOnlyToken;
+let writeToken;
 
 function connect(token) {
   const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
@@ -50,6 +71,7 @@ beforeAll(async () => {
   }).trip;
   readToken = createToken(owner.id, { name: 'read', scopes: ['trips:read'] }).token;
   docsOnlyToken = createToken(owner.id, { name: 'docs', scopes: ['documents:write'] }).token;
+  writeToken = createToken(owner.id, { name: 'write', scopes: ['trips:read', 'trips:write'] }).token;
 
   const app = express();
   // publicUrl is patched once the ephemeral port is known; the router only
@@ -140,7 +162,7 @@ describe('SDK client', () => {
     const client = await connect(readToken);
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(['get_trip', 'list_trips']);
+      expect(tools.map((t) => t.name).sort()).toEqual(['apply_draft', 'get_apply_status', 'get_trip', 'list_trips', 'prepare_draft']);
 
       const result = await client.callTool({ name: 'list_trips', arguments: {} });
       expect(result.isError).toBeFalsy();
@@ -206,9 +228,121 @@ describe('anonymous rate limit', () => {
     const client = await connect(readToken);
     try {
       const { tools } = await client.listTools();
-      expect(tools.length).toBe(2);
+      expect(tools.length).toBe(5);
     } finally {
       await client.close();
     }
+  });
+});
+
+// Plan 28 W2.6: full prepare -> apply -> status round trips through the real HTTP
+// router, proving the progress notification (SDK client) and the
+// notifications/message keep-alive fallback (a raw fetch tools/call with no
+// progressToken) both work through the public wire, not just in-process.
+async function rawFetchMcp(body) {
+  return fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${writeToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+// Stateless legacy handshake (W0 finding: no Mcp-Session-Id is ever issued or
+// expected) — this is the 2025-11-25 wire a hand-written client speaks, deliberately
+// not going through the SDK Client class for this one call so the test proves the
+// server serves a client that never sets the 2026-07-28 `_meta` envelope.
+async function rawInitialize() {
+  const initRes = await rawFetchMcp({
+    jsonrpc: '2.0', id: 1, method: 'initialize',
+    params: {
+      protocolVersion: '2025-11-25',
+      capabilities: {},
+      clientInfo: { name: 'raw-e2e-client', version: '1.0.0' },
+    },
+  });
+  await initRes.text();
+  await rawFetchMcp({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+}
+
+describe('prepare_draft / apply_draft / get_apply_status round trip', () => {
+  it('applies via the SDK client with onprogress, and get_apply_status agrees on the same booking id', async () => {
+    const client = await connect(writeToken);
+    try {
+      const prepared = await client.callTool({
+        name: 'prepare_draft',
+        arguments: {
+          idempotencyKey: 'e2e-progress-1',
+          target: { tripId: trip.id },
+          bookings: [{
+            type: 'hotel', title: 'Hotel Granvia', startDatetime: '2099-11-02T15:00:00',
+            endDatetime: '2099-11-04T11:00:00', destination: 'Kyoto', destinationTz: 'Asia/Tokyo',
+          }],
+          source: { kind: 'manual' },
+        },
+      });
+      expect(prepared.isError).toBeFalsy();
+      expect(prepared.structuredContent.applyAllowed).toBe(true);
+      const draftId = prepared.structuredContent.draftId;
+
+      const progressEvents = [];
+      const applied = await client.callTool(
+        { name: 'apply_draft', arguments: { draftId } },
+        { onprogress: (event) => progressEvents.push(event) },
+      );
+      expect(applied.isError).toBeFalsy();
+      expect(applied.structuredContent.status).toBe('applied');
+      expect(progressEvents.length).toBeGreaterThanOrEqual(2);
+
+      const bookingId = applied.structuredContent.bookings[0].bookingId;
+      const status = await client.callTool({ name: 'get_apply_status', arguments: { draftId } });
+      expect(status.structuredContent.draftStatus).toBe('applied');
+      expect(status.structuredContent.bookings[0].bookingId).toBe(bookingId);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('applies a second draft via a raw fetch tools/call with no progressToken, upgrading the response to SSE', async () => {
+    const client = await connect(writeToken);
+    let draftId;
+    try {
+      const prepared = await client.callTool({
+        name: 'prepare_draft',
+        arguments: {
+          idempotencyKey: 'e2e-raw-fetch-1',
+          target: { tripId: trip.id },
+          bookings: [{
+            type: 'hotel', title: 'Second Hotel', startDatetime: '2099-11-03T15:00:00',
+            endDatetime: '2099-11-04T11:00:00', destination: 'Kyoto', destinationTz: 'Asia/Tokyo',
+          }],
+          source: { kind: 'manual' },
+        },
+      });
+      expect(prepared.isError).toBeFalsy();
+      draftId = prepared.structuredContent.draftId;
+    } finally {
+      await client.close();
+    }
+
+    await rawInitialize();
+    const callRes = await rawFetchMcp({
+      jsonrpc: '2.0', id: 2, method: 'tools/call',
+      params: { name: 'apply_draft', arguments: { draftId } },
+    });
+
+    // The 'auto' responseMode only upgrades to SSE when a related notification
+    // (here, apply_draft's notifications/message fallback for a client with no
+    // progressToken) is sent before the result — proving the logging capability
+    // and the fallback branch both work on the real wire, not just in-process.
+    expect(callRes.headers.get('content-type')).toMatch(/^text\/event-stream/);
+    const text = await callRes.text();
+    const dataLines = text.split('\n').filter((line) => line.startsWith('data:'));
+    expect(dataLines.length).toBeGreaterThan(0);
+    const lastPayload = dataLines[dataLines.length - 1].slice('data:'.length).trim();
+    expect(lastPayload).toContain('"status":"applied"');
   });
 });
