@@ -8,6 +8,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { McpServer, SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/server';
 import { registerReadTools, registerWriteTools } from './tools.js';
+import { withToolLog } from './log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(join(__dirname, '../../../package.json'), 'utf8'));
@@ -17,7 +18,7 @@ const packageJson = JSON.parse(readFileSync(join(__dirname, '../../../package.js
 // see the server's full supported range in one place.
 export const MCP_PROTOCOL_VERSIONS = ['2026-07-28', ...SUPPORTED_PROTOCOL_VERSIONS];
 
-export function createTrippyMcpServer({ authInfo, appUrl, publicUrl }) {
+export function createTrippyMcpServer({ authInfo, appUrl, publicUrl, logSink }) {
   const userId = authInfo?.extra?.userId;
   if (!userId) {
     // The factory must never run unauthenticated — routes/mcp.js's bearer
@@ -33,6 +34,15 @@ export function createTrippyMcpServer({ authInfo, appUrl, publicUrl }) {
   // to emit notifications/message at all.
   const server = new McpServer({ name: 'trippy', version: packageJson.version }, { capabilities: { logging: {} } });
   const tokenId = authInfo.clientId;
+
+  // Plan 28 W5.2: wrap registerTool once, before any tool is registered, so
+  // every tool from registerReadTools/registerWriteTools gets a structured
+  // log line for free — tools.js itself stays untouched.
+  const tokenPrefix = authInfo?.extra?.tokenPrefix;
+  const originalRegisterTool = server.registerTool.bind(server);
+  server.registerTool = (name, config, handler) =>
+    originalRegisterTool(name, config, withToolLog(handler, { tool: name, tokenPrefix, userId, sink: logSink }));
+
   registerReadTools(server, { userId, scopes: authInfo.scopes || [], appUrl });
   registerWriteTools(server, { userId, tokenId, scopes: authInfo.scopes || [], appUrl, publicUrl });
   return server;

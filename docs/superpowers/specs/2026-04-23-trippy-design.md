@@ -124,6 +124,7 @@ Express API
 - Access helpers prove trip/day/stop/booking ownership before mutation.
 - Provider integrations live behind backend services so API keys and normalization remain server-side.
 - SQLite migrations are the durable data-model history. Existing migrations are immutable.
+- A hosted MCP endpoint (`/mcp`, Plan 28) runs inside the same process behind an `MCP_ENABLED` flag. External clients (Claude Code, Codex CLI, MCP Inspector, the owner's scripts) authenticate with personal integration tokens minted in the Account modal, reach only the trips that user owns or collaborates on, and can only write through a preview → apply draft that the same booking/stop services validate and persist. It adds no model call: the client interprets, Trippy validates. The process keeps its `http.Server` and shuts down cleanly on `SIGTERM` so an in-flight apply is cancelled before its transaction rather than half-written.
 
 ---
 

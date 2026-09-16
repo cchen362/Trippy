@@ -64,6 +64,14 @@ The tier itself is an account fact with no code home, so it stays here — but t
 
 One code-verified constraint from that review that any future plan must respect: provider daily budgets are **in-memory per process** (`backend/src/config.js`), so an MCP endpoint must run **inside the existing Express process** unless the budgets are first moved into SQLite. This is a consequence of Plan 26's budget design, not a new ruling.
 
+**2026-09-16, Plan 28 W5 — adopted interpretations and tested facts (promoted out of the plan so they outlive it).**
+- **I-28-1 adopted:** the Integrations UI lives in the Account modal (initials → Integrations), on `ModalShell`, not a route. A deep-linkable `/account/integrations` page can be added later without moving the panel.
+- **I-28-2 adopted:** `prepare_delete` removes exactly what the app's own delete removes with the same inputs — linked expenses are **kept and unlinked** unless the client names them in `deleteExpenseIds`. The preview reports each as `willUnlink` / `willDelete`. Do not "fix" a cost that survives an MCP delete.
+- **Mount order (F-28-22), a fact not a preference:** `/mcp` is mounted in `backend/src/index.js` *before* the global 16 MB `express.json()` because it owns its own 1 MB JSON parser and the upload route its own `express.raw`. Reordering breaks `PUT /mcp/uploads/:ticket` silently.
+- **Cloudflare keep-alive is a tested requirement, not a hedge:** the public host is a Cloudflare Tunnel with a 100 s no-bytes origin timeout. `apply_draft` streams a notification before its first provider call and `: keepalive` every 15 s; a 153 s apply completed through `https://trippy.zyroi.com/mcp` on 2026-09-16. Any future long-running MCP tool must stream the same way.
+- **Revoked tokens are deleted, not revealed (W5.6, owner request after Deploy A QA):** revoke stays the instant-kill-plus-audit step and revoked rows stay listed dimmed; `DELETE /api/integrations/tokens/:id` removes a **revoked** row only and answers 409 for a live token, so a row can never vanish while its hash still authenticates. Revoke moved to `POST /api/integrations/tokens/:id/revoke` so the verbs read honestly. Show-once plaintext remains unrecoverable (F-28-25) — do not propose a reveal.
+- **The MCP path never calls Anthropic.** Client-side interpretation, server-side validation. A proposal to add an extraction or "clean-up" model call on `/mcp` reopens a closed cost boundary.
+
 ### Production server facts
 
 Not a decision, but facts agents keep re-deriving: the app runs on port **6768** (not 3001), in container `trippy-trippy-1`. Production `~/Trippy/data` is root-owned with no passwordless sudo — take backups with the **host** `/usr/bin/sqlite3` (the container has none) into chee-owned `~/Trippy/backups/`. The production migrations table is `_migrations`.

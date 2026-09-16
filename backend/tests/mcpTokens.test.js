@@ -8,9 +8,10 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import {
-  SCOPES, createToken, listTokens, revokeToken, verifyToken,
+  SCOPES, createToken, listTokens, revokeToken, deleteToken, verifyToken,
 } from '../src/services/integrationTokens.js';
 import integrationRoutes from '../src/routes/integrations.js';
+import { errorHandler } from '../src/middleware/errorHandler.js';
 
 let tmpDir;
 let owner;
@@ -177,6 +178,46 @@ describe('revokeToken', () => {
   });
 });
 
+describe('deleteToken', () => {
+  it('throws 409 when the token is still live', () => {
+    const { record } = createToken(owner.id, { name: 'a', scopes: ['trips:read'] });
+    expect(() => deleteToken(owner.id, record.id)).toThrow('Revoke this token before deleting it');
+    const count = getDb().prepare('SELECT COUNT(*) AS n FROM integration_tokens WHERE id = ?').get(record.id).n;
+    expect(count).toBe(1);
+  });
+
+  it('deletes the row once revoked, and verifyToken stays null before and after', () => {
+    const { token, record } = createToken(owner.id, { name: 'a', scopes: ['trips:read'] });
+    revokeToken(owner.id, record.id);
+    expect(verifyToken(token)).toBeNull();
+
+    deleteToken(owner.id, record.id);
+    expect(verifyToken(token)).toBeNull();
+
+    const count = getDb().prepare('SELECT COUNT(*) AS n FROM integration_tokens WHERE id = ?').get(record.id).n;
+    expect(count).toBe(0);
+  });
+
+  it('throws 404 when deleting another user revoked token as a non-admin', () => {
+    const { record } = createToken(other.id, { name: 'a', scopes: ['trips:read'] });
+    revokeToken(other.id, record.id, { isAdmin: false });
+    expect(() => deleteToken(owner.id, record.id)).toThrow('Token not found');
+  });
+
+  it('lets an admin delete another user revoked token', () => {
+    const { record } = createToken(other.id, { name: 'a', scopes: ['trips:read'] });
+    revokeToken(owner.id, record.id, { isAdmin: true });
+    const deleted = deleteToken(owner.id, record.id, { isAdmin: true });
+    expect(deleted.id).toBe(record.id);
+    const count = getDb().prepare('SELECT COUNT(*) AS n FROM integration_tokens WHERE id = ?').get(record.id).n;
+    expect(count).toBe(0);
+  });
+
+  it('throws 404 when deleting an unknown id', () => {
+    expect(() => deleteToken(owner.id, 'not-a-real-id')).toThrow('Token not found');
+  });
+});
+
 describe('GET /api/integrations/tokens route — all=1 admin gating', () => {
   function buildApp() {
     const app = express();
@@ -224,6 +265,88 @@ describe('GET /api/integrations/tokens route — all=1 admin gating', () => {
       });
       const body = await res.json();
       expect(body.tokens).toHaveLength(2);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe('POST .../revoke and DELETE .../tokens/:id routes', () => {
+  function buildApp() {
+    const app = express();
+    app.use(cookieParser());
+    app.use(express.json());
+    app.use('/api/integrations', integrationRoutes);
+    // The other buildApp() in this file never exercises an error path, so it
+    // never needed this — these tests assert 409/404 bodies, which need the
+    // same error-rendering middleware production mounts (index.js).
+    app.use(errorHandler);
+    return app;
+  }
+
+  it('DELETE on a live token returns 409 and leaves the row usable', async () => {
+    const { token, record } = createToken(owner.id, { name: 'a', scopes: ['trips:read'] });
+
+    const app = buildApp();
+    const server = app.listen(0);
+    try {
+      const { port } = server.address();
+      const cookie = `auth_token=${authService.login('token-owner', 'password123').token}`;
+      const res = await fetch(`http://localhost:${port}/api/integrations/tokens/${record.id}`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie },
+      });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error).toBe('Revoke this token before deleting it');
+
+      const count = getDb().prepare('SELECT COUNT(*) AS n FROM integration_tokens WHERE id = ?').get(record.id).n;
+      expect(count).toBe(1);
+      expect(verifyToken(token)).not.toBeNull();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST .../revoke then DELETE succeeds and removes the row', async () => {
+    const { record } = createToken(owner.id, { name: 'a', scopes: ['trips:read'] });
+
+    const app = buildApp();
+    const server = app.listen(0);
+    try {
+      const { port } = server.address();
+      const cookie = `auth_token=${authService.login('token-owner', 'password123').token}`;
+
+      const revokeRes = await fetch(`http://localhost:${port}/api/integrations/tokens/${record.id}/revoke`, {
+        method: 'POST',
+        headers: { Cookie: cookie },
+      });
+      expect(revokeRes.status).toBe(200);
+
+      const deleteRes = await fetch(`http://localhost:${port}/api/integrations/tokens/${record.id}`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie },
+      });
+      expect(deleteRes.status).toBe(200);
+
+      const count = getDb().prepare('SELECT COUNT(*) AS n FROM integration_tokens WHERE id = ?').get(record.id).n;
+      expect(count).toBe(0);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('DELETE on an unknown id returns 404', async () => {
+    const app = buildApp();
+    const server = app.listen(0);
+    try {
+      const { port } = server.address();
+      const cookie = `auth_token=${authService.login('token-owner', 'password123').token}`;
+      const res = await fetch(`http://localhost:${port}/api/integrations/tokens/not-a-real-id`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie },
+      });
+      expect(res.status).toBe(404);
     } finally {
       server.close();
     }

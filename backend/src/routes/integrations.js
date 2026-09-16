@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { createToken, listTokens, revokeToken } from '../services/integrationTokens.js';
+import {
+  createToken, listTokens, revokeToken, deleteToken,
+} from '../services/integrationTokens.js';
 
 const router = Router();
 
@@ -28,9 +30,21 @@ router.post('/tokens', (req, res, next) => {
   }
 });
 
-router.delete('/tokens/:id', (req, res, next) => {
+router.post('/tokens/:id/revoke', (req, res, next) => {
   try {
     const record = revokeToken(req.user.id, req.params.id, { isAdmin: Boolean(req.user.is_admin) });
+    res.json({ token: record });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Plan 28 W5.6: DELETE now means hard delete (it previously meant revoke —
+// revoke moved to POST .../revoke above). Frontend and backend deploy
+// together, so nothing external calls the old DELETE-means-revoke shape.
+router.delete('/tokens/:id', (req, res, next) => {
+  try {
+    const record = deleteToken(req.user.id, req.params.id, { isAdmin: Boolean(req.user.is_admin) });
     res.json({ token: record });
   } catch (error) {
     next(error);

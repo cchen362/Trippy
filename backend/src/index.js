@@ -25,6 +25,7 @@ import shareRoutes from './routes/share.js';
 import stopRoutes from './routes/stops.js';
 import tripRoutes from './routes/trips.js';
 import { createMcpRouter } from './routes/mcp.js';
+import { installShutdownHandlers } from './shutdown.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -42,7 +43,10 @@ if (config.mcpEnabled) {
   const mcp = createMcpRouter({ publicUrl: config.mcpPublicUrl, frontendUrl: config.frontendUrl, appUrl: config.frontendUrl });
   app.use('/mcp', mcp.router);
   app.use(mcp.metadataRouter);
-  // Kept reachable so a shutdown hook can close open subscription streams cleanly.
+  // Plan 28 W5.1: mcp.handler is the object createMcpHandler returns
+  // ({ fetch, notify, bus, close }), not the Node-shaped fetch face routes/mcp.js
+  // uses internally — its close() tears down in-flight modern exchanges and open
+  // subscription/listen streams. Kept reachable so the shutdown hook below can call it.
   app.locals.mcpHandler = mcp.handler;
 }
 
@@ -89,8 +93,18 @@ async function start() {
     if (adminUser) seedIfEmpty(adminUser.id);
   }
 
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`Trippy backend running on :${config.port} [${config.nodeEnv}]`);
+  });
+
+  // Plan 28 W5.1: Docker sends SIGTERM with a 10s default stop timeout before
+  // SIGKILL, so shutdownServer's default 5s grace period must stay under that.
+  installShutdownHandlers({
+    server,
+    closeDb: async () => {
+      if (app.locals.mcpHandler) await app.locals.mcpHandler.close();
+      getDb().close();
+    },
   });
 }
 

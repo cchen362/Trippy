@@ -139,6 +139,26 @@ export function revokeToken(userId, id, { isAdmin = false } = {}) {
   return toRecord(row);
 }
 
+// Plan 28 W5.6: revoke is the instant-kill-plus-audit-trail step and stays
+// forever (W1 deviation 5 — the list only grows). Delete is a separate
+// cleanup action available on revoked rows only; deleting a still-live token
+// is refused with 409 so a row can never vanish while its hash still
+// authenticates verifyToken.
+export function deleteToken(userId, id, { isAdmin = false } = {}) {
+  const db = getDb();
+  const row = isAdmin
+    ? db.prepare('SELECT * FROM integration_tokens WHERE id = ?').get(id)
+    : db.prepare('SELECT * FROM integration_tokens WHERE id = ? AND user_id = ?').get(id, userId);
+
+  if (!row) throw notFound();
+  if (row.revoked_at === null) {
+    throw Object.assign(new Error('Revoke this token before deleting it'), { status: 409, code: 'token_live' });
+  }
+
+  db.prepare('DELETE FROM integration_tokens WHERE id = ?').run(id);
+  return toRecord(row);
+}
+
 export function verifyToken(plaintext) {
   if (typeof plaintext !== 'string' || !plaintext.startsWith('trp_')) return null;
 

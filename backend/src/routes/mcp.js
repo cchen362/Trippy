@@ -10,7 +10,7 @@ import { Router } from 'express';
 import express from 'express';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import { verifyToken as defaultVerify, SCOPES } from '../services/integrationTokens.js';
+import { verifyToken as defaultVerify, SCOPES, TOKEN_PREFIX_LENGTH } from '../services/integrationTokens.js';
 import { createTrippyMcpServer } from '../services/mcp/server.js';
 import { mcpAnonLimiter, mcpTokenLimiter } from '../middleware/rateLimit.js';
 import { MEDIA_TYPE_WHITELIST } from '../services/attachments.js';
@@ -36,12 +36,17 @@ export function createMcpRouter({ publicUrl, frontendUrl, verify = defaultVerify
   const publicUrlParsed = requireAbsoluteHttpUrl(publicUrl, 'publicUrl');
   const metadataUrl = `${publicUrlParsed.origin}/.well-known/oauth-protected-resource${publicUrlParsed.pathname}`;
 
-  const nodeHandler = toNodeHandler(
-    createMcpHandler(
-      (ctx) => createTrippyMcpServer({ authInfo: ctx.authInfo, appUrl, publicUrl }),
-      { legacy: 'stateless', onerror: (error) => console.error('[mcp]', error) },
-    ),
+  // Plan 28 W5.1: mcpHandler is the object createMcpHandler returns —
+  // { fetch, notify, bus, close } — kept so a shutdown hook can call
+  // mcpHandler.close(), which tears down every in-flight modern exchange and
+  // subscription stream (listenRouter.closeAll()). toNodeHandler only wants
+  // the `fetch` face; discarding the object itself (as this used to do inline)
+  // would have thrown away the one handle able to close those streams.
+  const mcpHandler = createMcpHandler(
+    (ctx) => createTrippyMcpServer({ authInfo: ctx.authInfo, appUrl, publicUrl }),
+    { legacy: 'stateless', onerror: (error) => console.error('[mcp]', error) },
   );
+  const nodeHandler = toNodeHandler(mcpHandler);
 
   const router = Router();
 
@@ -107,7 +112,11 @@ export function createMcpRouter({ publicUrl, frontendUrl, verify = defaultVerify
           clientId: verified.id,
           scopes: verified.scopes,
           expiresAt: verified.expiresAt ? Math.floor(Date.parse(verified.expiresAt) / 1000) : undefined,
-          extra: { userId: verified.userId, tokenId: verified.id },
+          // W5.2: tokenPrefix identifies which token made a call in the structured
+          // tool log without ever logging the plaintext token — it is exactly what
+          // createToken derives (services/integrationTokens.js), so the two always
+          // agree.
+          extra: { userId: verified.userId, tokenId: verified.id, tokenPrefix: token.slice(0, TOKEN_PREFIX_LENGTH) },
         };
         next();
       } catch (error) {
@@ -171,5 +180,5 @@ export function createMcpRouter({ publicUrl, frontendUrl, verify = defaultVerify
     res.json(metadataBody);
   });
 
-  return { router, metadataRouter, handler: nodeHandler };
+  return { router, metadataRouter, handler: mcpHandler };
 }

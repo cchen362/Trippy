@@ -10,6 +10,7 @@ vi.mock('../../services/integrationsApi.js', () => ({
     list: vi.fn(),
     create: vi.fn(),
     revoke: vi.fn(),
+    remove: vi.fn(),
   },
 }));
 
@@ -95,8 +96,47 @@ describe('IntegrationsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm?' }));
 
     await waitFor(() => expect(integrationsApi.revoke).toHaveBeenCalledWith('tok-1'));
-    await waitFor(() => expect(screen.getByText(/revoked/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/^revoked /)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
+  });
+
+  it('shows Revoke and no Delete on a live row', async () => {
+    integrationsApi.list.mockResolvedValue({ tokens: [baseToken] });
+
+    render(<IntegrationsPanel open onRequestClose={noop} />);
+
+    await screen.findByText('claude-code-laptop');
+    expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('shows Delete and no Revoke on a revoked row', async () => {
+    const revoked = { ...baseToken, revokedAt: '2026-09-16T12:00:00.000Z' };
+    integrationsApi.list.mockResolvedValue({ tokens: [revoked] });
+
+    render(<IntegrationsPanel open onRequestClose={noop} />);
+
+    await screen.findByText('claude-code-laptop');
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
+  });
+
+  it('deletes a revoked token via two-step confirm and refetches', async () => {
+    const revoked = { ...baseToken, revokedAt: '2026-09-16T12:00:00.000Z' };
+    integrationsApi.list
+      .mockResolvedValueOnce({ tokens: [revoked] })
+      .mockResolvedValueOnce({ tokens: [] });
+    integrationsApi.remove.mockResolvedValue({ token: revoked });
+
+    render(<IntegrationsPanel open onRequestClose={noop} />);
+
+    await screen.findByText('claude-code-laptop');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm?' }));
+
+    await waitFor(() => expect(integrationsApi.remove).toHaveBeenCalledWith('tok-1'));
+    await waitFor(() => expect(integrationsApi.list).toHaveBeenCalledTimes(2));
+    await screen.findByText(/Nothing connected yet/);
   });
 
   it('renders a friendly error message on API failure', async () => {

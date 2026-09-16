@@ -50,7 +50,10 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [revokeConfirmId, setRevokeConfirmId] = useState(null);
+  // Plan 28 W5.6: one confirmId does double duty for both Revoke (live rows)
+  // and Delete (revoked rows) — a row only ever shows one of the two actions,
+  // so the id alone disambiguates which confirm is pending.
+  const [confirmId, setConfirmId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [revealToken, setRevealToken] = useState('');
   const [copied, setCopied] = useState(false);
@@ -75,7 +78,7 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
   useEffect(() => {
     if (!open) {
       setView('list');
-      setRevokeConfirmId(null);
+      setConfirmId(null);
       setForm(emptyForm());
       setRevealToken('');
       setError('');
@@ -114,11 +117,26 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
     setError('');
     try {
       await integrationsApi.revoke(id);
-      setRevokeConfirmId(null);
+      setConfirmId(null);
       await load();
     } catch (err) {
       setError(friendlyError(err));
-      setRevokeConfirmId(null);
+      setConfirmId(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    setSaving(true);
+    setError('');
+    try {
+      await integrationsApi.remove(id);
+      setConfirmId(null);
+      await load();
+    } catch (err) {
+      setError(friendlyError(err));
+      setConfirmId(null);
     } finally {
       setSaving(false);
     }
@@ -158,7 +176,7 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
           <p className="font-body text-lg" style={{ color: 'var(--cream-dim)' }}>
             A token lets a tool you trust — Claude Code, Codex, your own script — read
             your trips and, with the right scope, add bookings. Each one is yours to
-            revoke.
+            revoke, and to delete once revoked.
           </p>
 
           {loading ? (
@@ -178,10 +196,10 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
                   <div
                     key={tok.id}
                     className="py-3 border-b last:border-b-0"
-                    style={{ borderColor: 'var(--ink-border)', opacity: revoked ? 0.5 : 1 }}
+                    style={{ borderColor: 'var(--ink-border)' }}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1" style={{ opacity: revoked ? 0.5 : 1 }}>
                         <p className="font-body text-lg truncate" style={{ color: 'var(--cream)' }}>
                           {tok.name}
                         </p>
@@ -200,38 +218,36 @@ export default function IntegrationsPanel({ open, onRequestClose }) {
                         </p>
                       </div>
 
-                      {!revoked && (
-                        revokeConfirmId === tok.id ? (
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setRevokeConfirmId(null)}
-                              className="font-mono text-[10px] tracking-[0.18em] uppercase"
-                              style={{ color: 'var(--cream-dim)' }}
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRevoke(tok.id)}
-                              disabled={saving}
-                              className="modal-danger-text modal-danger-border px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase"
-                              style={{ opacity: saving ? 0.45 : 1 }}
-                            >
-                              {saving ? 'Revoking…' : 'Confirm?'}
-                            </button>
-                          </div>
-                        ) : (
+                      {confirmId === tok.id ? (
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           <button
                             type="button"
-                            onClick={() => setRevokeConfirmId(tok.id)}
+                            onClick={() => setConfirmId(null)}
+                            className="font-mono text-[10px] tracking-[0.18em] uppercase"
+                            style={{ color: 'var(--cream-dim)' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => (revoked ? handleDelete(tok.id) : handleRevoke(tok.id))}
                             disabled={saving}
-                            className="modal-danger-text modal-danger-border px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase flex-shrink-0"
+                            className="modal-danger-text modal-danger-border px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase"
                             style={{ opacity: saving ? 0.45 : 1 }}
                           >
-                            Revoke
+                            {saving ? (revoked ? 'Deleting…' : 'Revoking…') : 'Confirm?'}
                           </button>
-                        )
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmId(tok.id)}
+                          disabled={saving}
+                          className="modal-danger-text modal-danger-border px-3 py-2 rounded-full border font-mono text-[10px] tracking-[0.18em] uppercase flex-shrink-0"
+                          style={{ opacity: saving ? 0.45 : 1 }}
+                        >
+                          {revoked ? 'Delete' : 'Revoke'}
+                        </button>
                       )}
                     </div>
                   </div>

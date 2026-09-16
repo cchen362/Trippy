@@ -36,6 +36,7 @@ import { createToken } from '../src/services/integrationTokens.js';
 import { createMcpRouter } from '../src/routes/mcp.js';
 import { errorHandler } from '../src/middleware/errorHandler.js';
 import { MCP_ANON_RATE_LIMIT } from '../src/middleware/rateLimit.js';
+import { shutdownServer } from '../src/shutdown.js';
 
 const FRONTEND_URL = 'http://localhost:5174';
 
@@ -56,6 +57,23 @@ function connect(token) {
   return client.connect(transport).then(() => client);
 }
 
+// Plan 28 W5.1: pulled out of beforeAll so the restart test can rebuild an
+// identical scratch app against the same (reopened) DB file after simulating
+// a shutdown mid-apply.
+async function startScratchServer() {
+  const app = express();
+  // publicUrl is patched once the ephemeral port is known; the router only
+  // uses it for the metadata pointer, so a placeholder origin is fine to build with.
+  const mcp = createMcpRouter({ publicUrl: 'http://127.0.0.1/mcp', frontendUrl: FRONTEND_URL, appUrl: FRONTEND_URL });
+  app.use('/mcp', mcp.router);
+  app.use(mcp.metadataRouter);
+  app.use(errorHandler);
+  const newServer = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  return { server: newServer, baseUrl: `http://127.0.0.1:${newServer.address().port}` };
+}
+
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-mcp-e2e-'));
   initDb(join(tmpDir, 'test.db'));
@@ -73,17 +91,7 @@ beforeAll(async () => {
   docsOnlyToken = createToken(owner.id, { name: 'docs', scopes: ['documents:write'] }).token;
   writeToken = createToken(owner.id, { name: 'write', scopes: ['trips:read', 'trips:write'] }).token;
 
-  const app = express();
-  // publicUrl is patched once the ephemeral port is known; the router only
-  // uses it for the metadata pointer, so a placeholder origin is fine to build with.
-  const mcp = createMcpRouter({ publicUrl: 'http://127.0.0.1/mcp', frontendUrl: FRONTEND_URL, appUrl: FRONTEND_URL });
-  app.use('/mcp', mcp.router);
-  app.use(mcp.metadataRouter);
-  app.use(errorHandler);
-  await new Promise((resolve) => {
-    server = app.listen(0, () => resolve());
-  });
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  ({ server, baseUrl } = await startScratchServer());
 });
 
 afterAll(async () => {
@@ -344,5 +352,107 @@ describe('prepare_draft / apply_draft / get_apply_status round trip', () => {
     expect(dataLines.length).toBeGreaterThan(0);
     const lastPayload = dataLines[dataLines.length - 1].slice('data:'.length).trim();
     expect(lastPayload).toContain('"status":"applied"');
+  });
+});
+
+// Plan 28 W5.1: proves shutdownServer's connection-destroying step is safe for
+// apply_draft — an apply caught mid-resolve (before its write transaction opens)
+// must leave the draft `pending` and write nothing, and must be cleanly retryable
+// against a freshly restarted server against the same DB file. Put last so the
+// other describes above run against the original server untouched.
+describe('restart mid-apply (Plan 28 W5.1)', () => {
+  it('destroys the in-flight apply before its write, and a fresh apply after restart succeeds exactly once', async () => {
+    const dbPath = join(tmpDir, 'test.db');
+
+    const prepClient = await connect(writeToken);
+    let draftId;
+    try {
+      const prepared = await prepClient.callTool({
+        name: 'prepare_draft',
+        arguments: {
+          idempotencyKey: 'e2e-restart-1',
+          target: { tripId: trip.id },
+          bookings: [{
+            type: 'hotel', title: 'Restart Hotel', startDatetime: '2099-11-02T15:00:00',
+            endDatetime: '2099-11-04T11:00:00', destination: 'Kyoto', destinationTz: 'Asia/Tokyo',
+          }],
+          source: { kind: 'manual' },
+        },
+      });
+      expect(prepared.isError).toBeFalsy();
+      draftId = prepared.structuredContent.draftId;
+    } finally {
+      await prepClient.close();
+    }
+
+    const bookingCountBefore = getDb().prepare('SELECT COUNT(*) AS n FROM bookings WHERE trip_id = ?').get(trip.id).n;
+
+    const applyClient = await connect(writeToken);
+    process.env.MCP_APPLY_RESOLVE_DELAY_MS = '1500';
+    // The W5.2 tool log is the only observable trace of the orphaned apply once
+    // its connection is gone — its outcome line is what proves the abort chain
+    // (socket close → SDK abort → apply.js `cancelled`) actually fired.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const inFlight = applyClient.callTool({ name: 'apply_draft', arguments: { draftId } });
+      // Swallow-and-record rather than let it reject unobserved before the
+      // assertion below attaches — Node would otherwise warn/crash on an
+      // unhandled rejection racing the shutdown.
+      let inFlightError;
+      const inFlightSettled = inFlight.then(
+        (result) => ({ result }),
+        (error) => { inFlightError = error; return { error }; },
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Destroys the server-side connection; apply.js's resolve loop observes
+      // the resulting abort signal once its (test-seam-lengthened) resolve
+      // delay elapses, and throws `cancelled` before its write transaction.
+      // The client's own SSE-stream reader treats a dropped connection with
+      // no response yet as reconnectable and retries rather than rejecting
+      // (StreamableHTTPClientTransport's resumption behavior) — closing the
+      // client below is what actually settles the pending call, exactly as a
+      // real client giving up on a dead connection would.
+      await shutdownServer({ server, closeDb: async () => getDb().close(), gracePeriodMs: 0 });
+      await applyClient.close();
+
+      const settled = await inFlightSettled;
+      expect(settled.error).toBeTruthy();
+      expect(settled.result).toBeUndefined();
+
+      // Let the seam delay elapse while the DB is still CLOSED, so the orphaned
+      // apply has fully terminated before anything is reopened — otherwise it
+      // could race the retry below against the reopened file.
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      const applyLines = logSpy.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('tool=apply_draft'));
+      expect(applyLines).toHaveLength(1);
+      expect(applyLines[0]).toContain('outcome=error:cancelled');
+    } finally {
+      logSpy.mockRestore();
+      delete process.env.MCP_APPLY_RESOLVE_DELAY_MS;
+      await applyClient.close().catch(() => {});
+    }
+
+    // Reopen the same DB file — no migrations needed, it is the same file.
+    initDb(dbPath);
+    const draftRow = getDb().prepare('SELECT status FROM mcp_drafts WHERE id = ?').get(draftId);
+    expect(draftRow.status).toBe('pending');
+    const bookingCountAfterDestroy = getDb().prepare('SELECT COUNT(*) AS n FROM bookings WHERE trip_id = ?').get(trip.id).n;
+    expect(bookingCountAfterDestroy).toBe(bookingCountBefore);
+
+    ({ server, baseUrl } = await startScratchServer());
+
+    const retryClient = await connect(writeToken);
+    try {
+      const retried = await retryClient.callTool({ name: 'apply_draft', arguments: { draftId } });
+      expect(retried.isError).toBeFalsy();
+      expect(retried.structuredContent.status).toBe('applied');
+    } finally {
+      await retryClient.close();
+    }
+
+    const bookingCountAfterRetry = getDb().prepare('SELECT COUNT(*) AS n FROM bookings WHERE trip_id = ?').get(trip.id).n;
+    expect(bookingCountAfterRetry).toBe(bookingCountBefore + 1);
   });
 });
