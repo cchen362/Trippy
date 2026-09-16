@@ -124,6 +124,28 @@ describe('prepare_draft idempotency', () => {
 });
 
 describe('apply_draft happy path', () => {
+  it('honours MCP_APPLY_RESOLVE_DELAY_MS during the resolve phase (Cloudflare timing seam)', async () => {
+    const trip = await futureTrip(owner.id);
+    const tokenId = tokenFor(owner.id, ['trips:read', 'trips:write']);
+    const { client, server } = await connectClient(authInfoFor(owner.id, ['trips:read', 'trips:write'], tokenId));
+    process.env.MCP_APPLY_RESOLVE_DELAY_MS = '300';
+    try {
+      const prepared = await client.callTool({
+        name: 'prepare_draft',
+        arguments: { idempotencyKey: 'apply-delay', target: { tripId: trip.id }, bookings: [hotelBooking()], source: manualSource() },
+      });
+      const started = Date.now();
+      const applied = await client.callTool({ name: 'apply_draft', arguments: { draftId: prepared.structuredContent.draftId } });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+      expect(applied.structuredContent.status).toBe('applied');
+      expect(countBookingRows(trip.id)).toBe(1);
+    } finally {
+      delete process.env.MCP_APPLY_RESOLVE_DELAY_MS;
+      await client.close();
+      await server.close();
+    }
+  });
+
   it('applies once, creates one booking and one stop, and is idempotent on retry', async () => {
     const trip = await futureTrip(owner.id);
     const tokenId = tokenFor(owner.id, ['trips:read', 'trips:write']);

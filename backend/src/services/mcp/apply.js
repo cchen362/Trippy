@@ -67,6 +67,15 @@ export async function applyDraft({ userId, draftId, report = async () => {}, sig
   // slow provider call, keeping Cloudflare's keep-alive flowing (F-28-14(b)).
   await report({ progress: 0, total, message: `Resolving ${total} booking${total === 1 ? '' : 's'}…` });
 
+  // Test seam for the Plan 28 W2 Cloudflare timing gate (F-28-14(b)): holds the
+  // resolve phase open so a ≥ 120 s apply can be driven through the public host
+  // without a destination that genuinely takes that long. Inert unless the env
+  // var is set; never set it in a normal .env. Read per call, not at import.
+  const resolveDelayMs = Number(process.env.MCP_APPLY_RESOLVE_DELAY_MS) || 0;
+  if (resolveDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, resolveDelayMs));
+  }
+
   const resolvedStops = [];
   for (let i = 0; i < total; i += 1) {
     if (signal?.aborted) {
