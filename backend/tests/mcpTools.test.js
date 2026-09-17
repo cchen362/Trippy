@@ -148,6 +148,56 @@ describe('list_trips', () => {
     }
   });
 
+  // D-29-4: an empty upcoming list states how many past trips the filter hid — the
+  // fact only, never an instruction — so a text-only host can offer them.
+  it('names hidden past trips when the upcoming list is empty, and says nothing more', async () => {
+    await createTrip(owner.id, {
+      title: 'Tokyo 2000', startDate: '2000-01-01', endDate: '2000-01-05',
+      destinations: [{ city: 'Tokyo', countryCode: 'JP' }],
+    });
+    await createTrip(owner.id, { title: 'Rome 2001', startDate: '2001-01-01', endDate: '2001-01-05' });
+
+    const { client, server } = await connectClient(authInfoFor(owner.id, ['trips:read']));
+    try {
+      const empty = await client.callTool({ name: 'list_trips', arguments: { query: null, includePast: false } });
+      expect(empty.structuredContent).toEqual({ trips: [], hiddenPastCount: 2 });
+      expect(empty.content[0].text).toBe('No upcoming trips. 2 past trips are on file.');
+      expect(empty.content[0].text).not.toMatch(/includePast|ask/i);
+      expectTextMirrorsStructured(empty);
+
+      const byQuery = await client.callTool({ name: 'list_trips', arguments: { query: 'tokyo' } });
+      expect(byQuery.structuredContent).toEqual({ trips: [], hiddenPastCount: 1 });
+      expect(byQuery.content[0].text).toBe('No upcoming trips match "tokyo". 1 past trip does.');
+      expectTextMirrorsStructured(byQuery);
+
+      const noMatch = await client.callTool({ name: 'list_trips', arguments: { query: 'lisbon' } });
+      expect(noMatch.structuredContent).toEqual({ trips: [], hiddenPastCount: 0 });
+      expect(noMatch.content[0].text).toBe('No trips match "lisbon".');
+      expectTextMirrorsStructured(noMatch);
+
+      const withPast = await client.callTool({ name: 'list_trips', arguments: { includePast: true } });
+      expect(withPast.structuredContent.hiddenPastCount).toBe(0);
+      expect(withPast.structuredContent.trips).toHaveLength(2);
+      expectTextMirrorsStructured(withPast);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('says "No trips yet." for an account with no trips at all', async () => {
+    const { client, server } = await connectClient(authInfoFor(stranger.id, ['trips:read']));
+    try {
+      const result = await client.callTool({ name: 'list_trips', arguments: {} });
+      expect(result.structuredContent).toEqual({ trips: [], hiddenPastCount: 0 });
+      expect(result.content[0].text).toBe('No trips yet.');
+      expectTextMirrorsStructured(result);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it('returns insufficient_scope for a token without trips:read', async () => {
     const { client, server } = await connectClient(authInfoFor(owner.id, ['documents:write']));
     try {

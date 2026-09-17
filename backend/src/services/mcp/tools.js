@@ -167,6 +167,14 @@ function formatTripLine(trip) {
   return `"${trip.title}" (${trip.startDate} → ${trip.endDate}, ${trip.status})`;
 }
 
+function formatEmptyTripList({ query, hiddenPastCount }) {
+  const q = typeof query === 'string' && query.trim() ? ` match "${query.trim()}"` : '';
+  const past = hiddenPastCount === 1 ? '1 past trip' : `${hiddenPastCount} past trips`;
+  if (hiddenPastCount === 0) return q ? `No trips${q}.` : 'No trips yet.';
+  if (q) return `No upcoming trips${q}. ${past} ${hiddenPastCount === 1 ? 'does' : 'do'}.`;
+  return `No upcoming trips. ${past} ${hiddenPastCount === 1 ? 'is' : 'are'} on file.`;
+}
+
 export function registerReadTools(server, { userId, scopes, appUrl }) {
   server.registerTool(
     'list_trips',
@@ -194,20 +202,26 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
       const query = typeof args?.query === 'string' ? args.query.trim().toLowerCase() : '';
 
       let trips = listTripsForUser(userId);
-      if (!includePast) trips = trips.filter((trip) => trip.status !== 'past');
       if (query) {
         trips = trips.filter((trip) => {
           if (trip.title.toLowerCase().includes(query)) return true;
           return (trip.destinationsGeo || []).some((geo) => geo.name?.toLowerCase().includes(query));
         });
       }
+      // D-29-4: when the past-trip filter hides everything, the result states the
+      // fact ("N past trips are on file") and nothing more — it never tells the host
+      // what to do next. Offering "want to see past trips instead?" and re-calling
+      // with includePast is the client model's job; Trippy's job is to make the fact
+      // visible to a text-only host, which "No trips found." did not.
+      const hiddenPastCount = includePast ? 0 : trips.filter((trip) => trip.status === 'past').length;
+      if (!includePast) trips = trips.filter((trip) => trip.status !== 'past');
 
       const summaries = trips.map((trip) => tripSummary(trip, appUrl));
       const text = summaries.length
         ? `${summaries.length} trip${summaries.length === 1 ? '' : 's'}: ${trips.map(formatTripLine).join('; ')}`
-        : 'No trips found.';
+        : formatEmptyTripList({ query: args?.query, hiddenPastCount });
 
-      return toolResult({ text, structuredContent: { trips: summaries } });
+      return toolResult({ text, structuredContent: { trips: summaries, hiddenPastCount } });
     },
   );
 
