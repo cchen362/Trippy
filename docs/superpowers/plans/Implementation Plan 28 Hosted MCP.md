@@ -483,6 +483,7 @@ Use the **verify trip** (create one named `MCP QA` spanning any 3 days; delete i
 - `GET https://trippy.zyroi.com/mcp` in a browser returns **405** (after W1) — the endpoint is POST-only by spec.
 - Claude.ai / Claude Desktop's "add custom connector" **cannot** connect — they require OAuth, which is not built (D-28-1).
 - Time-zone info notes on flights without a tz — see above.
+- A host that reads only `content[].text`, or that sends `null` for an omitted optional field — both fixed generally in `Implementation Plan 29 MCP Host Compatibility.md` (D-29-1/D-29-2/D-29-3), not with a per-host special case.
 
 ---
 

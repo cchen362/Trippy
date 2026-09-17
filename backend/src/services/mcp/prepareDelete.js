@@ -8,6 +8,7 @@ import { assertBookingAccess } from '../trips.js';
 import { fetchOwedRows } from '../expenses.js';
 import { formatMinor } from '../../utils/currency.js';
 import { computeBookingFingerprint } from './drafts.js';
+import { summarizeIssues } from './validate.js';
 
 // Mirrors frontend/src/utils/owedNames.js's normalizeOwedName exactly — a comparison
 // key only, never a rewrite of the stored name. Duplicated rather than shared because
@@ -143,8 +144,11 @@ export function computeDeleteFingerprint(bookingRow, linkedStopIds, linkedExpens
   return createHash('sha256').update(`${base}::${stopsPart}::${expensesPart}`).digest('hex');
 }
 
+// D-29-2: named issues, sharing validate.js's summarizeIssues so prepare_draft and
+// prepare_delete can never drift on issue formatting (blockers, then warnings, then
+// info; see the JSDoc above summarizeIssues for the location/message rules).
 export function summarizeDelete(validation) {
-  const { booking, linkedStop, linkedExpenses, openRepaymentsAggregate } = validation;
+  const { booking, linkedStop, linkedExpenses, openRepaymentsAggregate, issues } = validation;
   const dateLabel = (booking.startDatetime || '').slice(0, 10) || 'no date';
   const parts = [`Delete ${booking.type || 'booking'} "${booking.title}" (${dateLabel})`];
 
@@ -167,6 +171,8 @@ export function summarizeDelete(validation) {
     const suffix = openRepaymentsAggregate ? ` (includes ${openRepaymentsAggregate} in open repayments)` : '';
     parts.push(`${willDelete.length} linked cost${willDelete.length === 1 ? '' : 's'} will be deleted${suffix}`);
   }
+
+  parts.push(...summarizeIssues(issues || []));
 
   return `${parts.join('; ')}.`;
 }

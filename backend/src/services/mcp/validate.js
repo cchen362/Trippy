@@ -96,7 +96,10 @@ function validateSourceShape(source, issues, bookingsLength) {
   // W3.4: which of the draft's N bookings the document belongs to. Defaults to 0
   // (the common single-booking case) so older callers need not supply it.
   let sourceBookingIndex = 0;
-  if (source.sourceBookingIndex !== undefined) {
+  // D-29-3: null is "absent" (source.sourceBookingIndex is optional in the schema),
+  // exactly like every other optional field below — a null here defaults to 0
+  // instead of becoming a blocker.
+  if (source.sourceBookingIndex !== undefined && source.sourceBookingIndex !== null) {
     const n = source.sourceBookingIndex;
     if (!Number.isInteger(n) || n < 0 || (Number.isInteger(bookingsLength) && n >= bookingsLength)) {
       issues.push({
@@ -294,8 +297,10 @@ async function validateOneBooking(booking, index, { tripRow, existingBookingRows
 
   // The same rule writeBookingRow applies at insert time, so the preview and the
   // written row can never disagree about whether a stop is due.
+  // D-29-3: a null showInItinerary is "absent" — it must reach defaultShowInItinerary
+  // as undefined so the per-type default applies, not as a falsy "explicitly hidden".
   const showInItinerary = Boolean(defaultShowInItinerary({
-    type, startDatetime, destination: booking.destination ?? null, showInItinerary: booking.showInItinerary,
+    type, startDatetime, destination: booking.destination ?? null, showInItinerary: booking.showInItinerary ?? undefined,
   }));
 
   let plannedEffect = null;
@@ -495,6 +500,51 @@ export async function validateBookingDraft({ userId, target, bookings, source })
   };
 }
 
+// D-29-2: a summary names every blocker and warning, not just a count — a text-only
+// host (G-29-1) has no other way to learn which field failed. Blockers first, then
+// warnings, then info, in that fixed order; within a group, original array order
+// (the order validate/prepareDelete found them in) is preserved. Location is
+// `bookings[<bookingIndex>].<field>` when both are present on the issue, `<field>`
+// when only the field is, and omitted entirely (code alone) otherwise. A blocker or
+// warning also carries its message; an info item never does (F-29-2's issue objects
+// already carry everything a summary needs — this only changes how they're rendered),
+// but does carry `suggestion` when present. Shared by summarizeDraft and
+// summarizeDelete so the two call sites can never drift on issue formatting.
+const ISSUE_SEVERITY_LABELS = {
+  blocker: ['blocker', 'blockers'],
+  warning: ['warning', 'warnings'],
+  info: ['note', 'notes'],
+};
+
+function issueLocation(issue) {
+  if (issue.bookingIndex !== undefined && issue.bookingIndex !== null && issue.field) {
+    return `bookings[${issue.bookingIndex}].${issue.field}`;
+  }
+  if (issue.field) return issue.field;
+  return null;
+}
+
+function describeIssue(issue) {
+  const location = issueLocation(issue);
+  const locationPart = location ? ` at ${location}` : '';
+  if (issue.severity === 'info') {
+    const suggestionPart = issue.suggestion ? ` (suggested: ${issue.suggestion})` : '';
+    return `${issue.code}${locationPart}${suggestionPart}`;
+  }
+  return `${issue.code}${locationPart} — ${issue.message}`;
+}
+
+export function summarizeIssues(issues) {
+  const parts = [];
+  for (const severity of ['blocker', 'warning', 'info']) {
+    const group = issues.filter((issue) => issue.severity === severity);
+    if (!group.length) continue;
+    const [singular, plural] = ISSUE_SEVERITY_LABELS[severity];
+    parts.push(`${group.length} ${group.length === 1 ? singular : plural}: ${group.map(describeIssue).join('; ')}`);
+  }
+  return parts;
+}
+
 export function summarizeDraft({ bookings, issues, plannedEffects, tripRow }) {
   const n = bookings.length;
   const tripPart = tripRow ? ` for "${tripRow.title}"` : '';
@@ -508,12 +558,11 @@ export function summarizeDraft({ bookings, issues, plannedEffects, tripRow }) {
       : `no stop will be created (${effect.stop.reason})`
   ));
 
-  const parts = [`${n} booking${n === 1 ? '' : 's'}${tripPart}: ${bookingParts.join('; ')}`, ...stopParts];
-
-  const blockerCount = issues.filter((issue) => issue.severity === 'blocker').length;
-  const warningCount = issues.filter((issue) => issue.severity === 'warning').length;
-  if (blockerCount) parts.push(`${blockerCount} blocker${blockerCount === 1 ? '' : 's'}`);
-  if (warningCount) parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
+  const parts = [
+    `${n} booking${n === 1 ? '' : 's'}${tripPart}: ${bookingParts.join('; ')}`,
+    ...stopParts,
+    ...summarizeIssues(issues),
+  ];
 
   return `${parts.join('; ')}.`;
 }

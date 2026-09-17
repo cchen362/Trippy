@@ -11,41 +11,105 @@ import { applyDraft } from './apply.js';
 import { issueUploadTicket, getUploadTicket, uploadUrlFor } from './uploads.js';
 import { validateDelete, computeDeleteFingerprint, summarizeDelete } from './prepareDelete.js';
 
+// D-29-1: the ONLY place `content` is built in this file. Every return site —
+// success, refusal, not-found, scope error — goes through this constructor so the
+// text/structured relationship is a guarantee, not a convention. A host that reads
+// only content[].text (F-29-1/G-29-1) still gets the full structured object, as the
+// MCP spec's backwards-compatibility guidance requires: a second text block, never
+// appended to the first, carrying JSON.stringify(structuredContent) with no
+// indentation (bytes matter on every call). A result with no structuredContent
+// (there are none today, but a future tool could omit it) gets a single text block.
+function toolResult({ text, structuredContent, isError }) {
+  const content = [{ type: 'text', text }];
+  if (structuredContent !== undefined) {
+    content.push({ type: 'text', text: JSON.stringify(structuredContent) });
+  }
+  const result = { content };
+  if (structuredContent !== undefined) result.structuredContent = structuredContent;
+  if (isError) result.isError = true;
+  return result;
+}
+
+// D-29-3: every optional property in every tool schema accepts `null` as "absent"
+// (G-29-2). A host that builds tool schemas through Pydantic, zod `.nullable()`, or
+// OpenAI strict mode presents optionals as nullable, and models then send `null` for
+// "not applicable" — ajv (the validator behind fromJsonSchema, ajv@8.18.0, confirmed
+// in node_modules) refuses `null` for a bare `type: "string"` but accepts it for
+// `type: ["string", "null"]`, and for an `enum` only once `null` is listed in it.
+// This walks an object schema's `properties` recursively (into `items` and nested
+// `properties`) and makes every property NOT in that object's own `required` list
+// nullable — a required property is left untouched, so a required `null` is still a
+// validation error, which is the right answer. Wrap every fromJsonSchema(...) call in
+// this file with it so a new tool cannot opt out by forgetting.
+function makeNullable(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  const next = { ...schema };
+  if (Array.isArray(next.type)) {
+    if (!next.type.includes('null')) next.type = [...next.type, 'null'];
+  } else if (typeof next.type === 'string' && next.type !== 'null') {
+    next.type = [next.type, 'null'];
+  }
+  if (Array.isArray(next.enum) && !next.enum.includes(null)) {
+    next.enum = [...next.enum, null];
+  }
+  return next;
+}
+
+function withNullableOptionals(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+
+  if (schema.type === 'object' && schema.properties) {
+    const required = new Set(schema.required || []);
+    const properties = {};
+    for (const [key, propSchema] of Object.entries(schema.properties)) {
+      const walked = withNullableOptionals(propSchema);
+      properties[key] = required.has(key) ? walked : makeNullable(walked);
+    }
+    return { ...schema, properties };
+  }
+
+  if (schema.type === 'array' && schema.items) {
+    return { ...schema, items: withNullableOptionals(schema.items) };
+  }
+
+  return schema;
+}
+
 function requireScope(scopes, needed) {
   if (scopes.includes(needed)) return null;
-  return {
-    isError: true,
-    content: [{ type: 'text', text: `This token lacks the ${needed} scope.` }],
+  return toolResult({
+    text: `This token lacks the ${needed} scope.`,
     structuredContent: { error: 'insufficient_scope', requiredScope: needed },
-  };
+    isError: true,
+  });
 }
 
 function notFoundResult() {
-  return {
-    isError: true,
-    content: [{ type: 'text', text: 'Trip not found.' }],
+  return toolResult({
+    text: 'Trip not found.',
     structuredContent: { error: 'not_found' },
-  };
+    isError: true,
+  });
 }
 
 function draftNotFoundResult() {
-  return {
-    isError: true,
-    content: [{ type: 'text', text: 'Draft not found.' }],
+  return toolResult({
+    text: 'Draft not found.',
     structuredContent: { error: 'not_found' },
-  };
+    isError: true,
+  });
 }
 
 function bookingNotFoundResult() {
-  return {
-    isError: true,
-    content: [{ type: 'text', text: 'Booking not found.' }],
+  return toolResult({
+    text: 'Booking not found.',
     structuredContent: { error: 'not_found' },
-  };
+    isError: true,
+  });
 }
 
 function errorResult(text, structuredContent) {
-  return { isError: true, content: [{ type: 'text', text }], structuredContent };
+  return toolResult({ text, structuredContent, isError: true });
 }
 
 // Every thrown { code } from validate/drafts/apply becomes one of these shapes;
@@ -112,7 +176,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
         'Lists the trips this user owns or collaborates on. Read-only. Past trips are ' +
         'excluded unless includePast is true. query filters case-insensitively by trip ' +
         'title or destination city name.',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Case-insensitive substring match on title or destination city.' },
@@ -120,7 +184,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
           // opt-in rather than opt-out.
           includePast: { type: 'boolean', description: 'Include trips that have already ended. Defaults to false.' },
         },
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'trips:read');
@@ -143,10 +207,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
         ? `${summaries.length} trip${summaries.length === 1 ? '' : 's'}: ${trips.map(formatTripLine).join('; ')}`
         : 'No trips found.';
 
-      return {
-        content: [{ type: 'text', text }],
-        structuredContent: { trips: summaries },
-      };
+      return toolResult({ text, structuredContent: { trips: summaries } });
     },
   );
 
@@ -159,7 +220,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
         'Pass include: ["days"] and/or ["bookings"] to also fetch the day-by-day ' +
         'itinerary (resolved city/country, stop count) and logistics bookings ' +
         '(confirmation ref, times, document count).',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           tripId: { type: 'string', description: 'The trip id.' },
@@ -170,7 +231,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
           },
         },
         required: ['tripId'],
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'trips:read');
@@ -224,10 +285,7 @@ export function registerReadTools(server, { userId, scopes, appUrl }) {
 
       const text = `${formatTripLine(result.trip)}${result.days ? `, ${result.days.length} days` : ''}${result.bookings ? `, ${result.bookings.length} bookings` : ''}.`;
 
-      return {
-        content: [{ type: 'text', text }],
-        structuredContent: result,
-      };
+      return toolResult({ text, structuredContent: result });
     },
   );
 }
@@ -254,8 +312,10 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         'in the app. A missing origin/destination time zone is allowed and only produces an ' +
         'informational note: pass the wall-clock time exactly as printed on the confirmation, ' +
         'with no conversion. source describes where the booking came from; for a screenshot or ' +
-        'PDF, sha256/mediaType/sizeBytes let apply_draft issue an upload ticket afterward.',
-      inputSchema: fromJsonSchema({
+        'PDF, sha256/mediaType/sizeBytes let apply_draft issue an upload ticket afterward. ' +
+        'Required per type: flight/train/bus/ferry need origin and destination; hotel needs ' +
+        'endDatetime and destination; other needs only title and startDatetime.',
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           idempotencyKey: {
@@ -296,7 +356,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           },
         },
         required: ['idempotencyKey', 'target', 'bookings', 'source'],
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'trips:write');
@@ -339,8 +399,8 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
 
       const summary = summarizeDraft(validation);
 
-      return {
-        content: [{ type: 'text', text: summary }],
+      return toolResult({
+        text: summary,
         structuredContent: {
           draftId: draft.id,
           expiresAt: draft.expiresAt,
@@ -352,7 +412,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           applyAllowed: validation.applyAllowed,
           summary,
         },
-      };
+      });
     },
   );
 
@@ -365,11 +425,11 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         'prepare_draft. Only call this after the user has seen the prepare_draft preview and ' +
         'explicitly confirmed. Calling apply_draft again on an already-applied draft is safe ' +
         'and returns the same result rather than creating a duplicate booking.',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: { draftId: { type: 'string' } },
         required: ['draftId'],
-      }),
+      })),
     },
     async (args, ctx) => {
       const scopeError = requireScope(scopes, 'trips:write');
@@ -416,10 +476,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         const text = result.status === 'already_applied'
           ? `Already deleted earlier — booking ${result.deleted.bookingId}.`
           : `Deleted booking ${result.deleted.bookingId} (${[stopPart, unlinkedPart, deletedPart].filter(Boolean).join('; ')}).`;
-        return {
-          content: [{ type: 'text', text }],
-          structuredContent: { ...result, tripUrl },
-        };
+        return toolResult({ text, structuredContent: { ...result, tripUrl } });
       }
 
       const bookings = result.bookings.map((booking) => ({ ...booking, url: `${tripUrl}/logistics` }));
@@ -444,10 +501,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         text += ` The document could not be transferred (${sourceDocument.reason}); the booking was saved regardless.`;
       }
 
-      return {
-        content: [{ type: 'text', text }],
-        structuredContent: { ...result, tripUrl, bookings, sourceDocument },
-      };
+      return toolResult({ text, structuredContent: { ...result, tripUrl, bookings, sourceDocument } });
     },
   );
 
@@ -459,13 +513,13 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         'Looks up a draft by draftId or idempotencyKey and reports whether it is still ' +
         'pending, was applied, or failed (expired/stale/invalid/rejected). Use this to recover ' +
         'the result of an apply_draft call whose response was lost (e.g. a dropped connection).',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           draftId: { type: 'string' },
           idempotencyKey: { type: 'string' },
         },
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'trips:read');
@@ -485,10 +539,10 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
       if (!draft) return draftNotFoundResult();
 
       if (draft.status === 'pending') {
-        return {
-          content: [{ type: 'text', text: `Draft ${draft.id} is still pending (expires ${draft.expiresAt}).` }],
+        return toolResult({
+          text: `Draft ${draft.id} is still pending (expires ${draft.expiresAt}).`,
           structuredContent: { draftStatus: 'pending', draftId: draft.id, expiresAt: draft.expiresAt },
-        };
+        });
       }
 
       // Same shape as apply_draft's output (URLs included) so a client recovering
@@ -506,8 +560,8 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
       } else if (draft.result) {
         result = { ...draft.result };
       }
-      return {
-        content: [{ type: 'text', text: `Draft ${draft.id} is ${draft.status}.` }],
+      return toolResult({
+        text: `Draft ${draft.id} is ${draft.status}.`,
         structuredContent: {
           draftStatus: draft.status,
           draftId: draft.id,
@@ -515,7 +569,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           ...(tripUrl ? { tripUrl } : {}),
           ...result,
         },
-      };
+      });
     },
   );
 
@@ -531,7 +585,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         'minutes; mediaType, sizeBytes, and sha256 must match the actual file exactly, or the ' +
         'upload is refused. Uploading the same bytes twice is safe and returns the same ' +
         'attachment rather than a duplicate.',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           bookingId: { type: 'string' },
@@ -540,7 +594,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           sha256: { type: 'string', description: '64-character hex SHA-256 of the file bytes.' },
         },
         required: ['bookingId', 'mediaType', 'sizeBytes', 'sha256'],
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'documents:write');
@@ -559,15 +613,12 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
       }
 
       const uploadUrl = uploadUrlFor(publicUrl, ticket.id);
-      return {
-        content: [{
-          type: 'text',
-          text: `Upload with: curl -T <file> -H "Content-Type: ${ticket.mediaType}" ${uploadUrl} (expires ${ticket.expiresAt}).`,
-        }],
+      return toolResult({
+        text: `Upload with: curl -T <file> -H "Content-Type: ${ticket.mediaType}" ${uploadUrl} (expires ${ticket.expiresAt}).`,
         structuredContent: {
           ticket: { uploadUrl, expiresAt: ticket.expiresAt, maxBytes: ticket.maxBytes },
         },
-      };
+      });
     },
   );
 
@@ -582,7 +633,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
         'from the booking by default, exactly like the app\'s own delete review — pass their ' +
         'ids in deleteExpenseIds to delete them too. Call apply_draft with the returned ' +
         'draftId only after the user has reviewed this preview and explicitly confirmed.',
-      inputSchema: fromJsonSchema({
+      inputSchema: fromJsonSchema(withNullableOptionals({
         type: 'object',
         properties: {
           idempotencyKey: {
@@ -597,7 +648,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           },
         },
         required: ['idempotencyKey', 'bookingId'],
-      }),
+      })),
     },
     async (args) => {
       const scopeError = requireScope(scopes, 'trips:write');
@@ -640,8 +691,8 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
       const summary = summarizeDelete(validation);
       const bookingUrl = `${appUrl}/trips/${validation.booking.tripId}/logistics`;
 
-      return {
-        content: [{ type: 'text', text: summary }],
+      return toolResult({
+        text: summary,
         structuredContent: {
           draftId: draft.id,
           expiresAt: draft.expiresAt,
@@ -661,7 +712,7 @@ export function registerWriteTools(server, { userId, tokenId, scopes, appUrl, pu
           applyAllowed: validation.applyAllowed,
           summary,
         },
-      };
+      });
     },
   );
 }

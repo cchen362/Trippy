@@ -184,6 +184,11 @@ describe('SDK client', () => {
         url: `${FRONTEND_URL}/trips/${trip.id}`,
       });
       expect(result.content[0].text).toContain('Kyoto autumn');
+      // D-29-1: a real SDK client over HTTP sees two text blocks, the second
+      // parsing to the same object as structuredContent — not just the in-memory
+      // transport the mcpTools.test.js suite uses.
+      expect(result.content.length).toBe(2);
+      expect(JSON.parse(result.content[1].text)).toEqual(result.structuredContent);
     } finally {
       await client.close();
     }
