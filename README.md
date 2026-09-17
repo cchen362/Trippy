@@ -46,6 +46,14 @@ When the trip is live, Today brings forward what has happened, what is next, and
 
 The in-trip Co-Pilot is a second set of eyes, not an autopilot. It can search the trip's destination ideas, answer questions from the current plan, spot practical gaps, and propose changes. Every proposal stays visible for you to inspect, apply, or reject.
 
+## Connect Your Own AI Tools
+
+Trippy includes a hosted MCP endpoint for Claude Code, Codex CLI, MCP Inspector, and custom clients. Create a scoped personal token from **Account → Integrations**, then connect to `https://trippy.zyroi.com/mcp`. Tokens can grant trip reading, trip writing, and document uploads separately, and can be expired or revoked at any time.
+
+An MCP client can list and inspect trips; preview and apply a new trip or one or more bookings; check an uncertain apply without creating duplicates; attach the original screenshot or PDF; and preview a booking deletion before it happens. Trip and booking changes use durable 30-minute previews, require explicit confirmation, apply atomically, and follow the same owner-or-collaborator access rules as the app. The client interprets source material—Trippy does not make a second AI call, and pasted email text is not retained. Every tool result is returned both as a plain-language summary that names any issue and as the full structured result in text, so clients that read only text get the same information as clients that parse structured output.
+
+MCP currently uses personal bearer tokens rather than OAuth, so OAuth-only Claude.ai and Claude Desktop connectors are not supported. Verified client configuration examples are in [Plan 28 Appendix B](docs/superpowers/plans/Implementation%20Plan%2028%20Hosted%20MCP.md#appendix-b--client-configuration-reference-keys-verified-in-w0-re-verified-in-w5-on-2026-09-16-against-claude-code-21273-codex-cli-01446-sdk-200).
+
 ## Yours, and Only Yours
 
 Trippy is invite-only. The people travelling can plan together in a private workspace, and the owner controls access. When you want to share the shape of the trip more widely, a revocable public link shows a clean, read-only itinerary—never booking confirmations, documents, expenses, co-pilot history, collaborator details, or editing controls.
