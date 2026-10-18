@@ -18,8 +18,11 @@ const SONNET_55 = 'claude-sonnet-5-5';
 
 export const PROFILES = {
   descriptor: {
-    control: { model: HAIKU_45, maxTokens: 256 },
-    primary: { model: HAIKU_55, maxTokens: 1024, effort: 'low' },
+    // W2 flipped PHOTO_DESCRIPTOR_MODEL, so control is now Haiku 5.5 at effort low (identical to the
+    // winning candidate, which is why there is no separate primary). 'baseline-45' is the W0
+    // control under its old name: runnable for a re-measure, never asserted against the live profile.
+    control: { model: HAIKU_55, maxTokens: 1024, effort: 'low' },
+    'baseline-45': { model: HAIKU_45, maxTokens: 256 },
     'alt-disabled-low': { model: HAIKU_55, maxTokens: 1024, effort: 'low', thinking: { type: 'disabled' } },
     // §4: effort `medium` is measured on a 15-item subset only.
     'alt-medium': { model: HAIKU_55, maxTokens: 1024, effort: 'medium', subset: 15 },

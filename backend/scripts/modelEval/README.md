@@ -19,7 +19,7 @@ NODE_ENV=test node scripts/modelEval/descriptor.mjs --profile control
 NODE_ENV=test node scripts/modelEval/extraction.mjs --profile control
 NODE_ENV=test node scripts/modelEval/discovery.mjs --profile control --concurrency 3
 NODE_ENV=test node scripts/modelEval/copilot.mjs --profile control --concurrency 2
-node scripts/modelEval/score.mjs descriptor --profile control,primary
+node scripts/modelEval/score.mjs descriptor --profile baseline-45,control
 ```
 
 Shared flags: `--profile <name>` (see `profiles.mjs`; default `control`), `--only <id,id>`,

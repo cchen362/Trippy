@@ -286,9 +286,52 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 ### W2 — Photo descriptors → Haiku 5.5
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-18 — **COMPLETE, not deployed.** `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5'`, profile `{ maxTokens: 1024, effort: 'low' }` (the primary candidate won outright). Discovery, extraction and the co-pilot are untouched; the other three W0 sha256 request-body pins pass with their literals unchanged. Haiku 4.5's descriptor row (`{ maxTokens: 256 }`) stays in `MODEL_PROFILES`, and a test pins that it does.
 
-**Steps.** Run the §5.2 descriptor sweep; score; pick the profile; set `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5'` and its profile (candidate: effort `low`, 1,024); update `claude.test.js:1073`; local verification via the Plan 10 throwaway script pattern (temp DB, live Unsplash, 5 manual stops) to confirm the descriptor → Unsplash path still yields relevant photos — inspect the actual photos, not just a valid query. Record the sweep table, chosen profile, spend and unresolved limitations in this status line.
+**Sweep** (50-place fixture set, harness, sequential, dev key, 2026-10-18; control = W0 Haiku 4.5 run, now named `baseline-45` on disk):
+
+| Metric | Control: Haiku 4.5, 256 | **Primary: Haiku 5.5, `low`, 1,024** | `thinking: disabled` + `low` | `medium` (first 15 only) |
+|---|---|---|---|---|
+| Null (fallback) results | 0/50 | **0/50** | 0/50 | 0/15 |
+| `max_tokens` stops | 0 | **0** | 0 | 0 |
+| `sceneType` valid before coercion | 50/50 | **50/50** | 50/50 | 15/15 |
+| Query over 8 words (pre-truncation) | 0/50 | **0/50** | 0/50 | 1/15 (9 words) |
+| Latency median / max | 897 / 1,207 ms | **863 / 1,208 ms** | 871 / 2,037 ms | 906 / 1,372 ms |
+| Output tokens median / max (thinking included) | 39 / 45 | **52 / 62** | 52 / 62 | 52 / 198 |
+| Input tokens median | 205 | 309 (+51%, new tokenizer) | 308 | 307 |
+| Cost per call, median | $0.00040 | **$0.00006** | $0.00006 | $0.00006 |
+| Run total | $0.0199 | **$0.0029** | $0.0029 | $0.0009 |
+| Thinking blocks in the response | n/a | **0/50** | 0/50 | 1/15 |
+
+**Gate (§5.3):** null rate 0 ≤ 0; 0 `max_tokens`; 50/50 valid scene types; median latency 863 ms ≤ 897 + 500; cost 7× lower — **all pass.** Blind pairwise, 20 randomly chosen places, labels shuffled with a seeded generator, key not opened until after voting: **candidate 10, control 2, no clear difference 8** (70% counting ties as half; 83% of decided pairs). Judged by one reviewer (this session's model), not the owner. The wins were mostly landmark-specific nouns (*longtail boats*, *Kaminarimon gate*, *steamer baskets*, *Moonlight Rainbow Fountain*); the two control wins were pairs where the candidate added an arbitrary season ("autumn" for Kiyomizu-dera) or an indoor/outdoor mismatch (Louvre "interior" vs the pyramid courtyard).
+
+**Choice and allowance (D-30-6).** `low` is the winner: it is at parity with `thinking: disabled` on every measure (the same 43–62 output tokens — it did not think on any of 50), so disabling thinking buys nothing and adds one more field a future model change could reject. `medium` is not chosen: it thought once in 15 (198 output tokens, a 9-word query) for no gain. Allowance 1,024 is above the 2×-observed-max rule on purpose: the largest output at any effort was 198, so 1,024 is >5×; and `max_tokens` is a ceiling, not a spend. A cut-off still returns `null`, which the Plan 10 D3 never-block path turns into `resolvedName + city`; the Plan 10 D3 behaviour is untouched.
+
+**End-to-end (Plan 10 pattern: throwaway script, temp DB, real `createStop`, live Unsplash and Nominatim; script deleted).** Five manual stops, one trip each, run twice (the model is non-deterministic, so queries differ slightly between runs). The photos were downloaded and looked at:
+
+| Stop | Query (second run) | Photo |
+|---|---|---|
+| 清水寺, experience | Kiyomizu-dera temple wooden stage Kyoto autumn | **Right**: Kiyomizu-dera's red pagoda gate, visitors in kimono |
+| Borough Market, food | Borough Market London food stalls crowd | **Right**: a stall under a "Borough Market" sign |
+| Golden Gai, explore | Golden Gai Shinjuku narrow alley bars night | **Right**: a dim Shinjuku alley, Sapporo bottle in the foreground |
+| Tapas crawl in El Born, food | tapas bar El Born Barcelona pintxos counter | **Generic**: three cocktails on a bar — the scene-type fallback, not the place |
+| Cooking class, experience | Hanoi cooking class fresh spring rolls herbs | **Generic**: the *same* cocktail photo — the fallback again |
+
+The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) only accepts a primary result if its alt text or tags contain a query token that is not the city or country; otherwise it falls back to a `food drink`-style scene search. To size it, the same 50 fixtures' queries from each model were pushed through `selectPhoto` live, three runs each (249 Unsplash calls): **fallback fired on 15 / 14 / 20 of 50 for Haiku 4.5 and 19 / 20 / 15 of 50 for Haiku 5.5.** The spread inside one model (14–20) is as large as the gap between them (means 16.3 vs 18), so there is no measurable regression — and roughly **one stop in three gets a generic scene photo on either model**.
+
+**Spend.** ≈ **$0.06** in all: three 5.5 runs at $0.0029, the two alternates $0.0038, two extra Haiku 4.5 reruns $0.040, ten end-to-end descriptors under a cent. Live smoke `LIVE_ANTHROPIC=1` (6 tests) green against Haiku 5.5, ≈ $0.03.
+
+**Evidence.** `cd backend; npm test`: 46 files, 1,025 passed, 6 skipped; the single failure in the full run was the known `collaboration.test.js` timeout under load, and it passes 14/14 alone. `claude.test.js` 127/127. The descriptor sha256 pin was re-captured deliberately (`dafd384a…78f4`) after asserting the body's structure by field first (`model`, `max_tokens: 1024`, `output_config: {effort:'low'}`, no `thinking`). The harness's `descriptor` control now equals the live profile (`assertControlIsLive` passes); the W0 Haiku 4.5 baseline is renamed `baseline-45` in `profiles.mjs` and on disk (gitignored `data/model-eval/runs/descriptor/`, so the W0 status line's `…/control/…` path is now `…/baseline-45/…`).
+
+**Unresolved limitations.**
+- **Generic-photo fallback rate (~30–38% of descriptor-path stops, both models).** Pre-existing, found here by inspecting photos; `selectPhoto`'s token gate plus a scene-type fallback is the cause, and the same fallback photo can be handed to two stops in different trips (the exclusion set is per trip). Out of Plan 30's scope; a candidate follow-up, not changed.
+- The pairwise read is a single reviewer on 20 pairs; it supports "not worse", not "better".
+- `docs/ENGINEERING.md` ("Discovery and Photos" still says descriptors use Haiku 4.5) is deliberately left for W6, which owns that edit.
+- Not deployed: nothing about production behaviour is observed yet. The Deploy A observation window (§6) is where `[photo] descriptor not usable` warnings are first watched.
+
+**Rollback (one line):** `claude.js` → `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001'`; the Haiku 4.5 row supplies `{ maxTokens: 256 }` with no `effort`, and the claude test pin for the descriptor body must be flipped back to the W0 literal `7cfb9688…2ea6`.
+
+**Steps (as written).** Run the §5.2 descriptor sweep; score; pick the profile; set `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5'` and its profile (candidate: effort `low`, 1,024); update `claude.test.js:1073`; local verification via the Plan 10 throwaway script pattern (temp DB, live Unsplash, 5 manual stops) to confirm the descriptor → Unsplash path still yields relevant photos — inspect the actual photos, not just a valid query. Record the sweep table, chosen profile, spend and unresolved limitations in this status line.
 
 **Gate.** §5.3 descriptors. **Rollback:** revert the constant (profile follows automatically).
 

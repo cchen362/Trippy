@@ -1088,7 +1088,7 @@ describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
 
     expect(result).toEqual({ photoQuery: 'steaming hotpot table Chengdu', sceneType: 'food_drink' });
     expect(mockCreate).toHaveBeenCalledOnce();
-    expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: 'claude-haiku-4-5-20251001' });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: 'claude-haiku-5-5' });
   });
 
   it('coerces an invalid sceneType to null while keeping a valid photoQuery', async () => {
@@ -1276,12 +1276,14 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
   it('generatePhotoDescriptor', async () => {
     const body = await runDescriptor();
-    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
-    expect(body.model).toBe('claude-haiku-4-5-20251001');
-    expect(body.max_tokens).toBe(256);
+    // Plan 30 W2: the one deliberate move off the W0 pin — Haiku 5.5 at effort 'low' (the sha256
+    // below was re-captured for this body; the other three pins are untouched).
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
+    expect(body.model).toBe('claude-haiku-5-5');
+    expect(body.max_tokens).toBe(1024);
+    expect(body.output_config).toEqual({ effort: 'low' });
     expect(body).not.toHaveProperty('thinking');
-    expect(body).not.toHaveProperty('output_config');
-    expect(sha256(body)).toBe('7cfb9688dddadf9a568fd6c4d06b7409b279959ced6250cde5171c91af5d2ea6');
+    expect(sha256(body)).toBe('dafd384a5df94aa2e0cad8cb52e39e02f1ae441725e25d63d8365e0324b978f4');
   });
 
   it('discoverDestination', async () => {
@@ -1365,11 +1367,14 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
   it('returns each workload\'s live model and max_tokens, model first', () => {
     expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 8192 });
     expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 8192 });
-    expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 256 });
+    expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 1024, effort: 'low' });
     expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 64000 });
-    for (const workload of ['extraction', 'copilot', 'descriptor', 'discovery']) {
+    for (const workload of ['extraction', 'copilot', 'discovery']) {
       expect(Object.keys(profileFor(workload))).toEqual(['model', 'maxTokens']);
     }
+    // Plan 30 W2: Haiku 5.5 runs adaptive thinking unless told otherwise, so its descriptor
+    // profile carries an effort; no thinking field (low effort did not think in the sweep).
+    expect(Object.keys(profileFor('descriptor'))).toEqual(['model', 'maxTokens', 'effort']);
   });
 
   it('never gives Haiku 4.5 an effort or thinking field (it rejects output_config.effort)', () => {
@@ -1385,11 +1390,17 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     }
   });
 
-  it('the live profiles feed requestSettings without adding thinking or output_config', () => {
-    for (const workload of ['extraction', 'copilot', 'descriptor', 'discovery']) {
+  it('keeps the Haiku 4.5 descriptor row, so a one-line constant revert restores a compatible body (Plan 30 W2 rollback)', () => {
+    expect(MODEL_PROFILES['claude-haiku-4-5-20251001'].descriptor).toEqual({ maxTokens: 256 });
+    expect(MODEL_PROFILES['claude-haiku-5-5'].descriptor).toEqual({ maxTokens: 1024, effort: 'low' });
+  });
+
+  it('the live profiles feed requestSettings without thinking, and with output_config only for the descriptor', () => {
+    for (const workload of ['extraction', 'copilot', 'discovery']) {
       const fields = requestSettings(profileFor(workload));
       expect(Object.keys(fields)).toEqual(['model', 'max_tokens']);
     }
+    expect(Object.keys(requestSettings(profileFor('descriptor')))).toEqual(['model', 'max_tokens', 'output_config']);
   });
 
   it('throws a clear error for an unknown workload', () => {

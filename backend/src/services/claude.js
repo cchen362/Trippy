@@ -16,7 +16,7 @@ export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 
 // errors are user-facing.
 export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
 
-export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001';
+export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5';
 
 export const COPILOT_MODEL = 'claude-sonnet-4-6';
 
@@ -37,6 +37,13 @@ export const MODEL_PROFILES = Object.freeze({
   'claude-sonnet-4-6': Object.freeze({
     extraction: Object.freeze({ maxTokens: 8192 }),
     copilot: Object.freeze({ maxTokens: 8192 }),
+  }),
+  'claude-haiku-5-5': Object.freeze({
+    // Plan 30 W2 / D-30-6: at effort 'low' no response carried a thinking block on 50/50 fixtures
+    // (output 43-62 tokens); effort 'medium' thought once in 15 (198 tokens). 1,024 is over 5x the
+    // largest output seen at any effort, and a cut-off still degrades to the Plan 10 D3 null
+    // fallback (resolvedName + city), so the allowance can never block a stop.
+    descriptor: Object.freeze({ maxTokens: 1024, effort: 'low' }),
   }),
   'claude-haiku-4-5-20251001': Object.freeze({
     descriptor: Object.freeze({ maxTokens: 256 }),
