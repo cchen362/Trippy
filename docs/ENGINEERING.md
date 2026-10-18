@@ -63,6 +63,9 @@ Never swallow errors silently. `console.error` at minimum; throw where appropria
 **SQLite discipline.**
 Always use parameterised queries (never string interpolation). Run migrations in order. Never modify existing migration files — add new ones.
 
+**No meeting in the middle. (Owner ruling 2026-10-19, set during Plan 30 Q-30-3.)**
+When a change — a model upgrade, a dependency bump, a fix, a feature — can be made either by the smallest, safest edit or by the sound one, do the sound one. If the sound one needs architecture, protocol or prompt work, or a product ruling, do that work and ask for that ruling instead of routing around the cause. "Smallest change" is a tie-breaker between equally sound options, never a reason to accept a compromise, and "it passed the gate" is not a reason either when the gate was met by narrowing what the product does. Signs you are meeting in the middle: turning a capability off to preserve a display artefact; forwarding one channel's output as if it were another's; accepting a measured regression because the rest passed; a fix that holds only for the current model, provider version or client; a prompt rewritten to coax an old behaviour out of a new model when the surrounding contract was the real problem. The case that set this rule: Sonnet 5.5 hid the co-pilot's pre-proposal explanation inside a thinking block; the measured workaround (thinking off, forward the API's summary line as the reply) was rejected for a turn-protocol change that makes the explanation the model's final text — one more model step per proposal, and correct on every model.
+
 ---
 
 ## Current Architecture
