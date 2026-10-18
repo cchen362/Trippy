@@ -1,6 +1,6 @@
 # Implementation Plan 30 — Sonnet 5.5 / Haiku 5.5 Migration
 
-**Status:** 2026-10-18 — **APPROVED by the owner (plain approval, defaults of Q-30-1 … Q-30-5 apply until answered). W0 may start; nothing implemented, nothing deployed.** Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
+**Status:** 2026-10-19 — **Deploy A is LIVE at `a12f473` (W1, D-30-8 with migration 036, W2, W3, Plan 31 W1); owner production QA passed 2026-10-18. Rollout revised by owner ruling 2026-10-19: no calendar observation windows (§7). Next: W4 → W5 → Plan 32 → Deploy B.** Previously: approved 2026-10-18 (defaults of Q-30-1 … Q-30-5 applied; Q-30-5 superseded, see §7). Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
 
 **Origin.** The owner wants Sonnet 4.6 → Sonnet 5.5 (extraction, co-pilot) and Haiku 4.5 → Haiku 5.5 (discovery, photo descriptors). The companion [opportunity exploration brief](../reviews/2026-10-18-model-55-opportunity-exploration-brief.md) is a separate product-discovery track and is **not** an input to this plan: no new tool, capability, or product behaviour rides on this migration.
 
@@ -96,7 +96,7 @@ Code facts are from this checkout; provider facts are from the official pages na
 - **Q-30-2 — Bump the SDK in W1?** **Default: yes**, gated and revertable (D-30-2).
 - **Q-30-3 — If E-COP-1 shows the pre-proposal explanation vanishing, which remedy?** (a) `display: "updates"` (beta header) and forward non-empty progress-update text to the panel as a visibly *different* line (it is a model-written summary, not the prose); (b) `between_tools` at `medium` — same summary text, no beta header, no up-front thinking; (c) a protocol change so the model's explanation is written *after* the tool call (a Plan 11 contract change — out of this plan). **Default: decide at the W5 gate from the measurement; do not pre-commit.**
 - **Q-30-4 — Extraction fixtures.** Real confirmations are the only honest corpus. **Default:** the owner supplies 15–25 redacted real inputs (screenshots, PDFs, pasted emails) into the gitignored private fixtures directory; the plan adds 10–15 synthetic hard cases (DD/MM ambiguity, missing year, overnight flights, multi-leg, CJK local names, non-travel input) that are committed. Fewer real inputs lowers the confidence of the W4 gate; it does not change the method.
-- **Q-30-5 — Deploy grouping.** **Default: two deploys** (Haiku after W3, Sonnet after W5), each followed by its own observation window.
+- **Q-30-5 — Deploy grouping.** **Default: two deploys** (Haiku after W3, Sonnet after W5). *Superseded 2026-10-19 by owner ruling:* two deploys stand, but each is followed by the owner's same-day production pass (Appendix A step 4) instead of a calendar observation window — see §7.
 
 ---
 
@@ -367,7 +367,7 @@ The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) 
 - **Generic-photo fallback rate (~30–38% of descriptor-path stops, both models).** Pre-existing, found here by inspecting photos; `selectPhoto`'s token gate plus a scene-type fallback is the cause, and the same fallback photo can be handed to two stops in different trips (the exclusion set is per trip). Out of Plan 30's scope; a candidate follow-up, not changed.
 - The pairwise read is a single reviewer on 20 pairs; it supports "not worse", not "better".
 - `docs/ENGINEERING.md` ("Discovery and Photos" still says descriptors use Haiku 4.5) is deliberately left for W6, which owns that edit.
-- Not deployed: nothing about production behaviour is observed yet. The Deploy A observation window (§6) is where `[photo] descriptor not usable` warnings are first watched.
+- Deployed in Deploy A (2026-10-18). `[photo] descriptor not usable` warnings remain a standing log check; there is no calendar observation window (owner ruling 2026-10-19, §7).
 
 **Rollback (one line):** `claude.js` → `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-4-5-20251001'`; the Haiku 4.5 row supplies `{ maxTokens: 256 }` with no `effort`, and the claude test pin for the descriptor body must be flipped back to the W0 literal `7cfb9688…2ea6`.
 
@@ -617,7 +617,7 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
   - No discovery file changed in Deploy A (`f2383de..a12f473`).
   - Being investigated in its own session: the double request, probably the `TripPage` pre-warm and the panel sending different cache keys, plus the missing server-side single-flight. That session produces findings first; nothing is fixed here.
 - **"Show more" yield:** 90 generated, 50 new; the other 40 (44%) repeated stored names, which `insertPlaces` drops. That is above the 31% exclusion-repeat rate W3 measured for this profile. It is one data point, against a 156-name exclusion list, so watch it over the observation window.
-- **Observation window:** 7 days from 2026-10-18, to 2026-10-25. Watch descriptor `null` warnings and the discovery stop reasons.
+- **Observation:** no calendar window (owner ruling 2026-10-19, §7). The owner's production pass passed the same day; descriptor `null` warnings and discovery stop reasons stay as standing log checks, read at Deploy B and on request.
 
 ### W4 — Extraction → Sonnet 5.5
 
@@ -635,7 +635,7 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 
 **Gate.** §5.3 co-pilot. **Rollback:** revert the constant; the W1 keep-alive and notices stay (they are correct on 4.6 too).
 
-**Deploy B (default):** after W5 — `/deploy`; post-deploy proof as above plus the owner's Appendix A §B pass. Observation window: 14 days; watch `copilot_turn_metrics` (TTFD, stop reasons, truncation count, output tokens) weekly against the W0 baseline, and the import error log for `refusal`/`max_tokens` messages.
+**Deploy B (default):** after W5 — `/deploy`; post-deploy proof as above plus the owner's Appendix A §B pass. No calendar observation window (owner ruling 2026-10-19, §7); the owner's same-day production pass is the gate, and as standing log checks watch `copilot_turn_metrics` (TTFD, stop reasons, truncation count, output tokens) weekly against the W0 baseline, and the import error log for `refusal`/`max_tokens` messages.
 
 ### W6 — Close-out
 
@@ -647,9 +647,11 @@ Update `docs/ENGINEERING.md` ("Discovery and Photos" bullet naming the models; a
 
 ## 7. Rollout, observation, rollback — summary
 
-- **Order:** W1 (hardening) → Deploy A? (optional, recommended) → W2, W3 → **Deploy A** → observe 7 d → W4, W5 → **Deploy B** → observe 14 d → W6.
+- **Order (revised by owner ruling 2026-10-19):** W1 → W2 → W3 → **Deploy A** (done 2026-10-18 at `a12f473`, owner pass passed) → W4 → W5 → **Plan 32 M1, M2** → **Deploy B** (carries migration 037 after 036) → W6. No waiting between waves.
+- **No calendar observation windows (owner ruling 2026-10-19).** Production volume is too low for a 7- or 14-day window to observe anything (F-30-15, W0 production baseline: 8 co-pilot turns ever, one discovery generation a month, no extraction in a month). The gate after each deploy is the owner's deliberate 20-minute pass through the public host on a phone (Appendix A step 4: one real screenshot import, one co-pilot turn with a catalogue search, one "show more" on a heavily browsed destination, one manual stop), plus the orchestrator's same-day read of the container log. The per-workload rollback triggers below stay in force permanently as standing log checks, not as gates.
+- **Plan 32 (remove a stopped exchange) sits after W5, before Deploy B.** It edits the same co-pilot files W5 evaluates (`claude.js`, `routes/copilot.js`, `useCopilot.js`, `CopilotPanel.jsx`) and adds a `turn` SSE event to every stream, so it must not change the co-pilot while W5 measures it, and it cannot run in this checkout alongside any wave (every wave touches `claude.js`). If W5 stalls on an owner decision (Q-30-3), Plan 32 may use that idle time.
 - **Rollback unit = one workload constant.** Because profiles are keyed by model (D-30-1), a revert never sends `effort` to Haiku 4.5 or `between_tools` to Sonnet 4.6. Rollback = one-line commit + `/deploy` (standard backup ritual; no migration, so no schema rollback). Q-30-1 offers the env-var alternative.
-- **Rollback triggers (per workload, during observation):** descriptors — null-warning rate above the W0 baseline over any 24 h; discovery — any generation ending `max_tokens`/`refusal`, or <8 categories on a destination that reached 8 on control; extraction — any owner-observed critical error, or a `refusal`/`max_tokens` failure on a legitimate input; co-pilot — TTFD max > 10 s, any 524 through the public host, any silent turn, truncation rate > 0, grounding violation observed.
+- **Rollback triggers (per workload, standing log checks):** descriptors — null-warning rate above the W0 baseline over any 24 h; discovery — any generation ending `max_tokens`/`refusal`, or <8 categories on a destination that reached 8 on control; extraction — any owner-observed critical error, or a `refusal`/`max_tokens` failure on a legitimate input; co-pilot — TTFD max > 10 s, any 524 through the public host, any silent turn, truncation rate > 0, grounding violation observed.
 - **Time-bound external risk:** if Anthropic announces Haiku 4.5's deprecation, the Haiku rollback window closes at the retirement date; W2/W3 should not wait on W4/W5 (D-30-5).
 - **Provenance:** `copilot_turn_metrics.model` and `import_artifacts`' stored model string record whichever model actually ran; nothing rewrites history.
 
@@ -676,7 +678,7 @@ Update `docs/ENGINEERING.md` ("Discovery and Photos" bullet naming the models; a
 | W4 extraction (labelling dominates) | 4–6 h |
 | W5 co-pilot (E-COP-1 may add a remedy cycle) | 4–7 h |
 | W6 docs + decisions | 1–2 h |
-| **Total** | **26–38 h** (calendar: longer — two observation windows of 7 and 14 days) |
+| **Total** | **26–38 h** (calendar: a few days; no observation windows per the 2026-10-19 ruling) |
 
 The assessment's 19–31 h did not include a reusable harness or the W1 never-silent work; both are deliberate additions here because the first (keep-alive) is a production-correctness requirement and the second (harness) is what makes every later model change cheap.
 
