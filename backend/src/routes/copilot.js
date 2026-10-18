@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
 import { getTripDetail } from '../services/trips.js';
+import { removeStoppedExchange } from '../services/copilotMessages.js';
 import { streamCopilotResponse } from '../services/claude.js';
 import { copilotTripContext } from '../services/copilotTools.js';
 import { searchDiscoveryCatalogue } from '../services/copilotGrounding.js';
@@ -124,9 +125,9 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT id, role, content, context_json, notice, created_at, author_name FROM (
+      SELECT id, role, content, context_json, notice, created_at, user_id, author_name FROM (
         SELECT cm.id, cm.role, cm.content, cm.context_json, cm.notice, cm.created_at,
-          cm.rowid AS seq, u.display_name AS author_name
+          cm.user_id, cm.rowid AS seq, u.display_name AS author_name
         FROM copilot_messages cm
         LEFT JOIN users u ON u.id = cm.user_id
         WHERE cm.trip_id = ?
@@ -143,6 +144,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         context: parseStoredContext(r.context_json),
         notice: r.notice ?? null,
         createdAt: r.created_at,
+        userId: r.user_id ?? null,
         authorName: r.author_name,
       })),
       // Wave 2: expose recent proposals so the panel can restore a pending preview and render
@@ -163,6 +165,22 @@ router.delete('/:tripId/copilot/history', requireTripAccess, (req, res, next) =>
     const db = getDb();
     const info = db.prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(req.params.tripId);
     res.json({ ok: true, deleted: info.changes });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /trips/:tripId/copilot/exchanges/:messageId — removes one stopped exchange (Plan 32).
+// D-32-3 (Plan 32): the author or the trip owner may remove; Plan 11 D8 (owner-only Clear) is unchanged.
+router.delete('/:tripId/copilot/exchanges/:messageId', requireTripAccess, (req, res, next) => {
+  try {
+    const result = removeStoppedExchange({
+      tripId: req.params.tripId,
+      userId: req.user.id,
+      isOwner: req.trip.owner_id === req.user.id,
+      messageId: req.params.messageId,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -223,13 +241,15 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
   // linked to that message. Returns the proposal SSE payload, or null when there is nothing to
   // propose. The row is inserted only while the question row it answers still exists: Stop
   // followed by Clear conversation (or a clear mid-turn) must not leave an answer with no question.
+  // The same guard keeps a removed stopped exchange removed (Plan 32 F-32-2), and reply_to
+  // records which question the row answers (D-32-4, Plan 32).
   const persistTurn = async ({ assistantText, operations, notice }) => {
     const msg = db.prepare(`
-      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, notice, created_at)
-      SELECT lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, ?, datetime('now')
+      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, notice, reply_to, created_at)
+      SELECT lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, ?, ?, datetime('now')
       WHERE EXISTS (SELECT 1 FROM copilot_messages WHERE id = ?)
       RETURNING id
-    `).get(tripId, assistantText || '', notice ?? null, userMessage.id);
+    `).get(tripId, assistantText || '', notice ?? null, userMessage.id, userMessage.id);
     if (!msg || !operations) return null;
     const messageId = msg.id;
 
@@ -272,7 +292,7 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
 
   // Stream response — SSE headers are set inside streamCopilotResponse. Errors during
   // streaming (and inside persistTurn) are handled there; nothing to persist afterwards.
-  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn, toolExecutors, reportTurnMetrics);
+  await streamCopilotResponse(conversationMessages, copilotTripContext(tripDetail), res, req, persistTurn, toolExecutors, reportTurnMetrics, { messageId: userMessage.id });
 });
 
 // POST /trips/:tripId/copilot/apply — applies a persisted proposal by id (never raw ops)

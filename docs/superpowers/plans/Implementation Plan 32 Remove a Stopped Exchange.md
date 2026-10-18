@@ -1,6 +1,6 @@
 # Implementation Plan 32 — Remove a Stopped Exchange
 
-**Status:** 2026-10-18 — **APPROVED by the owner (R1–R3 below). Nothing implemented, nothing deployed.** Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
+**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below). M1 COMPLETE (backend; migration 037 applied in dev only). M2 pending. Nothing deployed.** Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
 
 ## Bottom line, in plain language
 
@@ -41,6 +41,60 @@ Cross-checked against meet-edweird Plan 042 "Remove a message" (shipped 2026-10-
 ## Milestones
 
 ### M1 — The removal (backend)
+
+**M1 status:** 2026-10-19 — **COMPLETE, not deployed** (branch `plan32-m1-remove-exchange`). Migration **037** (`copilot_messages.reply_to`) is applied in dev only. Production stays at 036 until Plan 30 Deploy B.
+- **Legacy check (step 1), dev:** run before any code, on a `.backup()` copy of `backend/data/trippy.db`. It found 44 messages and **4 stopped rows: 4 pass, 0 fail**. No owner stop was needed.
+- **Built:**
+  - `removeStoppedExchange` in `backend/src/services/copilotMessages.js` (D-32-1, D-32-4 and D-32-6 markers).
+  - `DELETE /trips/:tripId/copilot/exchanges/:messageId` (D-32-3).
+  - `persistTurn` writes `reply_to`.
+  - `streamCopilotResponse` takes a new `turnInfo` argument, placed before `profile`; the eval harness passes `null`. It writes `{type:'turn', messageId}` right after `flushHeaders()` (D-32-2).
+  - `/history` rows carry `userId`.
+- **Two corrections to the plan text below:**
+  - (a) "Already removed" returns **404**, not 409. Once a question is removed, the server cannot tell its id from an unknown one. The 404 uses the same sentence: "This conversation changed — reload and try again."
+  - (b) The D-32-4 legacy fallback pairs a question only with an assistant row whose `reply_to IS NULL`. Without that filter, a new question still waiting for its reply could be paired with another person's later reply, and its removal would be refused wrongly.
+- **Tests:** backend 1,099 passed, 6 skipped (45 files). New cases: 14 route/service cases in `copilot.test.js` and 2 `turn`-event cases in `claude.test.js`. The golden request-body hashes are unchanged.
+- **Live check (orchestrator):** on the dev server, verify trip `05b3c18d…`, real Sonnet 5.5. Three questions were asked and cut off with curl. Each stream's first event was `turn`, and each stopped row carried the right `reply_to`. Remove results:
+  - the collaborator removing the owner's exchange → 403;
+  - an assistant-row id → 404;
+  - the owner removing the collaborator's exchange → 200 `{removed:2}`;
+  - the collaborator removing their own → 200;
+  - the owner removing their own → 200, then the same request again → 404;
+  - a finished exchange → 409.
+
+  Afterwards no QA rows were left. The next turn logged `stream opened messages=34` (33 rows plus the new question), and the model recalled the question from before the QA turns, not the removed ones.
+- **Production legacy check, for the owner at Deploy B.** Run it on the server against the pre-deploy backup, before 037 is applied. Save the SQL below as `plan32-legacy-check.sql`, then run `sqlite3 ~/Trippy/backups/<pre-deploy-backup>.db < plan32-legacy-check.sql` (the host `sqlite3` CLI; the container has none). Every row must read `ok`; any `FAIL` row means stop and report before deploying. No rows at all means production has no stopped replies yet, which also passes. The SQL only reads, and it works on the pre-037 schema.
+
+```sql
+-- Plan 32 D-32-4 legacy-pairing check (read-only). Every stopped reply must pair with the
+-- nearest earlier question in its trip, with no other reply between them.
+WITH stopped AS (
+  SELECT a.rowid AS a_seq, a.id AS a_id, a.trip_id, a.created_at AS a_at
+  FROM copilot_messages a
+  WHERE a.role = 'assistant' AND a.notice = 'stopped'
+),
+paired AS (
+  SELECT s.*,
+    (SELECT u.rowid FROM copilot_messages u
+      WHERE u.trip_id = s.trip_id AND u.role = 'user'
+        AND (u.created_at < s.a_at OR (u.created_at = s.a_at AND u.rowid < s.a_seq))
+      ORDER BY u.created_at DESC, u.rowid DESC LIMIT 1) AS u_seq
+  FROM stopped s
+)
+SELECT p.a_id AS stopped_reply_id, p.trip_id, p.a_at AS stopped_at,
+  CASE
+    WHEN p.u_seq IS NULL THEN 'FAIL: no earlier question'
+    WHEN EXISTS (
+      SELECT 1 FROM copilot_messages x JOIN copilot_messages u ON u.rowid = p.u_seq
+      WHERE x.trip_id = p.trip_id AND x.role = 'assistant' AND x.rowid <> p.a_seq
+        AND (x.created_at > u.created_at OR (x.created_at = u.created_at AND x.rowid > u.rowid))
+        AND (x.created_at < p.a_at OR (x.created_at = p.a_at AND x.rowid < p.a_seq))
+    ) THEN 'FAIL: another reply in between'
+    ELSE 'ok'
+  END AS verdict
+FROM paired p
+ORDER BY p.a_at;
+```
 
 1. **Legacy check (read-only, first).** A throwaway script against a **copy** of the dev DB (the `initDb(copy)` pattern from Plan 30 W0). For every stopped row, confirm that the nearest preceding user row has no other assistant row between them, and report any row that fails. If any row fails, stop and report to the owner before step 3.
 2. **Migration 037** `backend/src/db/migrations/037_copilot_message_reply_to.sql`: `ALTER TABLE copilot_messages ADD COLUMN reply_to TEXT;`. It is additive, has no backfill, and changes no existing migration. Update `docs/ENGINEERING.md`'s "next migration" line to 038.

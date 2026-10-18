@@ -5,7 +5,7 @@
 //
 // Runs the 20 scenarios in fixtures/copilot/scenarios.json through the real
 // streamCopilotResponse(conversation, itineraryContext, res, req, persistTurn, toolExecutors,
-// reportTurnMetrics, profile) with the real tool executors, against two synthetic trips seeded into
+// reportTurnMetrics, turnInfo, profile) with the real tool executors, against two synthetic trips seeded into
 // a backup-API COPY of the dev DB. `res` is a recording fake (every SSE write is stored with a
 // timestamp), persistTurn is NOT passed (so the service emits the operations-only proposal event and
 // nothing is persisted), and reportTurnMetrics only captures the summary.
@@ -373,7 +373,7 @@ async function runScenario(scenario, { profile, profileName, seeded, userId }) {
     res = new RecordingResponse({ turnStart: Date.now(), abortAfterFirstText: Boolean(scenario.abortAfterFirstText) });
     const req = new EventEmitter();
     fullText = await streamCopilotResponse(
-      conversation, itineraryContext, res, req, undefined, toolExecutors, reportTurnMetrics, toServiceProfile(profile),
+      conversation, itineraryContext, res, req, undefined, toolExecutors, reportTurnMetrics, null, toServiceProfile(profile),
     );
     return fullText;
   });
