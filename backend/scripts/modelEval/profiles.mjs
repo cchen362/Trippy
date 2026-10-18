@@ -55,7 +55,11 @@ export const PROFILES = {
     '45-aim30-exit': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'aim30-exit' },
   },
   extraction: {
-    control: { model: SONNET_46, maxTokens: 8192 },
+    // W4 flipped EXTRACTION_MODEL: control is now Sonnet 5.5 at effort medium (identical to the
+    // measured primary). 'baseline-46' is the W0/W4 Sonnet 4.6 control under its new name — the run
+    // files under runs/extraction/baseline-46/ — runnable for a re-measure, never asserted live.
+    control: { model: SONNET_55, maxTokens: 16000, effort: 'medium' },
+    'baseline-46': { model: SONNET_46, maxTokens: 8192 },
     primary: { model: SONNET_55, maxTokens: 16000, effort: 'medium' },
     'alt-low': { model: SONNET_55, maxTokens: 16000, effort: 'low' },
     // §5.2: effort `high` only on the fixtures tagged "hard".
