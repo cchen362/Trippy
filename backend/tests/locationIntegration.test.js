@@ -15,6 +15,15 @@ import * as unsplashService from '../src/services/unsplash.js';
 import * as claudeService from '../src/services/claude.js';
 import * as lookupsService from '../src/services/lookups.js';
 
+// The photo-selection tests mock fetch but still pass through unsplash.js's
+// "key not configured" guard, so they need a key in config. Pin a test-only one
+// rather than reading the machine's .env: the file must behave the same in a fresh
+// worktree with no .env as on a machine that has the real key.
+vi.mock('../src/config.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { config: { ...actual.config, unsplashAccessKey: 'test-unsplash-key' } };
+});
+
 let tmpDir;
 let user;
 let trip;
@@ -811,6 +820,13 @@ describe('per-day geography (Plan 6 Wave 2)', () => {
 });
 
 describe('booking-linked itinerary stops', () => {
+  // These tests are about visibility and linking, not photos. Without this stub the
+  // booking-created stop asks Unsplash for a photo over the real network whenever a
+  // key is configured.
+  beforeEach(() => {
+    vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
+  });
+
   it('defaults booking itinerary visibility by type', async () => {
     const hotel = await createBooking(user.id, trip.trip.id, {
       type: 'hotel',
