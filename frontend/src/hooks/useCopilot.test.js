@@ -55,6 +55,23 @@ describe('useCopilot context channel', () => {
   });
 });
 
+describe('useCopilot history normalisation (D-30-8)', () => {
+  it('carries the server notice on history rows and defaults a missing one to null', async () => {
+    copilotApi.history.mockResolvedValue({
+      messages: [
+        { id: 'h1', role: 'assistant', content: 'Partial', createdAt: '2026-01-01', notice: 'stopped' },
+        { id: 'h2', role: 'assistant', content: 'Whole', createdAt: '2026-01-01' },
+      ],
+      proposals: [],
+    });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+
+    expect(result.current.messages[0].notice).toBe('stopped');
+    expect(result.current.messages[1].notice).toBeNull();
+  });
+});
+
 describe('useCopilot truncation notice (Plan 15 Wave 1)', () => {
   it('attaches notice: "truncated" to the assistant message when a notice event arrives', async () => {
     copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
@@ -158,5 +175,146 @@ describe('useCopilot truncation notice (Plan 15 Wave 1)', () => {
 
     const assistantMsg = result.current.messages.find((m) => m.role === 'assistant');
     expect(assistantMsg).toMatchObject({ content: 'Hello', notice: null });
+  });
+});
+
+// Stop is simulated the way the real client sees it: copilotApi.send rejects with an
+// AbortError once the signal fires. cancel() is what the Stop button calls.
+describe('useCopilot Stop and mid-turn error (D-30-8)', () => {
+  function abortError() {
+    const err = new Error('The operation was aborted.');
+    err.name = 'AbortError';
+    return err;
+  }
+
+  // Streams the given chunks, then stays pending until the hook aborts, then rejects.
+  function sendThatWaitsForStop(chunks) {
+    copilotApi.send.mockImplementation((_tripId, _text, _context, onChunk, signal) => new Promise((_resolve, reject) => {
+      chunks.forEach(onChunk);
+      signal.addEventListener('abort', () => reject(abortError()));
+    }));
+  }
+
+  async function sendThenStop(result, chunks) {
+    sendThatWaitsForStop(chunks);
+    let pending;
+    act(() => {
+      pending = result.current.send('hello');
+    });
+    await waitFor(() => expect(copilotApi.send).toHaveBeenCalled());
+    act(() => {
+      result.current.cancel();
+    });
+    await act(async () => {
+      await pending;
+    });
+  }
+
+  it('keeps the partial text as one row labelled "stopped"', async () => {
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    await sendThenStop(result, [{ type: 'text', content: 'Half an ans' }]);
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: 'Half an ans', notice: 'stopped' });
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('appends a notice-only "stopped" row when Stop lands before any text', async () => {
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    await sendThenStop(result, []);
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: '', notice: 'stopped' });
+  });
+
+  it('saves the turn normally, not as "stopped", when Stop lands after the proposal event', async () => {
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    await sendThenStop(result, [
+      { type: 'text', content: 'Here is a change' },
+      { type: 'proposal', proposalId: 'p1', operations: [{ op: 'move' }], warnings: [], status: 'pending' },
+    ]);
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: 'Here is a change', notice: null });
+    expect(result.current.proposals).toHaveLength(1);
+    expect(result.current.proposals[0]).toMatchObject({ id: 'p1', messageId: assistantMsgs[0].id });
+  });
+
+  it('leaves no stray row when Stop is followed by clear', async () => {
+    copilotApi.clear.mockResolvedValue({});
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    sendThatWaitsForStop([{ type: 'text', content: 'Half' }]);
+    let pending;
+    act(() => {
+      pending = result.current.send('hello');
+    });
+    await waitFor(() => expect(copilotApi.send).toHaveBeenCalled());
+    await act(async () => {
+      await result.current.clear();
+      await pending;
+    });
+
+    expect(result.current.messages).toEqual([]);
+  });
+
+  it('keeps partial text as one row labelled "interrupted" when the stream errors', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'text', content: 'Partway' });
+      onChunk({ type: 'error', message: 'Provider fell over' });
+      onChunk({ type: 'done' });
+    });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('hello');
+    });
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: 'Partway', notice: 'interrupted' });
+    expect(result.current.error).toBeInstanceOf(Error);
+  });
+
+  it('appends a notice-only "interrupted" row when the stream errors before any text', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'error', message: 'Provider fell over' });
+      onChunk({ type: 'done' });
+    });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('hello');
+    });
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: '', notice: 'interrupted' });
+  });
+
+  it('does not trust an SSE notice event claiming "stopped"', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'text', content: 'Fine' });
+      onChunk({ type: 'notice', notice: 'stopped' });
+      onChunk({ type: 'done' });
+    });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('hello');
+    });
+
+    expect(result.current.messages.find((m) => m.role === 'assistant')).toMatchObject({ content: 'Fine', notice: null });
   });
 });

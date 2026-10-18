@@ -660,13 +660,16 @@ const QUERY_TOOL_CAP = 5;
 // (routes/discovery.js). The frontend parser ignores event types it does not know.
 export const COPILOT_PING_INTERVAL_MS = 8000;
 
-// persistTurn (optional): async callback the route owns. Called once after the model turn
-// completes with { assistantText, operations } — where operations is the tool_use payload or
-// null. It persists the assistant message + (when operations exist) the proposal record, and
-// returns the enriched proposal SSE payload ({ proposalId, operations, warnings, status,
-// statusReason }) or null. Keeping persistence in the route (not here) is why claude.js stays
-// DB-free; when persistTurn is absent (unit tests) the Wave 1 { operations }-only event is
-// emitted so the protocol still round-trips.
+// persistTurn (optional): async callback the route owns. Called exactly once per turn, whichever
+// way it ends, with { assistantText, operations, notice } — operations is the tool_use payload or
+// null, and notice is why the turn ended short of a normal reply: 'stopped' (the traveller
+// pressed Stop), 'interrupted' (a provider error), 'truncated', 'refused', 'empty', or null.
+// It persists the assistant message (always one row, D-30-8) + (when operations exist) the
+// proposal record, and returns the enriched proposal SSE payload ({ proposalId, operations,
+// warnings, status, statusReason }) or null. A stopped or errored turn never passes operations,
+// so a half-streamed propose_itinerary_changes can never become a proposal. Keeping persistence
+// in the route (not here) is why claude.js stays DB-free; when persistTurn is absent (unit tests)
+// the Wave 1 { operations }-only event is emitted so the protocol still round-trips.
 //
 // toolExecutors (optional, Plan 12 Wave 1): { [toolName]: async (input) => resultObject },
 // injected by the route the same way as persistTurn — this file stays DB-free, the route owns
@@ -800,12 +803,29 @@ Stops carry one of four kinds of timing. Respect them:
     }
   };
 
+  // D-30-8 (Plan 30): every turn ends in exactly one persisted assistant row, so the question the
+  // route already saved is never left without an answer. The flag keeps a late throw in the
+  // success path's tail from writing a second row via the error path.
+  let turnPersisted = false;
+  const persistEndedTurn = async (turn) => {
+    if (!persistTurn || turnPersisted) return null;
+    turnPersisted = true;
+    try {
+      return (await persistTurn({ assistantText: fullText, ...turn })) || null;
+    } catch (err) {
+      console.error('[copilot] persistTurn failed:', err);
+      return null;
+    }
+  };
+
   // A client that drops mid-turn is not an error (D-30-4): record the tokens already spent under
   // stop_reason 'client_abort' with error = 0 (stop_reason is free text, so no migration), log one
   // plain line, and write nothing more to a dead socket. The aborted iteration's partial usage is
-  // folded in by the caller before this runs.
+  // folded in by the caller before this runs. The partial text is saved as a 'stopped' row, never
+  // with operations (D-30-8) — the DB write is not socket I/O, so a dead socket does not skip it.
   const recordClientAbort = async () => {
     streamDone = true;
+    await persistEndedTurn({ operations: null, notice: 'stopped' });
     console.log('[copilot] client aborted turn iterations=%d input=%d output=%d',
       iterations, totalUsage.input_tokens, totalUsage.output_tokens);
     await recordMetrics({ stopReason: 'client_abort', proposalOps: 0, error: 0 });
@@ -850,8 +870,9 @@ Stops carry one of four kinds of timing. Respect them:
       currentStream = null;
 
       // The client dropped the connection but the SDK resolved anyway (abort() is
-      // best-effort) — end quietly, no persistTurn/proposal/done writes (write() is already a
-      // no-op on a destroyed res, but skip the DB work too). The spent tokens still count.
+      // best-effort) — end quietly: no proposal/done writes (write() is already a no-op on a
+      // destroyed res) and no proposal even if the reply completed, but the partial text is still
+      // saved as a 'stopped' row (D-30-8) and the spent tokens still count.
       addUsage(finalMessage?.usage);
       if (aborted) {
         await recordClientAbort();
@@ -961,13 +982,15 @@ Stops carry one of four kinds of timing. Respect them:
 
     let proposalPayload = null;
     if (persistTurn) {
-      try {
-        // persistTurn always runs (it also saves the assistant message); it returns the
-        // proposal SSE payload only when a proposal was created, else null.
-        proposalPayload = (await persistTurn({ assistantText: fullText, operations })) || null;
-      } catch (err) {
-        console.error('[copilot] persistTurn failed:', err);
-      }
+      // persistTurn always runs (it also saves the assistant message); it returns the
+      // proposal SSE payload only when a proposal was created, else null. The stored notice is
+      // decided from this pre-persist state; the SSE 'empty' notice below keys off proposalPayload
+      // instead, so D-30-4 (a turn is never silent) is untouched.
+      let notice = null;
+      if (truncated) notice = 'truncated';
+      else if (refused) notice = 'refused';
+      else if (!fullText && !operations) notice = 'empty';
+      proposalPayload = await persistEndedTurn({ operations, notice });
     } else if (operations) {
       // No route callback (unit tests): fall back to the Wave 1 operations-only event.
       proposalPayload = { operations };
@@ -1011,6 +1034,8 @@ Stops carry one of four kinds of timing. Respect them:
       return fullText;
     }
     console.error('[copilot] stream error:', err);
+    // D-30-8 (Plan 30): the partial reply is kept, labelled 'interrupted', and never a proposal.
+    await persistEndedTurn({ operations: null, notice: 'interrupted' });
     write({ type: 'error', message: err.message });
     await recordMetrics({ stopReason: lastStopReason, proposalOps: 0, error: 1 });
     write({ type: 'done' });

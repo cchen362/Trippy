@@ -831,7 +831,7 @@ describe('streamCopilotResponse — agentic tool loop (Plan 12 Wave 1)', () => {
     const returned = await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, persistTurn);
 
     expect(returned).toBe('hi');
-    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'hi', operations: null });
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'hi', operations: null, notice: null });
     const events = parseEvents(res);
     expect(events[events.length - 1].type).toBe('done');
   });
@@ -861,7 +861,7 @@ describe('streamCopilotResponse — max_tokens truncation (Plan 15 Wave 1)', () 
     const events = parseEvents(res);
     expect(events.find((e) => e.type === 'notice' && e.notice === 'truncated')).toBeDefined();
     expect(events.find((e) => e.type === 'proposal')).toBeUndefined();
-    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'some partial prose chunk', operations: null });
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'some partial prose chunk', operations: null, notice: 'truncated' });
     expect(returned).toBe('some partial prose chunk');
   });
 
@@ -887,7 +887,7 @@ describe('streamCopilotResponse — max_tokens truncation (Plan 15 Wave 1)', () 
     const events = parseEvents(res);
     expect(events.find((e) => e.type === 'notice' && e.notice === 'truncated')).toBeDefined();
     expect(events.find((e) => e.type === 'proposal')).toBeUndefined();
-    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Sure.', operations: null });
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Sure.', operations: null, notice: 'truncated' });
   });
 
   it('a normal end_turn reply does not emit a notice event', async () => {
@@ -1720,7 +1720,7 @@ describe('streamCopilotResponse — thinking blocks and stop reasons (D-30-3, D-
     expect(noticesOf(res)).toEqual([{ type: 'notice', notice: 'refused' }]);
     expect(typesOf(res)).not.toContain('proposal');
     expect(typesOf(res).at(-1)).toBe('done');
-    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null });
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null, notice: 'refused' });
     warnSpy.mockRestore();
   });
 
@@ -1944,7 +1944,9 @@ describe('streamCopilotResponse — client abort is not an error (D-30-4)', () =
     });
     expect(errorSpy).not.toHaveBeenCalled();
     expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[copilot] client aborted turn'))).toBe(true);
-    expect(persistTurn).not.toHaveBeenCalled();
+    // D-30-8: the stopped turn is still saved (here with no text yet), never with operations.
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null, notice: 'stopped' });
     expect(parseEvents(res).filter((e) => e.type === 'error' || e.type === 'done')).toEqual([]);
     errorSpy.mockRestore();
     logSpy.mockRestore();
@@ -2033,5 +2035,204 @@ describe('streamCopilotResponse — client abort is not an error (D-30-4)', () =
     expect(reportTurnMetrics.mock.calls[0][0].stopReason).not.toBe('client_abort');
     expect(parseEvents(res).find((e) => e.type === 'error')).toEqual({ type: 'error', message: 'upstream 529' });
     errorSpy.mockRestore();
+  });
+});
+
+describe('streamCopilotResponse — every turn persists one assistant row (D-30-8)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+  });
+
+  const noticesOf = (res) => parseEvents(res).filter((e) => e.type === 'notice');
+  const proposeContent = [
+    { type: 'text', text: 'Sure.' },
+    { type: 'tool_use', id: 'tu_p', name: 'propose_itinerary_changes', input: { operations: [{ action: 'remove_stop', stopId: 's1' }] } },
+  ];
+
+  // Streams `chunks` through the text listener, then runs `end()` — the point where the turn
+  // stops being a normal one. Mirrors the real SDK: abort makes finalMessage() reject.
+  function makeStreamThen(chunks, end) {
+    let onText = null;
+    const stream = {
+      on(event, cb) { if (event === 'text') onText = cb; return stream; },
+      abort() {},
+      currentMessage: { usage: { input_tokens: 5, output_tokens: 2 } },
+      async finalMessage() {
+        for (const chunk of chunks) onText?.(chunk);
+        return end();
+      },
+    };
+    return stream;
+  }
+
+  let logSpy;
+  let errorSpy;
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('abort with finalMessage() rejecting: saves the partial text as stopped, metrics unchanged', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeStreamThen(['Day 2 is ', 'busy'], () => {
+      res.triggerClose();
+      throw new Error('Request was aborted.');
+    }));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Day 2 is busy', operations: null, notice: 'stopped' });
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', error: 0, proposalOps: 0 });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('abort with finalMessage() resolving after the drop: saves the text as stopped, never the proposal', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeStreamThen(['Sure.'], () => {
+      res.triggerClose();
+      return { content: proposeContent, stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 2 } };
+    }));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Sure.', operations: null, notice: 'stopped' });
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', error: 0, proposalOps: 0 });
+    expect(parseEvents(res).map((e) => e.type)).not.toContain('proposal');
+  });
+
+  it('abort between iterations (during a query tool): saves the earlier text as stopped', async () => {
+    const res = makeMockRes();
+    const executor = vi.fn(async () => {
+      res.triggerClose();
+      return { ok: true };
+    });
+    mockStream.mockReturnValueOnce(makeMockStream(['Let me check. '], undefined, [
+      { type: 'text', text: 'Let me check. ' },
+      toolUseBlock('search_discovery_catalogue', { destination: 'X' }, 'tu_1'),
+    ]));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn,
+      { search_discovery_catalogue: executor }, reportTurnMetrics);
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Let me check. ', operations: null, notice: 'stopped' });
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', error: 0 });
+  });
+
+  it('abort while propose_itinerary_changes was streaming: operations is null', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeStreamThen(['Sure.'], () => {
+      res.triggerClose();
+      throw new Error('Request was aborted.');
+    }));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, vi.fn());
+
+    expect(persistTurn.mock.calls[0][0].operations).toBeNull();
+  });
+
+  it('a persistTurn failure on abort is logged and does not break the metrics', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeStreamThen(['Hi'], () => {
+      res.triggerClose();
+      throw new Error('Request was aborted.');
+    }));
+    const persistTurn = vi.fn().mockRejectedValue(new Error('disk full'));
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(errorSpy).toHaveBeenCalledWith('[copilot] persistTurn failed:', expect.any(Error));
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', error: 0 });
+  });
+
+  it('genuine error mid-reply: saves the partial text as interrupted, error metrics, error event', async () => {
+    mockStream.mockReturnValueOnce(makeStreamThen(['Half a thou'], () => {
+      throw new Error('upstream 529');
+    }));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const res = makeMockRes();
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Half a thou', operations: null, notice: 'interrupted' });
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ error: 1, proposalOps: 0 });
+    expect(parseEvents(res).find((e) => e.type === 'error')).toEqual({ type: 'error', message: 'upstream 529' });
+  });
+
+  it('a throw after the success-path persist does not write a second row', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['Fine.'], 'Fine.'));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    // recordMetrics swallows its own failures, so make the post-persist SSE write throw instead.
+    const res = makeMockRes();
+    const realWrite = res.write.bind(res);
+    let exploded = false;
+    res.write = (chunk) => {
+      if (!exploded && chunk.includes('"type":"done"')) {
+        exploded = true;
+        throw new Error('socket exploded');
+      }
+      realWrite(chunk);
+    };
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, vi.fn());
+
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Fine.', operations: null, notice: null });
+  });
+
+  it('success-path notices: truncated, refused, empty, and null for normal and proposal-only turns', async () => {
+    const run = async (...streamArgs) => {
+      mockStream.mockReturnValueOnce(makeMockStream(...streamArgs));
+      const persistTurn = vi.fn().mockResolvedValue(null);
+      const res = makeMockRes();
+      await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {});
+      return { call: persistTurn.mock.calls[0][0], res };
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const truncated = await run(['cut'], 'cut', [{ type: 'text', text: 'cut' }], 'max_tokens');
+    expect(truncated.call).toEqual({ assistantText: 'cut', operations: null, notice: 'truncated' });
+
+    const refused = await run([], undefined, [], 'refusal');
+    expect(refused.call).toEqual({ assistantText: '', operations: null, notice: 'refused' });
+
+    const empty = await run([], undefined, [THINKING_BLOCK], 'end_turn');
+    expect(empty.call).toEqual({ assistantText: '', operations: null, notice: 'empty' });
+    // D-30-4 untouched: the SSE side still emits its own single 'empty' notice.
+    expect(noticesOf(empty.res)).toEqual([{ type: 'notice', notice: 'empty' }]);
+
+    const normal = await run(['Hello'], 'Hello');
+    expect(normal.call).toEqual({ assistantText: 'Hello', operations: null, notice: null });
+
+    const proposalOnly = await run([], undefined, [THINKING_BLOCK, proposeContent[1]]);
+    expect(proposalOnly.call).toEqual({
+      assistantText: '',
+      operations: [{ action: 'remove_stop', stopId: 's1' }],
+      notice: null,
+    });
+    warn.mockRestore();
   });
 });

@@ -710,3 +710,164 @@ describe('POST /trips/:tripId/copilot/proposals/:id/reject', () => {
     expect(db.prepare('SELECT id FROM stops WHERE id = ?').get(stopId)).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-30-8 (Plan 30): every turn ends in exactly one persisted assistant row
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/copilot — one persisted assistant row per turn (D-30-8)', () => {
+  const STOPPED_LINE = '[The traveller stopped this reply. Treat their next message as a new request; resume only if they ask.]';
+  const INTERRUPTED_LINE = '[This reply was cut off by an error before it finished.]';
+  const NO_REPLY_LINE = '[No reply was given to this message.]';
+
+  // Isolated trip so rows seeded here can never collide with the other describes' fixtures.
+  const turnReq = (message) => makeReq({
+    body: { message },
+    params: { tripId: otherTripId },
+    trip: { id: otherTripId, owner_id: userId },
+  });
+  const historyReq = () => makeReq({
+    params: { tripId: otherTripId },
+    trip: { id: otherTripId, owner_id: userId },
+  });
+
+  // Runs one turn whose stubbed service hands persistTurn the given arguments, and returns the
+  // conversation messages the route built for the model.
+  async function runTurn(message, persistArgs) {
+    mockStreamCopilotResponse.mockImplementationOnce(async (msgs, ctx, res, req, persistTurn) => {
+      await persistTurn(persistArgs);
+      return persistArgs.assistantText;
+    });
+    await callHandler('post', `/${otherTripId}/copilot`, turnReq(message), makeRes());
+    return mockStreamCopilotResponse.mock.calls.at(-1)[0];
+  }
+
+  const rows = () => getDb().prepare(
+    'SELECT role, content, notice FROM copilot_messages WHERE trip_id = ? ORDER BY created_at ASC, rowid ASC',
+  ).all(otherTripId);
+
+  beforeEach(() => {
+    getDb().prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(otherTripId);
+  });
+
+  it('stores the assistant row with its notice and returns it from the history endpoint', async () => {
+    await runTurn('Plan day 2', { assistantText: 'Day 2 is ', operations: null, notice: 'stopped' });
+
+    expect(rows()).toEqual([
+      { role: 'user', content: 'Plan day 2', notice: null },
+      { role: 'assistant', content: 'Day 2 is ', notice: 'stopped' },
+    ]);
+
+    const res = makeRes();
+    await callHandler('get', `/${otherTripId}/copilot/history`, historyReq(), res);
+    expect(res._body.messages.map((m) => [m.role, m.notice])).toEqual([['user', null], ['assistant', 'stopped']]);
+  });
+
+  it('always inserts one assistant row, even for a text-less turn with no proposal', async () => {
+    await runTurn('Anything?', { assistantText: '', operations: null, notice: 'empty' });
+
+    expect(rows()).toEqual([
+      { role: 'user', content: 'Anything?', notice: null },
+      { role: 'assistant', content: '', notice: 'empty' },
+    ]);
+  });
+
+  it('after a stopped turn the next turn alternates user/assistant and the stopped row carries the bracket line', async () => {
+    await runTurn('First question', { assistantText: 'Partial answer', operations: null, notice: 'stopped' });
+    const messages = await runTurn('Second question', { assistantText: 'Full answer', operations: null, notice: null });
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'First question' },
+      { role: 'assistant', content: `Partial answer\n\n${STOPPED_LINE}` },
+      { role: 'user', content: 'Second question' },
+    ]);
+  });
+
+  it('sends the stopped line alone when nothing had streamed, and labels an interrupted reply', async () => {
+    await runTurn('Q1', { assistantText: '', operations: null, notice: 'stopped' });
+    await runTurn('Q2', { assistantText: 'Half a thou', operations: null, notice: 'interrupted' });
+    const messages = await runTurn('Q3', { assistantText: 'ok', operations: null, notice: null });
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'Q1' },
+      { role: 'assistant', content: STOPPED_LINE },
+      { role: 'user', content: 'Q2' },
+      { role: 'assistant', content: `Half a thou\n\n${INTERRUPTED_LINE}` },
+      { role: 'user', content: 'Q3' },
+    ]);
+  });
+
+  it('gives a blank empty/refused/truncated assistant row the fallback line, never an empty turn', async () => {
+    await runTurn('Q1', { assistantText: '', operations: null, notice: 'empty' });
+    await runTurn('Q2', { assistantText: '', operations: null, notice: 'refused' });
+    await runTurn('Q3', { assistantText: '', operations: null, notice: 'truncated' });
+    const messages = await runTurn('Q4', { assistantText: 'ok', operations: null, notice: null });
+
+    expect(messages.filter((m) => m.role === 'assistant').map((m) => m.content))
+      .toEqual([NO_REPLY_LINE, NO_REPLY_LINE, NO_REPLY_LINE]);
+  });
+
+  it('leaves a text-bearing truncated row and a notice-null proposal-only row exactly as stored', async () => {
+    const db = getDb();
+    const stopId = db.prepare(`
+      INSERT INTO stops (day_id, title, type, sort_order) VALUES (?, 'Proposal Target', 'experience', 1) RETURNING id
+    `).get(otherDayId).id;
+    await runTurn('Q1', { assistantText: 'cut off mid', operations: null, notice: 'truncated' });
+    await runTurn('Q2', { assistantText: '', operations: [{ action: 'remove_stop', stopId }], notice: null });
+    const messages = await runTurn('Q3', { assistantText: 'ok', operations: null, notice: null });
+
+    expect(messages[1]).toEqual({ role: 'assistant', content: 'cut off mid' });
+    // Proposal-only rows keep their empty content (out of scope for D-30-8).
+    expect(messages[3]).toEqual({ role: 'assistant', content: '' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM copilot_proposals WHERE trip_id = ? AND message_id IS NOT NULL')
+      .get(otherTripId).n).toBe(1);
+
+    db.prepare('DELETE FROM copilot_proposals WHERE trip_id = ?').run(otherTripId);
+    db.prepare('DELETE FROM stops WHERE id = ?').run(stopId);
+  });
+
+  it('orders same-second rows by insertion in both the history and the model context', async () => {
+    const db = getDb();
+    const insert = db.prepare(`
+      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
+      VALUES (?, ?, ?, ?, ?, '2026-05-01 10:00:00')
+    `);
+    // Ids sort opposite to insertion order, so only rowid can produce the right result.
+    insert.run('zz-1', otherTripId, userId, 'user', 'tie-1');
+    insert.run('yy-2', otherTripId, null, 'assistant', 'tie-2');
+    insert.run('xx-3', otherTripId, userId, 'user', 'tie-3');
+    insert.run('ww-4', otherTripId, null, 'assistant', 'tie-4');
+
+    const res = makeRes();
+    await callHandler('get', `/${otherTripId}/copilot/history`, historyReq(), res);
+    expect(res._body.messages.map((m) => m.content)).toEqual(['tie-1', 'tie-2', 'tie-3', 'tie-4']);
+
+    const messages = await runTurn('tie-5', { assistantText: 'ok', operations: null, notice: null });
+    expect(messages.slice(0, 5).map((m) => m.content)).toEqual(['tie-1', 'tie-2', 'tie-3', 'tie-4', 'tie-5']);
+  });
+
+  it('inserts nothing (and creates no proposal) when the question row was cleared before persistTurn ran', async () => {
+    const db = getDb();
+    const stopId = db.prepare(`
+      INSERT INTO stops (day_id, title, type, sort_order) VALUES (?, 'Cleared Target', 'experience', 1) RETURNING id
+    `).get(otherDayId).id;
+    let returned;
+    mockStreamCopilotResponse.mockImplementationOnce(async (msgs, ctx, res, req, persistTurn) => {
+      // Stop followed by Clear conversation: the owner empties the history mid-turn.
+      db.prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(otherTripId);
+      returned = await persistTurn({
+        assistantText: 'late partial',
+        operations: [{ action: 'remove_stop', stopId }],
+        notice: 'stopped',
+      });
+      return 'late partial';
+    });
+
+    await callHandler('post', `/${otherTripId}/copilot`, turnReq('doomed question'), makeRes());
+
+    expect(returned).toBeNull();
+    expect(rows()).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM copilot_proposals WHERE trip_id = ?').get(otherTripId).n).toBe(0);
+    db.prepare('DELETE FROM stops WHERE id = ?').run(stopId);
+  });
+});

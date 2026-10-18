@@ -23,6 +23,22 @@ const MAX_DISCOVERY_NAME_LENGTH = 160;
 // limit are a single contract — the panel must never show an exchange the model has forgotten.
 const COPILOT_MESSAGE_WINDOW = 50;
 
+// D-30-8 (Plan 30): what the model is told about an assistant row that did not end normally. A
+// stopped reply is shown as abandoned, not paused, so the model does not resume it unprompted.
+const NOTICE_CONTEXT_LINES = {
+  stopped: '[The traveller stopped this reply. Treat their next message as a new request; resume only if they ask.]',
+  interrupted: '[This reply was cut off by an error before it finished.]',
+};
+// An assistant row with no text and a notice outside the map above ('empty', 'refused',
+// 'truncated') still takes a turn in the conversation, so a blank one is never sent to the model.
+const NO_REPLY_CONTEXT_LINE = '[No reply was given to this message.]';
+
+function assistantContextContent(row) {
+  const line = NOTICE_CONTEXT_LINES[row.notice] ?? (row.content === '' && row.notice ? NO_REPLY_CONTEXT_LINE : null);
+  if (!line) return row.content;
+  return row.content ? `${row.content}\n\n${line}` : line;
+}
+
 function dropContext(reason) {
   console.warn('[copilot] Dropping invalid message context: %s', reason);
   return null;
@@ -108,15 +124,15 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT id, role, content, context_json, created_at, author_name FROM (
-        SELECT cm.id, cm.role, cm.content, cm.context_json, cm.created_at,
-          u.display_name AS author_name
+      SELECT id, role, content, context_json, notice, created_at, author_name FROM (
+        SELECT cm.id, cm.role, cm.content, cm.context_json, cm.notice, cm.created_at,
+          cm.rowid AS seq, u.display_name AS author_name
         FROM copilot_messages cm
         LEFT JOIN users u ON u.id = cm.user_id
         WHERE cm.trip_id = ?
-        ORDER BY cm.created_at DESC
+        ORDER BY cm.created_at DESC, cm.rowid DESC
         LIMIT ${COPILOT_MESSAGE_WINDOW}
-      ) ORDER BY created_at ASC
+      ) ORDER BY created_at ASC, seq ASC
     `).all(req.params.tripId);
 
     res.json({
@@ -125,6 +141,7 @@ router.get('/:tripId/copilot/history', requireTripAccess, (req, res, next) => {
         role: r.role,
         content: r.content,
         context: parseStoredContext(r.context_json),
+        notice: r.notice ?? null,
         createdAt: r.created_at,
         authorName: r.author_name,
       })),
@@ -173,45 +190,48 @@ router.post('/:tripId/copilot', requireTripAccess, async (req, res, next) => {
   const messageContext = resolveMessageContext(req.body.context, tripDetail);
 
   // Now save the user message (trip access confirmed above)
-  db.prepare(`
+  const userMessage = db.prepare(`
     INSERT INTO copilot_messages (id, trip_id, user_id, role, content, context_json, created_at)
     VALUES (lower(hex(randomblob(16))), ?, ?, 'user', ?, ?, datetime('now'))
-  `).run(tripId, userId, req.body.message, messageContext ? JSON.stringify(messageContext) : null);
+    RETURNING id
+  `).get(tripId, userId, req.body.message, messageContext ? JSON.stringify(messageContext) : null);
 
   // Load the most recent COPILOT_MESSAGE_WINDOW messages for conversation context,
   // re-ordered chronologically. This must match the history endpoint's display limit (Plan 15 D4).
+  // rowid breaks same-second created_at ties in insertion order.
   const contextRows = db.prepare(`
-    SELECT role, content, context_json FROM (
-      SELECT role, content, context_json, created_at FROM copilot_messages
+    SELECT role, content, context_json, notice FROM (
+      SELECT role, content, context_json, notice, created_at, rowid AS seq FROM copilot_messages
       WHERE trip_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT ${COPILOT_MESSAGE_WINDOW}
-    ) ORDER BY created_at ASC
+    ) ORDER BY created_at ASC, seq ASC
   `).all(tripId);
 
   const conversationMessages = contextRows.map((r) => {
-    const storedContext = r.role === 'user' ? parseStoredContext(r.context_json) : null;
+    if (r.role === 'assistant') return { role: r.role, content: assistantContextContent(r) };
+    const storedContext = parseStoredContext(r.context_json);
     return {
       role: r.role,
       content: storedContext ? `${contextLine(storedContext)}\n\n${r.content}` : r.content,
     };
   });
 
-  // persistTurn — invoked once when the model turn completes, before the proposal/done SSE
-  // events. Saves the assistant message, and (when the model called the tool) creates the
-  // validated + fingerprinted proposal record linked to that message. Returns the proposal
-  // SSE payload, or null when there is nothing to propose.
-  const persistTurn = async ({ assistantText, operations }) => {
-    let messageId = null;
-    if (assistantText || operations) {
-      const msg = db.prepare(`
-        INSERT INTO copilot_messages (id, trip_id, user_id, role, content, created_at)
-        VALUES (lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, datetime('now'))
-        RETURNING id
-      `).get(tripId, assistantText || '');
-      messageId = msg.id;
-    }
-    if (!operations) return null;
+  // persistTurn — invoked once when the model turn ends, however it ends (D-30-8, Plan 30), before
+  // the proposal/done SSE events. Saves exactly one assistant message carrying the turn's notice,
+  // and (when the model called the tool) creates the validated + fingerprinted proposal record
+  // linked to that message. Returns the proposal SSE payload, or null when there is nothing to
+  // propose. The row is inserted only while the question row it answers still exists: Stop
+  // followed by Clear conversation (or a clear mid-turn) must not leave an answer with no question.
+  const persistTurn = async ({ assistantText, operations, notice }) => {
+    const msg = db.prepare(`
+      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, notice, created_at)
+      SELECT lower(hex(randomblob(16))), ?, NULL, 'assistant', ?, ?, datetime('now')
+      WHERE EXISTS (SELECT 1 FROM copilot_messages WHERE id = ?)
+      RETURNING id
+    `).get(tripId, assistantText || '', notice ?? null, userMessage.id);
+    if (!msg || !operations) return null;
+    const messageId = msg.id;
 
     const proposal = createProposal({ tripId, userId, messageId, operations });
     return {

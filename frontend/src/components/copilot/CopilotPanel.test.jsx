@@ -132,6 +132,8 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
   it.each([
     ['refused', "I can't help with that one — try asking another way."],
     ['empty', 'Nothing came through that time — try asking again.'],
+    ['stopped', 'You stopped this reply.'],
+    ['interrupted', 'This reply was interrupted — ask again.'],
   ])('renders the %s notice copy', (notice, copy) => {
     renderPanel({
       copilot: makeCopilot({
@@ -160,6 +162,19 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
     expect(notice).toBeInTheDocument();
     // The notice's wrapper holds only the notice: no sibling bubble precedes it.
     expect(notice.parentElement.children).toHaveLength(1);
+  });
+
+  it('renders a stopped row that has no text as the notice alone, with no empty bubble', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{ id: 'm1', role: 'assistant', content: '', createdAt: new Date().toISOString(), notice: 'stopped' }],
+      }),
+    });
+
+    const notice = screen.getByText('You stopped this reply.');
+    expect(notice).toBeInTheDocument();
+    expect(notice.parentElement.children).toHaveLength(1);
+    expect(document.body.querySelector('div[style*="border-radius: 2px 12px 12px 12px"]')).toBeNull();
   });
 
   it('still renders the bubble for an empty-content row with no notice (proposal-only turn)', () => {

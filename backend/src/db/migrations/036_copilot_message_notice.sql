@@ -1,0 +1,14 @@
+-- Plan 30 D-30-8: every co-pilot turn ends in exactly one persisted assistant row, and that row
+-- carries the turn's notice.
+--
+-- Additive only — one new nullable column on copilot_messages, no change to any existing row.
+-- NULL means a turn that ended normally with something to show (text and/or a proposal), which is
+-- every row written before this migration (no backfill by design). Otherwise one of:
+--   'stopped'     the traveller pressed Stop; content is the partial text streamed so far
+--   'interrupted' a provider error cut the reply; content is the partial text streamed so far
+--   'truncated'   the model hit its output limit; content is the cut-off text
+--   'refused'     the model declined the turn
+--   'empty'       the turn finished with neither text nor a proposal
+-- The history endpoint returns it so the notice survives a reload, and the model's context
+-- rebuild reads it so an abandoned reply is never shown to the model as a paused one.
+ALTER TABLE copilot_messages ADD COLUMN notice TEXT;

@@ -6,7 +6,7 @@
 
 **Scope in one sentence:** change which model answers each of the four existing requests in `backend/src/services/claude.js`, set thinking/effort/output allowances that are measured rather than inherited, make each request path honest about the response shapes the new models produce (thinking blocks, refusals, truncation, silence), and ship each workload only after it passes its own paired evaluation — with a per-workload revert that restores the old model *with the old model's compatible parameters*.
 
-**Not in scope.** No new tools, no model call on the hosted MCP path (a closed cost boundary — `docs/DECISIONS.md`), no change to proposal-apply semantics, catalogue lifecycle, resolver order, provider tiers, pin precedence or the geography ladder; no database migration; no rewriting of historical `copilot_turn_metrics.model` values, `import_artifacts` provenance, or completed plan docs to say 5.5; no image downscaling dependency (measure first — F-30-14); no prompt redesign beyond what a measured regression requires; no Opus, Fable, batch, fast-mode, server-side fallback or task-budget features.
+**Not in scope.** No new tools, no model call on the hosted MCP path (a closed cost boundary — `docs/DECISIONS.md`), no change to proposal-apply semantics, catalogue lifecycle, resolver order, provider tiers, pin precedence or the geography ladder; no database migration (one owner-approved exception, added after approval: 036 for D-30-8, the W1 follow-up); no rewriting of historical `copilot_turn_metrics.model` values, `import_artifacts` provenance, or completed plan docs to say 5.5; no image downscaling dependency (measure first — F-30-14); no prompt redesign beyond what a measured regression requires; no Opus, Fable, batch, fast-mode, server-side fallback or task-budget features.
 
 ---
 
@@ -82,6 +82,13 @@ Code facts are from this checkout; provider facts are from the official pages na
 - **D-30-5 — Order: Haiku first, Sonnet second, each workload gated independently.** Descriptors (W2) → discovery (W3) → extraction (W4) → co-pilot (W5). Rationale: F-30-13 (Haiku 4.5's retirement floor has passed) and blast radius (descriptors can only degrade a photo query; discovery writes to the shared catalogue; extraction and co-pilot are user-facing judgment). Default per **Q-30-5:** two deploys — Deploy A after W3, Deploy B after W5.
 - **D-30-6 — Allowances are budgets chosen from measurement, with headroom, never the provider maximum by reflex.** Candidate starting points (to be confirmed or replaced by W2–W5 evidence): extraction 16,000 (non-streaming limit F-30-6); co-pilot 16,000 per iteration; discovery 96,000 (streamed; ceiling 128,000); descriptors 1,024. Each wave records the observed p50/max `output_tokens` (thinking included) and sets the allowance at roughly 2× the observed max, capped by the ceiling.
 - **D-30-7 — Evaluation never touches owner data or the shared catalogue.** Harness runs call the services directly against a *copy* of the dev DB or none at all; no `insertPlaces`, no `enqueueForVerification`, no `copilot_messages`/`copilot_proposals` writes, no provider budget consumption beyond the Anthropic calls themselves. Proof is by side effect: row counts and `generation_count` unchanged after a run.
+- **D-30-8 — Every co-pilot turn ends in exactly one persisted assistant row carrying its notice.** *(Owner, 2026-10-18; W1 follow-up. It is the plan's one database migration, 036.)*
+  - A stopped turn keeps its partial text, labelled `stopped`. The model sees it as abandoned, not paused, and resumes only if the traveller asks.
+  - A provider error mid-turn keeps its partial text, labelled `interrupted`.
+  - An aborted or errored turn never becomes a proposal.
+  - There is no backfill.
+  - "Remove this exchange" is a follow-up, not part of this decision.
+  - Marker `D-30-8` in `claude.js`, `routes/copilot.js`, `useCopilot.js` and `CopilotPanel.jsx`.
 
 **Owner questions (defaults in bold; none blocks W0):**
 
@@ -269,7 +276,7 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 **Facts corrected or learned:**
 - The browser `fetch` behind the Vite dev proxy can resolve as late as the first body chunk. The client's first ping therefore landed ~7 s after `fetch` resolved, not 8 s. Spacing between pings is the meaningful measure.
-- `useCopilot`'s Stop comment says the server keeps the partial text. It does not: the abort path returns before `persistTurn`, so a stopped reply vanishes on reload (seen in the dev DB). This predates W1 and is left for a follow-up.
+- `useCopilot`'s Stop comment says the server keeps the partial text. It does not: the abort path returns before `persistTurn`, so a stopped reply vanishes on reload (seen in the dev DB). This predates W1. Fixed in the W1 follow-up below (D-30-8).
 - The live smoke is skipped (not excluded) under `npm test`; it makes zero calls without `LIVE_ANTHROPIC=1`.
 
 **Files.** `backend/src/services/claude.js`, `backend/src/routes/copilot.js` (only if the ping lives in the route rather than the service), `frontend/src/hooks/useCopilot.js`, `frontend/src/components/copilot/CopilotPanel.jsx` (render the new notices next to the existing `truncated` one), `backend/package.json` + lockfile (Q-30-2), `backend/tests/claude.test.js`, `backend/tests/copilot.test.js`, `frontend/src/hooks/useCopilot.test.js` or the panel test, `backend/tests/live/anthropic.live.test.js` (new, opt-in).
@@ -283,6 +290,39 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 6. **Tests.** Mocked fixtures gain a leading `thinking` block (empty text + signature) on every path; a `refusal` and a `max_tokens`-during-thinking fixture per path; the ping and notice events in the co-pilot protocol tests; frontend test for the new notice rendering.
 
 **Acceptance.** All of the above with the *old* models still configured; backend and frontend suites green; `npm run build` clean; a local browser pass of the co-pilot shows ping events in the network tab and an unchanged conversation UX; this wave may be deployed on its own (recommended, so Deploy A carries one variable).
+
+#### W1 follow-up — a stopped reply is kept (D-30-8)
+
+**Status:** 2026-10-18 — **COMPLETE, not deployed.** Owner-approved after a findings note. Migration **036** (`copilot_messages.notice`) ships with the next deploy that carries this commit.
+
+- **The bug.** When the traveller pressed Stop, the reply vanished on reload. The next turn's model context then held two user messages in a row, so the API merged the stopped question into the new one.
+  - It regressed in Plan 11 W2 (`a661e25`). That change moved the assistant-row save into `persistTurn`, which runs on the success path only. The client comment that said otherwise was true when it was written (`44e3dc5`).
+  - The same root cause dropped partial text on a provider error mid-turn, and it never stored a text-less turn or any notice.
+- **The fix.** `streamCopilotResponse` saves exactly one assistant row per turn, on every exit path, through one guarded helper.
+  - The notices it stores are `stopped`, `interrupted`, `truncated`, `refused` and `empty`.
+  - An aborted or errored turn never passes operations, so it can never become a proposal.
+  - The route inserts the row only while its question row still exists (`INSERT … WHERE EXISTS`), so a Stop or a turn that races Clear conversation leaves nothing behind.
+  - The history endpoint and the context queries break same-second ties by `rowid`, and history returns `notice`.
+  - The model sees a stopped row as abandoned: `[The traveller stopped this reply. Treat their next message as a new request; resume only if they ask.]`
+  - A blank row that carries a notice is never sent to the model blank.
+  - On the client, `useCopilot` stamps `stopped` and `interrupted` itself, because the server never sends them over SSE. `CopilotPanel` gains the copy *"You stopped this reply."* and *"This reply was interrupted — ask again."*
+- **Unchanged on purpose.** The W1 `client_abort` metrics behaviour is untouched: one row, `error 0`, the same usage.
+- **Verified.**
+  - Backend: 45 files, 1,042 passed and 6 skipped. `collaboration.test.js` timed out once under load (the known flake) and passed 14/14 when run alone.
+  - Frontend: 44 files, 327 tests, all passing. `npm run build` is clean.
+  - Migration 036 was applied to a dev-DB copy and then to the dev DB. Existing rows read `NULL`.
+  - Local browser pass at 375 px and 1280 px on the W3 verify trip:
+    1. Stop mid-reply → the partial text plus the notice. The DB has a `stopped` row with 355 chars, and the metrics row is still `client_abort` / `error 0`.
+    2. Reload → the same thread.
+    3. "Keep going" → it resumed at Day 2.
+    4. Stop before any text → a notice-only row with no empty bubble.
+    5. An unrelated next question was answered on its own.
+    6. DB rows alternate user/assistant.
+- **Limits.**
+  - The reloaded partial text can run a few characters past what the screen showed, because chunks already in flight reach the server but not the panel.
+  - The `interrupted` path is unit-tested only. A live provider error was not forced.
+  - A connection drop that is not a Stop is indistinguishable from Stop on the server, so it is saved as `stopped`.
+  - The owner-requested "remove this exchange" control is a separate follow-up and is not built.
 
 ### W2 — Photo descriptors → Haiku 5.5
 

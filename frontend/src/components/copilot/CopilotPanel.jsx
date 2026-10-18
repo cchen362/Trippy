@@ -17,6 +17,9 @@ const COPILOT_NOTICE_COPY = {
   truncated: 'Reply cut short — ask me to continue.',
   refused: "I can't help with that one — try asking another way.",
   empty: 'Nothing came through that time — try asking again.',
+  // D-30-8: stamped by the client on Stop / a mid-turn error, and carried by the server on reload.
+  stopped: 'You stopped this reply.',
+  interrupted: 'This reply was interrupted — ask again.',
 };
 
 // Plan 13 P2: the sheet NEVER changes height except by explicit user action
