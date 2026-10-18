@@ -338,3 +338,19 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
     expect(screen.queryByText('Reply cut short — ask me to continue.')).not.toBeInTheDocument();
   });
 });
+
+describe('CopilotPanel tool activity line', () => {
+  it.each([
+    ['search_discovery_catalogue', 'Searching your Discovery picks…'],
+    ['check_trip_health', 'Checking your trip…'],
+    ['propose_itinerary_changes', 'Drafting the change…'],
+  ])('labels %s in the co-pilot voice', (tool, label) => {
+    renderPanel({ copilot: makeCopilot({ streaming: true, activeTool: tool }) });
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it('renders no activity line when no tool is active', () => {
+    renderPanel({ copilot: makeCopilot({ streaming: true }) });
+    expect(screen.queryByText('Drafting the change…')).not.toBeInTheDocument();
+  });
+});

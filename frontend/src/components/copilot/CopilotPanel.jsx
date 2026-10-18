@@ -10,6 +10,8 @@ import { friendlyError } from '../../utils/apiError.js';
 const TOOL_ACTIVITY_LABELS = {
   search_discovery_catalogue: 'Searching your Discovery picks…',
   check_trip_health: 'Checking your trip…',
+  // D-30-9: covers the gap between the proposal call and its explanation.
+  propose_itinerary_changes: 'Drafting the change…',
 };
 
 // D-30-4: a co-pilot turn is never silent. One line per server-reported notice,
