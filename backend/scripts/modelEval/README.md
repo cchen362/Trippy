@@ -59,6 +59,9 @@ streamed call's `stop_details` is captured from the wire `message_delta` event e
 
 - `fixtures/` — committed and synthetic only: extraction hard cases with expected JSON, the 50
   descriptor places, the 6 discovery destinations, and the co-pilot trips and 20 scenarios.
+  A committed extraction fixture may reference a rendered PNG/PDF by relative `path` under
+  `fixtures/extraction/files/` (resolved like a private fixture's files); `renderExtractionFixtures.mjs`
+  produces them from eight of the text fixtures using the installed Chromium headless shell (Plan 30 W4).
 - `backend/data/model-eval/private/` — **gitignored, never committed.** The owner's redacted real
   booking inputs (Plan 30 Q-30-4). Layout:
   `private/extraction/<id>/fixture.json` plus the files it names, where `fixture.json` has the

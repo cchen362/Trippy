@@ -1,0 +1,57 @@
+{
+  "id": "img-overnight-flight-lands-next-day",
+  "description": "image render of overnight-flight-lands-next-day: Singapore to London departing 23:55 and landing 06:20 the following calendar day; dates spelled out so only the day roll is under test.",
+  "tags": [
+    "flight",
+    "overnight",
+    "hard",
+    "image",
+    "rendered"
+  ],
+  "source": "overnight-flight-lands-next-day",
+  "tripContext": {
+    "startDate": "2027-03-12",
+    "endDate": "2027-03-22",
+    "destinations": [
+      {
+        "city": "London",
+        "countryCode": "GB"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-overnight-flight-lands-next-day.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-03-12T23:55",
+        "endDatetime": "2027-03-13T06:20",
+        "origin": [
+          "SIN",
+          "Singapore"
+        ],
+        "destination": [
+          "LHR",
+          "London",
+          "Heathrow"
+        ],
+        "confirmationRef": "9RB4TX",
+        "details": {
+          "originCity": "Singapore",
+          "destinationCity": "London",
+          "originCountryCode": "SG",
+          "destinationCountryCode": "GB",
+          "flightNumber": "SQ322"
+        }
+      }
+    ]
+  }
+}

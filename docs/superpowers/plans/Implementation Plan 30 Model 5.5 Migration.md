@@ -621,7 +621,112 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 
 ### W4 — Extraction → Sonnet 5.5
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-19 — **Two criteria short of the gate; one owner ruling needed. Nothing switched, nothing deployed.** `EXTRACTION_MODEL` is still `claude-sonnet-4-6`. `claude.js` and `claude.test.js` are untouched, so the W0 extraction sha256 pin still holds. The two shortfalls are both formatting or prompt issues, not misread facts. Sonnet 4.6 shows the same two (one of them worse), so no candidate is judged against a bar control itself meets. Like W3, this stops rather than loosening §5.3. Steps 3–4 (switch, re-pin, browser pass, live smoke) were not run.
+
+**Corpus.** `private/extraction/` is still **empty** (Q-30-4), so everything below is synthetic.
+- The 15 W0 text fixtures.
+- 8 new committed renders of those texts, made by `renderExtractionFixtures.mjs` with the installed Chromium headless shell (no new dependency):
+  - 6 phone email screenshots at 1170×2532. Five are travel; one is the dinner invite.
+  - 2 single-page A4 PDFs with selectable text.
+  - The renderer throws if any source fact is missing or any digit is added.
+- The "10 hardest" for `high` are the 17 fixtures tagged `hard`: 11 text and 6 renders.
+
+**Sweep** (2026-10-19, harness, `--concurrency 2`, dev key, prompt frozen).
+- Control is a fresh Sonnet 4.6 run on all 23 fixtures. The W0 run on disk (15 text fixtures) scores identically on every shared fixture.
+- Run files: `data/model-eval/runs/extraction/{control,primary,alt-low,alt-high}/2026-10-18T16-3*.jsonl`. The harness stamps UTC.
+
+| Metric | Control: Sonnet 4.6, 8,192 | **Primary: 5.5 `medium`, 16,000** | 5.5 `low`, 16,000 | 5.5 `high`, 16,000 (hard, n = 17) |
+|---|---|---|---|---|
+| `stop_reason` | `end_turn` 23/23 | `end_turn` 23/23 | `end_turn` 23/23 | `end_turn` 17/17 |
+| Parse / `max_tokens` / refusal | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Booking count correct | 23/23 | 23/23 | 23/23 | 17/17 |
+| Critical-field accuracy (§5.3 fields) | 231/231 | **231/231** | 231/231 | 175/175 |
+| — text / image / PDF | 139/139 · 64/64 · 28/28 | 139 · 64 · 28 (all correct) | all correct | all correct |
+| Critical errors | 0 | **0** | 0 | 0 |
+| High confidence on a wrong *critical* field | 0 | **0** | 0 | 0 |
+| Other labelled fields (flight/train no., localName), as labelled | 22/22 | 15/22 | 15/22 | 13/18 |
+| — high confidence but different from the label (all `flightNumber`) | 0 | **6** | 7 | 5 |
+| Flight numbers Trippy can use (`normalizeFlightQuery` accepts the pair and gets the right designator) | **0/16** | 7/16 | 7/16 | 5/12 |
+| — unusable *and* marked high confidence | **16** | 9 | 8 | 7 |
+| `isTravelRelated` correct | 22/23 | 22/23 | 22/23 | 16/17 |
+| Wall time median / max | 9.6 / 19.9 s | **4.7 / 11.8 s** | 4.5 / 10.6 s | 5.0 / 13.6 s |
+| — text / image / PDF median | 9.2 · 11.1 · 12.0 s | 4.5 · 5.1 · 5.9 s | 4.3 · 4.6 · 5.1 s | 5.0 · 5.1 · 4.9 s |
+| Output tokens median / max (thinking included) | 663 / 1,700 | 746 / 2,180 | 724 / 1,988 | 812 / 2,370 |
+| Responses with a thinking block | 0/23 | 2/23 | 1/23 | 5/17 |
+| Est. thinking tokens, max | 0 | 475 | 366 | 585 |
+| Input tokens median: text · image · PDF | 1,300 · 2,679 · 2,911 | 1,687 · 5,402 · 3,314 | same as primary | same |
+| Cost median: text · image · PDF | $0.0139 · $0.0178 · $0.0209 | $0.0108 · $0.0183 · $0.0158 | $0.0106 · $0.0181 · $0.0156 | $0.0114 · $0.0190 · $0.0142 |
+| Cost per successful extraction | $0.0159 | **$0.0136 (−14%)** | $0.0133 | $0.0155 |
+| Run total | $0.365 | $0.312 | $0.305 | $0.264 |
+
+How the thinking estimate works: output minus text. The scorer takes the text's tokens per character from the same run's responses that had no thinking block. Two runs cross-check it:
+- 5.5 runs: 0.407 tokens/char from the thinking-free responses in each run.
+- `count_tokens` on the W0 control's 15 responses (31,825 chars): 0.397 on 5.5's tokenizer, and 0.324 on 4.6's — within 0.4% of 4.6's billed output.
+
+**Image token cost (F-30-14), measured with `count_tokens`** (`imageTokens.mjs`; free).
+- One 1170×2532 screenshot: **1,459 tokens on Sonnet 4.6 → 3,825 on Sonnet 5.5 (2.62×)**. That is $0.0044 → $0.0077, +$0.0033 per image.
+- F-30-14 predicted 1,513 → 3,950, so the estimate holds.
+- Whole image extraction: median **$0.0178 → $0.0183 (+3%)**. Cheaper output offsets the dearer image.
+- PDFs: 1,689–1,697 → 1,722–1,754 tokens, so a PDF costs less on 5.5.
+
+**Forced cut-off (D-30-3)** — profile `forced-cutoff`, `max_tokens` 300, harness only.
+- Both multi-leg fixtures stopped at `max_tokens` with *"The booking reader's output was cut off — try fewer pages or split the file."*
+- On the text version, Sonnet 5.5 spent all 300 tokens thinking and returned **no text block at all**. The W1 classifier reported it correctly; a parser that trusted content would have said "no JSON block".
+
+**Gate (§5.3), primary (`medium`):**
+
+| Criterion | Result |
+|---|---|
+| Zero new critical errors | **pass** (0) |
+| Critical-field accuracy ≥ control | **pass** (231/231 = 231/231) |
+| No field marked `high` that is wrong | **fail.** Against the labels as written, 6 `flightNumber` fields. Against Trippy's own contract, 9, where control has 16. |
+| `isTravelRelated:false` on all non-travel fixtures | **fail, identically on control and every candidate.** Both dinner invites (text and image) are correct. `non-travel-fare-promo` comes back `true` with 0 bookings on all four profiles. |
+| Parse + `max_tokens` + refusal = 0 | **pass** (0/23) |
+| Median latency ≤ 1.5× control | **pass** (4.7 s against 9.6 s, 0.49×) |
+| Cost per successful extraction reported | $0.0136 against $0.0159 (−14%); images +3% |
+
+**What the evidence says, in product terms.**
+- **Facts.** On Sonnet 5.5 at `medium`, every booking in the corpus came back with the same dates, times, references, places and countries as today, from text, screenshots and PDFs alike.
+- **Speed and cost.** An import finishes in about half the time (about 5 s against 10 s). It costs about 14% less, or about the same for a screenshot.
+- **The flight-number shortfall is the field's format, not its content.** Both models read the designator correctly. Sonnet 4.6 always writes the airline code into the number (`carrierCode "KE"`, `flightNumber "KE012"`). Sonnet 5.5 does that about half the time and otherwise writes `"012"`.
+- **Trippy's own code expects `"012"`.** Every stored flight is `SQ` + `842`. The booking card renders `${carrierCode} ${flightNumber}`. The live-status lookup refuses `"KE012"` and `"KE 012"` with a 400.
+- **So on today's model, every imported flight would read "KE KE012" and fail its status check.** Sonnet 5.5 would fix about half of them by accident.
+- **The fare-promo shortfall is a prompt ambiguity both models share.** Rule 6 puts "or contains no extractable booking" in parentheses. Both models answer "travel-related, no bookings", and the review screen then says "We couldn't find any bookings in that." instead of "This doesn't look like travel." Nothing is fabricated either way.
+
+**Facts corrected or learned:**
+- **W0's "151/151 critical fields" counted every labelled field.** §5.3's critical set is dates, times, refs, type, origin/destination, city and countryCode: 139 of those 151. The other 12 are flight and train numbers and `localName`. The scorer now reports the two separately, and adds the flight-number usability check against the real `lookups.normalizeFlightQuery`.
+- **The W0 `flightNumber` labels follow Sonnet 4.6's form**, which Trippy's lookup rejects. This looks like a pre-existing production defect on any imported flight: card text plus a failing status pill. Whether any of production's 3 artifacts was a flight was not checked. The robust fix is deterministic and model-agnostic, in `importer.js` `normalizeExtractedBooking`: strip a leading carrier code and spaces from `flightNumber`. It is outside W4's files and not done here.
+- **Thinking is rare at `medium` on this workload** (2 of 23 responses, ≤ 475 tokens). The +12% median output is mostly the tokenizer (+23% on the same JSON) offset by terser text. `low` is statistically indistinguishable on this corpus.
+- **The F-30-14 high-resolution image estimate holds within 3%.**
+- **Sonnet 5.5 can return a thinking-only message when the allowance is tight.** That argues against setting the allowance by the 2× rule alone (below).
+
+**Allowance, if switched (D-30-6).** The observed maximum is 2,370 tokens including thinking, so 2× would give about 4,800. **Recommend 16,000** (≤ 21,333, F-30-6), and say so in the code comment, for three reasons:
+- The corpus's largest input holds 3 bookings, while a real multi-page PDF itinerary is unmeasured.
+- A tight allowance can be spent entirely on thinking.
+- `max_tokens` is a ceiling, not a spend; Sonnet 4.6 ran at 8,192, about 4× its own maximum.
+
+**Spend.** Anthropic **$1.27**: control $0.365, primary $0.312, `low` $0.305, `high` $0.264, forced cut-off $0.021. `count_tokens` calls are free.
+
+**Unresolved limitations.**
+- **No owner inputs.** The image and PDF results are **provisional**. The screenshots are clean renders, not photos, compressed captures or cluttered real apps; the PDFs are single-page; n = 23 is too small for percentile claims.
+- Steps 3–4 (switch, re-pin, browser pass at 375 px and desktop, `LIVE_ANTHROPIC=1`) wait on the ruling.
+
+**Needs the owner — one ruling.** Do you accept the two shortfalls and switch extraction to Sonnet 5.5 at `medium`, 16,000? The two are:
+- the `flightNumber` format, where today's model is worse;
+- the fare-promo `isTravelRelated`, which is identical on today's model.
+
+Recommended: **yes**, with the flight-number normalisation fixed as its own small change. That fix also repairs today's Sonnet 4.6 imports. If yes, the switch is mechanical:
+- a `'claude-sonnet-5-5'` extraction row `{ maxTokens: 16000, effort: 'medium' }`;
+- `EXTRACTION_MODEL` flipped, keeping the Plan 2A D3 comment;
+- the extraction sha256 pin re-captured;
+- a rollback pin proving Sonnet 4.6's row still sends `eb6fafb2…`;
+- then the browser pass and the live smoke.
+
+**Rollback:** nothing to roll back; no production constant changed.
+
+**Files (this pass).** In `backend/scripts/modelEval/`:
+- New: `renderExtractionFixtures.mjs`, `imageTokens.mjs`, `fixtures/extraction/{img,pdf}-*.json` with `fixtures/extraction/files/*`.
+- Changed: `extraction.mjs` (committed fixtures may name a file by `path`), `lib/score/extraction.mjs`, `profiles.mjs` (`forced-cutoff`), `README.md`.
 
 **Steps.** Sweep per §5.2 on the labelled corpus (Q-30-4); pick the profile (candidate: effort `medium`, 16,000); set `EXTRACTION_MODEL`; keep the Plan 2A D3 comment (the ruling is *Sonnet-tier, not Haiku* and still holds; only the version string changes); the import flow's confirmation step and artifact retention are untouched; local browser pass at 375 px and desktop: paste text, upload a screenshot, upload a PDF, and a non-travel input — confirm the new specific error copy for a forced `max_tokens` case (lower the allowance temporarily in the harness, never in code).
 

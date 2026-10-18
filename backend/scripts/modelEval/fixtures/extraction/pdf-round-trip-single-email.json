@@ -1,0 +1,76 @@
+{
+  "id": "pdf-round-trip-single-email",
+  "description": "pdf render of round-trip-single-email: Plain round-trip flight email: two bookings that share one confirmation reference.",
+  "tags": [
+    "flight",
+    "multi-leg",
+    "pdf",
+    "rendered"
+  ],
+  "source": "round-trip-single-email",
+  "tripContext": {
+    "startDate": "2027-09-10",
+    "endDate": "2027-09-14",
+    "destinations": [
+      {
+        "city": "Barcelona",
+        "countryCode": "ES"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "pdf",
+      "mediaType": "application/pdf",
+      "path": "files/pdf-round-trip-single-email.pdf"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-09-10T09:05",
+        "endDatetime": "2027-09-10T11:10",
+        "origin": [
+          "AMS",
+          "Amsterdam"
+        ],
+        "destination": [
+          "BCN",
+          "Barcelona"
+        ],
+        "confirmationRef": "PX2K6C",
+        "details": {
+          "originCity": "Amsterdam",
+          "destinationCity": "Barcelona",
+          "originCountryCode": "NL",
+          "destinationCountryCode": "ES",
+          "flightNumber": "KL1675"
+        }
+      },
+      {
+        "type": "flight",
+        "startDatetime": "2027-09-14T18:30",
+        "endDatetime": "2027-09-14T20:45",
+        "origin": [
+          "BCN",
+          "Barcelona"
+        ],
+        "destination": [
+          "AMS",
+          "Amsterdam"
+        ],
+        "confirmationRef": "PX2K6C",
+        "details": {
+          "originCity": "Barcelona",
+          "destinationCity": "Amsterdam",
+          "originCountryCode": "ES",
+          "destinationCountryCode": "NL",
+          "flightNumber": "KL1676"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "pdf-german-train-dotted-date",
+  "description": "pdf render of german-train-dotted-date: Deutsche Bahn booking in German with a dotted two-digit-year date (21.08.27); München and Hauptbahnhof must come back as English city names (rule 5).",
+  "tags": [
+    "train",
+    "non-english",
+    "hard",
+    "pdf",
+    "rendered"
+  ],
+  "source": "german-train-dotted-date",
+  "tripContext": {
+    "startDate": "2027-08-20",
+    "endDate": "2027-08-26",
+    "destinations": [
+      {
+        "city": "Munich",
+        "countryCode": "DE"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "pdf",
+      "mediaType": "application/pdf",
+      "path": "files/pdf-german-train-dotted-date.pdf"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "train",
+        "startDatetime": "2027-08-21T08:00",
+        "endDatetime": "2027-08-21T12:05",
+        "confirmationRef": "7GH2KP",
+        "details": {
+          "originCity": "Berlin",
+          "destinationCity": "Munich",
+          "originCountryCode": "DE",
+          "destinationCountryCode": "DE",
+          "trainNumber": "ICE1005"
+        }
+      }
+    ]
+  }
+}

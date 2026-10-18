@@ -1,0 +1,32 @@
+{
+  "id": "img-non-travel-dinner-invite",
+  "description": "image render of non-travel-dinner-invite: A dinner-party invitation with a date, time and address: not travel (rule 6), no booking may be fabricated.",
+  "tags": [
+    "non-travel",
+    "image",
+    "rendered"
+  ],
+  "source": "non-travel-dinner-invite",
+  "tripContext": {
+    "startDate": "2027-04-01",
+    "endDate": "2027-04-14",
+    "destinations": [
+      {
+        "city": "Tokyo",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-non-travel-dinner-invite.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": false,
+    "bookings": []
+  }
+}
