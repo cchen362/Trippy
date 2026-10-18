@@ -19,7 +19,9 @@ export const EXTRACTION_MODEL = 'claude-sonnet-5-5';
 
 export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5';
 
-export const COPILOT_MODEL = 'claude-sonnet-4-6';
+// Plan 30 W5: Sonnet 5.5 at effort 'low' under the D-30-9 explain-after-proposal protocol.
+// Reverting this constant restores Sonnet 4.6's settings (8,192, no thinking, no effort).
+export const COPILOT_MODEL = 'claude-sonnet-5-5';
 
 // Plan 30 W3: Haiku 5.5 with thinking disabled, and the prompt's volume rules keyed by model
 // (DISCOVERY_SELECTION_RULES). Reverting this constant restores Haiku 4.5's settings and prompt.
@@ -45,9 +47,17 @@ export const MODEL_PROFILES = Object.freeze({
     // A cut-off is a traveller-facing failure (D-30-3), the allowance is a ceiling, not a spend,
     // and this call is non-streaming, so it must stay at or under 21,333 (F-30-6).
     extraction: Object.freeze({ maxTokens: 16000, effort: 'medium' }),
+    // Plan 30 W5 / D-30-6: on the 20 scenarios the largest single iteration was 1,764 output tokens
+    // thinking included (an eight-search proposal step; 1,258 of them thinking) and the explain
+    // step's largest was 542. 16,000 is well above the 2x rule on purpose: adaptive thinking at
+    // 'low' varied from 820 to 1,258 tokens on the same scenario, and a tight allowance can be
+    // spent entirely on thinking and return no text. The call is streamed, so F-30-6's 21,333 cap
+    // does not apply, and the allowance is a ceiling, not a spend. No `thinking` field: adaptive
+    // stays on.
+    copilot: Object.freeze({ maxTokens: 16000, effort: 'low' }),
   }),
   'claude-sonnet-4-6': Object.freeze({
-    // Rollback row for extraction since Plan 30 W4; still live for the co-pilot.
+    // Rollback row for both extraction (since Plan 30 W4) and the co-pilot (since Plan 30 W5).
     extraction: Object.freeze({ maxTokens: 8192 }),
     copilot: Object.freeze({ maxTokens: 8192 }),
   }),
@@ -720,9 +730,11 @@ export const COPILOT_PING_INTERVAL_MS = 8000;
 // It persists the assistant message (always one row, D-30-8) + (when operations exist) the
 // proposal record, and returns the enriched proposal SSE payload ({ proposalId, operations,
 // warnings, status, statusReason }) or null. A stopped or errored turn never passes operations,
-// so a half-streamed propose_itinerary_changes can never become a proposal. Keeping persistence
-// in the route (not here) is why claude.js stays DB-free; when persistTurn is absent (unit tests)
-// the Wave 1 { operations }-only event is emitted so the protocol still round-trips.
+// so a half-streamed propose_itinerary_changes can never become a proposal. The explanation that
+// follows a propose call (D-30-9) is part of assistantText, so the saved row carries the prose and
+// the operations together. Keeping persistence in the route (not here) is why claude.js stays
+// DB-free; when persistTurn is absent (unit tests) the Wave 1 { operations }-only event is
+// emitted so the protocol still round-trips.
 //
 // toolExecutors (optional, Plan 12 Wave 1): { [toolName]: async (input) => resultObject },
 // injected by the route the same way as persistTurn — this file stays DB-free, the route owns
@@ -755,7 +767,7 @@ ${JSON.stringify(itineraryContext, null, 2)}
 
 ## How to propose changes
 - The ONLY way to change the itinerary is to call the propose_itinerary_changes tool. Never write changes as prose, JSON, or code blocks.
-- First explain your reasoning in prose, then call the tool with the operations. If you are not proposing changes, do not call the tool.
+- Call the tool first. Once Trippy has acknowledged the call, explain the proposed changes to the traveller in prose: what changes and why, in your own words. If you are not proposing changes, do not call the tool.
 - Use real dayId and stopId values from the itinerary above.
 
 ## Booking-linked stops are off-limits
@@ -819,7 +831,8 @@ Stops carry one of four kinds of timing. Respect them:
   let sawFirstDelta = false;
   let ttfdMs = null;
   let iterations = 0;
-  let terminalUse = null; // the propose_itinerary_changes tool_use that ended the turn, if any
+  let terminalUse = null; // the propose_itinerary_changes tool_use that ended tool execution, if any
+  let explainStep = false; // true for the single post-proposal iteration (D-30-9)
   let truncated = false;
   let refused = false;
   let lastStopReason = null;
@@ -905,7 +918,11 @@ Stops carry one of four kinds of timing. Respect them:
         ...requestSettings(profile),
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
+        // The tools list never changes between iterations (prompt cache, preserved thinking);
+        // the explain step only forbids calling any of them. Every other iteration sends no
+        // tool_choice key at all.
         tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL],
+        ...(explainStep ? { tool_choice: { type: 'none' } } : {}),
       });
       currentStream = stream;
 
@@ -937,7 +954,9 @@ Stops carry one of four kinds of timing. Respect them:
       // and a refusal carries no usable answer. Either way end the turn now, before the
       // terminal-tool check below, so a partially-parsed propose_itinerary_changes block never
       // becomes terminalUse and never becomes a proposal (D5 — surfaced honestly, never silently
-      // re-run or discarded).
+      // re-run or discarded). On the explain step (D-30-9) the proposal's operations already
+      // arrived complete in the previous response, so a cut there still emits the proposal and
+      // only adds the notice.
       const stop = classifyStop(finalMessage);
       lastStopReason = stop.stopReason;
       if (stop.outcome === 'truncated') {
@@ -950,6 +969,10 @@ Stops carry one of four kinds of timing. Respect them:
         break;
       }
 
+      // D-30-9 (Plan 30 W5): the explain step is the last iteration of the turn. Nothing in it is
+      // ever executed, and terminalUse (set by the previous iteration) is never overwritten.
+      if (explainStep) break;
+
       // Native tool-use is the ONLY action channel (Plan 11 Wave 1). Prose already streamed
       // above via on('text'); tool_use blocks are assembled on a separate channel, so reading
       // them here does not delay prose.
@@ -961,12 +984,34 @@ Stops carry one of four kinds of timing. Respect them:
         (block) => block.type === 'tool_use' && QUERY_TOOL_NAMES.has(block.name),
       );
 
-      // Terminal wins: a propose_itinerary_changes call ends the turn even if the same
-      // response also contains query tool_use blocks — those are ignored outright (no
+      // Terminal wins (Plan 11 Wave 1): a propose_itinerary_changes call ends tool execution even
+      // if the same response also contains query tool_use blocks — those are ignored outright (no
       // execution, no SSE) rather than left dangling with no way to answer them.
+      //
+      // D-30-9 (Plan 30 W5): amends the Plan 11 Wave 1 terminal-tool rule. propose_itinerary_changes
+      // still ends tool execution and is still the only action channel, but it no longer ends the
+      // turn: one acknowledgement tool_result plus one tool_choice 'none' explain step follow,
+      // because on Sonnet 5.5 a pre-tool explanation comes back as an empty progress-update
+      // thinking block (F-30-9, measured 4/10 in W5). The assistant content is replayed unchanged
+      // (thinking blocks included) and the acknowledgement promises nothing about validity or
+      // persistence — the server has not validated the operations yet.
       if (foundTerminalUse) {
         terminalUse = foundTerminalUse;
-        break;
+        const operationCount = Array.isArray(terminalUse.input?.operations) ? terminalUse.input.operations.length : 0;
+        messages = [
+          ...messages,
+          { role: 'assistant', content },
+          {
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: terminalUse.id,
+              content: JSON.stringify({ status: 'received', operationCount }),
+            }],
+          },
+        ];
+        explainStep = true;
+        continue;
       }
 
       if (queryUses.length === 0) {

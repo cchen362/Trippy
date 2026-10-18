@@ -42,7 +42,7 @@ import { buildTripScopes, createTrip, getTripDetail, listTripScopes } from '../.
 import { scopesMatch } from '../../src/utils/geoIdentity.js';
 import { assertControlIsLive, getProfile, toServiceProfile } from './profiles.mjs';
 import { installRecorder, recordFixture } from './lib/recorder.mjs';
-import { installCopilotRequestPatch } from './lib/copilotPromptVariants.mjs';
+import { installCopilotRequestPatch } from './lib/copilotRequestPatch.mjs';
 import {
   FIXTURES_DIR, buildRecord, filterItems, openRunFile, parseArgs, printProgress, runPool,
 } from './lib/runner.mjs';
@@ -396,7 +396,6 @@ async function runScenario(scenario, { profile, profileName, seeded, userId }) {
       description: scenario.description,
       expect: scenario.expect,
       abortAfterFirstText: Boolean(scenario.abortAfterFirstText),
-      promptVariant: profile.promptVariant ?? null,
       betas: profile.betas ?? null,
       messageCount: conversation.length,
       contextChars: JSON.stringify(itineraryContext).length,
@@ -490,7 +489,6 @@ async function main() {
     console.log(`working copy: ${handle.path}`);
     console.log(
       `profile ${args.profile}: ${JSON.stringify(toServiceProfile(profile))}` +
-      `${profile.promptVariant ? ` + prompt variant "${profile.promptVariant}"` : ''}` +
       `${profile.betas ? ` + betas ${JSON.stringify(profile.betas)}` : ''}`,
     );
     console.log(`${scenarios.length} scenario(s)${isDryRun ? ' (dry run, no API call)' : ''}`);
@@ -499,10 +497,8 @@ async function main() {
       await dryRun({ scenarios, seeded, userId, db });
     } else if (scenarios.length) {
       installRecorder();
-      // After the recorder, so the run file stores the patched request body (Plan 30 W5, Q-30-3).
-      if (profile.promptVariant || profile.betas) {
-        installCopilotRequestPatch({ promptVariant: profile.promptVariant, betas: profile.betas });
-      }
+      // After the recorder: the beta header is a wire-only patch (Plan 30 W5, Q-30-3).
+      if (profile.betas) installCopilotRequestPatch({ betas: profile.betas });
       const run = openRunFile('copilot', args.profile);
       runPath = run.path;
       console.log(`run file: ${run.path}`);

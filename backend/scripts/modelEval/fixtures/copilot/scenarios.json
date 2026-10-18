@@ -1,5 +1,5 @@
 {
-  "_doc": "Plan 30 §5.2 co-pilot scenarios: exactly 20, run against the seeded trips in trips.json (trip A = Shanghai to Hangzhou, trip B = Taipei to Kaohsiung). messages are the conversation the model sees, ending in the traveller's final turn; stops and days are referred to by name and day number, never by id. `view` (optional, on a message) makes the script prefix the same '[Viewing: ...]' line routes/copilot.js contextLine() writes for a stored message context. `longThread: N` makes the script prepend N deterministic filler messages (alternating user/assistant, generated from templates in copilot.mjs) before `messages`. expect.tools is the ordered list of tool names the turn should use, including 'propose_itinerary_changes' when it proposes; toolsMode 'exact' needs the executed sequence to equal it, 'includes' needs it to appear as an ordered subsequence. Optional expect fields: forbidTools (names that must not appear), healthDayNumber (check_trip_health must be scoped to that day), searchCategory (a search must carry that category), timeAllowed (the traveller asked for a clock time, so a non-null time is not a fabrication). catalogueState, when present, is the state a search for that destination returns in the seeded copy — the setup makes shanghai, hangzhou and taipei fresh and kaohsiung generation_capped (and nothing is ever 'generating': that state would fire a real background generation, which D-30-7 forbids, so it cannot be exercised by this harness).",
+  "_doc": "Plan 30 §5.2 co-pilot scenarios: exactly 20, run against the seeded trips in trips.json (trip A = Shanghai to Hangzhou, trip B = Taipei to Kaohsiung). messages are the conversation the model sees, ending in the traveller's final turn; stops and days are referred to by name and day number, never by id. `view` (optional, on a message) makes the script prefix the same '[Viewing: ...]' line routes/copilot.js contextLine() writes for a stored message context. `longThread: N` makes the script prepend N deterministic filler messages (alternating user/assistant, generated from templates in copilot.mjs) before `messages`. expect.tools is the ordered list of tool names the turn should use, including 'propose_itinerary_changes' when it proposes, immediately followed by 'proposal_acknowledged' (the acknowledgement-and-explain step: a user tool_result for the propose call, then one tool_choice none call in which the model writes its explanation; the scorer derives it from the recorded API calls, not from executor calls); toolsMode 'exact' needs the executed sequence to equal it, 'includes' needs it to appear as an ordered subsequence. Optional expect fields: forbidTools (names that must not appear), healthDayNumber (check_trip_health must be scoped to that day), searchCategory (a search must carry that category), timeAllowed (the traveller asked for a clock time, so a non-null time is not a fabrication). catalogueState, when present, is the state a search for that destination returns in the seeded copy — the setup makes shanghai, hangzhou and taipei fresh and kaohsiung generation_capped (and nothing is ever 'generating': that state would fire a real background generation, which D-30-7 forbids, so it cannot be exercised by this harness).",
   "scenarios": [
     {
       "id": "plain-train-details",
@@ -75,7 +75,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "catalogueState": "fresh",
         "mustNotTargetBookingLinked": true,
@@ -92,7 +92,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "searchCategory": "nature",
         "catalogueState": "fresh",
@@ -110,7 +110,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "catalogueState": "fresh",
         "mustNotTargetBookingLinked": true,
@@ -198,7 +198,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "search_discovery_catalogue", "search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "search_discovery_catalogue", "search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "catalogueState": "fresh",
         "mustNotTargetBookingLinked": true,
@@ -215,7 +215,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["propose_itinerary_changes"],
+        "tools": ["propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "exact",
         "mustNotTargetBookingLinked": true,
         "groundedAdds": false,
@@ -231,7 +231,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["propose_itinerary_changes"],
+        "tools": ["propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "exact",
         "mustNotTargetBookingLinked": true,
         "groundedAdds": false,
@@ -247,7 +247,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["propose_itinerary_changes"],
+        "tools": ["propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "exact",
         "mustNotTargetBookingLinked": true,
         "groundedAdds": false,
@@ -263,7 +263,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "mustNotTargetBookingLinked": true,
         "groundedAdds": true,
@@ -281,7 +281,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["propose_itinerary_changes"],
+        "tools": ["propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "exact",
         "timeAllowed": true,
         "mustNotTargetBookingLinked": true,
@@ -333,7 +333,7 @@
       ],
       "expect": {
         "proposes": true,
-        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes", "proposal_acknowledged"],
         "toolsMode": "includes",
         "catalogueState": "fresh",
         "mustNotTargetBookingLinked": true,

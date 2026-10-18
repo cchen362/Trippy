@@ -69,19 +69,27 @@ export const PROFILES = {
     'forced-cutoff': { model: SONNET_55, maxTokens: 300, effort: 'medium' },
   },
   copilot: {
-    control: { model: SONNET_46, maxTokens: 8192 },
+    // W5 flipped COPILOT_MODEL: control is now Sonnet 5.5 at effort low under the D-30-9
+    // explain-after-proposal protocol (identical to the measured primary). 'baseline-46' is the
+    // Sonnet 4.6 control under its new name, runnable for a re-measure, never asserted live. Its
+    // run files are under runs/copilot/control/: the W0 and old-protocol runs are dated
+    // 2026-10-18T12-*, the D-30-9-protocol run 2026-10-18T17-37-* (recorded 2026-10-19).
+    control: { model: SONNET_55, maxTokens: 16000, effort: 'low' },
+    'baseline-46': { model: SONNET_46, maxTokens: 8192 },
     primary: { model: SONNET_55, maxTokens: 16000, effort: 'low' },
     'alt-medium': { model: SONNET_55, maxTokens: 16000, effort: 'medium' },
     // Thinking-off control for Sonnet 5.5 (F-30-4): between_tools at effort <= high.
     'alt-between-tools': { model: SONNET_55, maxTokens: 16000, effort: 'medium', thinking: { type: 'between_tools' } },
     // Plan 30 W5 (Q-30-3): remedies for the missing explanation above the change preview, measured
-    // at effort low. `betas` and `promptVariant` are harness-only: copilot.mjs applies them on the
-    // wire (lib/copilotPromptVariants.mjs); claude.js is unchanged.
-    // (a) show the model's progress updates: thinking display 'updates' behind its beta header.
+    // at effort low. `betas` is harness-only: copilot.mjs applies it on the wire
+    // (lib/copilotRequestPatch.mjs); claude.js is unchanged.
+    // Show the model's progress updates: thinking display 'updates' behind its beta header.
+    // Historical and re-runnable.
     'alt-updates-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', thinking: { type: 'adaptive', display: 'updates' }, betas: ['thinking-display-updates-2026-08-18'] },
-    // (c) rewrite the one prompt line that asks for the explanation.
-    'v-reply-text-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', promptVariant: 'reply-text' },
-    'v-reply-text-short-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', promptVariant: 'reply-text-short' },
+    // Two prompt variants that rewrote the one "explain your reasoning" line were measured on
+    // 2026-10-19 (no effect: 5/10 and 4/10 explanations) and rejected by the owner in favour of
+    // the acknowledgement protocol (D-30-9). Their profiles and code are removed; the run files stay
+    // under runs/copilot/v-reply-text-low/ and runs/copilot/v-reply-text-short-low/ as history.
   },
 };
 
