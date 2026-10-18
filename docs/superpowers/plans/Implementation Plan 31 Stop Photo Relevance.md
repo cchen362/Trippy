@@ -1,6 +1,6 @@
 # Implementation Plan 31 — Stop Photo Relevance (short-query retry + whole-word gate)
 
-**Status:** W1 COMPLETE (2026-10-18) — not deployed. Owner ruling 2026-10-18: ships with the next Plan 30 deploy (it is on `main`, so any deploy from `main` carries it); owner QA open.
+**Status:** W1 COMPLETE (2026-10-18) — DEPLOYED with Plan 30 Deploy A at `a12f473` (2026-10-18). Owner ruling 2026-10-18: ships with the next Plan 30 deploy (it is on `main`, so any deploy from `main` carries it); owner QA open.
 
 **Source:** `docs/superpowers/reviews/2026-10-18-stop-photo-fallback-investigation.md` (`5ea2560`). Owner approved remedies R1 + R2 on 2026-10-18; R3 deferred.
 
