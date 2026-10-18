@@ -507,6 +507,26 @@ describe('streamCopilotResponse — SSE headers', () => {
     await streamCopilotResponse([], {}, res);
     expect(res.ended).toBe(true);
   });
+
+  it('writes the turn event first when turnInfo carries the saved question id (D-32-2)', async () => {
+    mockStream.mockReturnValue(makeMockStream(['Hello'], 'Hello'));
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'Hi' }], {}, res, {}, undefined, {}, undefined, { messageId: 'q-123' });
+
+    const events = parseEvents(res);
+    expect(events[0]).toEqual({ type: 'turn', messageId: 'q-123' });
+    expect(events.filter((e) => e.type === 'turn')).toHaveLength(1);
+    expect(events.some((e) => e.type === 'text')).toBe(true);
+  });
+
+  it('writes no turn event without turnInfo', async () => {
+    mockStream.mockReturnValue(makeMockStream(['Hello'], 'Hello'));
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'Hi' }], {}, res);
+    await streamCopilotResponse([{ role: 'user', content: 'Hi' }], {}, res, {}, undefined, {}, undefined, null);
+
+    expect(parseEvents(res).some((e) => e.type === 'turn')).toBe(false);
+  });
 });
 
 describe('streamCopilotResponse — tool-use proposal protocol', () => {
@@ -1281,7 +1301,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     await streamCopilotResponse(
       [{ role: 'user', content: 'How is day 2?' }],
       { tripId: 't1', days: [{ id: 'd1', stops: [] }] },
-      makeMockRes(), {}, undefined, {}, reportTurnMetrics, ...profileArg,
+      makeMockRes(), {}, undefined, {}, reportTurnMetrics, null, ...profileArg,
     );
     return mockStream.mock.calls[0][0];
   }

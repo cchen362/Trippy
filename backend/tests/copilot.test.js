@@ -871,3 +871,242 @@ describe('POST /trips/:tripId/copilot — one persisted assistant row per turn (
     db.prepare('DELETE FROM stops WHERE id = ?').run(stopId);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plan 32: remove a stopped exchange (D-32-1 … D-32-6)
+// ---------------------------------------------------------------------------
+
+describe('DELETE /trips/:tripId/copilot/exchanges/:messageId (Plan 32)', () => {
+  let removeTripId;
+  let thirdUserId;
+
+  beforeAll(() => {
+    const db = getDb();
+    thirdUserId = db.prepare(`
+      INSERT INTO users (username, password_hash, display_name, is_admin)
+      VALUES ('collab-two', 'hash', 'Second Collaborator', 0)
+      RETURNING id
+    `).get().id;
+    removeTripId = db.prepare(`
+      INSERT INTO trips (title, owner_id, start_date, end_date, travellers, interest_tags, pace, status)
+      VALUES ('Remove Trip', ?, '2026-07-01', '2026-07-02', 'couple', '[]', 'moderate', 'upcoming')
+      RETURNING id
+    `).get(userId).id;
+    db.prepare(`
+      INSERT INTO days (trip_id, date, city) VALUES (?, '2026-07-01', 'Remove City')
+    `).run(removeTripId);
+    const addCollaborator = db.prepare('INSERT INTO trip_collaborators (trip_id, user_id) VALUES (?, ?)');
+    addCollaborator.run(removeTripId, otherUserId);
+    addCollaborator.run(removeTripId, thirdUserId);
+  });
+
+  beforeEach(() => {
+    const db = getDb();
+    db.prepare('DELETE FROM copilot_proposals WHERE trip_id = ?').run(removeTripId);
+    db.prepare('DELETE FROM copilot_messages WHERE trip_id = ?').run(removeTripId);
+  });
+
+  const asUser = (id, extra = {}) => makeReq({
+    user: { id },
+    params: { tripId: removeTripId },
+    trip: { id: removeTripId, owner_id: userId },
+    ...extra,
+  });
+  const remove = (id, messageId) =>
+    callHandler('delete', `/${removeTripId}/copilot/exchanges/${messageId}`, asUser(id), makeRes());
+  const removeWithBody = async (id, messageId) => {
+    const res = makeRes();
+    await callHandler('delete', `/${removeTripId}/copilot/exchanges/${messageId}`, asUser(id), res);
+    return res._body;
+  };
+  const askQuestion = (message) => callHandler('post', `/${removeTripId}/copilot`, asUser(userId, {
+    body: { message },
+  }), makeRes());
+
+  let seq = 0;
+  // Seeds one row with a strictly increasing timestamp, so ordering never depends on the clock.
+  function seed(id, role, authorId, { notice = null, replyTo = null, tripId: rowTripId = removeTripId } = {}) {
+    seq += 1;
+    const created = `2026-07-01 10:${String(Math.floor(seq / 60)).padStart(2, '0')}:${String(seq % 60).padStart(2, '0')}`;
+    getDb().prepare(`
+      INSERT INTO copilot_messages (id, trip_id, user_id, role, content, notice, reply_to, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, rowTripId, role === 'user' ? authorId : null, role, `${role} ${id}`, notice, replyTo, created);
+  }
+  const remaining = () => getDb().prepare(
+    'SELECT id FROM copilot_messages WHERE trip_id = ? ORDER BY created_at ASC, rowid ASC',
+  ).all(removeTripId).map((r) => r.id);
+
+  it('lets the author remove their own stopped exchange, and the next turn no longer carries it', async () => {
+    seed('q-a', 'user', otherUserId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+    seed('q-keep', 'user', otherUserId);
+    seed('a-keep', 'assistant', null, { replyTo: 'q-keep' });
+
+    expect(await removeWithBody(otherUserId, 'q-a')).toEqual({ removed: 2 });
+    expect(remaining()).toEqual(['q-keep', 'a-keep']);
+
+    mockStreamCopilotResponse.mockImplementationOnce(async () => 'ok');
+    await askQuestion('Fresh question');
+    const sent = mockStreamCopilotResponse.mock.calls.at(-1)[0].map((m) => m.content);
+    expect(sent).toEqual(['user q-keep', 'assistant a-keep', 'Fresh question']);
+  });
+
+  it('lets the trip owner remove a collaborator\'s stopped exchange', async () => {
+    seed('q-a', 'user', otherUserId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+
+    expect(await removeWithBody(userId, 'q-a')).toEqual({ removed: 2 });
+    expect(remaining()).toEqual([]);
+  });
+
+  it('refuses a collaborator removing someone else\'s exchange with 403 and leaves the rows', async () => {
+    seed('q-a', 'user', otherUserId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+
+    await expect(remove(thirdUserId, 'q-a')).rejects.toMatchObject({
+      status: 403,
+      message: 'Only the person who asked, or the trip owner, can remove this.',
+    });
+    expect(remaining()).toEqual(['q-a', 'a-a']);
+  });
+
+  it('refuses a finished reply with 409 and leaves the rows', async () => {
+    seed('q-a', 'user', userId);
+    seed('a-a', 'assistant', null, { notice: null, replyTo: 'q-a' });
+
+    await expect(remove(userId, 'q-a')).rejects.toMatchObject({
+      status: 409,
+      message: 'This conversation changed — reload and try again.',
+    });
+    expect(remaining()).toEqual(['q-a', 'a-a']);
+  });
+
+  it('refuses a stopped reply that a proposal references, with 409', async () => {
+    seed('q-a', 'user', userId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+    getDb().prepare(`
+      INSERT INTO copilot_proposals (id, trip_id, message_id, created_by_user_id, operations_json, trip_fingerprint)
+      VALUES ('p-guard', ?, 'a-a', ?, '[]', 'fp')
+    `).run(removeTripId, userId);
+
+    await expect(remove(userId, 'q-a')).rejects.toMatchObject({ status: 409 });
+    expect(remaining()).toEqual(['q-a', 'a-a']);
+  });
+
+  it('answers 404 for another trip\'s message id', async () => {
+    seed('q-other', 'user', userId, { tripId: otherTripId });
+    try {
+      await expect(remove(userId, 'q-other')).rejects.toMatchObject({
+        status: 404,
+        message: 'This conversation changed — reload and try again.',
+      });
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM copilot_messages WHERE id = ?').get('q-other').n).toBe(1);
+    } finally {
+      getDb().prepare('DELETE FROM copilot_messages WHERE id = ?').run('q-other');
+    }
+  });
+
+  it('answers 404 for an assistant row id and for a second removal of the same id', async () => {
+    seed('q-a', 'user', userId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+
+    await expect(remove(userId, 'a-a')).rejects.toMatchObject({ status: 404 });
+    expect(remaining()).toEqual(['q-a', 'a-a']);
+
+    await remove(userId, 'q-a');
+    await expect(remove(userId, 'q-a')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('removes a question that has no reply yet, and its late stopped reply is then never inserted', async () => {
+    let capturedPersistTurn;
+    let capturedTurnInfo;
+    mockStreamCopilotResponse.mockImplementationOnce(
+      async (msgs, ctx, res, req, persistTurn, toolExecutors, reportTurnMetrics, turnInfo) => {
+        capturedPersistTurn = persistTurn;
+        capturedTurnInfo = turnInfo;
+        return '';
+      },
+    );
+    await askQuestion('Mistaken question');
+
+    // The route names the saved question for the stream (D-32-2).
+    const saved = getDb().prepare(
+      "SELECT id FROM copilot_messages WHERE trip_id = ? AND role = 'user'",
+    ).get(removeTripId);
+    expect(capturedTurnInfo).toEqual({ messageId: saved.id });
+
+    expect(await removeWithBody(userId, saved.id)).toEqual({ removed: 1 });
+    expect(await capturedPersistTurn({ assistantText: 'late partial', operations: null, notice: 'stopped' })).toBeNull();
+    expect(remaining()).toEqual([]);
+  });
+
+  it('pairs a legacy exchange (reply_to NULL) by order', async () => {
+    seed('q-old', 'user', userId);
+    seed('a-old', 'assistant', null, { notice: 'stopped' });
+    seed('q-new', 'user', userId);
+    seed('a-new', 'assistant', null, { replyTo: 'q-new' });
+
+    expect(await removeWithBody(userId, 'q-old')).toEqual({ removed: 2 });
+    expect(remaining()).toEqual(['q-new', 'a-new']);
+  });
+
+  it('refuses an ambiguous legacy pair (another question sits between) with 409', async () => {
+    seed('q-one', 'user', otherUserId);
+    seed('q-two', 'user', userId);
+    seed('a-late', 'assistant', null, { notice: 'stopped' });
+
+    await expect(remove(otherUserId, 'q-one')).rejects.toMatchObject({ status: 409 });
+    expect(remaining()).toEqual(['q-one', 'q-two', 'a-late']);
+  });
+
+  it('removes a pending post-037 question alone and never takes another question\'s reply', async () => {
+    seed('q-pending', 'user', userId);
+    seed('q-other', 'user', otherUserId);
+    seed('a-other', 'assistant', null, { notice: 'stopped', replyTo: 'q-other' });
+
+    expect(await removeWithBody(userId, 'q-pending')).toEqual({ removed: 1 });
+    expect(remaining()).toEqual(['q-other', 'a-other']);
+  });
+
+  it('leaves turn metrics alone (D-32-6)', async () => {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO copilot_turn_metrics (trip_id, model, total_ms, iterations, query_calls)
+      VALUES (?, 'm', 1, 1, 0)
+    `).run(removeTripId);
+    seed('q-a', 'user', userId);
+    seed('a-a', 'assistant', null, { notice: 'stopped', replyTo: 'q-a' });
+
+    await remove(userId, 'q-a');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM copilot_turn_metrics WHERE trip_id = ?').get(removeTripId).n).toBe(1);
+    db.prepare('DELETE FROM copilot_turn_metrics WHERE trip_id = ?').run(removeTripId);
+  });
+
+  it('persistTurn writes reply_to as the saved question id', async () => {
+    mockStreamCopilotResponse.mockImplementationOnce(async (msgs, ctx, res, req, persistTurn) => {
+      await persistTurn({ assistantText: 'Reply', operations: null, notice: null });
+      return 'Reply';
+    });
+    await askQuestion('Linked question');
+
+    const question = getDb().prepare(
+      "SELECT id FROM copilot_messages WHERE trip_id = ? AND role = 'user'",
+    ).get(removeTripId);
+    const reply = getDb().prepare(
+      "SELECT reply_to FROM copilot_messages WHERE trip_id = ? AND role = 'assistant'",
+    ).get(removeTripId);
+    expect(reply.reply_to).toBe(question.id);
+  });
+
+  it('GET /history carries userId on user rows and null on assistant rows', async () => {
+    seed('q-a', 'user', otherUserId);
+    seed('a-a', 'assistant', null, { replyTo: 'q-a' });
+
+    const res = makeRes();
+    await callHandler('get', `/${removeTripId}/copilot/history`, asUser(userId), res);
+    const byId = Object.fromEntries(res._body.messages.map((m) => [m.id, m]));
+    expect(byId['q-a'].userId).toBe(otherUserId);
+    expect(byId['a-a'].userId).toBeNull();
+  });
+});

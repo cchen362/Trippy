@@ -740,8 +740,13 @@ export const COPILOT_PING_INTERVAL_MS = 8000;
 // injected by the route the same way as persistTurn — this file stays DB-free, the route owns
 // what a query tool actually does (catalogue reads, trip-health checks, etc).
 //
+// turnInfo (optional): { messageId }, the saved question row's id, owned by the route. D-32-2 (Plan 32):
+// when present it goes out as the first SSE event, { type: 'turn', messageId }, right after
+// flushHeaders(), so the panel learns the server id of a question it showed before the save was
+// visible to it. Older clients ignore the unknown type. Absent in unit tests and the harness.
+//
 // profile (optional): request settings override for the evaluation harness; defaults to live.
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics, profile = profileFor('copilot')) {
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics, turnInfo = null, profile = profileFor('copilot')) {
   const client = getClient();
 
   const write = (data) => {
@@ -754,6 +759,7 @@ export async function streamCopilotResponse(conversationMessages, itineraryConte
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
+  if (turnInfo?.messageId) write({ type: 'turn', messageId: turnInfo.messageId });
 
   const systemPrompt = `You are a travel co-pilot helping a traveller manage and improve their trip itinerary.
 
