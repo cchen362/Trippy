@@ -18,7 +18,8 @@ const COPILOT_NOTICE_COPY = {
   refused: "I can't help with that one — try asking another way.",
   empty: 'Nothing came through that time — try asking again.',
   // D-30-8: stamped by the client on Stop / a mid-turn error, and carried by the server on reload.
-  stopped: 'You stopped this reply.',
+  // 'stopped' is worded neutrally (owner): the server cannot tell Stop from a dropped connection.
+  stopped: 'This reply was stopped.',
   interrupted: 'This reply was interrupted — ask again.',
 };
 

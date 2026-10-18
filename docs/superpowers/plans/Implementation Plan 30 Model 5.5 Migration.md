@@ -305,7 +305,7 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
   - The history endpoint and the context queries break same-second ties by `rowid`, and history returns `notice`.
   - The model sees a stopped row as abandoned: `[The traveller stopped this reply. Treat their next message as a new request; resume only if they ask.]`
   - A blank row that carries a notice is never sent to the model blank.
-  - On the client, `useCopilot` stamps `stopped` and `interrupted` itself, because the server never sends them over SSE. `CopilotPanel` gains the copy *"You stopped this reply."* and *"This reply was interrupted — ask again."*
+  - On the client, `useCopilot` stamps `stopped` and `interrupted` itself, because the server never sends them over SSE. `CopilotPanel` gains the copy *"This reply was stopped."* and *"This reply was interrupted — ask again."* The stopped copy is neutral by owner ruling: the server cannot tell Stop from a dropped connection, so a drop is saved as `stopped` too.
 - **Unchanged on purpose.** The W1 `client_abort` metrics behaviour is untouched: one row, `error 0`, the same usage.
 - **Verified.**
   - Backend: 45 files, 1,042 passed and 6 skipped. `collaboration.test.js` timed out once under load (the known flake) and passed 14/14 when run alone.

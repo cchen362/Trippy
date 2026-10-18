@@ -132,7 +132,7 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
   it.each([
     ['refused', "I can't help with that one — try asking another way."],
     ['empty', 'Nothing came through that time — try asking again.'],
-    ['stopped', 'You stopped this reply.'],
+    ['stopped', 'This reply was stopped.'],
     ['interrupted', 'This reply was interrupted — ask again.'],
   ])('renders the %s notice copy', (notice, copy) => {
     renderPanel({
@@ -171,7 +171,7 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
       }),
     });
 
-    const notice = screen.getByText('You stopped this reply.');
+    const notice = screen.getByText('This reply was stopped.');
     expect(notice).toBeInTheDocument();
     expect(notice.parentElement.children).toHaveLength(1);
     expect(document.body.querySelector('div[style*="border-radius: 2px 12px 12px 12px"]')).toBeNull();
