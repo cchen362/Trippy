@@ -15,6 +15,7 @@ const {
   lookupFlightDetails,
   lookupHotelDetails,
   normalizeFlightQuery,
+  parseFlightDesignator,
   mergeDestinationPredictions,
   lookupDestinationPredictions,
   lookupDestinationBounds,
@@ -389,6 +390,50 @@ describe('normalizeFlightQuery', () => {
       'Flight number must include an airline code',
     );
   });
+
+  it.each([
+    ['U28123', 'U2', '8123'],
+    ['u2 8123', 'U2', '8123'],
+    ['3K681', '3K', '681'],
+    ['B6-1', 'B6', '1'],
+    ['KE012', 'KE', '012'],
+    ['EZY8123', 'EZY', '8123'],
+    ['ABC12', 'ABC', '12'],
+    ['9W339A', '9W', '339A'],
+  ])('splits the designator %s into %s + %s', (flightQuery, carrierCode, flightNumber) => {
+    expect(normalizeFlightQuery({ flightQuery })).toEqual({
+      carrierCode,
+      flightNumber,
+      flightDesignator: `${carrierCode}${flightNumber}`,
+    });
+  });
+
+  it('accepts a split airline code that carries a digit', () => {
+    expect(normalizeFlightQuery({ carrierCode: 'u2', flightNumber: '8123' })).toEqual({
+      carrierCode: 'U2',
+      flightNumber: '8123',
+      flightDesignator: 'U28123',
+    });
+    expect(normalizeFlightQuery({ carrierCode: '3K', flightNumber: '681' }).flightDesignator).toBe('3K681');
+  });
+
+  it.each(['5401', '12345', '1A'])('rejects %s, which has no airline code', (flightQuery) => {
+    expect(() => normalizeFlightQuery({ flightQuery })).toThrow('Flight number must include an airline code');
+  });
+
+  it.each(['54', '123', 'A', 'AB1', 'ABCD'])('rejects %s as a split airline code', (carrierCode) => {
+    expect(() => normalizeFlightQuery({ carrierCode, flightNumber: '123' })).toThrow(
+      'Flight number must include an airline code',
+    );
+  });
+});
+
+describe('parseFlightDesignator', () => {
+  it('splits a digit-bearing designator and refuses a bare number', () => {
+    expect(parseFlightDesignator('U28123')).toEqual({ carrierCode: 'U2', flightNumber: '8123' });
+    expect(parseFlightDesignator('5401')).toBeNull();
+    expect(parseFlightDesignator(null)).toBeNull();
+  });
 });
 
 describe('lookupFlightDetails', () => {
@@ -470,6 +515,33 @@ describe('lookupFlightDetails', () => {
       arrivalGate: 'D40',
       revisedDeparture: '2026-01-03T11:30',
       revisedArrival: '2026-01-04T08:25',
+    });
+  });
+
+  it('looks up a digit-bearing airline code and keeps only the number from the reply', async () => {
+    mockConfig.flightDataProvider = 'aerodatabox';
+    mockConfig.aerodataboxApiKey = 'rapid-key';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          number: 'U2 8123',
+          airline: { name: 'easyJet', iata: 'U2' },
+          departure: { airport: { iata: 'LGW', name: 'London Gatwick' } },
+          arrival: { airport: { iata: 'GVA', name: 'Geneva' } },
+        },
+      ],
+    });
+
+    const flight = await lookupFlightDetails({ flightQuery: 'U2 8123', departureDate: '2026-01-03' });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/flights\/number\/U28123\/2026-01-03\?/);
+    expect(flight).toMatchObject({
+      lookupStatus: 'found',
+      title: 'U2 8123',
+      carrierCode: 'U2',
+      flightNumber: '8123',
     });
   });
 

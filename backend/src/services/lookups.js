@@ -372,9 +372,17 @@ function cleanFlightPart(value) {
   return value?.trim().replace(/[\s-]+/g, '').toUpperCase() || '';
 }
 
-const CARRIER_CODE_RE = /^[A-Z]{2,3}$/;
-const FLIGHT_NUMBER_RE = /^[0-9]{1,4}[A-Z]?$/;
-const FLIGHT_DESIGNATOR_RE = /^([A-Z]{2,3})([0-9]{1,4}[A-Z]?)$/;
+// An airline code is a 3-letter ICAO code or a 2-character IATA code. An IATA
+// code may carry one digit (U2 easyJet, 3K Jetstar Asia, B6 JetBlue) but never
+// two: an all-digit pair would read a bare flight number "5401" as airline "54".
+const CARRIER_CODE = '[A-Z]{3}|[A-Z]{2}|[A-Z][0-9]|[0-9][A-Z]';
+const FLIGHT_NUMBER = '[0-9]{1,4}[A-Z]?';
+const CARRIER_CODE_RE = new RegExp(`^(?:${CARRIER_CODE})$`);
+const FLIGHT_NUMBER_RE = new RegExp(`^${FLIGHT_NUMBER}$`);
+// A combined designator splits at most one way: a flight number starts with a
+// digit and a 3-character code is all letters, so "KE012" is KE + 012, "U28123"
+// is U2 + 8123 and "ABC12" is ABC + 12.
+const FLIGHT_DESIGNATOR_RE = new RegExp(`^(${CARRIER_CODE})(${FLIGHT_NUMBER})$`);
 
 // Splits a full designator ("KE012", "KE 012", "ke-012") into its parts, or
 // returns null when the value is not one (e.g. a number-only "012"). The single
@@ -450,8 +458,9 @@ function scheduledLocal(point) {
 
 function normalizeAeroDataBoxFlight(rawFlight, normalized, departureDate) {
   const airlineCode = rawFlight.airline?.iata || normalized.carrierCode;
-  const rawNumber = rawFlight.number || rawFlight.flightNumber || normalized.flightDesignator;
-  const flightNumberOnly = String(rawNumber).replace(/^[A-Z]{2,3}\s*/i, '') || normalized.flightNumber;
+  // AeroDataBox reports the designator as "U2 8123"; keep only the number part.
+  const rawNumber = rawFlight.number || rawFlight.flightNumber;
+  const flightNumberOnly = parseFlightDesignator(rawNumber)?.flightNumber || normalized.flightNumber;
   const aircraft = rawFlight.aircraft?.model || rawFlight.aircraft?.icao || rawFlight.aircraft?.reg || null;
 
   return {

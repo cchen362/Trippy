@@ -207,6 +207,22 @@ describe('flight number normalisation', () => {
     expect(detailsJson.flightNumber).toBe(expected);
   });
 
+  it.each([
+    ['U2', 'U28123', '8123'],
+    [null, 'U2 8123', '8123'],
+    ['3K', '3K681', '681'],
+  ])('splits a digit-bearing airline code (carrierCode %s, flightNumber %s)', (carrier, number, expected) => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight(carrier, number), meta);
+    expect(detailsJson.carrierCode).toBe(number.slice(0, 2));
+    expect(detailsJson.flightNumber).toBe(expected);
+  });
+
+  it('never reads a bare number as an airline code when carrierCode is missing', () => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight(null, '5401'), meta);
+    expect(detailsJson.flightNumber).toBe('5401');
+    expect(detailsJson.carrierCode).toBeUndefined();
+  });
+
   it('leaves a number-only flight number unchanged', () => {
     const { detailsJson } = normalizeExtractedBooking(withFlight('KE', '012'), meta);
     expect(detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: '012' });
