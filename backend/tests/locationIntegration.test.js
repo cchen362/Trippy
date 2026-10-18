@@ -1068,12 +1068,12 @@ describe('stop photo attribution (Plan 10 Wave 1)', () => {
 });
 
 describe('stop photo selection (Plan 10 Wave 2)', () => {
-  function rawPhoto(id, { alt = '', tags = [] } = {}) {
+  function rawPhoto(id, { alt = '', description = '', tags = [] } = {}) {
     return {
       id,
       urls: { regular: `https://images.unsplash.com/${id}` },
       alt_description: alt,
-      description: '',
+      description,
       tags: tags.map((title) => ({ title })),
       user: { name: 'Test Photographer', links: { html: 'https://unsplash.com/@test' } },
       links: {
@@ -1156,6 +1156,139 @@ describe('stop photo selection (Plan 10 Wave 2)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const fallbackUrl = new URL(fetchMock.mock.calls[1][0]);
     expect(fallbackUrl.searchParams.get('query')).toBe('Hanoi travel');
+  });
+
+  describe('Plan 31 retry + whole-word gate', () => {
+    // Serves pools[n] on the nth fetch call (an empty pool once pools run out).
+    function mockSequence(pools) {
+      let call = 0;
+      return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        const results = pools[call] || [];
+        call += 1;
+        return { ok: true, json: async () => ({ results }) };
+      });
+    }
+    const queryAt = (fetchMock, n) => new URL(fetchMock.mock.calls[n][0]).searchParams.get('query');
+
+    it('retries a zero-result 6-word query with its first 4 words and uses the passing photo', async () => {
+      const fetchMock = mockSequence([[], [rawPhoto('retry-1', { alt: 'a dumpling basket' })]]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'dumpling basket steamed pork soup Taipei',
+        sceneType: 'restaurant',
+        country: 'Taiwan',
+        city: 'Taipei',
+      });
+
+      expect(photo.id).toBe('retry-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(queryAt(fetchMock, 1)).toBe('dumpling basket steamed pork');
+    });
+
+    it('falls to the scene fallback after the 4-word and 3-word retries both return nothing', async () => {
+      const fetchMock = mockSequence([[], [], [], [rawPhoto('scene-1', { alt: 'a restaurant' })]]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'dumpling basket steamed pork soup Taipei',
+        sceneType: 'restaurant',
+        country: 'Taiwan',
+        city: 'Taipei',
+      });
+
+      expect(photo.id).toBe('scene-1');
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(queryAt(fetchMock, 0)).toBe('dumpling basket steamed pork soup Taipei');
+      expect(queryAt(fetchMock, 1)).toBe('dumpling basket steamed pork');
+      expect(queryAt(fetchMock, 2)).toBe('dumpling basket steamed');
+      expect(queryAt(fetchMock, 3)).toBe('restaurant Taiwan');
+    });
+
+    it('does not retry a 3-word query that returned nothing', async () => {
+      const fetchMock = mockSequence([[], []]);
+
+      await unsplashService.selectPhoto({
+        query: 'Random Alley Hanoi',
+        sceneType: 'street_neighborhood',
+        country: 'Vietnam',
+        city: 'Hanoi',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(queryAt(fetchMock, 1)).toBe('street neighborhood Vietnam');
+    });
+
+    it('does not retry when the primary returned results that all fail the gate', async () => {
+      const fetchMock = mockSequence([
+        [rawPhoto('off-1', { alt: 'a mountain view' })],
+        [rawPhoto('scene-1', { alt: 'busy street' })],
+      ]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'dumpling basket steamed pork soup Taipei',
+        sceneType: 'restaurant',
+        country: 'Taiwan',
+        city: 'Taipei',
+      });
+
+      expect(photo.id).toBe('scene-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(queryAt(fetchMock, 1)).toBe('restaurant Taiwan');
+    });
+
+    it('gate reads description even when alt_description is present', async () => {
+      const fetchMock = mockSequence([[
+        rawPhoto('berghain', {
+          alt: 'blue and white graffiti on wall',
+          description: 'Berghain Berlin during Covid Closing Period.',
+        }),
+      ]]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'Berghain Berlin industrial techno nightclub',
+        sceneType: 'nightlife',
+        country: 'Germany',
+        city: 'Berlin',
+      });
+
+      expect(photo.id).toBe('berghain');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('no longer passes on substring matches', async () => {
+      const fetchMock = mockSequence([
+        [
+          rawPhoto('sub-1', { alt: 'low-angle photo of high-rise building' }),
+          rawPhoto('sub-2', { alt: 'stainless steel bowl' }),
+        ],
+        [rawPhoto('scene-1', { alt: 'a restaurant' })],
+      ]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'Din Tai Fung Taipei',
+        sceneType: 'restaurant',
+        country: 'Taiwan',
+        city: 'Taipei',
+      });
+
+      expect(photo.id).toBe('scene-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('tolerates plurals: token "dumpling" matches "dumplings"', async () => {
+      const fetchMock = mockSequence([[
+        rawPhoto('plural-1', { alt: 'a person holding a spoon full of dumplings' }),
+      ]]);
+
+      const photo = await unsplashService.selectPhoto({
+        query: 'dim sum dumpling basket Hong Kong',
+        sceneType: 'restaurant',
+        country: 'Hong Kong',
+        city: 'Hong Kong',
+      });
+
+      expect(photo.id).toBe('plural-1');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('does not re-roll the photo when a stop is only moved to another day (D6)', async () => {
