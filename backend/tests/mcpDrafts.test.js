@@ -1190,3 +1190,29 @@ describe('W3.4 request_upload_ticket', () => {
     }
   });
 });
+
+describe('flight number normalisation', () => {
+  it('stores a designator sent in flightNumber as carrierCode + number, same as the importer', async () => {
+    const trip = await futureTrip(owner.id);
+    const tokenId = tokenFor(owner.id, ['trips:read', 'trips:write']);
+    const { client, server } = await connectClient(authInfoFor(owner.id, ['trips:read', 'trips:write'], tokenId));
+    try {
+      const prepared = await client.callTool({
+        name: 'prepare_draft',
+        arguments: {
+          idempotencyKey: 'flight-number-1',
+          target: { tripId: trip.id },
+          bookings: [flightBooking({ detailsJson: { carrierCode: 'NH', flightNumber: 'NH 123' } })],
+          source: manualSource(),
+        },
+      });
+      const applied = await client.callTool({ name: 'apply_draft', arguments: { draftId: prepared.structuredContent.draftId } });
+      expect(applied.structuredContent.status).toBe('applied');
+      const row = getDb().prepare('SELECT details_json FROM bookings WHERE id = ?').get(applied.structuredContent.bookings[0].bookingId);
+      expect(JSON.parse(row.details_json)).toMatchObject({ carrierCode: 'NH', flightNumber: '123' });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});

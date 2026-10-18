@@ -372,11 +372,24 @@ function cleanFlightPart(value) {
   return value?.trim().replace(/[\s-]+/g, '').toUpperCase() || '';
 }
 
+const CARRIER_CODE_RE = /^[A-Z]{2,3}$/;
+const FLIGHT_NUMBER_RE = /^[0-9]{1,4}[A-Z]?$/;
+const FLIGHT_DESIGNATOR_RE = /^([A-Z]{2,3})([0-9]{1,4}[A-Z]?)$/;
+
+// Splits a full designator ("KE012", "KE 012", "ke-012") into its parts, or
+// returns null when the value is not one (e.g. a number-only "012"). The single
+// definition of a flight designator — the importer reuses it rather than a copy.
+export function parseFlightDesignator(value) {
+  if (typeof value !== 'string') return null;
+  const match = cleanFlightPart(value).match(FLIGHT_DESIGNATOR_RE);
+  return match ? { carrierCode: match[1], flightNumber: match[2] } : null;
+}
+
 export function normalizeFlightQuery({ carrierCode, flightNumber, flightQuery }) {
   const combined = cleanFlightPart(flightQuery);
 
   if (combined) {
-    const match = combined.match(/^([A-Z]{2,3})([0-9]{1,4}[A-Z]?)$/);
+    const match = combined.match(FLIGHT_DESIGNATOR_RE);
     if (!match) {
       throw badRequest('Flight number must include an airline code followed by a flight number');
     }
@@ -393,7 +406,7 @@ export function normalizeFlightQuery({ carrierCode, flightNumber, flightQuery })
   if (!normalizedCarrier || !normalizedNumber) {
     throw badRequest('Flight number must include an airline code and departure date');
   }
-  if (!/^[A-Z]{2,3}$/.test(normalizedCarrier) || !/^[0-9]{1,4}[A-Z]?$/.test(normalizedNumber)) {
+  if (!CARRIER_CODE_RE.test(normalizedCarrier) || !FLIGHT_NUMBER_RE.test(normalizedNumber)) {
     throw badRequest('Flight number must include an airline code followed by a flight number');
   }
 

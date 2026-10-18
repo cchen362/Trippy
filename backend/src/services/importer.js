@@ -3,6 +3,7 @@ import { getDb } from '../db/database.js';
 import { extractBookings } from './claude.js';
 import { createBooking } from './bookings.js';
 import { assertTripAccess, listBookingsForTrip, listDaysForTrip } from './trips.js';
+import { parseFlightDesignator } from './lookups.js';
 
 const SIZE_CAPS = { text: 100 * 1024, image: 5 * 1024 * 1024, pdf: 10 * 1024 * 1024 };
 const MEDIA_TYPE_WHITELIST = {
@@ -140,6 +141,21 @@ export function normalizeTz(tz) {
   }
 }
 
+// Shared with the MCP draft validator (Plan 28 W2.1) — never duplicate this
+// normalization logic in the MCP write path.
+// Trippy stores a flight as carrierCode "KE" + flightNumber "012": manual entry,
+// the flight card and the status lookup all assume it. Extraction models and MCP
+// clients often send the full designator "KE012" in flightNumber instead. The
+// airline code is stripped only when it matches carrierCode (or fills a missing
+// one); a different airline (a codeshare) or an unparseable value is left as given.
+export function normalizeFlightDetails(details) {
+  const designator = parseFlightDesignator(details.flightNumber);
+  if (!designator) return details;
+  const carrierCode = typeof details.carrierCode === 'string' ? details.carrierCode.trim().toUpperCase() : '';
+  if (carrierCode && carrierCode !== designator.carrierCode) return details;
+  return { ...details, carrierCode: designator.carrierCode, flightNumber: designator.flightNumber };
+}
+
 // Maps one extracted-booking object (Claude's schema) into createBooking()'s payload shape.
 // Exported so confirmArtifact() can re-run it on client-edited bookings before persisting.
 export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt }) {
@@ -149,10 +165,11 @@ export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt 
   // raw.details is Claude's extraction schema; raw.detailsJson is this function's own
   // output shape (present when re-normalizing client-edited bookings sent back to confirm).
   const rawDetails = raw.details || raw.detailsJson || {};
-  const detailsJson = {};
+  let detailsJson = {};
   for (const [key, value] of Object.entries(rawDetails)) {
     if (value !== null && value !== undefined && value !== '') detailsJson[key] = value;
   }
+  if (type === 'flight') detailsJson = normalizeFlightDetails(detailsJson);
   // Server-stamped — never trust a client-supplied importedFrom.
   detailsJson.importedFrom = { artifactId, model, extractedAt };
 
