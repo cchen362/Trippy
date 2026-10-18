@@ -11,6 +11,8 @@ export const copilotApi = {
     }),
   reject: (tripId, proposalId) =>
     request(`/api/trips/${tripId}/copilot/proposals/${proposalId}/reject`, { method: 'POST' }),
+  removeExchange: (tripId, messageId) =>
+    request(`/api/trips/${tripId}/copilot/exchanges/${messageId}`, { method: 'DELETE' }),
   clear: (tripId) =>
     request(`/api/trips/${tripId}/copilot/history`, { method: 'DELETE' }),
 };

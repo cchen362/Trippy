@@ -1,6 +1,6 @@
 # Implementation Plan 32 — Remove a Stopped Exchange
 
-**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below). M1 COMPLETE (backend; migration 037 applied in dev only). M2 pending. Nothing deployed.** Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
+**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below). M1 and M2 COMPLETE; DECISIONS rows D-32-1…6 added. Not deployed.** Ships in Plan 30 Deploy B with migration 037 (after 036). The owner runs the production legacy check in M1's status line first. Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
 
 ## Bottom line, in plain language
 
@@ -120,6 +120,34 @@ ORDER BY p.a_at;
 **Verify (the orchestrator, not a subagent report):** on the dev server with a dedicated verify trip, ask a question and Stop it, call DELETE, then read the rows back with sqlite. Send a fresh question and log the `conversationMessages` length to confirm the removed pair is absent. Exercise the 403 path with a collaborator account.
 
 ### M2 — The control (frontend)
+
+**M2 status:** 2026-10-19 — **COMPLETE, not deployed** (branch `plan32-m2-remove-control`, stacked on M1).
+- **Built:**
+  - `copilotApi.removeExchange`.
+  - `useCopilot`: a `turn` chunk stamps `serverId` on the live question. History rows carry `serverId = id` and `userId`, and the live row carries the session user's id. `removeExchange` is optimistic: on failure it puts the rows back where they were and rethrows.
+  - `CopilotPanel`: the D-32-5 control, with the stopped-notice colour moved to `var(--cream-mute)` (F-32-8). The error under the line goes through `friendlyError`.
+- **Two fixes made during QA (not in the plan):**
+  - (a) **Auto-scroll.** The thread scrolled to the bottom on *any* change to `messages`. So removing an exchange higher up, or restoring it after a failure, would have carried the reader to the bottom, away from the line they tapped and from the inline error. Scrolling is now keyed on the last row's id (an append or a history load) and on streaming text. There is a regression test.
+  - (b) **Separator spacing.** On a coarse pointer the line is a flex row, and flex items drop literal spaces, so it rendered as "stopped.· Remove". The dot is now spaced by margin. Each link's 36 px target is widened by padding and pulled back by an equal negative margin, so the words sit in the same place on touch and mouse.
+- **Tests:** frontend 346 passed (44 files): 6 new hook cases and 13 new panel cases. `npm run build` is clean.
+- **Browser pass (orchestrator, built-in pane, dev servers, verify trip, real Sonnet 5.5):**
+  - **375 px as the owner** (touch emulation, `pointer: coarse`):
+    1. Asked a wrong question and pressed Stop mid-reply. The Remove link appeared live, with no reload.
+    2. Remove → the confirm swapped in place: sheet still 471 px, line top and 46 px line height unchanged, Remove and Keep both 36 px tall, focus on Keep. Keep → the line came back and nothing changed.
+    3. Remove → Remove → the exchange was gone at once, with no error.
+    4. Reload → still gone (also confirmed by a DB read-back).
+    5. Follow-up "quote the message I sent just before this one" → the model quoted the exchange before the removed one. The server logged `messages=40`, which excludes the removed pair.
+  - **375 px as collaborator `qa_second`:** the owner's 4 stopped replies showed the notice with no Remove link, and no Clear button. The collaborator's own stopped question showed exactly one Remove link.
+  - **1280 px as the owner** (fine pointer): the collaborator's stopped exchange showed Remove. The confirm swapped in place (same top, 26.5 px line, sheet 448 px), and removing it went through. `/history` no longer lists it, and every user row carries `userId`.
+  - **Cleanup:** the QA exchanges, the minted sessions and the one-shot login pages were all removed. The verify trip is back to its 33 pre-QA messages.
+  - **Not verified here:** the sheet's slide animation. The pane freezes framer animations, and this change touches no motion.
+- **For the owner at Deploy B (production click-through):**
+  1. Run the legacy-check SQL from M1's status line against the pre-deploy backup.
+  2. On a phone: ask something, press Stop while it is answering, tap **Remove**, then **Keep**; nothing should change.
+  3. Tap **Remove** → **Remove**; the exchange should disappear.
+  4. Reload; it should still be gone.
+  5. Ask a follow-up; the reply should not mention the removed question.
+  6. As a collaborator, check there is no Remove link on someone else's stopped question.
 
 1. **`copilotApi.removeExchange(tripId, messageId)`.**
 2. **`useCopilot`.** On a `turn` chunk, stamp `serverId` on the live user row. Once that is set, the user row from `send` and its stopped assistant row become removable. History rows use their real `id`/`userId`. Add `removeExchange(serverQuestionId)`, which drops the question and the assistant row right after it from local state, restores them on failure, and rethrows.

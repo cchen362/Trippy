@@ -25,6 +25,9 @@ function normalizeMessage(message) {
     ...message,
     context: message.context ?? null,
     notice: message.notice ?? null,
+    // History ids ARE server ids; a row sent live gets its serverId from the `turn` event.
+    serverId: message.id,
+    userId: message.userId ?? null,
   };
 }
 
@@ -37,6 +40,8 @@ export function useCopilot(tripId) {
   const [proposals, setProposals] = useState([]);
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Load history on mount
   useEffect(() => {
@@ -62,6 +67,8 @@ export function useCopilot(tripId) {
       content: text,
       createdAt: new Date().toISOString(),
       authorName: user?.display_name ?? null,
+      userId: user?.id ?? null,
+      serverId: null,
       context,
     };
     setMessages(prev => [...prev, userMsg]);
@@ -107,7 +114,13 @@ export function useCopilot(tripId) {
 
     try {
       await copilotApi.send(tripId, text, context, (chunk) => {
-        if (chunk.type === 'text') {
+        if (chunk.type === 'turn') {
+          // D-32-2 (Plan 32): the first event names the saved question row, so the live
+          // user row can be removed later without a reload.
+          if (typeof chunk.messageId === 'string') {
+            setMessages(prev => prev.map(m => (m.id === userMsg.id ? { ...m, serverId: chunk.messageId } : m)));
+          }
+        } else if (chunk.type === 'text') {
           fullText += chunk.content;
           setStreamingText(fullText);
         } else if (chunk.type === 'proposal') {
@@ -182,6 +195,34 @@ export function useCopilot(tripId) {
     }
   }, [tripId, setProposalStatus]);
 
+  // D-32-1 (Plan 32): the unit is the question row plus the assistant row right after it.
+  // Optimistic: both leave at once; a failure puts them back exactly where they were.
+  const removeExchange = useCallback(async (serverQuestionId) => {
+    const current = messagesRef.current;
+    const qIndex = current.findIndex(m => m.role === 'user' && m.serverId === serverQuestionId);
+    if (qIndex === -1) {
+      await copilotApi.removeExchange(tripId, serverQuestionId);
+      return;
+    }
+    const next = current[qIndex + 1];
+    const removed = next?.role === 'assistant' ? [current[qIndex], next] : [current[qIndex]];
+    const followingId = current[qIndex + removed.length]?.id ?? null;
+    const removedIds = new Set(removed.map(m => m.id));
+
+    setMessages(prev => prev.filter(m => !removedIds.has(m.id)));
+    try {
+      await copilotApi.removeExchange(tripId, serverQuestionId);
+    } catch (err) {
+      setMessages(prev => {
+        if (prev.some(m => removedIds.has(m.id))) return prev;
+        const followIdx = followingId === null ? -1 : prev.findIndex(m => m.id === followingId);
+        const at = followIdx >= 0 ? followIdx : Math.min(qIndex, prev.length);
+        return [...prev.slice(0, at), ...removed, ...prev.slice(at)];
+      });
+      throw err;
+    }
+  }, [tripId]);
+
   const cancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -203,6 +244,6 @@ export function useCopilot(tripId) {
 
   return {
     messages, streaming, streamingText, activeTool, proposals, error,
-    send, applyProposal, rejectProposal, cancel, clear,
+    send, applyProposal, rejectProposal, cancel, clear, removeExchange,
   };
 }
