@@ -13,8 +13,9 @@ export const DISCOVERY_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 
 
 // Plan 2A D3: extraction uses Sonnet, not Haiku. Messy screenshots and
 // date-ambiguity reasoning are exactly where Haiku degrades, and extraction
-// errors are user-facing.
-export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
+// errors are user-facing. Plan 30 W4 moved the version, not the tier: Sonnet 5.5 at effort
+// 'medium'. Reverting this constant restores Sonnet 4.6's settings (no thinking, no effort).
+export const EXTRACTION_MODEL = 'claude-sonnet-5-5';
 
 export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5';
 
@@ -36,7 +37,17 @@ export const DISCOVERY_MODEL = 'claude-haiku-5-5';
 // (backend/scripts/modelEval) inject another profile through each service function's optional
 // `profile` argument.
 export const MODEL_PROFILES = Object.freeze({
+  'claude-sonnet-5-5': Object.freeze({
+    // Plan 30 W4 / D-30-6: on 23 fixtures (text, phone screenshots, PDFs) the largest output was
+    // 2,370 tokens thinking included, and only 2 of 23 responses at 'medium' thought at all. 16,000
+    // is above the 2x rule on purpose: no multi-page itinerary was measured, and with a tight
+    // allowance Sonnet 5.5 can spend all of it thinking and return no text (a 300-token run did).
+    // A cut-off is a traveller-facing failure (D-30-3), the allowance is a ceiling, not a spend,
+    // and this call is non-streaming, so it must stay at or under 21,333 (F-30-6).
+    extraction: Object.freeze({ maxTokens: 16000, effort: 'medium' }),
+  }),
   'claude-sonnet-4-6': Object.freeze({
+    // Rollback row for extraction since Plan 30 W4; still live for the co-pilot.
     extraction: Object.freeze({ maxTokens: 8192 }),
     copilot: Object.freeze({ maxTokens: 8192 }),
   }),

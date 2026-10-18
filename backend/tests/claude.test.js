@@ -1268,11 +1268,20 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
   it('extractBookings', async () => {
     const { body } = await runExtraction();
-    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
-    expect(body.model).toBe('claude-sonnet-4-6');
-    expect(body.max_tokens).toBe(8192);
+    // Plan 30 W4: the third deliberate move off the W0 pin — Sonnet 5.5 at effort 'medium',
+    // adaptive thinking left on (no thinking field), prompt unchanged (the sha256 below was
+    // re-captured for this body).
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
+    expect(body.model).toBe('claude-sonnet-5-5');
+    expect(body.max_tokens).toBe(16000);
+    expect(body.output_config).toEqual({ effort: 'medium' });
     expect(body).not.toHaveProperty('thinking');
-    expect(body).not.toHaveProperty('output_config');
+    expect(sha256(body)).toBe('57a2beddff7300eed3c46995b1579f079f642827990630395f5c29139b0e73bf');
+  });
+
+  it('extractBookings rolled back to Sonnet 4.6 sends the exact W0 body (Plan 30 W4 rollback)', async () => {
+    const { body } = await runExtraction({ profile: { model: 'claude-sonnet-4-6', ...MODEL_PROFILES['claude-sonnet-4-6'].extraction } });
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
     expect(sha256(body)).toBe('eb6fafb2148fe0bdcc070d737f73aab9d7292886466e5b4d6bd0fdbaad79aa74');
   });
 
@@ -1376,13 +1385,13 @@ const DESCRIPTOR_OK_TEXT = '```json\n{"photoQuery":"night market skewers","scene
 
 describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
   it('returns each workload\'s live model and max_tokens, model first', () => {
-    expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 8192 });
+    expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 16000, effort: 'medium' });
     expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 8192 });
     expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 1024, effort: 'low' });
     expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' });
-    for (const workload of ['extraction', 'copilot']) {
-      expect(Object.keys(profileFor(workload))).toEqual(['model', 'maxTokens']);
-    }
+    expect(Object.keys(profileFor('copilot'))).toEqual(['model', 'maxTokens']);
+    // Plan 30 W4: Sonnet 5.5 extraction runs adaptive thinking at effort 'medium' (no thinking field).
+    expect(Object.keys(profileFor('extraction'))).toEqual(['model', 'maxTokens', 'effort']);
     // Plan 30 W2: Haiku 5.5 runs adaptive thinking unless told otherwise, so its descriptor
     // profile carries an effort; no thinking field (low effort did not think in the sweep).
     expect(Object.keys(profileFor('descriptor'))).toEqual(['model', 'maxTokens', 'effort']);
@@ -1413,11 +1422,16 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(MODEL_PROFILES['claude-haiku-5-5'].discovery).toEqual({ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' });
   });
 
-  it('the live profiles feed requestSettings: no thinking or output_config for the Sonnet workloads', () => {
-    for (const workload of ['extraction', 'copilot']) {
-      const fields = requestSettings(profileFor(workload));
-      expect(Object.keys(fields)).toEqual(['model', 'max_tokens']);
-    }
+  it('keeps the Sonnet 4.6 extraction row, so a one-line constant revert restores a compatible body (Plan 30 W4 rollback)', () => {
+    expect(MODEL_PROFILES['claude-sonnet-4-6'].extraction).toEqual({ maxTokens: 8192 });
+    expect(MODEL_PROFILES['claude-sonnet-5-5'].extraction).toEqual({ maxTokens: 16000, effort: 'medium' });
+    // F-30-6: the extraction call is non-streaming, so its allowance must stay at or under 21,333.
+    expect(MODEL_PROFILES['claude-sonnet-5-5'].extraction.maxTokens).toBeLessThanOrEqual(21333);
+  });
+
+  it('the live profiles feed requestSettings: the co-pilot sends no thinking or output_config', () => {
+    expect(Object.keys(requestSettings(profileFor('copilot')))).toEqual(['model', 'max_tokens']);
+    expect(Object.keys(requestSettings(profileFor('extraction')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('descriptor')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('discovery')))).toEqual(['model', 'max_tokens', 'thinking', 'output_config']);
   });

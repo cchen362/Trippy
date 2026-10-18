@@ -1,6 +1,6 @@
 # Implementation Plan 30 — Sonnet 5.5 / Haiku 5.5 Migration
 
-**Status:** 2026-10-19 — **Deploy A is LIVE at `a12f473` (W1, D-30-8 with migration 036, W2, W3, Plan 31 W1); owner production QA passed 2026-10-18. Rollout revised by owner ruling 2026-10-19: no calendar observation windows (§7). Next: W4 → W5 → Plan 32 → Deploy B.** Previously: approved 2026-10-18 (defaults of Q-30-1 … Q-30-5 applied; Q-30-5 superseded, see §7). Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
+**Status:** 2026-10-19 — **Deploy A is LIVE at `a12f473` (W1, D-30-8 with migration 036, W2, W3, Plan 31 W1); owner production QA passed 2026-10-18. W4 COMPLETE 2026-10-19 (extraction on Sonnet 5.5 `medium`, owner-accepted; not deployed). Rollout revised by owner ruling 2026-10-19: no calendar observation windows (§7). Next: W5 → Plan 32 → Deploy B.** Previously: approved 2026-10-18 (defaults of Q-30-1 … Q-30-5 applied; Q-30-5 superseded, see §7). Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
 
 **Origin.** The owner wants Sonnet 4.6 → Sonnet 5.5 (extraction, co-pilot) and Haiku 4.5 → Haiku 5.5 (discovery, photo descriptors). The companion [opportunity exploration brief](../reviews/2026-10-18-model-55-opportunity-exploration-brief.md) is a separate product-discovery track and is **not** an input to this plan: no new tool, capability, or product behaviour rides on this migration.
 
@@ -621,7 +621,7 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 
 ### W4 — Extraction → Sonnet 5.5
 
-**Status:** 2026-10-19 — **Two criteria short of the gate; one owner ruling needed. Nothing switched, nothing deployed.** `EXTRACTION_MODEL` is still `claude-sonnet-4-6`. `claude.js` and `claude.test.js` are untouched, so the W0 extraction sha256 pin still holds. The two shortfalls are both formatting or prompt issues, not misread facts. Sonnet 4.6 shows the same two (one of them worse), so no candidate is judged against a bar control itself meets. Like W3, this stops rather than loosening §5.3. Steps 3–4 (switch, re-pin, browser pass, live smoke) were not run.
+**Status:** 2026-10-19 — **COMPLETE (owner-accepted); not deployed (Deploy B).** `EXTRACTION_MODEL = 'claude-sonnet-5-5'`, profile `{ maxTokens: 16000, effort: 'medium' }`. Details are under *W4 switch* below; the sweep record follows unchanged. **Sweep record:** two criteria short of the gate; one owner ruling needed. Nothing was switched at that point: `EXTRACTION_MODEL` was still `claude-sonnet-4-6`. `claude.js` and `claude.test.js` are untouched, so the W0 extraction sha256 pin still holds. The two shortfalls are both formatting or prompt issues, not misread facts. Sonnet 4.6 shows the same two (one of them worse), so no candidate is judged against a bar control itself meets. Like W3, this stops rather than loosening §5.3. Steps 3–4 (switch, re-pin, browser pass, live smoke) were not run.
 
 **Corpus.** `private/extraction/` is still **empty** (Q-30-4), so everything below is synthetic.
 - The 15 W0 text fixtures.
@@ -727,6 +727,55 @@ Recommended: **yes**, with the flight-number normalisation fixed as its own smal
 **Files (this pass).** In `backend/scripts/modelEval/`:
 - New: `renderExtractionFixtures.mjs`, `imageTokens.mjs`, `fixtures/extraction/{img,pdf}-*.json` with `fixtures/extraction/files/*`.
 - Changed: `extraction.mjs` (committed fixtures may name a file by `path`), `lib/score/extraction.mjs`, `profiles.mjs` (`forced-cutoff`), `README.md`.
+
+#### W4 switch — owner-accepted, extraction on Sonnet 5.5
+
+**Status:** 2026-10-19 — **COMPLETE; not deployed.** It ships with Deploy B (§7).
+
+**Owner ruling, recorded as §5.3 requires.** The owner "accept[s] the flightNumber format and fare-promo isTravelRelated shortfalls for Plan 30 W4" and switched extraction to Sonnet 5.5 at effort `medium`, 16,000. These are the only loosenings; every other §5.3 criterion passed as measured above.
+
+The flight-number normalisation is being fixed separately and model-agnostically in `importer.js` (a sibling session started 2026-10-19), not here.
+
+**What changed.**
+- **`claude.js`:**
+  - `EXTRACTION_MODEL = 'claude-sonnet-5-5'`.
+  - The Plan 2A D3 comment is kept and extended: the tier ruling stands, only the version moved.
+  - A new `MODEL_PROFILES['claude-sonnet-5-5'].extraction` of `{ maxTokens: 16000, effort: 'medium' }`, with no `thinking` field, so adaptive thinking stays on. Its comment records why the allowance is above D-30-6's 2× rule: no multi-page itinerary was measured, a tight allowance produced a thinking-only reply, and F-30-6 caps a non-streaming call at 21,333.
+  - Sonnet 4.6's row stays as the rollback row; it is still live for the co-pilot.
+- **`claude.test.js`:**
+  - The extraction request-body pin is re-captured: **`57a2bedd…73bf`**. The body's structure is asserted first: keys `model, max_tokens, output_config, system, messages`, `max_tokens` 16,000, `output_config: {effort:'medium'}`, no `thinking`.
+  - A new rollback pin proves Sonnet 4.6's row still sends the exact W0 body, `eb6fafb2…`, unchanged.
+  - Profile tests: the live extraction profile, Sonnet 4.6's row kept, and the allowance ≤ 21,333. The co-pilot assertions are unchanged.
+- **Harness:** `profiles.mjs` `control` is now the live Sonnet 5.5 profile, and `assertControlIsLive` passes. `baseline-46` is the Sonnet 4.6 control; its run files moved to `runs/extraction/baseline-46/` (gitignored).
+- **Not changed:** the prompt, the confirmation step, artifact retention, `importer.js`.
+
+**Checks.**
+- `cd backend; npm test`: 45 files passed (1 skipped), **1,057 passed**, 6 skipped (the live suite). `claude.test.js`: 143/143.
+- `LIVE_ANTHROPIC=1 npx vitest run tests/live`: **6/6** on Sonnet 5.5. The extraction raw and `extractBookings` shapes both ran.
+- **Browser pass**: Playwright, dev servers from `launch.json`, the W3 verify trip, a minted dev session that was deleted afterwards. No booking was confirmed, so the trip is unchanged.
+
+| # | Viewport | Input | Result |
+|---|---|---|---|
+| 1 | 375 × 812 | Pasted SQ 322 confirmation | Review in ~5 s. Flight, Fri 12 Mar → Sat 13 Mar, SIN → LHR, `9RB4TX`. `import_artifacts.model = claude-sonnet-5-5`. |
+| 2 | 375 × 812 | Phone screenshot (`img-cjk-high-speed-train.png`, 1170×2532) | Review in 5.9 s. G8501, Chengdu East → Chongqing West, Mon 3 May, `EA71234567`. |
+| 3 | 375 × 812 | PDF (`pdf-round-trip-single-email.pdf`) | Review in 7.5 s. 2 of 2 KLM legs, `PX2K6C`. |
+| 4 | 375 × 812 | Non-travel paste (an office meeting note) | "This doesn't look like travel." in 1.3 s. |
+| 5 | 375 × 812 | Forced cut-off | The real Sonnet 5.5 `max_tokens` error from the harness (`forced-cutoff`) was replayed through a Playwright route, with no server call. The panel shows *"The booking reader's output was cut off — try fewer pages or split the file."* inline under the inputs. |
+| 6 | 1280 × 860 | Phone screenshot (`img-cjk-ryokan-japan.png`) | Review in 5.6 s. 旅館 山水荘 (Ryokan Sansuiso), 8–10 Nov, `KY-88213`, the country inferred from the Kyoto address, and the "Extend trip" prompt. |
+
+**Observed during the pass, not caused by W4:**
+- The first PDF attempt got a 500. `node --watch` restarted the dev backend mid-request, because another session was editing files in this shared checkout. The retry succeeded.
+- **That interrupted request left its `import_artifacts` row at `extracting` permanently** (`0a276ba6…`, dev DB). A process restart during an extraction, such as a deploy, would do the same in production. It is pre-existing and noted for a later look.
+- Sonnet 5.5 did not write the flight number as `SQ322` consistently. Test 1 produced the doubled form, as the sweep predicted; the importer fix covers it.
+- One assumption line named a schema field ("noted in details.note"). Across the sweep this is 0 of 45 assumptions on 5.5 against 1 of 50 on 4.6, so it is not a regression.
+
+**Spend.** ≈ $0.07 for the browser pass and the live smoke. The W4 total is about **$1.34**.
+
+**Not done here.**
+- `docs/ENGINEERING.md` ("Booking extraction and the co-pilot use Sonnet 4.6 unless …") becomes false when Deploy B ships. Correct it at Deploy B, as W3 did at Deploy A.
+- W6 owns the `docs/DECISIONS.md` rows.
+
+**Rollback:** set `EXTRACTION_MODEL` back to `'claude-sonnet-4-6'`. That one line restores `{ maxTokens: 8192 }` with no effort and no thinking. The rollback test pins the resulting body to the W0 hash `eb6fafb2…`, so the main extraction pin must be flipped back to that literal too.
 
 **Steps.** Sweep per §5.2 on the labelled corpus (Q-30-4); pick the profile (candidate: effort `medium`, 16,000); set `EXTRACTION_MODEL`; keep the Plan 2A D3 comment (the ruling is *Sonnet-tier, not Haiku* and still holds; only the version string changes); the import flow's confirmation step and artifact retention are untouched; local browser pass at 375 px and desktop: paste text, upload a screenshot, upload a PDF, and a non-travel input — confirm the new specific error copy for a forced `max_tokens` case (lower the allowance temporarily in the harness, never in code).
 
