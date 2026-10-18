@@ -839,6 +839,24 @@ Stops carry one of four kinds of timing. Respect them:
   let iterations = 0;
   let terminalUse = null; // the propose_itinerary_changes tool_use that ended tool execution, if any
   let explainStep = false; // true for the single post-proposal iteration (D-30-9)
+  // D-30-9: on a direct edit the model calls the propose tool at once and the explanation follows
+  // seconds later, so the proposal reports as a tool like the query tools do. 'started' goes out
+  // when the tool_use block opens (its operations then stream for a while), or at the latest when
+  // the response carrying it ends; 'done' on the explain step's first text delta, or when the turn
+  // leaves the loop without one (no text, or a cut before the explain step). At most once per turn.
+  let proposeActivityOpen = false;
+  let proposeActivityReported = false;
+  const startProposeActivity = () => {
+    if (proposeActivityReported) return;
+    proposeActivityReported = true;
+    proposeActivityOpen = true;
+    write({ type: 'tool', tool: PROPOSE_ITINERARY_CHANGES_TOOL.name, state: 'started' });
+  };
+  const endProposeActivity = () => {
+    if (!proposeActivityOpen) return;
+    proposeActivityOpen = false;
+    write({ type: 'tool', tool: PROPOSE_ITINERARY_CHANGES_TOOL.name, state: 'done' });
+  };
   let truncated = false;
   let refused = false;
   let lastStopReason = null;
@@ -931,6 +949,13 @@ Stops carry one of four kinds of timing. Respect them:
         ...(explainStep ? { tool_choice: { type: 'none' } } : {}),
       });
       currentStream = stream;
+      stream.on('streamEvent', (event) => {
+        if (!explainStep && event.type === 'content_block_start'
+          && event.content_block?.type === 'tool_use'
+          && event.content_block.name === PROPOSE_ITINERARY_CHANGES_TOOL.name) {
+          startProposeActivity();
+        }
+      });
 
       stream.on('text', (text) => {
         if (!sawFirstDelta) {
@@ -938,6 +963,7 @@ Stops carry one of four kinds of timing. Respect them:
           ttfdMs = Date.now() - turnStart;
           console.log('[copilot] first text delta len=%d ttfd=%dms', text.length, ttfdMs);
         }
+        if (explainStep) endProposeActivity();
         fullText += text;
         write({ type: 'text', content: text });
       });
@@ -1017,6 +1043,7 @@ Stops carry one of four kinds of timing. Respect them:
           },
         ];
         explainStep = true;
+        startProposeActivity();
         continue;
       }
 
@@ -1070,6 +1097,8 @@ Stops carry one of four kinds of timing. Respect them:
 
       messages = [...messages, { role: 'assistant', content }, { role: 'user', content: toolResults }];
     }
+
+    endProposeActivity();
 
     if (truncated) {
       write({ type: 'notice', notice: 'truncated' });

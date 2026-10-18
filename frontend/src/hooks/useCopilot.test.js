@@ -452,3 +452,34 @@ describe('useCopilot Stop and mid-turn error (D-30-8)', () => {
     expect(result.current.messages.find((m) => m.role === 'assistant')).toMatchObject({ content: 'Fine', notice: null });
   });
 });
+
+describe('useCopilot proposal activity (D-30-9)', () => {
+  it('shows the propose tool as active until the explanation starts', async () => {
+    let releaseExplanation;
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'tool', tool: 'propose_itinerary_changes', state: 'started' });
+      await new Promise((resolve) => { releaseExplanation = resolve; });
+      onChunk({ type: 'tool', tool: 'propose_itinerary_changes', state: 'done' });
+      onChunk({ type: 'text', content: 'Moved it to day 2.' });
+      onChunk({ type: 'done' });
+    });
+
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    let pending;
+    act(() => {
+      pending = result.current.send('move the museum to day 2');
+    });
+    await waitFor(() => expect(result.current.activeTool).toBe('propose_itinerary_changes'));
+    expect(result.current.streamingText).toBe('');
+
+    await act(async () => {
+      releaseExplanation();
+      await pending;
+    });
+
+    expect(result.current.activeTool).toBeNull();
+    expect(result.current.messages.at(-1)).toMatchObject({ role: 'assistant', content: 'Moved it to day 2.' });
+  });
+});

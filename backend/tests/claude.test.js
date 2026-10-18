@@ -53,6 +53,9 @@ function makeMockStream(chunks, finalText, finalContent, stopReason, extras = {}
       // without throwing for tests that don't care about abort behavior.
     },
     async finalMessage() {
+      for (const event of extras.streamEvents ?? []) {
+        if (listeners['streamEvent']) listeners['streamEvent'](event);
+      }
       for (const chunk of chunks) {
         if (listeners['text']) listeners['text'](chunk);
       }
@@ -790,7 +793,9 @@ describe('streamCopilotResponse — agentic tool loop (Plan 12 Wave 1)', () => {
     expect(mockStream).toHaveBeenCalledTimes(2);
     expect(executor).not.toHaveBeenCalled();
     const events = parseEvents(res);
-    expect(events.find((e) => e.type === 'tool')).toBeUndefined();
+    // The ignored query tool never reports as running; only the proposal's own activity does (D-30-9).
+    expect(events.filter((e) => e.type === 'tool').map((e) => e.tool))
+      .toEqual(['propose_itinerary_changes', 'propose_itinerary_changes']);
     const proposalEvent = events.find((e) => e.type === 'proposal');
     expect(proposalEvent).toBeDefined();
     expect(proposalEvent.operations).toEqual(operations);
@@ -2511,6 +2516,142 @@ describe('streamCopilotResponse - proposal acknowledgement and explain step (D-3
     expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ iterations: 2, proposalOps: 2, stopReason: 'end_turn', error: 0 });
   });
 
+  const toolEvents = (res) => parseEvents(res).filter((e) => e.type === 'tool');
+  const PROPOSE_STARTED = { type: 'tool', tool: 'propose_itinerary_changes', state: 'started' };
+  const PROPOSE_DONE = { type: 'tool', tool: 'propose_itinerary_changes', state: 'done' };
+
+  it('reports the proposal as an active tool from the call until the first explanation delta', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK, proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Moved ', 'it.'], undefined, [{ type: 'text', text: 'Moved it.' }], 'end_turn'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'move it' }], {}, res, {}, persistTurn);
+
+    const events = parseEvents(res).filter((e) => e.type !== 'ping');
+    expect(toolEvents(res)).toEqual([PROPOSE_STARTED, PROPOSE_DONE]);
+    const started = events.findIndex((e) => e.type === 'tool' && e.state === 'started');
+    const done = events.findIndex((e) => e.type === 'tool' && e.state === 'done');
+    const firstText = events.findIndex((e) => e.type === 'text');
+    const proposal = events.findIndex((e) => e.type === 'proposal');
+    // 'started' is the first thing the client sees; 'done' lands immediately before the first delta.
+    expect(started).toBe(0);
+    expect(done).toBe(firstText - 1);
+    expect(firstText).toBeLessThan(proposal);
+  });
+
+  it('closes the proposal activity when the explain step ends without text, before the notice and proposal', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [], 'refusal'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn);
+
+    const types = typesOf(res).filter((t) => t !== 'ping');
+    expect(toolEvents(res)).toEqual([PROPOSE_STARTED, PROPOSE_DONE]);
+    expect(types).toEqual(['tool', 'tool', 'notice', 'proposal', 'done']);
+    warnSpy.mockRestore();
+  });
+
+  it('reports no proposal activity on a plain-text turn or a query-only turn', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['Hi.'], 'Hi.'));
+    const plain = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, plain);
+    expect(toolEvents(plain)).toEqual([]);
+
+    mockStream.mockReset();
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')]))
+      .mockReturnValueOnce(makeMockStream(['Here.'], undefined, [{ type: 'text', text: 'Here.' }], 'end_turn'));
+    const query = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'ideas?' }], {}, query, {}, undefined,
+      { search_discovery_catalogue: vi.fn().mockResolvedValue({ places: [] }) });
+    expect(toolEvents(query).map((e) => e.tool)).toEqual(['search_discovery_catalogue', 'search_discovery_catalogue']);
+  });
+
+  const proposeBlockStart = (id = 'tu_prop') => (
+    { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name: 'propose_itinerary_changes', input: {} } }
+  );
+
+  it('reports the proposal as started when its tool_use block opens, before the response ends, and only once', async () => {
+    const res = makeMockRes();
+    let eventsWhenBlockOpened = null;
+    let streamEventListener = null;
+    mockStream
+      .mockReturnValueOnce({
+        on(event, cb) { if (event === 'streamEvent') streamEventListener = cb; return this; },
+        abort() {},
+        async finalMessage() {
+          streamEventListener(proposeBlockStart());
+          // The operations are still streaming at this point; the response has not ended.
+          eventsWhenBlockOpened = parseEvents(res).filter((e) => e.type !== 'ping');
+          return { content: [proposeBlock()], stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 2 } };
+        },
+      })
+      .mockReturnValueOnce(makeMockStream(['Moved.'], undefined, [{ type: 'text', text: 'Moved.' }], 'end_turn'));
+
+    await streamCopilotResponse([{ role: 'user', content: 'move it' }], {}, res);
+
+    expect(eventsWhenBlockOpened).toEqual([PROPOSE_STARTED]);
+    expect(toolEvents(res)).toEqual([PROPOSE_STARTED, PROPOSE_DONE]);
+  });
+
+  it('ignores block starts for query tools and text', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('check_trip_health', {}, 'tu_h')], undefined, {
+        streamEvents: [
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_h', name: 'check_trip_health', input: {} } },
+        ],
+      }))
+      .mockReturnValueOnce(makeMockStream(['All good.'], undefined, [{ type: 'text', text: 'All good.' }], 'end_turn'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'check' }], {}, res, {}, undefined,
+      { check_trip_health: vi.fn().mockResolvedValue({ findings: [] }) });
+
+    expect(toolEvents(res).map((e) => e.tool)).toEqual(['check_trip_health', 'check_trip_health']);
+  });
+
+  it('closes the proposal activity when the propose response is cut before the explain step', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()], 'max_tokens', {
+      streamEvents: [proposeBlockStart()],
+    }));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, vi.fn().mockResolvedValue(null));
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(parseEvents(res).filter((e) => e.type !== 'ping')).toEqual([
+      PROPOSE_STARTED,
+      PROPOSE_DONE,
+      { type: 'notice', notice: 'truncated' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('a query round-trip before the proposal reports each tool in turn', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Added.'], undefined, [{ type: 'text', text: 'Added.' }], 'end_turn'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: vi.fn().mockResolvedValue({ places: [] }) });
+
+    expect(toolEvents(res)).toEqual([
+      { type: 'tool', tool: 'search_discovery_catalogue', state: 'started' },
+      { type: 'tool', tool: 'search_discovery_catalogue', state: 'done' },
+      PROPOSE_STARTED,
+      PROPOSE_DONE,
+    ]);
+  });
+
   it('never executes anything from the explain step, and a tool_use there cannot overwrite the proposal', async () => {
     const executor = vi.fn();
     const otherOps = [{ action: 'remove_stop', stopId: 'other' }];
@@ -2532,7 +2673,11 @@ describe('streamCopilotResponse - proposal acknowledgement and explain step (D-3
     // (e) a query tool_use beside the propose block is ignored outright, in both responses.
     expect(executor).not.toHaveBeenCalled();
     expect(mockStream).toHaveBeenCalledTimes(2);
-    expect(parseEvents(res).find((e) => e.type === 'tool')).toBeUndefined();
+    // Only the proposal's own activity events - no query tool ever reports as running.
+    expect(parseEvents(res).filter((e) => e.type === 'tool')).toEqual([
+      { type: 'tool', tool: 'propose_itinerary_changes', state: 'started' },
+      { type: 'tool', tool: 'propose_itinerary_changes', state: 'done' },
+    ]);
     expect(persistTurn).toHaveBeenCalledOnce();
     expect(persistTurn.mock.calls[0][0].operations).toEqual(OPS);
   });
