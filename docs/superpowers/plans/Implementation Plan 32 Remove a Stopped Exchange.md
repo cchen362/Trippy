@@ -1,6 +1,6 @@
 # Implementation Plan 32 — Remove a Stopped Exchange
 
-**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below). M1 and M2 COMPLETE; DECISIONS rows D-32-1…6 added. Not deployed.** Ships in Plan 30 Deploy B with migration 037 (after 036). The owner runs the production legacy check in M1's status line first. Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
+**Status:** **DEPLOYED to production in Plan 30 Deploy B at `a2c47d5` (2026-10-19; migration 037 applied). Owner production click-through pending.** 2026-10-19 — **APPROVED by the owner (R1–R3 below). M1 and M2 COMPLETE; DECISIONS rows D-32-1…6 added. Not deployed.** Ships in Plan 30 Deploy B with migration 037 (after 036). The owner runs the production legacy check in M1's status line first. Written at `a44d867` as the follow-up the owner deferred when approving D-30-8 (Plan 30, commit `ab4e293`). M1 (backend) then M2 (frontend), each implemented via `/implement-milestone`, each updating its own status line and committing. Migration 037 ships with the next production deploy, after 036.
 
 ## Bottom line, in plain language
 
