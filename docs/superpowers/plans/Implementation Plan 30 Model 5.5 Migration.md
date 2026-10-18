@@ -604,11 +604,20 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 - **Production key, checked in place of the Appendix A step 2 Console check:**
   - One minimal request per shape, run from inside the container with the production key. Discovery's `thinking: disabled` + `low` and the descriptor's `low` both returned `end_turn`, so no workspace allow-list blocks `claude-haiku-5-5`.
   - The rate-limit tier cannot be read from the server. It stays an owner Console item, and is low-risk at this volume.
-- **Not yet verified (owner click-script, given in the session report):**
-  - a new manual stop gets a photo (descriptor + Plan 31 W1);
-  - "show more" or a first open on a fresh destination streams 8 categories, after which the agent reads the `[discover] end … stop_reason=end_turn categories=8` line from the container log;
-  - a stopped co-pilot reply survives a reload, labelled "This reply was stopped." (D-30-8).
-- **Observation window:** 7 days from 2026-10-18.
+- **Owner production QA: PASSED (2026-10-18), on the new trip "BKK - 30 W3 Deploy A".**
+  - **Photo:** a new manual stop ("KhuaKling PakSod Thong Lo") got its photo. This covers the descriptor and Plan 31 W1.
+  - **Stopped reply:** a stopped co-pilot reply survived a reload with its "This reply was stopped." label (D-30-8).
+  - **Discovery:**
+    - Bangkok's first open and a "show more" both streamed 8 categories.
+    - The container log shows three generations, all `stop_reason=end_turn categories=8 dropped=0`, with 85, 96 and 90 items (20,321–21,345 output tokens).
+    - The owner reported that the first view looked thin: 67 places, food 5. After a reload and reopen the panel showed the full catalogue: 206 active places, food 22.
+- **Defect found during QA — older than Deploy A, not caused by the model switch.**
+  - Opening Discovery on the brand-new trip fired **two** cache-miss generations for Bangkok, 5 s apart (16:06:41 and 16:06:46 UTC). The panel showed only the second request's stream: the rows that the first request, 5 s ahead, had not already inserted.
+  - The first request's places were stored but not shown until the reload. The duplicate also spent one of Bangkok's three daily generations (`MAX_GENERATIONS_PER_DESTINATION_PER_DAY`).
+  - No discovery file changed in Deploy A (`f2383de..a12f473`).
+  - Being investigated in its own session: the double request, probably the `TripPage` pre-warm and the panel sending different cache keys, plus the missing server-side single-flight. That session produces findings first; nothing is fixed here.
+- **"Show more" yield:** 90 generated, 50 new; the other 40 (44%) repeated stored names, which `insertPlaces` drops. That is above the 31% exclusion-repeat rate W3 measured for this profile. It is one data point, against a 156-name exclusion list, so watch it over the observation window.
+- **Observation window:** 7 days from 2026-10-18, to 2026-10-25. Watch descriptor `null` warnings and the discovery stop reasons.
 
 ### W4 — Extraction → Sonnet 5.5
 
