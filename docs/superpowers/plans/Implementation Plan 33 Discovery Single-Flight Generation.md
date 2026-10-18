@@ -88,7 +88,7 @@ The production log fits this exactly: both requests carried TH (`[discover] dest
 - **Tests.**
   - New: 10 in `discoveryGeneration.test.js`, 11 in `discovery.test.js` (including co-pilot/route sharing in both orders) and 2 in `copilotGrounding.test.js`. That file's mock now wraps the real `runCatalogueGeneration`.
   - Full backend suite: **1140 passed, 12 skipped, 0 failed.**
-  - `locationIntegration.test.js` needs *some* `UNSPLASH_ACCESS_KEY` / `GOOGLE_PLACES_API_KEY` in the environment, even though its `fetch` is mocked. A worktree with no `.env` therefore fails 11 of its tests with 503. With dummy values it passes 76/76. This is environmental, not M1.
+  - Re-run after merging `origin/main` at `84adf10` (Plan 32 M2, plus `63bafdb`, which stops the stop-photo tests needing a real Unsplash key): **1140 passed, 12 skipped**, with no provider keys in the environment at all.
 - **Route verification, real model, dev-DB copy** (Google off, owner DB untouched). A new trip "Chiang Mai single-flight QA" sent two first-time `POST /discover` requests for Chiang Mai/TH, 4 s apart:
   - The log shows one `[discover] destination=` line, one `joined running generation` line, and no `skipped duplicate` lines.
   - `generation_count` 1, daily count 1, every row batch 0.
