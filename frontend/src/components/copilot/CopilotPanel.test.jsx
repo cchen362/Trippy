@@ -4,12 +4,13 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import CopilotPanel from './CopilotPanel.jsx';
 
-vi.mock('../../context/AuthContext.jsx', () => ({
-  useAuth: () => ({ user: { id: 'owner-1' } }),
+const { mockUseMediaQuery, mockAuth } = vi.hoisted(() => ({
+  mockUseMediaQuery: vi.fn(() => false),
+  mockAuth: { user: { id: 'owner-1' } },
 }));
 
-const { mockUseMediaQuery } = vi.hoisted(() => ({
-  mockUseMediaQuery: vi.fn(() => false),
+vi.mock('../../context/AuthContext.jsx', () => ({
+  useAuth: () => ({ user: mockAuth.user }),
 }));
 
 vi.mock('../../hooks/useMediaQuery.js', () => ({
@@ -21,6 +22,7 @@ afterEach(cleanup);
 beforeEach(() => {
   HTMLElement.prototype.scrollTo = vi.fn();
   mockUseMediaQuery.mockReturnValue(false);
+  mockAuth.user = { id: 'owner-1' };
 });
 
 function makeCopilot(overrides = {}) {
@@ -36,6 +38,7 @@ function makeCopilot(overrides = {}) {
     rejectProposal: vi.fn(),
     cancel: vi.fn(),
     clear: vi.fn(),
+    removeExchange: vi.fn().mockResolvedValue({ removed: 2 }),
     ...overrides,
   };
 }
@@ -109,6 +112,138 @@ describe('CopilotPanel desktop readability', () => {
     expect(screen.getByPlaceholderText('Message your co-pilot...')).toHaveStyle({
       fontSize: '18px',
     });
+  });
+});
+
+// Plan 32 D-32-5: Remove on a stopped reply's notice line, for the question's author or the owner.
+describe('CopilotPanel remove a stopped exchange (Plan 32)', () => {
+  function exchange({ userId = 'collab-1', serverId = 'q1', notice = 'stopped' } = {}) {
+    return [
+      { id: 'u1', serverId, userId, role: 'user', content: 'Move Day 3 to Osaka', createdAt: '2026-01-01', context: null },
+      { id: 'a1', serverId: 'a1', userId: null, role: 'assistant', content: 'Partial', createdAt: '2026-01-01', notice },
+    ];
+  }
+
+  const removeLink = () => screen.queryByRole('button', { name: 'Remove' });
+
+  it('shows Remove to the author of the question (a collaborator on their own question)', () => {
+    mockAuth.user = { id: 'collab-1' };
+    renderPanel({ copilot: makeCopilot({ messages: exchange({ userId: 'collab-1' }) }) });
+
+    expect(removeLink()).toBeInTheDocument();
+    expect(screen.getByText('This reply was stopped.')).toBeInTheDocument();
+  });
+
+  it('shows Remove to the trip owner on a collaborator question', () => {
+    renderPanel({ copilot: makeCopilot({ messages: exchange({ userId: 'collab-1' }) }) });
+    expect(removeLink()).toBeInTheDocument();
+  });
+
+  it("hides Remove on another collaborator's question when the viewer is not the owner", () => {
+    mockAuth.user = { id: 'collab-2' };
+    renderPanel({ copilot: makeCopilot({ messages: exchange({ userId: 'collab-1' }) }) });
+    expect(removeLink()).not.toBeInTheDocument();
+  });
+
+  it('hides Remove while a reply is streaming', () => {
+    renderPanel({ copilot: makeCopilot({ messages: exchange(), streaming: true }) });
+    expect(removeLink()).not.toBeInTheDocument();
+  });
+
+  it.each([[null], ['interrupted']])('hides Remove on a reply whose notice is %s', (notice) => {
+    renderPanel({ copilot: makeCopilot({ messages: exchange({ notice }) }) });
+    expect(removeLink()).not.toBeInTheDocument();
+  });
+
+  it('hides Remove when the question has no server id yet', () => {
+    renderPanel({ copilot: makeCopilot({ messages: exchange({ serverId: null }) }) });
+    expect(removeLink()).not.toBeInTheDocument();
+  });
+
+  it('does not crash when the copilot object has no removeExchange', () => {
+    renderPanel({ copilot: makeCopilot({ messages: exchange(), removeExchange: undefined }) });
+    expect(removeLink()).not.toBeInTheDocument();
+    expect(screen.getByText('This reply was stopped.')).toBeInTheDocument();
+  });
+
+  it('swaps the line for a confirm, focuses Keep, and Keep restores the line without removing', () => {
+    const copilot = makeCopilot({ messages: exchange() });
+    renderPanel({ copilot });
+
+    fireEvent.click(removeLink());
+    expect(screen.getByText('Remove question and reply?')).toBeInTheDocument();
+    expect(screen.queryByText('This reply was stopped.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
+    expect(screen.getByText('This reply was stopped.')).toBeInTheDocument();
+    expect(screen.queryByText('Remove question and reply?')).not.toBeInTheDocument();
+    expect(copilot.removeExchange).not.toHaveBeenCalled();
+  });
+
+  it('calls removeExchange with the question server id when the confirm is accepted', () => {
+    const copilot = makeCopilot({ messages: exchange({ serverId: 'srv-q9' }) });
+    renderPanel({ copilot });
+
+    fireEvent.click(removeLink());
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(copilot.removeExchange).toHaveBeenCalledWith('srv-q9');
+  });
+
+  it('shows the server sentence inline under the notice when the remove is rejected', async () => {
+    const failure = Object.assign(new Error('This conversation changed — reload and try again.'), { status: 409 });
+    const copilot = makeCopilot({
+      messages: exchange(),
+      removeExchange: vi.fn().mockRejectedValue(failure),
+    });
+    renderPanel({ copilot });
+
+    fireEvent.click(removeLink());
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    expect(await screen.findByText('This conversation changed — reload and try again.')).toBeInTheDocument();
+    expect(screen.getByText('This reply was stopped.')).toBeInTheDocument();
+
+    // Tapping Remove again clears the error.
+    fireEvent.click(removeLink());
+    expect(screen.queryByText('This conversation changed — reload and try again.')).not.toBeInTheDocument();
+  });
+
+  it('gives each link a 36px minimum height on a coarse pointer', () => {
+    mockUseMediaQuery.mockReturnValue(true);
+    renderPanel({ copilot: makeCopilot({ messages: exchange() }) });
+
+    expect(removeLink()).toHaveStyle({ minHeight: '36px' });
+    fireEvent.click(removeLink());
+    expect(screen.getByRole('button', { name: 'Keep' })).toHaveStyle({ minHeight: '36px' });
+  });
+
+  it('does not scroll the thread when an exchange above the last row leaves, but does when a row is appended', () => {
+    const later = [
+      { id: 'u2', serverId: 'q2', userId: 'owner-1', role: 'user', content: 'Right question', createdAt: '2026-01-02', context: null },
+      { id: 'a2', serverId: 'a2', userId: null, role: 'assistant', content: 'Answer', createdAt: '2026-01-02', notice: null },
+    ];
+    const panel = (messages) => (
+      <CopilotPanel
+        copilot={makeCopilot({ messages })}
+        context={{ tab: 'plan', dayId: null }}
+        trip={{ id: 'trip-1', title: 'Test Trip' }}
+        days={[]}
+        bookings={[]}
+        activeDayId={null}
+        onClose={vi.fn()}
+        onMutationApplied={vi.fn()}
+        ownerId="owner-1"
+      />
+    );
+    const { rerender } = render(panel([...exchange(), ...later]));
+    HTMLElement.prototype.scrollTo.mockClear();
+
+    rerender(panel(later));
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled();
+
+    rerender(panel([...later, { id: 'u3', role: 'user', content: 'Next', createdAt: '2026-01-03', context: null }]));
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalled();
   });
 });
 

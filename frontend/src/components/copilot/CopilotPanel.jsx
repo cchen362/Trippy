@@ -5,6 +5,7 @@ import MutationPreview from './MutationPreview.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import useMediaQuery from '../../hooks/useMediaQuery.js';
 import { deriveCopilotSeeds } from '../../utils/copilotSeeds.js';
+import { friendlyError } from '../../utils/apiError.js';
 
 const TOOL_ACTIVITY_LABELS = {
   search_discovery_catalogue: 'Searching your Discovery picks…',
@@ -22,6 +23,35 @@ const COPILOT_NOTICE_COPY = {
   stopped: 'This reply was stopped.',
   interrupted: 'This reply was interrupted — ask again.',
 };
+
+// Plan 32: the Remove / Keep links on a stopped reply's notice line are plain text,
+// not chrome — no fill, no border, no accent. Colour is set per button.
+const REMOVE_LINK_STYLE = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  letterSpacing: 'inherit',
+  color: 'var(--cream-mute)',
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+  cursor: 'pointer',
+};
+
+// On a coarse pointer each link is a 36px-tall touch target. The horizontal padding widens the
+// target and the matching negative margin takes it back out of the layout, so the words sit
+// exactly where they do on a fine pointer.
+const REMOVE_LINK_COARSE = {
+  minHeight: 36,
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0 6px',
+  margin: '0 -6px',
+};
+
+// The dot between the notice and its links is spaced by margin, not by literal spaces: on a
+// coarse pointer the line is a flex row, and flex items drop their leading and trailing spaces.
+const SEPARATOR_STYLE = { margin: '0 0.6em' };
 
 // Plan 13 P2: the sheet NEVER changes height except by explicit user action
 // (drag or the expand/collapse control). Long replies scroll inside it at its
@@ -58,6 +88,10 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
   const [inputText, setInputText] = useState('');
   const [applyingId, setApplyingId] = useState(null);
   const [applyError, setApplyError] = useState(null);
+  // D-32-5 (Plan 32): the question serverId whose confirm is open, and the last failed remove.
+  const [confirmingId, setConfirmingId] = useState(null);
+  const [removeError, setRemoveError] = useState(null);
+  const keepRef = useRef(null);
   const [sheetState, setSheetState] = useState('partial');
   const [kbInset, setKbInset] = useState(0);
   const [viewportH, setViewportH] = useState(() =>
@@ -67,6 +101,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
   const inputRef = useRef(null);
 
   const isDesktop = useMediaQuery('(min-width: 640px)');
+  const isCoarse = useMediaQuery('(pointer: coarse)');
   const reduceMotion = useReducedMotion();
   const dragControls = useDragControls();
 
@@ -92,10 +127,18 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
     inputRef.current?.focus();
   }, []);
 
-  // Auto-scroll to bottom when messages or streaming text change
+  // Opening the remove confirm puts focus on Keep, the safe choice.
+  useEffect(() => {
+    if (confirmingId) keepRef.current?.focus();
+  }, [confirmingId]);
+
+  // Auto-scroll to bottom when the thread grows at its end (a new row, a history load) or text
+  // streams in. Keyed on the last row, not the whole list: removing or restoring an exchange
+  // higher up the thread (Plan 32) must not carry the reader away from the line they tapped.
+  const lastMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, streamingText]);
+  }, [lastMessageId, streamingText]);
 
   // Track the layout-viewport height so the pixel-resolved sheet height follows
   // rotation / window resize but NOT the keyboard (which changes only visualViewport).
@@ -167,6 +210,16 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
       await rejectProposal(proposalId);
     } catch (err) {
       setApplyError(err.message || 'Failed to reject changes. Please try again.');
+    }
+  };
+
+  const handleRemoveExchange = async (questionId) => {
+    setRemoveError(null);
+    setConfirmingId(null);
+    try {
+      await copilot.removeExchange(questionId);
+    } catch (err) {
+      setRemoveError({ id: questionId, text: friendlyError(err) });
     }
   };
 
@@ -498,7 +551,21 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
             </div>
           )}
 
-          {messages.map((msg, i) => (
+          {messages.map((msg, i) => {
+            // D-32-5 (Plan 32): only a stopped reply is removable, by its question's author or the trip owner.
+            const prevRow = messages[i - 1];
+            const questionId = prevRow?.role === 'user' ? prevRow.serverId : null;
+            const removable = Boolean(
+              msg.notice === 'stopped'
+              && questionId
+              && ((prevRow.userId && prevRow.userId === user?.id) || isOwner)
+              && !streaming
+              && copilot.removeExchange,
+            );
+            const confirming = removable && confirmingId === questionId;
+            const rowError = removable && removeError?.id === questionId ? removeError.text : null;
+
+            return (
             <div key={msg.id || `${msg.role}-${msg.createdAt || i}`}>
               {/* A text-less turn that ends in a notice shows the notice alone, not an empty bubble. */}
               {!(msg.notice && !msg.content) && (
@@ -518,11 +585,63 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                     fontFamily: "'DM Mono', monospace",
                     fontSize: 11,
                     letterSpacing: '0.06em',
-                    color: 'rgba(240,234,216,0.45)',
+                    color: 'var(--cream-mute)',
                     padding: '2px 0 8px',
+                    ...(removable && isCoarse
+                      ? { minHeight: 36, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }
+                      : null),
                   }}
                 >
-                  {COPILOT_NOTICE_COPY[msg.notice]}
+                  {!removable && COPILOT_NOTICE_COPY[msg.notice]}
+                  {removable && !confirming && (
+                    <>
+                      <span>{COPILOT_NOTICE_COPY[msg.notice]}</span>
+                      <span aria-hidden="true" style={SEPARATOR_STYLE}>·</span>
+                      <button
+                        type="button"
+                        onClick={() => { setRemoveError(null); setConfirmingId(questionId); }}
+                        style={{ ...REMOVE_LINK_STYLE, ...(isCoarse ? REMOVE_LINK_COARSE : null) }}
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
+                  {confirming && (
+                    <>
+                      <span>Remove question and reply?</span>
+                      <span aria-hidden="true" style={SEPARATOR_STYLE}>·</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveExchange(questionId)}
+                        style={{ ...REMOVE_LINK_STYLE, color: 'var(--cream-dim)', ...(isCoarse ? REMOVE_LINK_COARSE : null) }}
+                      >
+                        Remove
+                      </button>
+                      <span aria-hidden="true" style={SEPARATOR_STYLE}>·</span>
+                      <button
+                        type="button"
+                        ref={keepRef}
+                        onClick={() => setConfirmingId(null)}
+                        style={{ ...REMOVE_LINK_STYLE, ...(isCoarse ? REMOVE_LINK_COARSE : null) }}
+                      >
+                        Keep
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {rowError && (
+                <div
+                  role="alert"
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 11,
+                    letterSpacing: '0.06em',
+                    color: '#e05a5a',
+                    padding: '0 0 8px',
+                  }}
+                >
+                  {rowError}
                 </div>
               )}
               {(proposalsByMessageId.get(msg.id) || []).map((p) => (
@@ -536,7 +655,8 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                 />
               ))}
             </div>
-          ))}
+            );
+          })}
 
           {activeTool && (
             <div
