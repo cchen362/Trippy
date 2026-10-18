@@ -69,7 +69,11 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getOrCreateDestination, getDailyGenerationCount } from '../src/db/discoveryCatalogue.js';
 import { __resetDiscoveryVerifyForTests, waitForVerificationDrain } from '../src/services/discoveryVerify.js';
-import { runCatalogueGeneration } from '../src/services/discoveryGeneration.js';
+import {
+  runCatalogueGeneration,
+  getRunningGeneration,
+  __resetRunningGenerationsForTests,
+} from '../src/services/discoveryGeneration.js';
 
 let tmpDir;
 
@@ -98,6 +102,7 @@ beforeEach(() => {
     businessStatus: null, rating: null, ratingCount: null,
   }));
   __resetDiscoveryVerifyForTests();
+  __resetRunningGenerationsForTests();
   getDb().prepare('DELETE FROM discovery_places').run();
   getDb().prepare('DELETE FROM discovery_destinations').run();
   getDb().prepare('DELETE FROM discovery_generation_daily').run();
@@ -391,5 +396,204 @@ describe('runCatalogueGeneration', () => {
       claudeDestination: 'yokohama, Japan (JP)',
       useExclusions: false,
     })).resolves.toBeDefined();
+  });
+});
+
+// D-33-1: one generation per destination, joinable through the registry.
+describe('running-generation registry (D-33-1)', () => {
+  // A controllable generation: discoverDestination parks until release() is called.
+  function parkedGeneration() {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    return { gate, release };
+  }
+
+  function startRun(cityKey, overrides = {}) {
+    const db = getDb();
+    const destinationRow = makeDestination({ cityKey });
+    const run = runCatalogueGeneration(db, {
+      destinationRow,
+      claudeDestination: 'x',
+      useExclusions: false,
+      ...overrides,
+    });
+    return { db, destinationRow, run };
+  }
+
+  function parkAndEmit(park) {
+    mockDiscoverDestination.mockImplementation(async (dest, exclusions, cb) => {
+      await park.gate;
+      FAKE_CATEGORIES.forEach((cat) => cb(cat));
+      return FAKE_CATEGORIES;
+    });
+  }
+
+  it('is null when nothing runs, registers synchronously at start, and clears on success', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+
+    const destinationRow = makeDestination({ cityKey: 'registryok' });
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
+
+    const run = runCatalogueGeneration(getDb(), { destinationRow, claudeDestination: 'x', useExclusions: false });
+    // No await between the call and this check: registration is synchronous.
+    expect(getRunningGeneration(destinationRow.id)).not.toBeNull();
+    // Another destination is unaffected.
+    expect(getRunningGeneration(destinationRow.id + 999)).toBeNull();
+
+    park.release();
+    await run;
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
+  });
+
+  it('clears the entry after a failed generation, and settled resolves { ok:false, error } without rejecting', async () => {
+    const park = parkedGeneration();
+    mockDiscoverDestination.mockImplementation(async () => {
+      await park.gate;
+      throw new Error('model unavailable');
+    });
+
+    const { destinationRow, run } = startRun('registryfail');
+    const running = getRunningGeneration(destinationRow.id);
+    const runOutcome = run.catch((err) => err);
+
+    park.release();
+    const outcome = await running.settled;
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error.message).toBe('model unavailable');
+    expect((await runOutcome).message).toBe('model unavailable');
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
+  });
+
+  it('clears the entry when the generation throws before reaching the model', async () => {
+    const db = getDb();
+    const destinationRow = makeDestination({ cityKey: 'registrysyncthrow' });
+    // useExclusions reads the catalogue synchronously; a broken handle makes that throw.
+    const brokenDb = { prepare() { throw new Error('db exploded'); } };
+    await expect(
+      runCatalogueGeneration(brokenDb, { destinationRow, claudeDestination: 'x', useExclusions: true }),
+    ).rejects.toThrow('db exploded');
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
+    expect(getDailyGenerationCount(db, destinationRow.id)).toBe(0);
+  });
+
+  it('settled resolves { ok:true } when the generation finishes', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+
+    const { destinationRow, run } = startRun('registrysettled');
+    const running = getRunningGeneration(destinationRow.id);
+    park.release();
+    await expect(running.settled).resolves.toEqual({ ok: true });
+    await run;
+  });
+
+  it('throws when a second generation starts for the same destination, and leaves the first intact', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+
+    const { db, destinationRow, run: first } = startRun('registrydouble');
+
+    await expect(
+      runCatalogueGeneration(db, { destinationRow, claudeDestination: 'x', useExclusions: false }),
+    ).rejects.toThrow(/already running/);
+    // The rejected second call must not have cleared the first one's entry.
+    expect(getRunningGeneration(destinationRow.id)).not.toBeNull();
+
+    park.release();
+    await first;
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
+    expect(getDailyGenerationCount(db, destinationRow.id)).toBe(1);
+  });
+
+  it('allows a new generation once the previous one has finished', async () => {
+    mockDiscoverDestination.mockImplementation(async (dest, exclusions, cb) => {
+      cb(FAKE_CATEGORIES[0]);
+      return FAKE_CATEGORIES;
+    });
+    const { db, destinationRow, run } = startRun('registryagain');
+    await run;
+    await expect(
+      runCatalogueGeneration(db, { destinationRow, claudeDestination: 'x', useExclusions: true }),
+    ).resolves.toBeDefined();
+  });
+
+  it('listeners receive each persisted category (real rows), after the leader\'s own onCategory', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+    const order = [];
+
+    const { destinationRow, run } = startRun('registrylisten', {
+      onCategory: ({ category }) => order.push(`leader:${category}`),
+    });
+    const received = [];
+    getRunningGeneration(destinationRow.id).subscribe((event) => {
+      order.push(`listener:${event.category}`);
+      received.push(event);
+    });
+    park.release();
+    await run;
+
+    expect(order).toEqual(['leader:culture', 'listener:culture', 'leader:food', 'listener:food']);
+    expect(received).toHaveLength(2);
+    expect(received[0].inserted[0]).toMatchObject({ name: 'Fushimi Inari', category: 'culture' });
+    expect(typeof received[0].inserted[0].id).toBe('number');
+    expect(received[1].inserted[0]).toMatchObject({ name: 'Ramen Alley', category: 'food' });
+  });
+
+  it('a throwing listener is logged and unsubscribed while the leader completes and other listeners keep hearing', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { db, destinationRow, run } = startRun('registrythrow');
+    const running = getRunningGeneration(destinationRow.id);
+    const bad = vi.fn(() => { throw new Error('socket gone'); });
+    const good = vi.fn();
+    running.subscribe(bad);
+    running.subscribe(good);
+    park.release();
+
+    const result = await run;
+    const calls = [...errorSpy.mock.calls];
+    errorSpy.mockRestore();
+
+    expect(result.inserted).toHaveLength(2);
+    // Unsubscribed after its first failure: it only ever heard 'culture'.
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toContain('listener failed');
+    expect(calls[0].slice(1, 4)).toEqual([destinationRow.id, 'culture', 'socket gone']);
+    const updated = db.prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(destinationRow.id);
+    expect(updated.generation_count).toBe(1);
+    expect(getDailyGenerationCount(db, destinationRow.id)).toBe(1);
+  });
+
+  it('an unsubscribed listener stops hearing categories', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+    const { destinationRow, run } = startRun('registryunsub');
+    const listener = vi.fn();
+    const unsubscribe = getRunningGeneration(destinationRow.id).subscribe(listener);
+    unsubscribe();
+    park.release();
+    await run;
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('a leader onCategory that throws still propagates and settles { ok:false }', async () => {
+    const park = parkedGeneration();
+    parkAndEmit(park);
+    const { destinationRow, run } = startRun('registryleaderthrow', {
+      onCategory: () => { throw new Error('leader boom'); },
+    });
+    const running = getRunningGeneration(destinationRow.id);
+    const runOutcome = run.catch((err) => err);
+    park.release();
+    expect((await running.settled).ok).toBe(false);
+    expect((await runOutcome).message).toBe('leader boom');
+    expect(getRunningGeneration(destinationRow.id)).toBeNull();
   });
 });

@@ -15,6 +15,35 @@ import {
   incrementDailyGenerationCount,
 } from '../db/discoveryCatalogue.js';
 
+// D-33-1: a destination has at most one generation in flight. Concurrent requests (the
+// /discover route or a co-pilot kick) join the running one, never start a second, and never
+// spend the daily cap. Keyed by discovery_destinations.id; the registry is in-process, which
+// is correct because the backend is a single process by design (the same assumption the
+// provider budgets in config.js make).
+const runningGenerations = new Map();
+
+// Returns null when nothing is generating for this destination, otherwise
+// `{ settled, subscribe }`. `settled` NEVER rejects: it resolves `{ ok: true }` when the
+// generation finishes, or `{ ok: false, error }` when it throws, so a joiner can await it
+// without a try/catch of its own. `subscribe(listener)` registers a per-category listener
+// called with `{ category, inserted }` right after that category is persisted, and returns
+// an unsubscribe function.
+//
+// Callers must check this and, on null, start their own generation with no await between
+// the check and the runCatalogueGeneration call: that gap being synchronous is what makes
+// the check-then-start atomic on a single thread.
+export function getRunningGeneration(destinationId) {
+  const entry = runningGenerations.get(destinationId);
+  return entry ? { settled: entry.settled, subscribe: entry.subscribe } : null;
+}
+
+// Test-only escape hatch: vitest's module registry is shared across test files unless
+// explicitly reset, so a generation left pending at test end would otherwise leak its
+// entry into the next test.
+export function __resetRunningGenerationsForTests() {
+  runningGenerations.clear();
+}
+
 // destinationRow: the discovery_destinations row generation is happening
 // against (already resolved by the caller — this module never creates one).
 // claudeDestination: the human-readable string sent to Claude, already
@@ -29,7 +58,7 @@ import {
 // don't have to pass one. This is a DIFFERENT contract than the pre-W1
 // version, which forwarded discoverDestination's own onCategory straight
 // through with raw, never-persisted Claude items (no id/provenance/batch).
-export async function runCatalogueGeneration(db, { destinationRow, claudeDestination, useExclusions, onCategory }) {
+async function generate(db, { destinationRow, claudeDestination, useExclusions, onCategory }, notifyListeners) {
   const exclusionTitles = useExclusions
     ? listExclusionNames(db, destinationRow.id, 400)
     : [];
@@ -95,6 +124,7 @@ export async function runCatalogueGeneration(db, { destinationRow, claudeDestina
 
     allInserted.push(...inserted);
     if (onCategory) onCategory({ category: categoryObj.category, inserted });
+    notifyListeners({ category: categoryObj.category, inserted });
   };
 
   await discoverDestination(claudeDestination, exclusionTitles, handleCategory);
@@ -107,4 +137,58 @@ export async function runCatalogueGeneration(db, { destinationRow, claudeDestina
   incrementDailyGenerationCount(db, destinationRow.id);
 
   return { inserted: allInserted, insertedIds: allInserted.map((row) => row.id) };
+}
+
+// Runs one generation for destinationRow and registers it so concurrent callers can join
+// it (D-33-1). The entry is registered synchronously, before any await, and removed in the
+// `finally` on every exit. Starting a second generation for a destination that already has
+// one is a caller bug (the caller skipped the getRunningGeneration check), so it throws
+// instead of silently double-generating.
+export async function runCatalogueGeneration(db, options) {
+  const destinationId = options.destinationRow.id;
+  if (runningGenerations.has(destinationId)) {
+    throw new Error(
+      `runCatalogueGeneration: a generation is already running for destination=${destinationId}; callers must join it via getRunningGeneration`,
+    );
+  }
+
+  const listeners = new Set();
+  let settle;
+  const settled = new Promise((resolve) => { settle = resolve; });
+  runningGenerations.set(destinationId, {
+    settled,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  });
+
+  // A joiner's listener failing must never abort the leader's generation, which keeps
+  // persisting for the shared catalogue regardless of who is watching: log it, drop that
+  // listener, carry on. The leader's own onCategory is NOT guarded this way; it propagates
+  // exactly as it always has.
+  const notifyListeners = (event) => {
+    for (const listener of [...listeners]) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error(
+          '[discoveryGeneration] listener failed destination=%s category=%s, unsubscribing: %s',
+          destinationId, event.category, err.message,
+        );
+        listeners.delete(listener);
+      }
+    }
+  };
+
+  try {
+    const result = await generate(db, options, notifyListeners);
+    settle({ ok: true });
+    return result;
+  } catch (error) {
+    settle({ ok: false, error });
+    throw error;
+  } finally {
+    runningGenerations.delete(destinationId);
+  }
 }

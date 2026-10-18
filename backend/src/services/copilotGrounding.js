@@ -21,35 +21,27 @@ import {
   CACHE_TTL_MS,
   cacheTimestampToEpochMs,
 } from '../db/discoveryCatalogue.js';
-import { runCatalogueGeneration } from './discoveryGeneration.js';
+import { runCatalogueGeneration, getRunningGeneration } from './discoveryGeneration.js';
 import { rankPlaces, buildFitLine } from './discoveryRank.js';
 import { buildTripScopes, listTripScopes } from './trips.js';
 import { scopesMatch } from '../utils/geoIdentity.js';
 import { countryNameFromCode } from '../utils/countries.js';
 
-// Destinations with a background generation currently in flight, keyed
-// `${cityKey}|${countryCode}` — guards against firing a second kick for the
-// same destination while one is already running (concurrent searches for the
-// same empty/stale city within a turn, or across turns before the first kick
-// finishes). Cleared in the kick's `finally`, regardless of success/failure.
-const inFlightGenerationKeys = new Set();
-
-// Test-only escape hatch: vitest's module registry is shared across test
-// files unless explicitly reset, so a kick left in-flight (or a key never
-// cleared because its promise is still pending at test end) would otherwise
-// leak between tests.
-export function resetInFlightGenerations() {
-  inFlightGenerationKeys.clear();
-}
-
 // Fires the exact generation pipeline routes/discovery.js's /discover handler
 // uses (via services/discoveryGeneration.js), detached from the search call
 // that triggered it — the SSE-less co-pilot turn must never await this. Errors
 // are logged, never thrown back at anything, since nothing is awaiting.
+//
+// "Is this destination already generating" is answered by the shared registry in
+// discoveryGeneration.js (D-33-1), the same one the /discover route consults, so a
+// co-pilot search and a Discovery open for the same city never double-generate. When
+// one is running the kick simply returns: the search already answers
+// catalogueState 'generating' either way, and there is nothing to subscribe to here
+// because no caller streams. The registry check and the runCatalogueGeneration call
+// below sit in one synchronous stretch (no await between them), which is what makes
+// check-then-start atomic.
 function kickBackgroundGeneration(db, { cityKey, countryCode, label, useExclusions }) {
   const key = `${cityKey}|${countryCode}`;
-  if (inFlightGenerationKeys.has(key)) return;
-  inFlightGenerationKeys.add(key);
 
   (async () => {
     // Row creation is legitimately generation's job (see module header) — the
@@ -59,6 +51,8 @@ function kickBackgroundGeneration(db, { cityKey, countryCode, label, useExclusio
       countryCode,
       displayName: label,
     });
+
+    if (getRunningGeneration(destinationRow.id)) return;
 
     // Mirrors routes/discovery.js's claudeDestination composition exactly: country
     // context (when known) is composed into the STRING sent to Claude only.
@@ -72,14 +66,12 @@ function kickBackgroundGeneration(db, { cityKey, countryCode, label, useExclusio
       useExclusions,
       onCategory: undefined,
     });
-  })()
-    .catch((err) => {
-      console.error(
-        '[copilotGrounding] background generation failed destination=%s: %s',
-        key, err.message,
-      );
-    })
-    .finally(() => inFlightGenerationKeys.delete(key));
+  })().catch((err) => {
+    console.error(
+      '[copilotGrounding] background generation failed destination=%s: %s',
+      key, err.message,
+    );
+  });
 }
 
 // Maps a stored, active discovery_places row into the bounded G8 compact shape the

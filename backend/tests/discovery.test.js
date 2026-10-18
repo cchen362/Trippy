@@ -105,6 +105,8 @@ import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import * as tripService from '../src/services/trips.js';
 import { __resetDiscoveryVerifyForTests, waitForVerificationDrain } from '../src/services/discoveryVerify.js';
+import { __resetRunningGenerationsForTests } from '../src/services/discoveryGeneration.js';
+import { searchDiscoveryCatalogue } from '../src/services/copilotGrounding.js';
 
 let tmpDir;
 let userId;
@@ -150,6 +152,7 @@ beforeEach(() => {
     businessStatus: null, rating: null, ratingCount: null,
   }));
   __resetDiscoveryVerifyForTests();
+  __resetRunningGenerationsForTests();
   getDb().prepare('DELETE FROM discovery_places').run();
   getDb().prepare('DELETE FROM discovery_destinations').run();
   getDb().prepare('DELETE FROM discovery_generation_daily').run();
@@ -157,8 +160,7 @@ beforeEach(() => {
 });
 
 // Helper: build an SSE-capable mock res and collect emitted events
-function makeSseRes() {
-  const events = [];
+function makeSseRes(events = []) {
   const res = {
     destroyed: false,
     writableEnded: false,
@@ -175,7 +177,8 @@ function makeSseRes() {
 }
 
 // Helper: invoke the POST /:tripId/discover handler directly
-async function callDiscover(body) {
+// liveEvents lets a caller that does not await the request still read the stream so far.
+async function callDiscover(body, liveEvents = []) {
   const { default: handler } = await import('../src/routes/discovery.js');
   const req = {
     params: { tripId },
@@ -183,7 +186,7 @@ async function callDiscover(body) {
     user: { id: userId },
     trip: getDb().prepare('SELECT * FROM trips WHERE id = ?').get(tripId),
   };
-  const { res, events } = makeSseRes();
+  const { res, events } = makeSseRes(liveEvents);
   let nextErr;
   const next = (err) => { nextErr = err; };
 
@@ -1245,6 +1248,377 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
 
     expect(mockDiscoverDestination).toHaveBeenCalledTimes(3);
     expect(events.find((e) => e.type === 'error')?.code).toBe('generation_limit');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-flight generation (Plan 33 M1, D-33-1/2/3): a second request for a destination
+// that is already generating joins the running generation instead of starting another.
+// ---------------------------------------------------------------------------
+
+describe('POST /trips/:tripId/discover — single-flight generation (Plan 33)', () => {
+  let logSpy;
+  let errorSpy;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+
+  const THREE_CATEGORIES = [
+    { category: 'culture', items: [
+      { name: 'Wat Pho', description: 'Reclining Buddha temple.' },
+      { name: 'Grand Palace', description: 'The royal complex.' },
+    ] },
+    { category: 'food', items: [
+      { name: 'Jay Fai', description: 'Crab omelette legend.' },
+      { name: 'Thip Samai', description: 'Pad thai institution.' },
+    ] },
+    { category: 'nature', items: [
+      { name: 'Lumphini Park', description: 'The city lung.' },
+      { name: 'Bang Krachao', description: 'Green lung across the river.' },
+    ] },
+  ];
+
+  // A generation whose categories only land when the test says so (no sleeps): land(i)
+  // persists category i through the real onCategory and resolves once that has happened;
+  // fail(error) makes the pending generation throw instead.
+  function controlledGeneration(categories = THREE_CATEGORIES) {
+    const gates = categories.map(() => deferred());
+    const landed = categories.map(() => deferred());
+    const started = deferred();
+    mockDiscoverDestination.mockImplementation(async (dest, existingTitles, onCategory) => {
+      started.resolve();
+      for (let i = 0; i < categories.length; i += 1) {
+        await gates[i].promise;
+        onCategory(categories[i]);
+        landed[i].resolve();
+      }
+      return categories;
+    });
+    return {
+      started: started.promise,
+      async land(i) {
+        gates[i].resolve();
+        await landed[i].promise;
+      },
+      fail(i, error) {
+        gates[i].reject(error);
+      },
+    };
+  }
+
+  // Same shape as callDiscover, but hands back the live event list immediately so a test
+  // can assert what a client has seen mid-generation.
+  function startDiscover(body) {
+    const events = [];
+    const done = callDiscover(body, events);
+    return { events, done };
+  }
+
+  const joinedCount = () => logSpy.mock.calls.filter(
+    (args) => String(args[0]).includes('joined running generation'),
+  ).length;
+
+  async function waitForJoins(n) {
+    await vi.waitFor(() => expect(joinedCount()).toBe(n));
+  }
+
+  // The final per-category item names a client holds when it REPLACES a category on every
+  // plain chunk (the non-append protocol): the last chunk per category wins.
+  function finalNamesByCategory(events) {
+    const byCategory = new Map();
+    for (const e of events) {
+      if (e.type === 'category') byCategory.set(e.category, e.items.map((i) => i.name));
+    }
+    return byCategory;
+  }
+
+  function activeNamesByCategory(destinationId) {
+    const byCategory = new Map();
+    const rows = getDb().prepare(
+      `SELECT category, name FROM discovery_places WHERE destination_id = ? AND status = 'active' ORDER BY id`,
+    ).all(destinationId);
+    for (const row of rows) {
+      if (!byCategory.has(row.category)) byCategory.set(row.category, []);
+      byCategory.get(row.category).push(row.name);
+    }
+    return byCategory;
+  }
+
+  const sorted = (map) => Object.fromEntries(
+    [...map.entries()].map(([k, v]) => [k, [...v].sort()]),
+  );
+
+  const dailyCount = (destinationId) => getDb().prepare(
+    `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+  ).get(destinationId)?.count ?? 0;
+
+  it('two concurrent first-time requests run ONE generation, and the joiner ends with the full catalogue', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    const joiner = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await waitForJoins(1);
+
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    const [leaderResult, joinerResult] = await Promise.all([leader.done, joiner.done]);
+
+    expect(leaderResult.error).toBeUndefined();
+    expect(joinerResult.error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('bangkok');
+    const rows = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(dest.id);
+    expect(rows).toHaveLength(6);
+    expect(rows.every((r) => r.batch === 0)).toBe(true);
+    expect(dest.generation_count).toBe(1);
+    expect(dailyCount(dest.id)).toBe(1);
+
+    // The joiner's last chunk per category covers every active row in the DB (the thin
+    // second screen was the defect), and so does the leader's.
+    expect(sorted(finalNamesByCategory(joiner.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
+    expect(sorted(finalNamesByCategory(leader.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
+    expect([...finalNamesByCategory(joiner.events).keys()].sort()).toEqual(['culture', 'food', 'nature']);
+
+    const joinerDone = joiner.events.find((e) => e.type === 'done');
+    expect(joinerDone).toEqual({ type: 'done', cached: false });
+    expect(joiner.events.some((e) => e.append)).toBe(false);
+    expect(joiner.events.filter((e) => e.type === 'error')).toEqual([]);
+  });
+
+  it('a joiner arriving after some categories landed receives them immediately, before the next one', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    await gen.land(0);
+    await gen.land(1);
+
+    const joiner = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await waitForJoins(1);
+
+    // Category 2 has not landed, yet the joiner already holds the two that did.
+    expect([...finalNamesByCategory(joiner.events).keys()].sort()).toEqual(['culture', 'food']);
+    expect(joiner.events.find((e) => e.type === 'done')).toBeUndefined();
+
+    await gen.land(2);
+    await Promise.all([leader.done, joiner.done]);
+
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('bangkok');
+    expect(sorted(finalNamesByCategory(joiner.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(dailyCount(dest.id)).toBe(1);
+  });
+
+  it('a null-country request adopted onto the coded row (decision-table case 2) joins that row\'s generation', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    // No countryCode: case 2 silently adopts TH because exactly one coded row exists.
+    const joiner = startDiscover({ destination: 'Bangkok' });
+    await waitForJoins(1);
+
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    const [, joinerResult] = await Promise.all([leader.done, joiner.done]);
+
+    expect(joinerResult.error).toBeUndefined();
+    expect(joiner.events.find((e) => e.code === 'country_required')).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('bangkok');
+    expect(dailyCount(dest.id)).toBe(1);
+    expect(sorted(finalNamesByCategory(joiner.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
+  });
+
+  it('a "show more" joiner gets append chunks and an append done, and starts no second generation', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    await gen.land(0);
+    const joiner = startDiscover({ destination: 'Bangkok', countryCode: 'TH', more: true });
+    await waitForJoins(1);
+
+    await gen.land(1);
+    await gen.land(2);
+    await Promise.all([leader.done, joiner.done]);
+
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const chunks = joiner.events.filter((e) => e.type === 'category');
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    expect(chunks.every((e) => e.append === true)).toBe(true);
+    expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: false, append: true });
+    // The leader (a plain first generation) is unaffected: no append flag anywhere.
+    expect(leader.events.some((e) => e.append)).toBe(false);
+
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('bangkok');
+    expect(dailyCount(dest.id)).toBe(1);
+    expect(dest.generation_count).toBe(1);
+  });
+
+  it('a "show more" joiner is not refused as catalogue_full while a generation is running', async () => {
+    const { CATEGORY_ACTIVE_CAP } = await import('../src/db/discoveryCatalogue.js');
+    const { runCatalogueGeneration } = await import('../src/services/discoveryGeneration.js');
+    const dest = seedDestination({ cityKey: 'fullrun', countryCode: 'JP', displayName: 'Fullrun', lastGeneratedAt: nowSql() });
+    for (const category of DISCOVERY_CATEGORIES) {
+      for (let i = 0; i < CATEGORY_ACTIVE_CAP; i += 1) {
+        seedPlace(dest.id, { category, name: `${category} spot ${i}` });
+      }
+    }
+    const gen = controlledGeneration();
+    // A generation already running for this destination (started elsewhere, e.g. a kick).
+    const running = runCatalogueGeneration(getDb(), {
+      destinationRow: dest, claudeDestination: 'Fullrun, Japan (JP)', useExclusions: true,
+    });
+    await gen.started;
+
+    const joiner = startDiscover({ destination: 'Fullrun', countryCode: 'JP', more: true });
+    await waitForJoins(1);
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    await Promise.all([running, joiner.done]);
+
+    expect(joiner.events.find((e) => e.code)).toBeUndefined();
+    expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: false, append: true });
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+  });
+
+  it('a leader failure with a stored catalogue reaches the joiner as the existing fallback (rows, then generationFailed)', async () => {
+    const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'faillong', countryCode: 'JP', displayName: 'Faillong', lastGeneratedAt: staleTime });
+    seedPlace(dest.id, { category: 'culture', name: 'Stored Temple' });
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Faillong', countryCode: 'JP' });
+    await gen.started;
+    const joiner = startDiscover({ destination: 'Faillong', countryCode: 'JP' });
+    await waitForJoins(1);
+    gen.fail(0, new Error('Claude API unavailable'));
+    const [leaderResult, joinerResult] = await Promise.all([leader.done, joiner.done]);
+
+    expect(leaderResult.error).toBeUndefined();
+    expect(joinerResult.error).toBeUndefined();
+    expect(joiner.events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(finalNamesByCategory(joiner.events).get('culture')).toEqual(['Stored Temple']);
+    expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: true, generationFailed: true });
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    expect(dailyCount(dest.id)).toBe(0);
+  });
+
+  it('a leader failure with no rows at all reaches the joiner as the error event', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Failempty', countryCode: 'US' });
+    await gen.started;
+    const joiner = startDiscover({ destination: 'Failempty', countryCode: 'US' });
+    await waitForJoins(1);
+    gen.fail(0, new Error('Claude API unavailable'));
+    await Promise.all([leader.done, joiner.done]);
+
+    const errorEvent = joiner.events.find((e) => e.type === 'error');
+    expect(errorEvent.message).toMatch(/unavailable/i);
+    expect(joiner.events.find((e) => e.type === 'done')).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+  });
+
+  it('a joiner on a destination already at the daily cap still joins while the generation runs (no generation_limit)', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Capcity', countryCode: 'JP' });
+    await gen.started;
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('capcity');
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const joiner = startDiscover({ destination: 'Capcity', countryCode: 'JP' });
+    await waitForJoins(1);
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    await Promise.all([leader.done, joiner.done]);
+
+    expect(joiner.events.find((e) => e.code === 'generation_limit')).toBeUndefined();
+    expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: false });
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    // Only the leader's own completed generation spent anything (3 seeded + 1).
+    expect(dailyCount(dest.id)).toBe(4);
+  });
+
+  it('once the generation finishes the registry is clear, so the next stale refresh generates again', async () => {
+    const gen = controlledGeneration();
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    await leader.done;
+
+    // Cache is now fresh: served from cache, never joined, never generated.
+    const { events } = await callDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    expect(events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: true });
+    expect(joinedCount()).toBe(0);
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+  });
+
+  it('a co-pilot kick and a route request for the same destination share one generation (route first)', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Kyoto', countryCode: 'JP' });
+    await gen.started;
+
+    const result = await searchDiscoveryCatalogue(await tripService.getTripDetail(tripId, userId), { destination: 'Kyoto' });
+    expect(result.catalogueState).toBe('generating');
+
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    await leader.done;
+
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('kyoto');
+    expect(dailyCount(dest.id)).toBe(1);
+  });
+
+  it('a co-pilot kick and a route request for the same destination share one generation (co-pilot first)', async () => {
+    const gen = controlledGeneration();
+
+    const result = await searchDiscoveryCatalogue(await tripService.getTripDetail(tripId, userId), { destination: 'Kyoto' });
+    expect(result.catalogueState).toBe('generating');
+    await gen.started;
+
+    const joiner = startDiscover({ destination: 'Kyoto', countryCode: 'JP' });
+    await waitForJoins(1);
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    await joiner.done;
+
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('kyoto');
+    expect(dailyCount(dest.id)).toBe(1);
+    expect(dest.generation_count).toBe(1);
+    expect(sorted(finalNamesByCategory(joiner.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
+    expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: false });
   });
 });
 
