@@ -33,9 +33,11 @@ rewrites the two volume/selection lines of the system prompt on the wire, from
 `lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
 actually sent. `claude.js` is never changed to measure a variant.
 
-Co-pilot profiles may carry `promptVariant` (rewrites the one "explain your reasoning" line) and `betas`
-(an `anthropic-beta` header passed as the stream call's options), both harness-only, from
-`lib/copilotPromptVariants.mjs` (Plan 30 W5, Q-30-3). They are installed after the recorder the same way.
+Co-pilot profiles may carry `betas` (an `anthropic-beta` header passed as the stream call's options), harness-only,
+from `lib/copilotRequestPatch.mjs` (Plan 30 W5, Q-30-3); it is installed after the recorder the same way. The
+two co-pilot prompt variants measured on 2026-10-19 (no effect) were rejected in favour of the acknowledgement
+protocol (D-30-9) and are gone; their run files remain under `runs/copilot/v-reply-text-*/`. The scorer
+recognises the acknowledgement step (`proposal_acknowledged`) from the recorded API calls.
 
 After a `DISCOVERY_MODEL` switch, `discoveryRouteCheck.mjs [--destination Tainan] [--country TW]` runs one
 real first generation through `POST /api/trips/:tripId/discover` on a database copy. It prints the SSE

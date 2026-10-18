@@ -1,6 +1,6 @@
 # Implementation Plan 30 — Sonnet 5.5 / Haiku 5.5 Migration
 
-**Status:** 2026-10-19 — **Deploy A is LIVE at `a12f473` (W1, D-30-8 with migration 036, W2, W3, Plan 31 W1); owner production QA passed 2026-10-18. W4 COMPLETE 2026-10-19 (extraction on Sonnet 5.5 `medium`, owner-accepted; not deployed). Rollout revised by owner ruling 2026-10-19: no calendar observation windows (§7). **W5 STOPPED AT E-COP-1 2026-10-19** — on Sonnet 5.5 `low` the pre-proposal explanation reached the panel on 4/10 proposing turns (control 10/10); nothing switched; Q-30-3 is with the owner with the three remedies measured (§6 W5). Next: owner ruling → W5 → Plan 32 → Deploy B.** Previously: approved 2026-10-18 (defaults of Q-30-1 … Q-30-5 applied; Q-30-5 superseded, see §7). Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
+**Status:** 2026-10-19 — **Deploy A is LIVE at `a12f473` (W1, D-30-8 with migration 036, W2, W3, Plan 31 W1); owner production QA passed 2026-10-18. W4 COMPLETE 2026-10-19 (extraction on Sonnet 5.5 `medium`, owner-accepted; not deployed). Rollout revised by owner ruling 2026-10-19: no calendar observation windows (§7). **W5 COMPLETE 2026-10-19** — E-COP-1 failed on Sonnet 5.5 `low` (4/10, control 10/10); the owner ruled D-30-9 (the co-pilot explains *after* the proposal call, as final text), under which both models read 10/10; `COPILOT_MODEL = 'claude-sonnet-5-5'` at effort `low`, 16,000; not deployed. Next: Plan 32 → Deploy B.** Previously: approved 2026-10-18 (defaults of Q-30-1 … Q-30-5 applied; Q-30-5 superseded, see §7). Written at `ad959a5` from the owner's stated intent to move all four Anthropic workloads to their 5.5 counterparts, after an independent verification of the [2026-10-18 upgrade assessment](../reviews/2026-10-18-sonnet-haiku-55-upgrade-assessment.md) against live code, the installed SDK, and official provider documentation (all fetched 2026-10-18). Every setting, threshold, budget and estimate below is **provisional** until the evaluation in W0–W1 produces numbers; the plan says which gate turns each one into a decision. Waves are implemented later via `/implement-milestone`; each wave updates its own status line and commits. The owner questions Q-30-1 … Q-30-5 carry a default each wave follows unless the owner says otherwise — none of them blocks W0.
 
 **Origin.** The owner wants Sonnet 4.6 → Sonnet 5.5 (extraction, co-pilot) and Haiku 4.5 → Haiku 5.5 (discovery, photo descriptors). The companion [opportunity exploration brief](../reviews/2026-10-18-model-55-opportunity-exploration-brief.md) is a separate product-discovery track and is **not** an input to this plan: no new tool, capability, or product behaviour rides on this migration.
 
@@ -89,12 +89,13 @@ Code facts are from this checkout; provider facts are from the official pages na
   - There is no backfill.
   - "Remove this exchange" is a follow-up, not part of this decision.
   - Marker `D-30-8` in `claude.js`, `routes/copilot.js`, `useCopilot.js` and `CopilotPanel.jsx`.
+- **D-30-9 — The co-pilot explains a proposal *after* the tool call, as final text.** *(Owner, 2026-10-19; answers Q-30-3 after the W5 E-COP-1 measurement.)* Amends the Plan 11 Wave 1 terminal-tool rule: `propose_itinerary_changes` still ends tool execution and remains the only action channel, but it no longer ends the turn. The server appends the assistant content unchanged plus one `tool_result` for the proposal call (`{status:'received', operationCount}` — a neutral acknowledgement that promises nothing about validity or persistence), then runs exactly one more model step with `tool_choice: {type:'none'}` so the explanation arrives as ordinary `text`, streamed and persisted by the existing paths; the `proposal` SSE event still follows, so the panel order is unchanged. The `tools` list is identical on every iteration (prompt cache, preserved thinking). Adaptive thinking stays on at effort `low`. Remedies (a) `display: "updates"`, (b) `between_tools` and (b-lite) were rejected: they protect a display artefact by forwarding an API summary channel as the reply and couple the product to one model's thinking-display semantics. Marker `D-30-9` in `claude.js`; row in `docs/DECISIONS.md`.
 
 **Owner questions (defaults in bold; none blocks W0):**
 
 - **Q-30-1 — Env override per workload for rollback without a rebuild?** An `EXTRACTION_MODEL`-style env var would let `.env` + container restart flip a workload in seconds. Cost: a second source of truth that drifts (the repo already carries a `.env` precedence gotcha), and production `.env` is edited by hand. **Default: no** — constants in code, rollback is a one-line revert + `/deploy` (a few minutes).
 - **Q-30-2 — Bump the SDK in W1?** **Default: yes**, gated and revertable (D-30-2).
-- **Q-30-3 — If E-COP-1 shows the pre-proposal explanation vanishing, which remedy?** (a) `display: "updates"` (beta header) and forward non-empty progress-update text to the panel as a visibly *different* line (it is a model-written summary, not the prose); (b) `between_tools` at `medium` — same summary text, no beta header, no up-front thinking; (c) a protocol change so the model's explanation is written *after* the tool call (a Plan 11 contract change — out of this plan). **Default: decide at the W5 gate from the measurement; do not pre-commit.**
+- **Q-30-3 — If E-COP-1 shows the pre-proposal explanation vanishing, which remedy?** (a) `display: "updates"` (beta header) and forward non-empty progress-update text to the panel as a visibly *different* line (it is a model-written summary, not the prose); (b) `between_tools` at `medium` — same summary text, no beta header, no up-front thinking; (c) a protocol change so the model's explanation is written *after* the tool call (a Plan 11 contract change — out of this plan). **Default: decide at the W5 gate from the measurement; do not pre-commit.** *Answered 2026-10-19 by D-30-9: the owner chose (c), brought into this plan as a Plan 11 amendment, after W5 measured (a) at 8/10, (b) at 10/10-with-forwarding and a prompt-only rewording at no effect (§6 W5).*
 - **Q-30-4 — Extraction fixtures.** Real confirmations are the only honest corpus. **Default:** the owner supplies 15–25 redacted real inputs (screenshots, PDFs, pasted emails) into the gitignored private fixtures directory; the plan adds 10–15 synthetic hard cases (DD/MM ambiguity, missing year, overnight flights, multi-leg, CJK local names, non-travel input) that are committed. Fewer real inputs lowers the confidence of the W4 gate; it does not change the method.
 - **Q-30-5 — Deploy grouping.** **Default: two deploys** (Haiku after W3, Sonnet after W5). *Superseded 2026-10-19 by owner ruling:* two deploys stand, but each is followed by the owner's same-day production pass (Appendix A step 4) instead of a calendar observation window — see §7.
 
@@ -783,7 +784,7 @@ The flight-number normalisation is being fixed separately and model-agnostically
 
 ### W5 — Co-pilot → Sonnet 5.5
 
-**Status:** 2026-10-19 — **STOPPED AT E-COP-1. Nothing switched, nothing deployed; Q-30-3 is with the owner.** `COPILOT_MODEL` is still `claude-sonnet-4-6`; `claude.js`, `claude.test.js` and every frontend file are untouched, so the W0 co-pilot sha256 pin still holds. On the primary candidate the explanation the prompt asks for reached the panel on **4 of 10** proposing turns (control 10/10). That is the material loss §6 W5 says to stop on, so the §5.3 sweep was not completed as a gate; the same 20 scenarios were instead run under the three Q-30-3 remedies, harness-only, and the numbers are below. Run files: `data/model-eval/runs/copilot/<profile>/2026-10-18T17-*.jsonl` (harness UTC stamps); the control is the W0 Sonnet 4.6 run.
+**Status:** 2026-10-19 — **COMPLETE (owner-ruled D-30-9); not deployed (Deploy B).** `COPILOT_MODEL = 'claude-sonnet-5-5'`, profile `{ maxTokens: 16000, effort: 'low' }`, under the explain-after-proposal protocol. Details are under *W5 switch* below; the E-COP-1 record and the remedy measurements that led to the ruling follow unchanged. **E-COP-1 record (same day, earlier):** STOPPED AT E-COP-1; nothing switched; Q-30-3 put to the owner. At that point `COPILOT_MODEL` was still `claude-sonnet-4-6`; `claude.js`, `claude.test.js` and every frontend file were untouched, so the W0 co-pilot sha256 pin still held. On the primary candidate the explanation the prompt asks for reached the panel on **4 of 10** proposing turns (control 10/10). That is the material loss §6 W5 says to stop on, so the §5.3 sweep was not completed as a gate; the same 20 scenarios were instead run under the three Q-30-3 remedies, harness-only, and the numbers are below. Run files: `data/model-eval/runs/copilot/<profile>/2026-10-18T17-*.jsonl` (harness UTC stamps); the control is the W0 Sonnet 4.6 run.
 
 #### E-COP-1 — primary candidate (Sonnet 5.5, adaptive effort `low`, 16,000/iter, prompt frozen)
 
@@ -847,7 +848,108 @@ The earlier Q-30-3 option (c) in §3 — writing the explanation *after* the too
 
 **Files (this pass).** `backend/scripts/modelEval/profiles.mjs` (five co-pilot profiles; `betas` is a harness-only key), `copilot.mjs` (installs the request patch after the recorder; records `promptVariant`/`betas`), `lib/copilotPromptVariants.mjs` (new), `lib/score/copilot.mjs` (keep-alive gap, exact/estimated thinking tokens, notice-on-text-less, progress-update and time-to-first-visible rows, `blocks` column), `README.md`, this plan.
 
-**Rollback:** nothing to roll back; no production constant changed.
+**Rollback (E-COP-1 record):** nothing to roll back at that point; no production constant changed.
+
+#### W5 switch — owner-ruled D-30-9, co-pilot on Sonnet 5.5
+
+**Status:** 2026-10-19 — **COMPLETE; not deployed.** It ships with Deploy B (§7).
+
+**Owner ruling, recorded as §3 and §5.3 require (quoted):** "Approved: change the protocol so the proposal tool call no longer ends the turn; the model explains afterwards as final text with tools disabled for that step, adaptive thinking stays on at low effort, measured on both models through the 20 scenarios. Record it as a Plan 11 amendment." Remedies (a), (b) and (b-lite) were rejected: they protect a display artefact by forwarding an API summary channel as the reply and couple the product to one model's thinking-display semantics. This is **D-30-9** (§3; `docs/DECISIONS.md`); it answers Q-30-3.
+
+**What changed.**
+- **`claude.js` — the loop (D-30-9).** When a response carries `propose_itinerary_changes`, the loop no longer breaks. It appends the assistant content unchanged (thinking blocks included) and one user turn holding exactly one `tool_result` for that call, `{"status":"received","operationCount":N}` — a neutral acknowledgement that promises nothing about validity or persistence — then runs one more `messages.stream` with the same settings, system block and `tools` array plus `tool_choice: {type:'none'}`, and breaks after it unconditionally. Query tool_use blocks beside a propose call are still ignored (Plan 11 Wave 1 "terminal wins"); every other iteration sends no `tool_choice` key. The explanation streams through the existing `text` path and is persisted as `fullText` by the unchanged `persistTurn`; the `proposal` event still follows the loop, so the panel order is explanation → card with **no frontend change**. A cut or refusal *on the explain step* adds the existing notice and still emits the proposal (its operations arrived complete); a cut *before* the proposal still discards it (Plan 11 D5). A client abort between the two steps takes the existing `client_abort` path (`stopped` row, operations null). `iterations` counts the explain step. Marker `D-30-9` at the loop change, citing the Plan 11 Wave 1 rule it amends.
+- **Prompt.** One bullet under *How to propose changes* changed, shared by both models: *"Call the tool first. Once Trippy has acknowledged the call, explain the proposed changes to the traveller in prose: what changes and why, in your own words. If you are not proposing changes, do not call the tool."* The "never write changes as prose" rule and the real-id rule are byte-identical. Sonnet 4.6 did not regress under the shared prompt (table below), so the line is not keyed by model.
+- **Settings.** `MODEL_PROFILES['claude-sonnet-5-5'].copilot = { maxTokens: 16000, effort: 'low' }` (no `thinking` field: adaptive stays on) and `COPILOT_MODEL = 'claude-sonnet-5-5'`. Sonnet 4.6's row stays as the rollback row for extraction and the co-pilot. `reportTurnMetrics` keeps writing the configured model string; new rows read `claude-sonnet-5-5` (seen in the dev `copilot_turn_metrics` during the browser pass), old rows are history.
+- **`claude.test.js`.** Co-pilot request-body pin re-captured twice, deliberately and structure-first: `739c12cf…c4c` for Sonnet 4.6 under the new prompt (now the **rollback pin**, asserted by passing the 4.6 row explicitly) and **`3a751ac7…c712`** for the live Sonnet 5.5 body (`model`, `max_tokens` 16000, `output_config: {effort:'low'}`, no `thinking`, no `tool_choice`). New prompt-text pin on `system[0].text` with an empty itinerary: `80142664…d365`. Fourteen new tests cover the acknowledgement round trip (content replayed unchanged, one `tool_result`, the right id, `tool_choice` only on the explain call, identical `tools`/`system`), the SSE order, one `persistTurn` with the explanation and operations, metrics `iterations`, a query tool beside the propose call not executed, cut/refusal on the explain step, abort between the steps, an explain step with no text (proposal emitted, no `empty` notice — documented current behaviour), malformed operations (`operationCount` 0), and exactly one explain step per turn. Extraction, descriptor and discovery pins untouched.
+- **`docs/DECISIONS.md`:** one row for D-30-9. **Harness:** `scenarios.json` expects `proposal_acknowledged` after `propose_itinerary_changes` on the 10 proposing scenarios (the scorer derives it from the recorded calls: `tool_choice: none` plus a `tool_result` for the propose id in the preceding assistant turn, and checks the acknowledgement is well-formed); the scorer's E-COP-1 raw measure is now "explanation text block in the explain step", the old reading stays as an informational row, and five explain-step cost rows were added. The two rejected prompt variants' code is removed (run files stay as history); `lib/copilotRequestPatch.mjs` keeps only the beta-header patch for the historical `alt-updates-low` profile. `profiles.mjs` `control` is the live Sonnet 5.5 profile; `baseline-46` is Sonnet 4.6.
+
+**E-COP-1 under D-30-9 — both models, same 20 scenarios, prompt shared** (run files `runs/copilot/{control,primary,alt-medium}/2026-10-18T17-3*.jsonl`; D-30-7 counts unchanged on all three):
+
+| Measure | Sonnet 4.6, 8,192 (D-30-9) | **Sonnet 5.5 `low`, 16,000 (D-30-9)** | Sonnet 5.5 `medium` (D-30-9) |
+|---|---|---|---|
+| Explanation reached the stream as text before the `proposal` event | **10/10** | **10/10** | 10/10 |
+| Explanation `text` block in the explain step (final call, `tool_choice: none`) | **10/10** | **10/10** | 10/10 |
+| Acknowledgement step present and well-formed | 10/10 | 10/10 | 10/10 |
+| Pre-tool `text` block before the propose call (informational) | 7/10 | 0/10 | 0/10 |
+| Raw block sequences, proposing turns | `[text>]tool_use ‖ text` | `[thinking>]tool_use ‖ text` (5 of 10 with an empty reasoning block before the propose call; never before the explanation) | same shape |
+
+On Sonnet 5.5 the explanation is written entirely in the explain step and reads as a reply (*"I've added Jia Shanghai Restaurant to the end of day 2 (11 April) as your dinner. I left it untimed … I chose it because you asked for a proper sit-down local dinner …"*; the Chinese scenario answers in Chinese). On Sonnet 4.6 the explanation is duplicated on 7 of 10 turns: a pre-tool sentence or two as before, then the post-acknowledgement text.
+
+**§5.3 sweep** (n = 20; the old-protocol W0 control is kept as the cost/latency reference):
+
+| Metric | W0 control: 4.6, old protocol | 4.6, D-30-9 | **5.5 `low`, D-30-9** | 5.5 `medium`, D-30-9 |
+|---|---|---|---|---|
+| Tool sequence / proposes as expected | 20/20 · 20/20 | 20/20 · 20/20 | **20/20 · 20/20** | 20/20 · 20/20 |
+| Real ids · server validation | 10/10 · 10/10 | 10/10 · **9/10** (an `add_stop` with stop type `"nature"`) | **10/10 · 10/10** | 10/10 · 10/10 |
+| Booking-linked targets · adds grounded with a `placeId` from that turn · clock time invented | 0 · 10/10 · 0 | 0 · 10/10 · 0 | **0 · 10/10 · 0** | 0 · 10/10 · 0 |
+| `catalogueState` relayed · out-of-scope declined · capped relayed honestly (read) | 6/6 · yes · yes | 6/6 · yes · yes | **6/6 · yes · yes** | 6/6 · yes · yes |
+| Query cap hit (expected 1) · hard stop | 1/20 · never | 1/20 · never | **1/20 · never** | 1/20 · never |
+| TTFD median / max (n with text) | 962 / 4,347 (20) | 1,157 / 5,752 (20) | **4,345 / 17,272 (20)** | 4,948 / 19,856 (20) |
+| Max SSE gap on turns > 10 s (ping ≤ 10 s) | 12,941 (pre-W1 run, no ping) | 8,013 (n=8) | **8,002 (n=2)** | 8,009 (n=2) |
+| Truncations · silent turns · text-less turns without a notice | 0 · 0 · 0/19 | 0 · 0 · 0/19 | **0 · 0 · 0/19** | 0 · 0 · 0/19 |
+| Cache read on iterations 2+ (median) | 5,070 (n=9) | 5,090 (n=14) | **6,439 (n=14)** | 6,439 (n=14) |
+| Explain step: wall ms median / max · output tokens median / max · cache read · uncached input | — | 4,901 / 12,256 · 162 / 441 · 5,090 · 1,576 | **2,847 / 4,716 · 255 / 542 · 6,439 · 905** | 3,158 / 4,670 · 292 / 498 · 6,439 · 918 |
+| Thinking: turns with a block · tokens max (share), exact from `output_tokens_details` | 0 · 0 | 0 · 0 | **6/20 · 820 (12%)** | 6/20 · 1,176 (17%) |
+| Turn total median / max | 6.7 / 30.0 s | 8.5 / 39.9 s | **5.0 / 17.3 s** | 5.0 / 19.9 s |
+| Cost per turn median / mean | $0.0098 / $0.0124 | $0.0163 / $0.0190 | **$0.0093 / $0.0137** | $0.0059 / $0.0128 |
+| Run total | $0.247 | $0.380 | **$0.273** | $0.256 |
+
+**Gate (§5.3), primary 5.5 `low`:**
+
+| Criterion | Result |
+|---|---|
+| E-COP-1 100% | **pass** (10/10, both measures) |
+| Grounding: 0 named places outside results; out-of-scope declined; states relayed | **pass** |
+| Tool/ID correctness; validation on every proposing turn; booking-linked never targeted | **pass** (10/10, 10/10, 0) |
+| Query cap respected; hard stop never on well-formed scenarios | **pass** |
+| TTFD median ≤ 2.5 s and max ≤ 8 s | **fails as written: 4.3 s / 17.3 s.** Owner reading, applied here: under D-30-9 the explanation is by construction the *last* thing in a turn, so the first text arrives after the tool call(s); on search turns the first visible output is the tool badge, which the July 2026 ruling made the progress affordance. Reported, not loosened by this session — see *Unresolved limitations* for the one case the reading does not cover. |
+| Keep-alive ≤ 10 s on every turn > 10 s | **pass** (8,002 ms) |
+| Truncations 0; silent turns 0; every text-less turn carries a notice | **pass** |
+| Within-turn cache reads ≥ control on multi-iteration turns | **pass** (6,439 vs 5,070 / 5,090; the explain step reads the full system block, so `tool_choice` did not break the prefix) |
+| Cost per turn vs control | median $0.0093 vs $0.0098 (−5%), mean $0.0137 vs $0.0124 (+10%); the explain step costs about $0.005 per proposing turn and adds 2.8 s median / 4.7 s max |
+
+`medium` is the measured alternative, not chosen: the same 10/10 with more thinking (1,176 max) and a 4.9 s TTFD median; in the earlier old-protocol run it invented a `stopId` once (9/10 ids), which `low` never did across four runs.
+
+**Allowance (D-30-6).** Largest single iteration on Sonnet 5.5 across every W5 run: 1,764 output tokens thinking included (the eight-search proposal step; 1,258 thinking); largest explain step 542. 16,000 is far above 2× on purpose: adaptive thinking at `low` varied from 820 to 1,258 tokens on the same scenario between runs, a tight allowance can be spent entirely on thinking and return no text (W4's 300-token run), the call is streamed so F-30-6's 21,333 cap does not apply, and the allowance is a ceiling, not a spend.
+
+**Checks.**
+- `cd backend; npm test`: 45 files passed (1 skipped), **1,083 passed**, 6 skipped (the live suite); `claude.test.js` 160/160. No timeout this time.
+- `LIVE_ANTHROPIC=1 npx vitest run tests/live`: **6/6** on the switched profiles (10.9 s).
+- No frontend file changed, so no frontend suite or build was run.
+- **Browser pass** (built-in browser pane, dev servers from `launch.json`, dev DB, a 1-day session minted through a one-shot login page and deleted afterwards; `node --watch` had reloaded the switched `claude.js`). Verify trip "Shanghai - Hangzhou (W3 verify)", nothing applied there; the apply ran on a throwaway trip created and deleted in the pass. Every turn wrote a `copilot_turn_metrics` row with `model = claude-sonnet-5-5`.
+
+| # | Viewport | Turn | Result |
+|---|---|---|---|
+| 1 | 375 × 812 | Plain question (flight time, rest of day 1) | 1 iteration, first text 1.2 s, 968 chars; it noticed the dinner stop's note says closed on Sundays. |
+| 2 | 375 | Whole-trip audit | `check_trip_health` badge, then 1,910 chars leading with the 14:00-free arrival-day overload and an Okinawa placeholder day. 7.0 s total. |
+| 3 | 375 | Retime the booking-linked SQ 832 | No proposal; redirected to Logistics with the knock-on effects. 2.9 s. |
+| 4 | 375 | Move the Tower to day 2 (proposal, **rejected**) | 2 iterations; 571 chars of explanation streamed **before** the `proposal` event; card below it with Apply/Reject; metrics `iterations 2`, `cache_read 11,344` (both steps read the block), `proposal_ops 1`; rejected → DISMISSED. |
+| 5 | 375 | Stop before any text | Notice-only row *"This reply was stopped."*, metrics `client_abort`, `error 0`. |
+| 6 | 375 | Stop after the first text | 166-char partial saved as `stopped`; metrics `client_abort`, `error 0`, input 9,032, cache read 5,672. |
+| 7 | 375 | Long walkthrough, let run | 15.1 s, 2,062 output tokens, 5,178 chars; one ping interleaved at 6.9 s after the first chunk, max silent gap 350 ms. |
+| 8 | 375 | QA trip: grounded dinner add → **applied** | search (Shanghai fresh) → 1,018 chars of explanation → card → Apply. The stop landed on day 1 with `provider_id google:…`, WGS-84 coordinates from the catalogue place, a photo and attribution. 3 iterations, TTFD 7.1 s, cache read on all three steps. |
+| 9 | 1280 × 860 | QA trip: move that dinner to day 2 (proposal, rejected) | 532 chars of explanation above the card at desktop width; rejected; trip deleted. |
+
+**Spend.** Anthropic ≈ **$2.33** for W5 in all: E-COP-1 and remedies $1.18 (recorded above), the three D-30-9 runs $0.91 (4.6 $0.380, 5.5 `low` $0.273, `medium` $0.256), the browser pass ≈ $0.21 (seven turns on the verify trip $0.19 plus two on the deleted QA trip), the live smoke ≈ $0.03.
+
+**Facts corrected or learned.**
+- The shared prompt works on both models under D-30-9, so no model-keyed co-pilot prompt was needed. Sonnet 4.6's one validation miss (`"nature"` as a stop type) is the first in any co-pilot run; one sample, not investigated further since 4.6 is now the rollback row.
+- The explain step reads the whole cached system block on every call (6,439 tokens on 5.5): adding `tool_choice` on the last iteration did not touch the prefix.
+- Sonnet 5.5 never writes text before the propose call under the new prompt (0/10); Sonnet 4.6 still does on 7/10, so a 4.6 rollback shows a short lead-in plus the explanation.
+- Loading a trip page in the browser pass fired the plan tab's discovery pre-warm for a stale Shanghai catalogue (`generation_count` 3 → 4 in the dev DB). Normal product behaviour, not W5; the harness runs keep D-30-7 by design and all three stayed unchanged.
+- The pane's `fetch` resolves on the first body chunk, so in-page SSE timestamps are relative to the first chunk; absolute TTFD comes from `copilot_turn_metrics`, as W1 found.
+
+**Unresolved limitations.**
+- **Direct edits have no progress affordance for the first 2–4 s.** On a remove/move/retime the model now calls the tool immediately and the explanation follows the acknowledgement, so the first text arrives at 3.0–5.0 s (Sonnet 4.6 old protocol: ~0.7–1.1 s). The proposal tool emits no `tool` event, so the panel shows nothing in that window — the owner's tool-badge reading covers search and audit turns, not this case. A one-line follow-up (emit `{type:'tool', tool:'propose_itinerary_changes', state:'started'}` and a "Drafting the change…" label) would close it; not done here because it touches the frontend and the ruling's scope.
+- Visible self-corrections at `low`: one plain answer wrote a wrong weekday and corrected itself mid-sentence (*"on Tuesday… Sorry, I'll correct that"*), and after an applied proposal the next turn "corrected" its own earlier (accurate) message because the itinerary now contained the stop. The second is a context gap older than W5 (an applied proposal's outcome is not in the conversation), surfaced more visibly by a model that reconciles out loud.
+- The model relays catalogue provenance to the traveller (*"the catalogue lists these places as 'unverified'"*), the word D-27-1 keeps out of the discovery UI. The tool result carries it; a prompt line could stop it. Pre-existing, not W5.
+- Motion (sheet slide, drag) was not exercised: the pane runs the tab hidden; settled states were verified.
+- The public-host turn with a catalogue search (no 524 through Cloudflare) is a post-deploy step (§7, Deploy B).
+- `docs/ENGINEERING.md` ("Booking extraction and the co-pilot use Sonnet 4.6 …") becomes false at Deploy B; correct it then, as W3 did at Deploy A. W6 owns the `docs/DECISIONS.md` chosen-profiles entry.
+
+**Rollback (one line):** `claude.js` → `COPILOT_MODEL = 'claude-sonnet-4-6'`. That restores `{ maxTokens: 8192 }` with no effort and no thinking under the D-30-9 protocol and the new prompt (the rollback pin `739c12cf…` proves the body); the main co-pilot pin must be flipped back to that literal too. D-30-9 itself stays (it is correct on 4.6: 10/10). Reverting D-30-9 as well would need the loop change and the prompt bullet reverted together.
+
+**Files.** `backend/src/services/claude.js`, `backend/tests/claude.test.js`, `docs/DECISIONS.md`, `backend/scripts/modelEval/{profiles.mjs, copilot.mjs, README.md, fixtures/copilot/scenarios.json, lib/score/copilot.mjs, lib/copilotRequestPatch.mjs (new), lib/copilotPromptVariants.mjs (removed)}`, this plan.
 
 **Steps.** Sweep per §5.2 with the recorded SSE events; **E-COP-1 first** — if the pre-proposal explanation vanishes under the primary candidate, stop and put Q-30-3 to the owner with the recordings before choosing a remedy; pick the profile (candidate: effort `low`, 16,000/iter); set `COPILOT_MODEL`; `reportTurnMetrics` continues to record the configured model string (new rows say `claude-sonnet-5-5`; old rows are history); verify cache reads within multi-iteration turns on the real API; local browser pass on the dedicated verify trip (Plan 11/12 memory): plain question, audit, grounded add → proposal → apply, booking-linked refusal, abort mid-turn, and a deliberately slow turn to see ping spacing; through the public host after deploy, one turn that includes a catalogue search to prove no 524.
 

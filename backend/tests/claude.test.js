@@ -516,14 +516,16 @@ describe('streamCopilotResponse — tool-use proposal protocol', () => {
 
   it('emits a proposal event carrying the tool_use operations', async () => {
     const operations = [{ action: 'remove_stop', stopId: 'stop-1' }];
-    mockStream.mockReturnValue(makeMockStream(
-      ['Sure.'],
-      'Sure.',
-      [
-        { type: 'text', text: 'Sure.' },
-        { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
-      ],
-    ));
+    mockStream
+      .mockReturnValueOnce(makeMockStream(
+        ['Sure.'],
+        'Sure.',
+        [
+          { type: 'text', text: 'Sure.' },
+          { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
+        ],
+      ))
+      .mockReturnValueOnce(makeMockStream([' Removing it.'], ' Removing it.'));
 
     const res = makeMockRes();
     await streamCopilotResponse([{ role: 'user', content: 'Remove the first stop' }], {}, res);
@@ -748,27 +750,34 @@ describe('streamCopilotResponse — agentic tool loop (Plan 12 Wave 1)', () => {
   it('terminal propose_itinerary_changes wins over a query tool_use in the same response', async () => {
     const executor = vi.fn();
     const operations = [{ action: 'remove_stop', stopId: 'stop-1' }];
-    mockStream.mockReturnValueOnce(makeMockStream(
-      ['Sure, removing that.'], undefined,
-      [
-        { type: 'text', text: 'Sure, removing that.' },
-        toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_x'),
-        { type: 'tool_use', id: 'tu_term', name: 'propose_itinerary_changes', input: { operations } },
-      ],
-    ));
+    mockStream
+      .mockReturnValueOnce(makeMockStream(
+        ['Sure, removing that.'], undefined,
+        [
+          { type: 'text', text: 'Sure, removing that.' },
+          toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_x'),
+          { type: 'tool_use', id: 'tu_term', name: 'propose_itinerary_changes', input: { operations } },
+        ],
+      ))
+      .mockReturnValueOnce(makeMockStream([' Done.'], undefined, [{ type: 'text', text: ' Done.' }]));
 
     const res = makeMockRes();
     await streamCopilotResponse([{ role: 'user', content: 'remove it' }], {}, res, {}, undefined, {
       search_discovery_catalogue: executor,
     });
 
-    expect(mockStream).toHaveBeenCalledOnce();
+    // D-30-9: the propose call ends tool execution, not the turn - one explain step follows.
+    expect(mockStream).toHaveBeenCalledTimes(2);
     expect(executor).not.toHaveBeenCalled();
     const events = parseEvents(res);
     expect(events.find((e) => e.type === 'tool')).toBeUndefined();
     const proposalEvent = events.find((e) => e.type === 'proposal');
     expect(proposalEvent).toBeDefined();
     expect(proposalEvent.operations).toEqual(operations);
+    // Exactly one tool_result goes back - for the propose block; the ignored query use gets none.
+    const ack = mockStream.mock.calls[1][0].messages.at(-1);
+    expect(ack.content).toHaveLength(1);
+    expect(ack.content[0].tool_use_id).toBe('tu_term');
   });
 
   it('aborts the live stream when the client drops the SSE connection mid-iteration', async () => {
@@ -962,14 +971,20 @@ describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
 
   it('reports proposalOps matching the operations count on a proposing turn', async () => {
     const operations = [{ action: 'remove_stop', stopId: 'stop-1' }, { action: 'remove_stop', stopId: 'stop-2' }];
-    mockStream.mockReturnValueOnce(makeUsageStream(
-      'Sure.',
-      [
-        { type: 'text', text: 'Sure.' },
-        { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
-      ],
-      { input_tokens: 20, output_tokens: 15, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-    ));
+    mockStream
+      .mockReturnValueOnce(makeUsageStream(
+        'Sure.',
+        [
+          { type: 'text', text: 'Sure.' },
+          { type: 'tool_use', name: 'propose_itinerary_changes', input: { operations } },
+        ],
+        { input_tokens: 20, output_tokens: 15, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      ))
+      .mockReturnValueOnce(makeUsageStream(
+        ' Both go.', [{ type: 'text', text: ' Both go.' }],
+        { input_tokens: 5, output_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 25 },
+        'end_turn',
+      ));
 
     const res = makeMockRes();
     const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
@@ -982,6 +997,11 @@ describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
     const summary = reportTurnMetrics.mock.calls[0][0];
     expect(summary.proposalOps).toBe(2);
     expect(summary.error).toBe(0);
+    // D-30-9: the explain step is a second iteration and its usage is summed in.
+    expect(summary.iterations).toBe(2);
+    expect(summary.inputTokens).toBe(25);
+    expect(summary.outputTokens).toBe(18);
+    expect(summary.cacheReadTokens).toBe(25);
   });
 
   it('reports stopReason: max_tokens on a truncated turn', async () => {
@@ -1318,12 +1338,27 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
   it('streamCopilotResponse', async () => {
     const body = await runCopilot();
+    // Plan 30 W5: the fifth deliberate move off the W0 pin - Sonnet 5.5 at effort 'low' under the
+    // D-30-9 explain-after-proposal protocol, with the system prompt's second "How to propose
+    // changes" bullet saying "call the tool first, explain after the acknowledgement". Structure
+    // first, then the re-captured sha256.
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages', 'tools']);
+    expect(body.model).toBe('claude-sonnet-5-5');
+    expect(body.max_tokens).toBe(16000);
+    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('tool_choice');
+    expect(body.system[0].text).toContain('- Call the tool first. Once Trippy has acknowledged the call, explain the proposed changes to the traveller in prose: what changes and why, in your own words. If you are not proposing changes, do not call the tool.');
+    expect(body.system[0].text).not.toContain('First explain your reasoning in prose');
+    expect(sha256(body)).toBe('3a751ac74b7d3291a76ba904792cf214b85d46289b9e883f4fff15eaf528c712');
+  });
+
+  it('streamCopilotResponse rolled back to Sonnet 4.6 sends the exact D-30-9 Sonnet 4.6 body (Plan 30 W5 rollback)', async () => {
+    const body = await runCopilot(undefined, { model: 'claude-sonnet-4-6', ...MODEL_PROFILES['claude-sonnet-4-6'].copilot });
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages', 'tools']);
     expect(body.model).toBe('claude-sonnet-4-6');
     expect(body.max_tokens).toBe(8192);
-    expect(body).not.toHaveProperty('thinking');
-    expect(body).not.toHaveProperty('output_config');
-    expect(sha256(body)).toBe('b6eb30a562b9483669a9c54178a9b04fac1cdb5772be0f361092a5b956460839');
+    expect(sha256(body)).toBe('739c12cf99a9690e999297e29dbff080b461c129ad96de48e2f97f2a1cb43c4c');
   });
 
   describe('an explicit profile changes the request as intended', () => {
@@ -1386,10 +1421,12 @@ const DESCRIPTOR_OK_TEXT = '```json\n{"photoQuery":"night market skewers","scene
 describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
   it('returns each workload\'s live model and max_tokens, model first', () => {
     expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 16000, effort: 'medium' });
-    expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 8192 });
+    expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 16000, effort: 'low' });
+    expect(COPILOT_MODEL).toBe('claude-sonnet-5-5');
     expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 1024, effort: 'low' });
     expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' });
-    expect(Object.keys(profileFor('copilot'))).toEqual(['model', 'maxTokens']);
+    // Plan 30 W5: Sonnet 5.5 co-pilot runs adaptive thinking at effort 'low' (no thinking field).
+    expect(Object.keys(profileFor('copilot'))).toEqual(['model', 'maxTokens', 'effort']);
     // Plan 30 W4: Sonnet 5.5 extraction runs adaptive thinking at effort 'medium' (no thinking field).
     expect(Object.keys(profileFor('extraction'))).toEqual(['model', 'maxTokens', 'effort']);
     // Plan 30 W2: Haiku 5.5 runs adaptive thinking unless told otherwise, so its descriptor
@@ -1429,8 +1466,15 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(MODEL_PROFILES['claude-sonnet-5-5'].extraction.maxTokens).toBeLessThanOrEqual(21333);
   });
 
-  it('the live profiles feed requestSettings: the co-pilot sends no thinking or output_config', () => {
-    expect(Object.keys(requestSettings(profileFor('copilot')))).toEqual(['model', 'max_tokens']);
+  it('keeps the Sonnet 4.6 co-pilot row, so a one-line constant revert restores a compatible body (Plan 30 W5 rollback)', () => {
+    expect(MODEL_PROFILES['claude-sonnet-4-6'].copilot).toEqual({ maxTokens: 8192 });
+    expect(MODEL_PROFILES['claude-sonnet-5-5'].copilot).toEqual({ maxTokens: 16000, effort: 'low' });
+    expect(MODEL_PROFILES['claude-sonnet-5-5'].copilot).not.toHaveProperty('thinking');
+  });
+
+  it('the live profiles feed requestSettings: the co-pilot sends output_config effort low and no thinking', () => {
+    expect(Object.keys(requestSettings(profileFor('copilot')))).toEqual(['model', 'max_tokens', 'output_config']);
+    expect(requestSettings(profileFor('copilot')).output_config).toEqual({ effort: 'low' });
     expect(Object.keys(requestSettings(profileFor('extraction')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('descriptor')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('discovery')))).toEqual(['model', 'max_tokens', 'thinking', 'output_config']);
@@ -1843,11 +1887,13 @@ describe('streamCopilotResponse — thinking blocks and stop reasons (D-30-3, D-
     expect(types.at(-1)).toBe('done');
   });
 
-  it('a proposal-only turn (no text) is not "empty"', async () => {
-    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [
-      THINKING_BLOCK,
-      { type: 'tool_use', id: 'tu_p', name: 'propose_itinerary_changes', input: { operations: [{ action: 'remove_stop', stopId: 's1' }] } },
-    ]));
+  it('a proposal-only turn (no text, even from the explain step) is not "empty"', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [
+        THINKING_BLOCK,
+        { type: 'tool_use', id: 'tu_p', name: 'propose_itinerary_changes', input: { operations: [{ action: 'remove_stop', stopId: 's1' }] } },
+      ]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK], 'end_turn'));
 
     const res = makeMockRes();
     await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, vi.fn().mockResolvedValue({ proposalId: 'p1', operations: [{ action: 'remove_stop', stopId: 's1' }] }));
@@ -2007,7 +2053,7 @@ describe('streamCopilotResponse — client abort is not an error (D-30-4)', () =
 
     expect(reportTurnMetrics).toHaveBeenCalledOnce();
     expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({
-      model: COPILOT_MODEL,
+      model: 'claude-sonnet-5-5',
       stopReason: 'client_abort',
       error: 0,
       proposalOps: 0,
@@ -2302,12 +2348,311 @@ describe('streamCopilotResponse — every turn persists one assistant row (D-30-
     const normal = await run(['Hello'], 'Hello');
     expect(normal.call).toEqual({ assistantText: 'Hello', operations: null, notice: null });
 
-    const proposalOnly = await run([], undefined, [THINKING_BLOCK, proposeContent[1]]);
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK, proposeContent[1]]));
+    const proposalOnly = await run([], undefined, [THINKING_BLOCK], 'end_turn');
     expect(proposalOnly.call).toEqual({
       assistantText: '',
       operations: [{ action: 'remove_stop', stopId: 's1' }],
       notice: null,
     });
     warn.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-30-9 (Plan 30 W5) - amends the Plan 11 Wave 1 terminal-tool rule. A propose_itinerary_changes
+// call still ends tool execution, but no longer ends the turn: one acknowledgement tool_result and
+// one tool_choice 'none' explain step follow, so the explanation is written as final text.
+// ---------------------------------------------------------------------------
+
+describe('streamCopilotResponse - proposal acknowledgement and explain step (D-30-9)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+  });
+
+  const OPS = [{ action: 'remove_stop', stopId: 's1' }, { action: 'remove_stop', stopId: 's2' }];
+  const proposeBlock = (operations = OPS, id = 'tu_prop') => (
+    { type: 'tool_use', id, name: 'propose_itinerary_changes', input: { operations } }
+  );
+  const typesOf = (res) => parseEvents(res).map((e) => e.type);
+  const textOf = (res) => parseEvents(res).filter((e) => e.type === 'text').map((e) => e.content).join('');
+
+  it('replays the assistant content unchanged and acknowledges the propose block with exactly one tool_result', async () => {
+    const firstContent = [THINKING_BLOCK, proposeBlock()];
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, firstContent))
+      .mockReturnValueOnce(makeMockStream(['Both stops go.'], undefined, [{ type: 'text', text: 'Both stops go.' }], 'end_turn'));
+
+    await streamCopilotResponse([{ role: 'user', content: 'drop s1 and s2' }], {}, makeMockRes());
+
+    expect(mockStream).toHaveBeenCalledTimes(2);
+    const messages = mockStream.mock.calls[1][0].messages;
+    expect(messages).toHaveLength(3);
+    // Preserved-thinking rule: the assistant turn is replayed as the same content, thinking block included.
+    expect(messages[1]).toEqual({ role: 'assistant', content: firstContent });
+    expect(messages[1].content).toBe(firstContent);
+    expect(messages[2].role).toBe('user');
+    expect(messages[2].content).toHaveLength(1);
+    expect(messages[2].content[0].type).toBe('tool_result');
+    expect(messages[2].content[0].tool_use_id).toBe('tu_prop');
+    expect(JSON.parse(messages[2].content[0].content)).toEqual({ status: 'received', operationCount: 2 });
+  });
+
+  it('acknowledges a proposal with a malformed operations field as operationCount 0', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [{ type: 'tool_use', id: 'tu_bad', name: 'propose_itinerary_changes', input: {} }]))
+      .mockReturnValueOnce(makeMockStream(['Hm.'], undefined, [{ type: 'text', text: 'Hm.' }], 'end_turn'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    const ack = mockStream.mock.calls[1][0].messages.at(-1).content[0];
+    expect(JSON.parse(ack.content)).toEqual({ status: 'received', operationCount: 0 });
+    expect(typesOf(res)).not.toContain('proposal');
+  });
+
+  it('sends tool_choice none on the explain call only, with the tools list unchanged', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Done.'], undefined, [{ type: 'text', text: 'Done.' }], 'end_turn'));
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, makeMockRes());
+
+    const [first, second] = mockStream.mock.calls.map((c) => c[0]);
+    // The key must not exist at all on a non-explain call - not even as undefined.
+    expect(Object.hasOwn(first, 'tool_choice')).toBe(false);
+    expect(second.tool_choice).toEqual({ type: 'none' });
+    expect(second.tools).toEqual(first.tools);
+    expect(second.tools.map((t) => t.name)).toEqual(
+      ['propose_itinerary_changes', 'search_discovery_catalogue', 'check_trip_health'],
+    );
+    expect(second.system).toEqual(first.system);
+    expect(second.model).toBe(first.model);
+    expect(second.max_tokens).toBe(first.max_tokens);
+  });
+
+  it('sends no tool_choice key on a plain-text turn or on any call of a query-tool turn', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['Hi.'], 'Hi.'));
+    await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, makeMockRes());
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(Object.hasOwn(mockStream.mock.calls[0][0], 'tool_choice')).toBe(false);
+
+    mockStream.mockReset();
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')]))
+      .mockReturnValueOnce(makeMockStream(['Here.'], undefined, [{ type: 'text', text: 'Here.' }], 'end_turn'));
+    await streamCopilotResponse([{ role: 'user', content: 'ideas?' }], {}, makeMockRes(), {}, undefined,
+      { search_discovery_catalogue: vi.fn().mockResolvedValue({ places: [] }) });
+    expect(mockStream).toHaveBeenCalledTimes(2);
+    for (const [body] of mockStream.mock.calls) {
+      expect(Object.hasOwn(body, 'tool_choice')).toBe(false);
+    }
+  });
+
+  it('a query round-trip before the proposal still works: explain is the third call, tool_choice none only there', async () => {
+    const executor = vi.fn().mockResolvedValue({ places: [] });
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Added.'], undefined, [{ type: 'text', text: 'Added.' }], 'end_turn'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined, { search_discovery_catalogue: executor });
+
+    expect(mockStream).toHaveBeenCalledTimes(3);
+    expect(executor).toHaveBeenCalledOnce();
+    const bodies = mockStream.mock.calls.map((c) => c[0]);
+    expect(bodies.map((b) => Object.hasOwn(b, 'tool_choice'))).toEqual([false, false, true]);
+    expect(bodies[2].messages).toHaveLength(5);
+    expect(typesOf(res)).toContain('proposal');
+  });
+
+  it('writes the explanation as text events before the proposal event, and persists it with the operations once', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK, proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Both stops ', 'go: they clash.'], undefined, [{ type: 'text', text: 'Both stops go: they clash.' }], 'end_turn'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    const res = makeMockRes();
+    const returned = await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    const types = typesOf(res);
+    expect(textOf(res)).toBe('Both stops go: they clash.');
+    expect(types.lastIndexOf('text')).toBeLessThan(types.indexOf('proposal'));
+    expect(types.indexOf('proposal')).toBeLessThan(types.indexOf('done'));
+    expect(types.filter((t) => t === 'proposal')).toHaveLength(1);
+    expect(types).not.toContain('notice');
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Both stops go: they clash.', operations: OPS, notice: null });
+    expect(returned).toBe('Both stops go: they clash.');
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ iterations: 2, proposalOps: 2, stopReason: 'end_turn', error: 0 });
+  });
+
+  it('never executes anything from the explain step, and a tool_use there cannot overwrite the proposal', async () => {
+    const executor = vi.fn();
+    const otherOps = [{ action: 'remove_stop', stopId: 'other' }];
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [
+        toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_q'),
+        proposeBlock(),
+      ]))
+      .mockReturnValueOnce(makeMockStream(['Explained.'], undefined, [
+        { type: 'text', text: 'Explained.' },
+        toolUseBlock('search_discovery_catalogue', { destination: 'Osaka' }, 'tu_q2'),
+        proposeBlock(otherOps, 'tu_prop2'),
+      ]));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, { search_discovery_catalogue: executor });
+
+    // (e) a query tool_use beside the propose block is ignored outright, in both responses.
+    expect(executor).not.toHaveBeenCalled();
+    expect(mockStream).toHaveBeenCalledTimes(2);
+    expect(parseEvents(res).find((e) => e.type === 'tool')).toBeUndefined();
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn.mock.calls[0][0].operations).toEqual(OPS);
+  });
+
+  it('explain step cut by max_tokens: the proposal is still emitted, with a truncated notice', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Both stops'], undefined, [{ type: 'text', text: 'Both stops' }], 'max_tokens'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    const events = parseEvents(res);
+    expect(events.filter((e) => e.type === 'notice')).toEqual([{ type: 'notice', notice: 'truncated' }]);
+    expect(events.find((e) => e.type === 'proposal')).toMatchObject({ proposalId: 'p1' });
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Both stops', operations: OPS, notice: 'truncated' });
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'max_tokens', proposalOps: 2, iterations: 2 });
+  });
+
+  it('explain step refused: the proposal is still emitted, with a refused notice', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [], 'refusal'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn);
+
+    expect(parseEvents(res).filter((e) => e.type === 'notice')).toEqual([{ type: 'notice', notice: 'refused' }]);
+    expect(typesOf(res)).toContain('proposal');
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: OPS, notice: 'refused' });
+    warnSpy.mockRestore();
+  });
+
+  it('truncation BEFORE the proposal still discards it and makes no explain call (Plan 11 D5)', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()], 'max_tokens'));
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn);
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(typesOf(res)).not.toContain('proposal');
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null, notice: 'truncated' });
+  });
+
+  it('client abort right after the propose response: no explain call, no proposal, saved as stopped', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce({
+      on() { return this; },
+      abort() {},
+      async finalMessage() {
+        res.triggerClose();
+        return { content: [proposeBlock()], stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 2 } };
+      },
+    });
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(typesOf(res)).not.toContain('proposal');
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null, notice: 'stopped' });
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', proposalOps: 0, error: 0 });
+    logSpy.mockRestore();
+  });
+
+  it('client abort during the explain step: partial text saved as stopped, never the proposal', async () => {
+    const res = makeMockRes();
+    let onText = null;
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce({
+        on(event, cb) { if (event === 'text') onText = cb; return this; },
+        abort() {},
+        currentMessage: { usage: { input_tokens: 4, output_tokens: 1 } },
+        async finalMessage() {
+          onText?.('Both ');
+          res.triggerClose();
+          throw new Error('Request was aborted.');
+        },
+      });
+    const persistTurn = vi.fn().mockResolvedValue(null);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(typesOf(res)).not.toContain('proposal');
+    expect(persistTurn).toHaveBeenCalledOnce();
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: 'Both ', operations: null, notice: 'stopped' });
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', proposalOps: 0, iterations: 2 });
+    logSpy.mockRestore();
+  });
+
+  it('an explain step with no text still emits the proposal and no "empty" notice', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK, proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK], 'end_turn'));
+    const persistTurn = vi.fn().mockResolvedValue({ proposalId: 'p1', operations: OPS });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn);
+
+    const types = typesOf(res);
+    expect(types).toContain('proposal');
+    expect(types).not.toContain('notice');
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: OPS, notice: null });
+  });
+
+  it('runs exactly one explain step per turn', async () => {
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [proposeBlock()]))
+      .mockReturnValueOnce(makeMockStream(['Words.'], undefined, [{ type: 'text', text: 'Words.' }, proposeBlock(OPS, 'tu_again')]))
+      .mockReturnValueOnce(makeMockStream(['never'], 'never'));
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, makeMockRes());
+
+    expect(mockStream).toHaveBeenCalledTimes(2);
+  });
+
+  it('pins the co-pilot system prompt text (D-30-9 bullet in place, other bullets byte-identical)', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['Hi'], 'Hi'));
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, makeMockRes());
+
+    const text = mockStream.mock.calls[0][0].system[0].text;
+    expect(text).toContain([
+      '## How to propose changes',
+      '- The ONLY way to change the itinerary is to call the propose_itinerary_changes tool. Never write changes as prose, JSON, or code blocks.',
+      '- Call the tool first. Once Trippy has acknowledged the call, explain the proposed changes to the traveller in prose: what changes and why, in your own words. If you are not proposing changes, do not call the tool.',
+      '- Use real dayId and stopId values from the itinerary above.',
+    ].join('\n'));
+    // The itinerary context is `{}` here, so the whole prompt is deterministic.
+    expect(createHash('sha256').update(text).digest('hex')).toBe('801426643725841661899e1f71b2dc10fef551b0340d560583dc5b90b0ecd365');
   });
 });

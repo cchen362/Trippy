@@ -5,10 +5,18 @@
 // recorder captured (block order in the terminal call, usage, cache reads). Nothing is re-run.
 //
 // E-COP-1 (Plan 30 §5.3): on every turn that emitted a proposal, the explanation the prompt asks
-// for must reach the panel as text. Two independent readings are reported:
-//   * the streamed SSE: characters of text events before the proposal event (> 0), and
-//   * the terminal API call: a `text` block started before the propose_itinerary_changes tool_use
-//     (a thinking-only lead-in or an empty progress-update block does not count).
+// for must reach the panel as text. Independent readings are reported:
+//   * the streamed SSE: characters of text events before the proposal event (> 0),
+//   * the explain step (D-30-9): the final call, made with tool_choice none after the propose
+//     call is acknowledged, has a non-empty `text` block, and
+//   * for the old protocol and as history: a `text` block started before the propose_itinerary_changes
+//     tool_use in the call that contains it (a thinking-only lead-in or an empty progress-update
+//     block does not count).
+//
+// The acknowledgement step (D-30-9) is not an executor call, so it is derived from the recorded API
+// calls: a stream call with tool_choice {type:'none'} whose last request message is a user turn
+// holding a tool_result for the propose tool_use of the preceding assistant message. Records from
+// the old protocol have none, and every explain-step metric reads null for them.
 
 import { max, median, sum } from './common.mjs';
 
@@ -22,6 +30,7 @@ const abbreviate = (name) => TOOL_ABBREV[name] ?? name;
 // Fallback output-tokens-per-character ratio when no record in the run is free of thinking blocks.
 const FALLBACK_TOKENS_PER_CHAR = 0.30;
 const KEEPALIVE_TURN_MS = 10000;
+const ACK = 'proposal_acknowledged';
 
 function isSubsequence(expected, actual) {
   let i = 0;
@@ -29,10 +38,58 @@ function isSubsequence(expected, actual) {
   return i === expected.length;
 }
 
-function toolSequence(output, hasProposal) {
+function toolSequence(output, hasProposal, hasAck) {
   const sequence = output.toolCalls.map((c) => c.name);
   if (hasProposal) sequence.push(PROPOSE);
+  if (hasProposal && hasAck) sequence.push(ACK);
   return sequence;
+}
+
+// The API call that contains the propose_itinerary_changes tool_use (null when the turn made none).
+// Under the old protocol this is the terminal call; under D-30-9 it is the one before the explain step.
+function proposeCall(record) {
+  return streamCalls(record).find((c) => (c.response.content ?? []).some((b) => b.type === 'tool_use' && b.name === PROPOSE)) ?? null;
+}
+
+const textOfResult = (content) => (typeof content === 'string'
+  ? content
+  : (Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('') : ''));
+
+// The acknowledgement-and-explain step, or null. A call qualifies when its tool_choice is exactly
+// {type:'none'} and its last request message is a user message whose content array holds a
+// tool_result whose tool_use_id is the id of a propose tool_use in the assistant message before it.
+// `wellFormed` additionally needs the result to parse to { status:'received', operationCount } with
+// operationCount an integer equal to the proposed operations' length.
+function ackStep(record) {
+  for (const call of streamCalls(record)) {
+    const choice = call.request?.tool_choice;
+    if (!choice || Object.keys(choice).length !== 1 || choice.type !== 'none') continue;
+    const messages = call.request.messages ?? [];
+    const last = messages.at(-1);
+    const before = messages.at(-2);
+    if (last?.role !== 'user' || !Array.isArray(last.content) || before?.role !== 'assistant' || !Array.isArray(before.content)) continue;
+    const proposeUses = before.content.filter((b) => b.type === 'tool_use' && b.name === PROPOSE);
+    for (const block of last.content) {
+      if (block.type !== 'tool_result') continue;
+      const use = proposeUses.find((u) => u.id === block.tool_use_id);
+      if (!use) continue;
+      let parsed = null;
+      try { parsed = JSON.parse(textOfResult(block.content)); } catch { parsed = null; }
+      const operations = use.input?.operations;
+      const wellFormed = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        && parsed.status === 'received'
+        && Number.isInteger(parsed.operationCount)
+        && Array.isArray(operations) && parsed.operationCount === operations.length;
+      return { call, wellFormed };
+    }
+  }
+  return null;
+}
+
+function textChars(call) {
+  return (call?.response?.content ?? [])
+    .filter((b) => b.type === 'text')
+    .reduce((n, b) => n + (typeof b.text === 'string' ? b.text.length : (b.text?.length ?? 0)), 0);
 }
 
 function terminalCall(record) {
@@ -50,8 +107,8 @@ function terminalTextBeforeTool(call) {
   return textIndex !== -1 && textIndex < toolIndex;
 }
 
-// Characters of the thinking block that immediately precedes the propose tool_use in the terminal
-// call (0 when that block is not a thinking block or its text is empty); null when there is no
+// Characters of the thinking block that immediately precedes the propose tool_use in the call that
+// contains it (0 when that block is not a thinking block or its text is empty); null when there is no
 // propose tool_use. Under thinking display 'updates' this text is the model's progress update.
 function updateCharsBeforeTool(call) {
   if (!call) return null;
@@ -157,7 +214,8 @@ function analyse(record) {
   const proposalEvent = proposalIndex === -1 ? null : events[proposalIndex].event;
   const hasProposal = proposalEvent !== null;
   const textEvents = events.filter((e) => e.event.type === 'text');
-  const sequence = toolSequence(output, hasProposal);
+  const ack = hasProposal ? ackStep(record) : null;
+  const sequence = toolSequence(output, hasProposal, ack !== null);
 
   const sequenceOk = expect.toolsMode === 'exact'
     ? JSON.stringify(sequence) === JSON.stringify(expect.tools)
@@ -172,8 +230,11 @@ function analyse(record) {
     ? events.slice(0, proposalIndex).filter((e) => e.event.type === 'text').reduce((n, e) => n + e.event.content.length, 0)
     : null;
   const terminal = terminalCall(record);
-  const textBlockFirst = hasProposal ? terminalTextBeforeTool(terminal) : null;
-  const updateChars = hasProposal ? updateCharsBeforeTool(terminal) : null;
+  const proposing = hasProposal ? proposeCall(record) : null;
+  const textBlockFirst = hasProposal ? terminalTextBeforeTool(proposing) : null;
+  const updateChars = hasProposal ? updateCharsBeforeTool(proposing) : null;
+  const explainChars = ack ? textChars(ack.call) : null;
+  const explainText = hasProposal ? Boolean(ack) && textChars(terminal) > 0 : null;
 
   const ops = hasProposal ? proposalEvent.operations : [];
   const audit = auditOperations(ops, extra.seed, searchPlaceIds);
@@ -203,6 +264,14 @@ function analyse(record) {
     textBeforeProposal,
     textBlockFirst,
     updateChars,
+    hasAck: ack !== null,
+    ackWellFormed: ack ? ack.wellFormed : null,
+    explainText,
+    explainChars,
+    explainMs: ack ? (ack.call.wallMs ?? null) : null,
+    explainOut: ack ? (ack.call.response.usage?.output_tokens ?? null) : null,
+    explainIn: ack ? (ack.call.response.usage?.input_tokens ?? null) : null,
+    explainCacheRd: ack ? (ack.call.response.usage?.cache_read_input_tokens ?? null) : null,
     thinkingBlocksInTerminal: thinkingBlocks(terminal),
     thinkingBlocksAll: thinking.blocks,
     thinkingChars: thinking.chars,
@@ -211,7 +280,7 @@ function analyse(record) {
     visibleChars: visibleOutputChars(record),
     maxGapMs: maxEventGap(events),
     noticeKinds,
-    blocks: hasProposal ? blockSignature(terminal) : null,
+    blocks: hasProposal ? `${blockSignature(proposing)}${ack ? ` || ${blockSignature(ack.call)}` : ''}` : null,
     statesSeen,
     stateRelayed: expect.catalogueState && searchResults.length ? statesSeen.includes(expect.catalogueState) : null,
     audit,
@@ -247,6 +316,11 @@ export function score(records) {
   const stateExpected = analyses.filter((a) => a.stateRelayed !== null);
   const timed = analyses.filter((a) => a.ttfdMs !== null);
   const timedVisible = analyses.filter((a) => a.ttfvMs !== null);
+  const explained = analyses.filter((a) => a.hasAck);
+  // 'median / max' of an explain-step measure, or null (rendered as —) when no record has the step.
+  const explainStat = (key) => (explained.length
+    ? `${median(explained.map((a) => a[key]))} / ${max(explained.map((a) => a[key]))} (n=${explained.length})`
+    : null);
 
   const notAborted = analyses.filter((a) => !a.record.extra.abortAfterFirstText);
 
@@ -276,8 +350,10 @@ export function score(records) {
     'tool sequence as expected': frac(analyses.filter((a) => a.sequenceOk && !a.forbiddenUsed.length).length, n),
     'proposes as expected': frac(analyses.filter((a) => a.proposesOk).length, n),
     'E-COP-1 text before proposal (SSE)': frac(proposing.filter((a) => a.textBeforeProposal > 0).length, proposing.length),
-    'E-COP-1 text block before tool_use (terminal call)': frac(proposing.filter((a) => a.textBlockFirst === true).length, proposing.length),
-    'E-COP-1 remedy: non-empty progress-update text right before the propose tool_use (terminal call)': frac(proposing.filter((a) => a.updateChars > 0).length, proposing.length),
+    'E-COP-1 explanation text block in the explain step (final call, tool_choice none)': frac(proposing.filter((a) => a.explainText === true).length, proposing.length),
+    'acknowledgement step present and well-formed': frac(proposing.filter((a) => a.ackWellFormed === true).length, proposing.length),
+    'text block before the propose tool_use (pre-ack call)': frac(proposing.filter((a) => a.textBlockFirst === true).length, proposing.length),
+    'E-COP-1 remedy: non-empty progress-update text right before the propose tool_use (propose call)': frac(proposing.filter((a) => a.updateChars > 0).length, proposing.length),
     'E-COP-1 either: text before proposal OR non-empty update before tool_use': frac(proposing.filter((a) => a.textBeforeProposal > 0 || a.updateChars > 0).length, proposing.length),
     'proposal ids all real': frac(proposing.filter((a) => a.audit.invalidIds === 0).length, proposing.length),
     'proposal passes server validation': frac(proposing.filter((a) => a.validation?.ok).length, proposing.length),
@@ -293,6 +369,11 @@ export function score(records) {
     'truncation notices': frac(analyses.filter((a) => a.truncated).length, n),
     'silent turns (no text, no proposal)': frac(analyses.filter((a) => a.silent).length, n),
     'turns with an error event': frac(analyses.filter((a) => a.errored).length, n),
+    'explain step: wall ms median / max': explainStat('explainMs'),
+    'explain step: output tokens median / max': explainStat('explainOut'),
+    'explain step: input tokens median': explained.length ? `${median(explained.map((a) => a.explainIn))} (n=${explained.length})` : null,
+    'explain step: cache read tokens median': explained.length ? `${median(explained.map((a) => a.explainCacheRd))} (n=${explained.length})` : null,
+    'explain step: explanation chars median / max': explainStat('explainChars'),
     'cache read tokens on iterations 2+, multi-iteration turns: median': `${median(multi.map((a) => a.cacheRead))} (n=${multi.length})`,
     'turns that hit the query cap': frac(analyses.filter((a) => a.capNoticeSent).length, n),
     'cost per turn ($): median / mean': `${median(analyses.map((a) => a.record.costUsd)).toFixed(5)} / ${(analyses.reduce((s, a) => s + a.record.costUsd, 0) / n).toFixed(5)}`,
@@ -318,6 +399,11 @@ export function score(records) {
     thinkExact: yn(a.thinkingExact),
     thinkChars: a.thinkingChars,
     blocks: a.blocks ?? '—',
+    ack: a.hasAck ? yn(a.ackWellFormed) : '—',
+    explainMs: a.explainMs ?? '—',
+    explainOut: a.explainOut ?? '—',
+    explainCacheRd: a.explainCacheRd ?? '—',
+    explainChars: a.explainChars ?? '—',
     ids: a.hasProposal ? yn(a.audit.invalidIds === 0) : '—',
     valid: a.validation ? yn(a.validation.ok) : '—',
     bookingHits: a.audit.bookingLinkedTargets,
