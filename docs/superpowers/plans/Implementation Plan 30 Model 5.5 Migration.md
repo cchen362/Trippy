@@ -181,7 +181,7 @@ Each wave: read this plan, implement only that wave, run `cd backend; npm test` 
 
 ### W0 — Baseline, harness, fixtures (no model change, no production change)
 
-**Status:** 2026-10-18 — **COMPLETE except step 1.** Step 1, the production `copilot_turn_metrics` / `[discover] ok` export, is an owner-only server step (Appendix A.1) and is still open; until it lands, every gate compares against the local control run below. No model, prompt or production request shape changed: `claude.js` gains only `LIVE_PROFILES` and an optional trailing `profile` argument on the four service functions. The four default request bodies are pinned by sha256 in `backend/tests/claude.test.js`; the hashes were captured against the unmodified `4496a96`, and re-checked by running those tests against HEAD's `claude.js`, where they pass. Backend suite green: 45 files, 982 tests. Harness: `backend/scripts/modelEval/` (README there). Run files are in the gitignored `backend/data/model-eval/runs/<workload>/control/2026-10-18T12-*.jsonl`.
+**Status:** 2026-10-18 — **COMPLETE.** Step 1 (production export) was run read-only over ssh the same day from a fresh backup copy (`~/Trippy/backups/trippy-plan30-baseline-20261018.db`, integrity ok) and the container log; it is recorded under **Production baseline** below. Production volume is small enough that the gates rest on the harness runs below, and the observation windows in §7 are low-signal confirmation, not the evidence. No model, prompt or production request shape changed: `claude.js` gains only `LIVE_PROFILES` and an optional trailing `profile` argument on the four service functions. The four default request bodies are pinned by sha256 in `backend/tests/claude.test.js`; the hashes were captured against the unmodified `4496a96`, and re-checked by running those tests against HEAD's `claude.js`, where they pass. Backend suite green: 45 files, 982 tests. Harness: `backend/scripts/modelEval/` (README there). Run files are in the gitignored `backend/data/model-eval/runs/<workload>/control/2026-10-18T12-*.jsonl`.
 
 Baseline: control profile, 2026-10-18, harness on the dev machine, dev key.
 
@@ -212,6 +212,15 @@ E-COP-1's two measures are SSE text before the proposal and a text block before 
 | destinations digest | `d0e53d333682` |
 
 In the co-pilot copy, `discovery_generation_daily` reads 24 both before and after. The extra 3 is the Kaohsiung cap written during setup, before the "before" count. `extraction.mjs` and `descriptor.mjs` import no database.
+
+**Production baseline (read 2026-10-18;  keeps 90 days, the container log starts 2026-09-17 06:12 UTC).**
+
+| Workload | Production evidence |
+|---|---|
+| Co-pilot (Sonnet 4.6) | 8 turns in the table, all 2026-07-15 → 2026-07-21 (nothing since — the 90-day prune has not yet removed them). Input 1,602 avg / 3,062 max; output 172 avg / 494 max; cache read 3,730 avg (6/8 turns read 4,973), cache write 2,095 avg; TTFD 1,458 ms avg / 2,513 max; total 5,271 ms avg / 13,090 max (the one 2-iteration turn with a query call); stop reasons  5 /  3; truncations 0; errors 0. **Two of the five proposing turns have NULL TTFD** — the model called  with no prose first, on Sonnet 4.6 — so the real-world E-COP-1 baseline is 3/5, not the 10/10 the scripted scenarios produced. W5 must compare like with like (same scenarios on both models), and a missing explanation is a pre-existing behaviour to measure, not automatically a 5.5 regression. |
+| Discovery (Haiku 4.5) | One generation in the log window: ChengDu, CN, 2026-09-24, with 244 exclusion names; started 01:24:25,  at 01:27:23 (178 s; local control median 169 s); 8/8 categories;  skipped repeated names across categories (consistent with the 27.6% exclusion-repeat rate measured locally); resolver budget after the run 102/1000, escalation 9/50. Catalogue totals: 13 destinations, 44 generations, 3,014 places. 0 / lines, 0 provider errors () in the window. |
+| Extraction (Sonnet 4.6) | 0  lines in the window; 3 artifacts ever (1 PDF of 350 KB, 2 pasted texts of ≤395 bytes). No image has ever been extracted in production — the W4 image/PDF evidence can only come from the Q-30-4 private fixtures. |
+| Descriptors (Haiku 4.5) | 0  lines in the window. |
 
 **Facts corrected or learned:**
 - **§5.1 "`DB_PATH` pointed at the copy" cannot work.** `config.js` loads `backend/.env` with `override: true`. The harness calls `initDb(copy)` and asserts that `getDb().name` is the copy.
