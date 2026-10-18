@@ -1,6 +1,6 @@
 # Implementation Plan 33 — Discovery Single-Flight Generation
 
-**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below).** M1 (backend): **COMPLETE 2026-10-19, not deployed** (record under "M1 record" below). M2 (frontend): **COMPLETE 2026-10-19, not deployed** (record under "M2 record" below; started once Plan 32 M2 and the co-pilot "Drafting…" badge had merged, per R3). Nothing deployed: M1 ships with Plan 30 Deploy B, and M2 ships with whichever deploy follows its merge. Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18), merged as findings in PR #15. No migration.
+**Status:** **DEPLOYED to production in Plan 30 Deploy B at `a2c47d5` (2026-10-19; migration 037 applied). Owner production click-through pending.** 2026-10-19 — **APPROVED by the owner (R1–R3 below).** M1 (backend): **COMPLETE 2026-10-19, not deployed** (record under "M1 record" below). M2 (frontend): **COMPLETE 2026-10-19, not deployed** (record under "M2 record" below; started once Plan 32 M2 and the co-pilot "Drafting…" badge had merged, per R3). Nothing deployed: M1 ships with Plan 30 Deploy B, and M2 ships with whichever deploy follows its merge. Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18), merged as findings in PR #15. No migration.
 
 ## Owner rulings — 2026-10-19 (do not reopen)
 
