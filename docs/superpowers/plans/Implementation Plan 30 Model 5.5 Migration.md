@@ -377,7 +377,79 @@ The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) 
 
 ### W3 — Discovery → Haiku 5.5
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-18 — **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js`, `claude.test.js` and `profiles.mjs` are untouched, so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
+
+**Sweep** (6 destinations × first / with-exclusions, harness, `--concurrency 3`, dev key, prompt frozen; control = the W0 Haiku 4.5 run on disk). Every run's prompt is at most 8,704 tokens (input + cache), far under Haiku 5.5's 100K price threshold. D-30-7 counts were unchanged for the copy and the owner DB on all three candidate runs.
+
+| Metric (n = 12 each) | Control: Haiku 4.5, 64,000 | Primary: 5.5 `low`, 96,000 | 5.5 `medium`, 96,000 | 5.5 `thinking: disabled` + `low` |
+|---|---|---|---|---|
+| `stop_reason` | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 |
+| Categories with items, worst / median | 8 / 8 | **6** / 8 (taipei/excl) | **3** / 8 (ipoh/excl: insufficient yield, generation thrown) | 8 / 8 |
+| Items per category, median of medians / worst min | 10.75 / 6 | **2.5** / 0 | **2.25** / 0 | **5** / 3 |
+| Total items median / min (first; excl) | 91 / 69 (76.5; 97.5) | 20 / 12 (24.5; 18) | 23 / 5 (32.5; 12.5) | 37 / 24 (37.5; 32) |
+| Dropped unparseable lines | 0/96 | 0/96 | 0/96 | 0/96 |
+| Editorial prefix (raw) | 0.4% | 0.0% | 0.0% | 0.0% |
+| Alias identical to name (raw) | 2.1% | **3.6%** | 2.1% | **4.7%** |
+| Dash clause (raw) | 1.3% | 0.0% | 0.0% | 0.0% |
+| Description-in-brackets (heuristic, raw) | 5.2% | 0.0% | 0.4% | 0.9% |
+| Exclusions variant: raw items repeating an excluded name | 27.6% | 0.0% | 0.0% | **54.0%** |
+| Time to first category, median / max | 20.5 / 33.1 s | 20.5 / 28.0 s | **44.7 / 97.4 s** | 5.0 / 9.4 s |
+| Total time, median / max | 169 / 313 s | 38 / 60 s | 71 / 120 s | 38 / 61 s |
+| Output tokens median / max (thinking included) | 17,857 / 32,509 | 8,273 / 13,447 | 15,934 / 28,764 | 8,733 / 14,120 |
+| Estimated thinking tokens, median / max (share) | 0 | ≈3,090 / 4,746 (≈38%) | ≈8,422 / 20,078 (≈68%) | 0 (no thinking blocks) |
+| Cost per generation, median | $0.091 | $0.0047 | $0.0081 | $0.0046 |
+| Cost per usable item, median | $0.00104 | $0.00021 | $0.00041 | $0.00013 |
+| Run total | $1.168 | $0.0555 | $0.1007 | $0.0563 |
+
+Thinking tokens are estimated as output minus text. The text's tokens are taken from the 0.429 tokens-per-character ratio of the no-thinking run, because thinking text is empty under the default `display: "omitted"`. Per-destination rows are in the run files, `data/model-eval/runs/discovery/<profile>/2026-10-18T14-3*.jsonl`.
+
+**Reality/location spot check.** `backend/scripts/modelEval/discoverySpotCheck.mjs` (new) draws 10 seeded-random items per destination from each profile's run, pooled across both variants and deduped. It runs them through the real `insertPlaces` → `enqueueForVerification` path with live budgets, on scratch destinations inside one `BEGIN … ROLLBACK` on a DB copy. All D-30-7 counts were unchanged after, for the copy and the owner DB.
+
+| Destination | Control | Primary `low` | `disabled` + `low` |
+|---|---|---|---|
+| Taipei | 0/10 | 4/10 | 3/10 |
+| Kuala Lumpur | 2/10 | 7/10 | 5/10 |
+| Chengdu | 0/10 | 0/10 | 1/10 |
+| 冲绳 | 0/10 | 0/10 | 0/10 |
+| Ipoh | 2/10 | 4/10 | 1/10 |
+| Kaohsiung | 0/10 | 2/10 | 1/10 |
+| **Verified** | **4/60 (7%)** | **17/60 (28%)** | **11/60 (18%)** |
+
+Almost every non-verified item is `weak_match`: control 55, primary 43, disabled 48, plus one or two `no_result`. That spot-check process used 788 of the 1,000 resolver requests (Nominatim) and all 50 Google escalations, which come from that process's in-memory budget, not the dev server's. Escalation ran out partway, so items checked later got no Google second look. All three profiles drained concurrently, so the cut fell on each of them alike.
+
+**Gate (§5.3) — fails on volume for every candidate:**
+
+| Criterion | Primary | Medium | Disabled |
+|---|---|---|---|
+| 8/8 categories wherever control had 8/8 | fail (6/8) | fail (3/8, 7/8 ×3) | pass |
+| Items per category median ≥ −20% of control (≥ 8.6) | **fail (2.5)** | **fail (2.25)** | **fail (5)** |
+| Dropped lines ≤ control | pass | pass | pass |
+| `end_turn` on all primary runs | pass | — | — |
+| Name-quality defects ≤ control | fail (alias = name 3.6% vs 2.1%; the others are lower) | pass | fail (alias = name 4.7%) |
+| Verified share ≥ control | pass (28% vs 7%) | not run | pass (18%) |
+| First category ≤ control + 5 s; total ≤ control + 20% | pass | fail (44.7 s) | pass |
+| Cost per usable item ≤ control | pass | pass | pass |
+
+**What the evidence says, in product terms.** On Haiku 5.5 with today's prompt, a traveller opening a fresh destination would see about 20–37 places where they see about 90 today, and most categories would have 2–5 picks. A "show more" on a destination they have already browsed would add about 12–32. In the `disabled` profile, over half of those would be names already shown, which `insertPlaces` drops. The places that do come back are more often real and locatable: 28% against 7% verify on the first pass. They are also cleaner names, with no editorial prefixes, dash clauses or descriptive brackets. They cost about a fifth per usable item, and arrive four times faster end to end.
+
+**Facts corrected or learned:**
+- **The volume collapse is the finding the plan did not anticipate.** §4 and C-30-7 worried that the allowance would cut late categories. With every run at `end_turn` and the largest output at 28,764 tokens (22% of 128K), the 96,000 allowance is irrelevant. The model simply writes fewer items. The prompt says *"Aim for 30 items per category. Fewer sharp picks beats padding with mediocre ones — do not force 30 if the city cannot support it."* Haiku 4.5 reads that as ~10 per category. All three 5.5 settings read it as 2–5, and more thinking (`medium`) made it fewer, not more. This is a hypothesis about cause, not a measured one: no prompt variant has been run (§4 freezes the prompt for the first pass).
+- `thinking: disabled` is accepted by Haiku 5.5 on this path (F-30-4 holds), streams its first category in ≈5 s, and is the only 5.5 setting that keeps 8/8 categories. But it ignores the exclusion list about twice as often as control (54% vs 27.6%).
+- `medium` spends about 68% of its output on hidden thinking before the first line. First category arrives at 45 s median and 97 s worst. The route's 8 s `{type:'thinking'}` ping keeps the Cloudflare 100 s timer from firing, but the traveller waits.
+- Input tokens rise about 39% on the new tokenizer (median 1,605 → 2,226). That is immaterial at $0.10/MTok.
+- **The owner's dev catalogue moved between W0 and W3** (`discovery_places` 1,955 → 2,084, verification attempts 2,378 → 2,867, resolver cache 817 → 953). Something outside the harness wrote to the dev DB, most likely the dev server in use. Nothing in this wave did; the start and end counts are equal within every run. The comparison is unaffected because the exclusion lists are frozen in `data/model-eval/discovery-exclusions.json`. The W0 D-30-7 table's absolute values are not current.
+- The low control verified share (7%, almost all `weak_match`) is a fact about the resolver on generated items, not about either model. Kuala Lumpur's dev row carries the bare key `kualalumpur` as its `display_name`, which is passed to the resolver as the city. It is noted here, not investigated: resolver order is closed (`docs/DECISIONS.md`).
+
+**Spend.** Anthropic $0.213 for the three candidate sweeps. The spot check made no model call, issued 788 Nominatim requests, and used 50 Google escalations (bounded by the 50/day sub-budget).
+
+**Open — needs an owner decision before W3 can continue.** Rerunning the sweep will not change the gate. The options are:
+- A §4 second-pass prompt comparison, with the volume line rewritten for 5.5. The prompt is shared, so it either becomes model-keyed or is also re-measured on Haiku 4.5.
+- Explicitly accepting fewer, more verifiable items. That loosens §5.3 and is the owner's call alone.
+- Leaving discovery on Haiku 4.5 for now. F-30-13: its retirement floor has passed, so this window is finite.
+
+Deploy A (Q-30-5) was "after W3". W1, the D-30-8 follow-up and W2 are ready on their own, and whether Deploy A goes without W3 is also the owner's call.
+
+**Rollback:** nothing to roll back; no production constant changed.
 
 **Steps.** Sweep per §5.2; measure actual `output_tokens` (thinking included) per generation and set the allowance (D-30-6); pick the profile (candidate: effort `low`, 96,000); set `DISCOVERY_MODEL`; update the `claude.js:350` comment to state the new reasoning (the 64K ceiling rationale is Haiku-4.5-specific and must not survive as a false fact) and `claude.test.js:210`; keep `MIN_CATEGORIES_WITH_ITEMS` and all lifecycle/budget behaviour untouched; one real local generation through the route (fresh destination in the dev DB copy — *not* production) to confirm per-category streaming and the `thinking` ping still interleave; confirm the resolver verification queue behaves identically on the new rows (budgets, provenance `pending`).
 
