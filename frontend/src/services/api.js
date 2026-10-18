@@ -81,20 +81,25 @@ export async function requestStream(path, body, onChunk, signal) {
     }
   };
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += value;
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop(); // keep incomplete chunk
-      for (const line of lines) parseChunk(line);
-    }
-    // Flush any trailing data that arrived without a trailing blank line
-    if (buffer) parseChunk(buffer);
-  } finally {
-    reader.cancel();
+  // No reader.cancel() here, on purpose. The loop below only ends two ways:
+  // `done` (the stream is already closed, so there is nothing left to cancel)
+  // or a rejected read() — an abort or a network drop — which leaves the stream
+  // errored, so cancel() could only return a second rejection nobody handles
+  // (an AbortError in the console on every co-pilot Stop and Discovery unmount).
+  // parseChunk swallows onChunk/JSON failures, so no other exception can leave
+  // the stream readable. Neither path needs the lock released: the stream is
+  // finished and unreachable once this function returns. A read() rejection
+  // propagates to the caller unchanged — callers key on err.name === 'AbortError'.
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop(); // keep incomplete chunk
+    for (const line of lines) parseChunk(line);
   }
+  // Flush any trailing data that arrived without a trailing blank line
+  if (buffer) parseChunk(buffer);
 }
 
 export const authApi = {
