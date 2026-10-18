@@ -21,8 +21,12 @@ const SCENE_TYPES = [
 function coerceSceneType(value) {
   return SCENE_TYPES.includes(value) ? value : null;
 }
+// vi.hoisted: the vi.mock factory below runs before this file's own top-level code.
+const { mockDiscoverDestination } = vi.hoisted(() => ({
+  mockDiscoverDestination: vi.fn(),
+}));
 vi.mock('../src/services/claude.js', () => ({
-  discoverDestination: vi.fn(),
+  discoverDestination: mockDiscoverDestination,
   normalizeName,
   coerceSceneType,
 }));
@@ -64,19 +68,28 @@ import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
 import * as authService from '../src/services/auth.js';
 import * as tripService from '../src/services/trips.js';
-import { searchDiscoveryCatalogue, resetInFlightGenerations } from '../src/services/copilotGrounding.js';
+import { searchDiscoveryCatalogue } from '../src/services/copilotGrounding.js';
+import {
+  getRunningGeneration,
+  runCatalogueGeneration,
+  __resetRunningGenerationsForTests,
+} from '../src/services/discoveryGeneration.js';
 
-// --- Mock the generation pipeline: these tests care about the READ path's
-// decision (fire a kick? how many times? with what useExclusions?), not the
-// real generate/insert sequence — that's discoveryGeneration.test.js's job.
-// vi.hoisted is required (not a plain top-level const) because vi.mock
-// factories run before this file's own top-level const declarations.
+// --- Spy on the generation pipeline but let the REAL one run: the single-flight rule
+// lives in its registry (D-33-1), so these tests need the real registry and the real
+// runCatalogueGeneration, with claude.js's discoverDestination (mocked above) as the
+// controllable model call. The spy answers "was a kick fired, how many times, with what
+// useExclusions" without replacing what it wraps. vi.hoisted is required (not a plain
+// top-level const) because vi.mock factories run before this file's own top-level
+// const declarations.
 const { mockRunCatalogueGeneration } = vi.hoisted(() => ({
-  mockRunCatalogueGeneration: vi.fn().mockResolvedValue({ inserted: [], insertedIds: [] }),
+  mockRunCatalogueGeneration: vi.fn(),
 }));
-vi.mock('../src/services/discoveryGeneration.js', () => ({
-  runCatalogueGeneration: mockRunCatalogueGeneration,
-}));
+vi.mock('../src/services/discoveryGeneration.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  mockRunCatalogueGeneration.mockImplementation(actual.runCatalogueGeneration);
+  return { ...actual, runCatalogueGeneration: mockRunCatalogueGeneration };
+});
 
 let tmpDir;
 let userId;
@@ -114,7 +127,10 @@ beforeEach(() => {
   getDb().prepare('DELETE FROM discovery_generation_daily').run();
   getDb().prepare('DELETE FROM days WHERE trip_id = ?').run(tripId);
   mockRunCatalogueGeneration.mockClear();
-  resetInFlightGenerations();
+  __resetRunningGenerationsForTests();
+  // A kick that is never made to wait finishes at once with an empty generation.
+  mockDiscoverDestination.mockReset();
+  mockDiscoverDestination.mockResolvedValue([]);
 });
 
 function nowSql() {
@@ -238,19 +254,64 @@ describe('searchDiscoveryCatalogue', () => {
   });
 
   it('returns generating exactly once (single fired generation) when a second search for the same destination arrives while a kick is already in flight', async () => {
-    // Simulate an in-flight kick by never resolving the mocked generation call —
-    // the second search must see the in-flight key and not fire a second one.
-    let resolveGeneration;
-    mockRunCatalogueGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveGeneration = resolve; }));
+    // Hold the model call open so the first kick stays in flight; the second search must
+    // find it in the shared registry and not fire another.
+    let resolveModel;
+    mockDiscoverDestination.mockImplementation(() => new Promise((resolve) => { resolveModel = resolve; }));
 
     const first = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    const dest = getDb().prepare('SELECT * FROM discovery_destinations WHERE city_key = ?').get('shanghai');
+    const running = getRunningGeneration(dest.id);
+    expect(running).not.toBeNull();
     const second = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
 
     expect(first.catalogueState).toBe('generating');
     expect(second.catalogueState).toBe('generating');
     expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
 
-    resolveGeneration({ inserted: [], insertedIds: [] });
+    resolveModel([]);
+    await running.settled;
+    expect(getRunningGeneration(dest.id)).toBeNull();
+  });
+
+  it('fires no kick when another caller (e.g. the /discover route) already has a generation running for the destination', async () => {
+    // The generation is started directly through the shared pipeline, standing in for the
+    // route; the co-pilot kick must see it in the registry and stand down.
+    let resolveModel;
+    mockDiscoverDestination.mockImplementation(() => new Promise((resolve) => { resolveModel = resolve; }));
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: staleSql(8) });
+    seedPlace(dest.id, { category: 'culture', name: 'The Bund' });
+    const external = runCatalogueGeneration(getDb(), {
+      destinationRow: dest, claudeDestination: 'Shanghai, China (CN)', useExclusions: true,
+    });
+    mockRunCatalogueGeneration.mockClear();
+
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(result.catalogueState).toBe('generating');
+    expect(result.places.map((p) => p.name)).toEqual(['The Bund']);
+    expect(mockRunCatalogueGeneration).not.toHaveBeenCalled();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+
+    resolveModel([]);
+    await external;
+  });
+
+  it('a kick that finishes clears the registry, so a later search for a still-stale destination kicks again', async () => {
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: staleSql(8) });
+    seedPlace(dest.id, { category: 'culture', name: 'The Bund' });
+    // The fake generation inserts nothing, but the pipeline still bumps last_generated_at;
+    // make the destination stale again so the second search is eligible to kick.
+    await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    await vi.waitFor(() => expect(getRunningGeneration(dest.id)).toBeNull());
+    getDb().prepare('UPDATE discovery_destinations SET last_generated_at = ?, generation_count = 0 WHERE id = ?')
+      .run(staleSql(8), dest.id);
+    getDb().prepare('DELETE FROM discovery_generation_daily').run();
+
+    await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledTimes(2);
   });
 
   it('fresh search fires no generation and leaves the daily counter unchanged', async () => {

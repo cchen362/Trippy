@@ -1,6 +1,14 @@
 # Implementation Plan 33 — Discovery Single-Flight Generation
 
-**Status:** 2026-10-19 — **FINDINGS ONLY, awaiting owner approval (Q1–Q3 below). Nothing implemented, nothing deployed.** Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18). Once approved: M1 (backend) then M2 (frontend), each via `/implement-milestone`, each updating its own status line and committing. No migration.
+**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below).** M1 (backend): **COMPLETE 2026-10-19, not deployed** (record under "M1 record" below). M2 (frontend): HELD until Plan 32 M2 and the co-pilot "Drafting…" badge have merged. Nothing deployed: M1 ships with Plan 30 Deploy B. Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18), merged as findings in PR #15. No migration.
+
+## Owner rulings — 2026-10-19 (do not reopen)
+
+Relayed by the Plan 30 orchestrator; the owner's words were "Plan 33 - Ok to the recommendation."
+
+- **R1 (Q1) — A second request joins the generation already running.** It gets everything already saved at once, then each remaining category as it finishes. It never waits on a "still building" note. Code marker `D-33-2`; the single-generation rule underneath it is `D-33-1`.
+- **R2 (Q2) — "Show more" pressed while a generation is running joins that generation.** It does not start a second one in parallel. Code marker `D-33-3`.
+- **R3 (Q3) — M2 is included, sequenced after Plan 32 M2 and the co-pilot "Drafting…" badge.** Those touch `api.js` `requestStream` and the co-pilot files, and M2 edits the same `requestStream`.
 
 ## Bottom line, in plain language
 
@@ -67,6 +75,31 @@ The production log fits this exactly: both requests carried TH (`[discover] dest
    - a co-pilot kick and a route request share one generation;
    - a leader failure reaches the joiner as the existing fallback or error;
    - "show more" during a generation (see Q2).
+
+### M1 record — 2026-10-19
+
+- **As built.**
+  - `discoveryGeneration.js`:
+    - `runCatalogueGeneration` registers itself synchronously in a module `Map` keyed by destination id, removes the entry in `finally`, and throws if a generation is already running for that destination (a caller bug).
+    - `getRunningGeneration(id)` returns `{ settled, subscribe }`, where `settled` never rejects. A listener that throws is logged and dropped; it never aborts the leader.
+  - `routes/discovery.js`: the join path sits right after the fresh-cache return and before the daily-cap check. It subscribes first, then streams every saved category, then streams each later category's full set through the new `activeCategoryChunk` helper (shared with stale refresh). "Show more" joiners get `append: true`. A leader failure gives the joiner the route's existing fallback.
+  - `copilotGrounding.js`: its private set is gone. The kick checks the shared registry after `getOrCreateDestination`.
+  - Markers `D-33-1`, `D-33-2` and `D-33-3` are stamped in code, with rows in `docs/DECISIONS.md`.
+- **Tests.**
+  - New: 10 in `discoveryGeneration.test.js`, 11 in `discovery.test.js` (including co-pilot/route sharing in both orders) and 2 in `copilotGrounding.test.js`. That file's mock now wraps the real `runCatalogueGeneration`.
+  - Full backend suite: **1140 passed, 12 skipped, 0 failed.**
+  - Re-run after merging `origin/main` at `84adf10` (Plan 32 M2, plus `63bafdb`, which stops the stop-photo tests needing a real Unsplash key): **1140 passed, 12 skipped**, with no provider keys in the environment at all.
+- **Route verification, real model, dev-DB copy** (Google off, owner DB untouched). A new trip "Chiang Mai single-flight QA" sent two first-time `POST /discover` requests for Chiang Mai/TH, 4 s apart:
+  - The log shows one `[discover] destination=` line, one `joined running generation` line, and no `skipped duplicate` lines.
+  - `generation_count` 1, daily count 1, every row batch 0.
+  - **Both** streams ended with all 95 active places in all 8 categories, the joiner included. Both received their first category at +16 s and `done` at +80 s.
+- **Not exercised in a browser.** No frontend file changed and the panel consumes the same stream, but the remount flow was not clicked through. Owner production click-script, after Deploy B:
+  1. Create a trip for a city never opened before.
+  2. Open Discover.
+  3. Within a minute, tap "← Trips" and reopen the trip.
+  4. Open Discover again.
+  5. Check that the panel fills to the full catalogue with no reload.
+  6. Check that the container log shows one `[discover] destination=` line and one `joined running generation` line for that city.
 
 ### M2 — Frontend: stop orphaned streams on unmount
 

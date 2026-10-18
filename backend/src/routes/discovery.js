@@ -4,7 +4,7 @@ import { requireTripAccess } from '../middleware/tripAccess.js';
 import { getDb } from '../db/database.js';
 import { countryNameFromCode } from '../utils/countries.js';
 import { assertTripAccess, suggestCountryForDestinationText } from '../services/trips.js';
-import { runCatalogueGeneration } from '../services/discoveryGeneration.js';
+import { runCatalogueGeneration, getRunningGeneration } from '../services/discoveryGeneration.js';
 import { DISCOVERY_CATEGORIES } from '../services/claude.js';
 import {
   getOrCreateDestination,
@@ -81,6 +81,17 @@ function groupPlaceRowsByCategory(rows, prefs) {
       serializePlaceRow(row, prefs),
     ),
   }));
+}
+
+// One category's FULL current active set, re-read from the DB in the wire shape, or null
+// when the category has no active rows. Used wherever the client replaces (or merges by
+// name into) a whole category rather than receiving a delta: the stale-refresh stream and
+// a joiner following another request's generation.
+function activeCategoryChunk(db, destinationId, category, prefs) {
+  const categoryRows = listActivePlaces(db, destinationId)
+    .filter((row) => row.category === category);
+  const [chunk] = groupPlaceRowsByCategory(categoryRows, prefs);
+  return chunk ?? null;
 }
 
 router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
@@ -244,6 +255,63 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       return res.end();
     }
 
+    // D-33-1: a generation for this destination is already running (another request, a
+    // reload, a second device, or a co-pilot kick), so this request JOINS it instead of
+    // starting a second one. This sits before the daily-cap check on purpose: a joiner
+    // never spends a generation, so it must not be refused as capped, and it must not hit
+    // the catalogue_full or stale-prestream branches below, which exist only for a request
+    // that is about to generate. The check-to-start gap down to runCatalogueGeneration
+    // below has no await in it; that is what keeps "nothing running" true until we start.
+    const runningGeneration = getRunningGeneration(destinationRow.id);
+    if (runningGeneration) {
+      console.log(
+        '[discover] joined running generation destination=%s more=%s',
+        destinationRow.id, Boolean(more),
+      );
+      // D-33-3: "show more" during a running generation joins it rather than generating in
+      // parallel (Plan 33 Q2). A parallel one cannot exclude names the running generation
+      // has not saved yet, so most of what it paid for would be skipped as duplicates.
+      // append:true tells the client to merge by name instead of replacing the category;
+      // sending full sets is safe because showMore dedupes by name.
+      const appendFlag = more ? { append: true } : {};
+      const writeChunk = (chunk) => write({
+        type: 'category', category: chunk.category, items: chunk.items, ...appendFlag,
+      });
+
+      const joinPing = setInterval(() => write({ type: 'thinking' }), 8000);
+      // D-33-2: subscribe FIRST, then stream everything already saved, so no category
+      // can land unseen between the two (both run in this one synchronous stretch). Each
+      // later category then streams its full active set, so the joiner ends with the
+      // whole catalogue however late it arrived (Plan 33 Q1).
+      const unsubscribe = runningGeneration.subscribe(({ category }) => {
+        const chunk = activeCategoryChunk(db, destinationRow.id, category, prefs);
+        if (chunk) writeChunk(chunk);
+      });
+      try {
+        for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) writeChunk(cat);
+
+        const outcome = await runningGeneration.settled;
+        if (outcome.ok) {
+          write({ type: 'done', cached: false, ...appendFlag });
+        } else {
+          // Same degrade the generating request takes: serve what is stored, else error.
+          const fallbackRows = listActivePlaces(db, destinationRow.id);
+          if (fallbackRows.length > 0) {
+            console.error('[discover] joined generation failed, serving existing catalogue:', outcome.error.message);
+            for (const cat of groupPlaceRowsByCategory(fallbackRows, prefs)) writeChunk(cat);
+            write({ type: 'done', cached: true, generationFailed: true });
+          } else {
+            console.error('[discover] joined generation failed, no existing catalogue:', outcome.error.message);
+            write({ type: 'error', message: outcome.error.message || 'Discovery failed' });
+          }
+        }
+      } finally {
+        clearInterval(joinPing);
+        unsubscribe();
+      }
+      return res.end();
+    }
+
     // Generation limit (Trust criteria, decision 4): every path past the fresh-cache
     // check below is about to trigger a Claude generation. generation_count is a
     // lifetime counter, not a daily one (see discoveryCatalogue.js), so the per-UTC-day
@@ -347,9 +415,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
             // this category), re-read from the DB, rather than the delta
             // alone — a delta-only chunk would shrink the visible grid to
             // just what's new while the DB holds the full breadth.
-            const mergedRows = listActivePlaces(db, destinationRow.id)
-              .filter((row) => row.category === category);
-            const [merged] = groupPlaceRowsByCategory(mergedRows, prefs);
+            const merged = activeCategoryChunk(db, destinationRow.id, category, prefs);
             if (merged) write({ type: 'category', category: merged.category, items: merged.items });
             return;
           }
