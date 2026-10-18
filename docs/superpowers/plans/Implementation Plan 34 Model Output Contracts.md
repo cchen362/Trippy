@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **WRITTEN, NOT APPROVED.** No wave has started. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1 is the only question that blocks a wave (W1, because it sets fixture labels). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
+**Status:** 2026-10-19 — **WRITTEN, NOT APPROVED.** No wave has started. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default); the plan itself is still unapproved. Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -139,7 +139,8 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 | **Plan 10 D2** | Tier count (already superseded by D-31-1) | W3 | Only if W3's gate passes (D-34-9). |
 | **Plan 31 D-31-1** | Zero-result retry with 4- then 3-word prefix | **W3** | Measured against a model-authored broad query; superseded **only** on the descriptor path and **only** if the gate passes. |
 | **Plan 30 D-30-1** | Request settings keyed by model | W1, W2, W5 | Stands. The output format is a *workload* property merged into `output_config` beside the model's `effort` (D-34-6). |
-| **Plan 30 D-30-3** | Classify the stop before trusting content; a retry is the caller's choice, never silent | W1, W2 | Stands; it is the reason for D-34-2. Q-34-3 asks whether measured `max_tokens` stops justify one logged retry. |
+| **Plan 30 D-30-3** | Classify the stop before trusting content; a retry is the caller's choice, never silent | W1, W2 | Stands; it is the reason for D-34-2. Q-34-3: measured `max_tokens` stops lead first to effort `high`, and to a logged retry only if `high` also runs away. |
+| **Plan 30 D-30-6** | Allowances and effort chosen from measurement | W1 | Extraction's effort may move from `medium` to `high` under Q-34-3. |
 | **Plan 30 W3 profile** | Discovery on Haiku 5.5 with thinking disabled | **W4** | Replaced only if thinking-on matches it (D-34-10). |
 | **Plan 30 D-30-5 / W6** | Haiku first; old rows kept for rollback | **W5** | Rows removed only on a deprecation notice (D-34-11). |
 
@@ -187,7 +188,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 - **D-34-7 — Enum values are case-normalised before membership checks.** The docs do not guarantee enum capitalisation (F-34-6). `coerceSceneType` and the `type` check in `normalizeExtractedBooking` lower-case before matching, so `"Flight"` stays a flight instead of silently becoming `'other'` (F-34-5). Marker `D-34-7`. *Gate:* W1, W2 (unit tests).
 - **D-34-8 — A `max_tokens` stop under a schema is a failure, never a partial answer, and it is counted.**
   - D-30-3 already fails it before parsing. This plan adds the measured rate to every sweep table, because the Sonnet 5.5 guide names runaway thinking at `low`/`medium` under structured outputs as a known behaviour (F-34-7).
-  - Whether a non-zero rate justifies one automatic, logged retry is Q-34-3. That would amend D-30-3's "a retry is the caller's choice".
+  - What a non-zero rate leads to is Q-34-3. Raising effort to `high` comes first, because it treats the cause. One automatic, logged retry is considered only if `high` also runs away; that would amend D-30-3's "a retry is the caller's choice".
 - **D-34-9 — The descriptor authors a broad fallback query only if it measurably beats D-31-1.** Provisional default: **keep D-31-1**, because:
   - the headroom is 5 of 50 (F-34-11);
   - discovery-path stops would still need the prefix retry, so adopting the pair adds a second retry mechanism rather than replacing one;
@@ -202,7 +203,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 
 **Owner questions.** Each is written in plain language first; a default applies unless the owner rules.
 
-- **Q-34-1 — What should Trippy say when someone imports a travel email that holds no booking?** *(Blocks W1: it sets the fixture labels.)*
+- **Q-34-1 — What should Trippy say when someone imports a travel email that holds no booking?** **ANSWERED 2026-10-19 by the owner: the default.** `travel_no_booking` maps to `isTravelRelated: true` with no bookings, so the review screen says "We couldn't find any bookings in that." The W0 fixture labels follow this.
   - **Plain language.** A fare-sale newsletter, a price alert, or a "your trip is coming up" email with no confirmation is about travel, but there is nothing to import. Trippy has two messages: "We couldn't find any bookings in that." and "This doesn't look like travel."
   - **Example.** You forward "SKYDEALS WEEKLY — London to Tokyo from £489". Today's rule says to answer "This doesn't look like travel." Every model ignores that rule and Trippy actually shows "We couldn't find any bookings in that."
   - **Implication.** Choosing "couldn't find any bookings" makes the rule match what the models already do and what the screen already says; it is the honest description. Choosing "doesn't look like travel" keeps the old rule; the new contract can enforce it, at the cost of telling the traveller something untrue about an email that is plainly travel.
@@ -215,8 +216,15 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 - **Q-34-3 — Should an import that runs out of room retry once automatically?** *(Only asked if W1 measures any `max_tokens` stop at the chosen setting.)*
   - **Plain language.** Under a schema, the model sometimes "thinks" until it hits its length limit and returns nothing usable. Today the traveller sees "The booking reader's output was cut off — try fewer pages or split the file." and must press Try Again.
   - **Example.** One import in, say, fifty fails that way on a perfectly ordinary screenshot, and the message wrongly tells you to split a one-page file.
-  - **Implication.** One silent-to-the-user, logged retry costs a second call (about one cent) and about 5 more seconds, but only on that rare failure. It amends Plan 30 D-30-3's "a retry is the caller's choice, never silent". Not retrying keeps D-30-3 exact, but leaves a misleading message on a failure that is not the traveller's fault.
-  - **Recommendation (default): decide from the measured rate.** At 0 occurrences, do nothing. At any occurrence, retry once with the same request and log it, and reword the message for the second failure.
+  - **Implication.** A runaway is not a cheap failure. It spends the whole 16,000-token allowance, about $0.16 against about $0.014 for a normal import, and it is a long wait. There are three responses:
+    - **Retry once, logged.** This repeats that cost and that wait on the same failure, and it amends Plan 30 D-30-3's "a retry is the caller's choice, never silent".
+    - **Raise extraction's effort from `medium` to `high`.** The provider says the runaway "almost never happens" at `high` (F-34-7). This treats the cause rather than the symptom. Plan 30 W4 measured `high` on the 17 hard fixtures at $0.0155 against $0.0136 per import (+14%) and 5.0 s against 4.7 s median, with the same accuracy.
+    - **Change nothing.** This keeps the misleading message on a failure that is not the traveller's fault.
+  - **Recommendation (default, revised 2026-10-19): decide from the measured rate.** W1 always measures `high` beside `medium`.
+    - If `medium` shows no runaway, nothing changes.
+    - If it shows any and `high` shows none, move the profile to `high` (a D-30-6 profile change, re-pinned).
+    - Only if `high` also runs away, ask about a logged retry.
+    - In every case, the message for a thinking runaway stops telling the traveller to split the file.
 - **Q-34-4 — Is a slower first category acceptable if discovery with thinking on is otherwise as good?** *(Only asked if W4 passes every criterion except time to first category.)*
   - **Plain language.** Discovery today shows its first category in about 12 seconds with the model's up-front thinking turned off. With thinking on, Plan 30 saw about 36 seconds.
   - **Example.** You open Discovery for Tainan. Today, Essentials appears after about 12 s; with thinking on it might take about 30 s, with the same eight categories after that.
@@ -474,11 +482,11 @@ Otherwise record the numbers and keep D-31-1.
 | Wave | Anthropic calls | Spend | Other providers |
 |---|---|---|---|
 | W0 | ~31 extraction fixtures ×2 (5.5, 4.6), 50 descriptors, compile probe 4 models × 2 schemas ×2 | ≈ $1.0 | none |
-| W1 | ~31 × (contract, contract + think line, 4.6 under contract) + forced cut-off | ≈ $1.5 | none |
+| W1 | ~31 × (contract, contract + think line, contract at `high`, 4.6 under contract) + forced cut-off | ≈ $2.0 | none |
 | W2 | 50 × (5.5, 4.5 under contract) + 20-pair blind read | ≈ $0.05 | ~450 Unsplash searches (3 runs × 50 × ≤3), within 1,000/hr |
 | W3 | 50 × 3 runs with `broadQuery` | ≈ $0.01 | ≤ 450 Unsplash searches |
 | W4 | 12 thinking-on + 12 control | ≈ $0.30 | spot check ≤ 1,000 Nominatim, ≤ 50 Google escalations (process-local budgets) |
-| **Total** | | **≈ $3** | |
+| **Total** | | **≈ $3.5** | |
 
 ---
 
@@ -502,7 +510,7 @@ Each wave starts with reading this plan. It implements only that wave on its own
    - travel-without-booking: a price alert, an airline newsletter, a visa-reminder email, a "your trip starts in 3 days" email with no reference;
    - not-travel: a utility bill.
 
-   Re-label `non-travel-fare-promo` per Q-34-1 (default: `travel_no_booking`).
+   Re-label `non-travel-fare-promo` as `travel_no_booking` (`isTravelRelated: true`, no bookings), per the owner's Q-34-1 answer.
 2. **Same-day baselines on `main`:** `extraction.mjs --profile control` and `--profile baseline-46` on the full corpus; `descriptor.mjs --profile control` and `baseline-45`; three `selectPhoto` fallback passes for the descriptor control queries.
 3. **Compile probe.** `schemaProbe.mjs` sends each proposed schema once per model (`claude-sonnet-5-5`, `claude-sonnet-4-6` for extraction; `claude-haiku-5-5`, `claude-haiku-4-5-20251001` for the descriptor) on a trivial input, then once more. It records:
    - acceptance or the exact 400 (union/optional counts, `pattern`, `$ref` handling, "too complex");
@@ -518,7 +526,7 @@ Each wave starts with reading this plan. It implements only that wave on its own
 
 ### W1 — Extraction contract (D-34-1 … D-34-8)
 
-**Status:** NOT STARTED. Blocked by Q-34-1 (fixture labels).
+**Status:** NOT STARTED. Q-34-1 answered 2026-10-19 (the default), so the fixture labels are settled.
 
 **Files.**
 - `backend/src/services/claude.js`: `EXTRACTION_OUTPUT_SCHEMA`, prompt per §4.3, `requestSettings` merging a format, the parse/validate/map path, and the regex deleted;
@@ -532,7 +540,7 @@ Each wave starts with reading this plan. It implements only that wave on its own
 **Steps.**
 1. Implement on a branch.
 2. Run `extraction.mjs --profile control` (the branch's code) and `--profile baseline-46` (Sonnet 4.6 under the contract).
-3. Run a harness-only `contract-think` profile: the same model and settings, with the §4.3 line added on the wire.
+3. Run a harness-only `contract-think` profile (the same model and settings, with the §4.3 line added on the wire) and a `contract-high` profile (the same contract at effort `high`, for Q-34-3).
 4. Run `forced-cutoff`.
 5. Score against W0 and apply §5.1.
 6. If the gate passes: browser pass at 375 px and 1280 px on the W3 verify trip (Plan 30 W4's six cases, plus one fare-promo paste showing the Q-34-1 copy), then `LIVE_ANTHROPIC=1` smoke and the backend suite.
@@ -633,7 +641,7 @@ Run `git diff --check`, record total spend, and close.
 
 ## 7. Sequencing and rollback summary
 
-- **Order.** Plan 30 Deploy B → (owner approves this plan, answers Q-34-1) → W0 → W1 and W2 (sequential in one checkout; either order) → **Deploy** → W3 and W4 (harness-first; switch only on gate) → Deploy if either switched → W6. W5 runs whenever a notice arrives, and its prerequisite for Sonnet 4.6 is Plan 30 W5.
+- **Order.** Plan 30 Deploy B → (owner approves this plan; Q-34-1 already answered) → W0 → W1 and W2 (sequential in one checkout; either order) → **Deploy** → W3 and W4 (harness-first; switch only on gate) → Deploy if either switched → W6. W5 runs whenever a notice arrives, and its prerequisite for Sonnet 4.6 is Plan 30 W5.
 - **Shared files.** W1 and W2 both edit `claude.js`, `claude.test.js` and the live smoke, so they never run side by side. Plan 32 and Plan 30 W5 own the co-pilot section of the same files; this plan does not touch it.
 - **Rollback unit.** One wave's commit. No migration anywhere, and no stored-data change (D-34-3).
 - **Standing log checks after deploy.** These are not gates (Plan 30 §7 ruling):
