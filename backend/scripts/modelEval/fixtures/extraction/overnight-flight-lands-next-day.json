@@ -1,0 +1,53 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-03-12",
+    "endDate": "2027-03-22",
+    "destinations": [
+      {
+        "city": "London",
+        "countryCode": "GB"
+      }
+    ]
+  },
+  "id": "overnight-flight-lands-next-day",
+  "description": "Singapore to London departing 23:55 and landing 06:20 the following calendar day; dates spelled out so only the day roll is under test.",
+  "tags": [
+    "flight",
+    "overnight",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Singapore Airlines - Booking Reference: 9RB4TX\n\nSQ 322\nSingapore (SIN) Changi Terminal 3\nFri 12 Mar 2027  23:55\nLondon (LHR) Heathrow Terminal 2\nSat 13 Mar 2027  06:20\n\nSeat 41A confirmed."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-03-12T23:55",
+        "endDatetime": "2027-03-13T06:20",
+        "origin": [
+          "SIN",
+          "Singapore"
+        ],
+        "destination": [
+          "LHR",
+          "London",
+          "Heathrow"
+        ],
+        "confirmationRef": "9RB4TX",
+        "details": {
+          "originCity": "Singapore",
+          "destinationCity": "London",
+          "originCountryCode": "SG",
+          "destinationCountryCode": "GB",
+          "flightNumber": "SQ322"
+        }
+      }
+    ]
+  }
+}

@@ -22,6 +22,37 @@ export const COPILOT_MODEL = 'claude-sonnet-4-6';
 
 export const DISCOVERY_MODEL = 'claude-haiku-4-5-20251001';
 
+// The request settings each workload sends today. Plan 30 W0 lets the evaluation harness
+// (backend/scripts/modelEval) inject another profile through each service function's optional
+// `profile` argument; D-30-1 (W1) replaces this with a model-keyed MODEL_PROFILES map.
+// A profile is { model, maxTokens, thinking?, effort? } — `thinking` is sent verbatim,
+// `effort` becomes output_config.effort.
+export const LIVE_PROFILES = Object.freeze({
+  extraction: Object.freeze({ model: EXTRACTION_MODEL, maxTokens: 8192 }),
+  descriptor: Object.freeze({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 256 }),
+  discovery: Object.freeze({
+    model: DISCOVERY_MODEL,
+    // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
+    // across 8 categories (~40-50k output tokens) — a smaller budget silently
+    // truncates the tail of the response, which is why production generations
+    // were systematically missing the last 1-2 categories in the prompt's
+    // ordering (architecture, wellness).
+    maxTokens: 64000,
+  }),
+  copilot: Object.freeze({ model: COPILOT_MODEL, maxTokens: 8192 }),
+});
+
+// A profile as the request fields it controls. Spread where model/max_tokens sit so the key order
+// of a default (no thinking, no effort) body is exactly what it was before profiles existed.
+function requestSettings({ model, maxTokens, thinking, effort }) {
+  return {
+    model,
+    max_tokens: maxTokens,
+    ...(thinking ? { thinking } : {}),
+    ...(effort ? { output_config: { effort } } : {}),
+  };
+}
+
 // Closed D8 scene-type vocabulary (Plan 10 §1) — used by both discovery-authored
 // and Haiku-authored photo descriptors, and by the fallback query builder in
 // unsplash.js. Never persist a value outside this set.
@@ -94,7 +125,8 @@ Rules:
 // Extracts structured bookings from pasted text / uploaded images / PDFs via a single
 // non-streaming Claude call. files: [{ kind: 'text'|'image'|'pdf', mediaType, content }]
 // where content is a UTF-8 string for 'text' and base64 (no data-URI prefix) otherwise.
-export async function extractBookings({ files, contextText, tripContext }) {
+// profile (optional): request settings override for the evaluation harness; defaults to live.
+export async function extractBookings({ files, contextText, tripContext, profile = LIVE_PROFILES.extraction }) {
   const client = getClient();
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -137,8 +169,7 @@ export async function extractBookings({ files, contextText, tripContext }) {
   console.log('[import] extract files=%d', files.length);
 
   const response = await client.messages.create({
-    model: EXTRACTION_MODEL,
-    max_tokens: 8192,
+    ...requestSettings(profile),
     system: EXTRACTION_SYSTEM,
     messages: [{ role: 'user', content }],
   });
@@ -178,7 +209,7 @@ export async function extractBookings({ files, contextText, tripContext }) {
     });
   }
 
-  return { extraction: parsed, model: EXTRACTION_MODEL, usage: { input_tokens: inTok, output_tokens: outTok } };
+  return { extraction: parsed, model: profile.model, usage: { input_tokens: inTok, output_tokens: outTok } };
 }
 
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"
@@ -334,7 +365,8 @@ export function sanitizeGeneratedAliases(aliases, name) {
 
 // Streams discovery results as NDJSON. Calls onCategory({ category, items }) for each
 // completed line as Claude generates it. Returns the full accumulated results array for caching.
-export async function discoverDestination(destination, existingStopTitles = [], onCategory) {
+// profile (optional): request settings override for the evaluation harness; defaults to live.
+export async function discoverDestination(destination, existingStopTitles = [], onCategory, profile = LIVE_PROFILES.discovery) {
   console.log('[discover] destination=%s existingStops=%d', destination, existingStopTitles.length);
 
   const client = getClient();
@@ -346,13 +378,7 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   const systemPrompt = existingLine ? `${DISCOVER_SYSTEM}${existingLine}` : DISCOVER_SYSTEM;
 
   const stream = client.messages.stream({
-    model: DISCOVERY_MODEL,
-    // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
-    // across 8 categories (~40-50k output tokens) — a smaller budget silently
-    // truncates the tail of the response, which is why production generations
-    // were systematically missing the last 1-2 categories in the prompt's
-    // ordering (architecture, wellness).
-    max_tokens: 64000,
+    ...requestSettings(profile),
     system: systemPrompt,
     messages: [{
       role: 'user',
@@ -461,7 +487,8 @@ Rules:
 // stop that carries no descriptor of its own (Plan 10 D3). Must never block stop creation:
 // every failure mode (missing key, network error, malformed output, invalid schema)
 // is caught and returns null so the caller falls through to resolvedName+city.
-export async function generatePhotoDescriptor({ title, resolvedName, city, country, type }) {
+// profile (optional): request settings override for the evaluation harness; defaults to live.
+export async function generatePhotoDescriptor({ title, resolvedName, city, country, type, profile = LIVE_PROFILES.descriptor }) {
   try {
     const client = getClient();
 
@@ -473,8 +500,7 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
     ].filter(Boolean);
 
     const response = await client.messages.create({
-      model: PHOTO_DESCRIPTOR_MODEL,
-      max_tokens: 256,
+      ...requestSettings(profile),
       system: PHOTO_DESCRIPTOR_SYSTEM,
       messages: [{ role: 'user', content: contextParts.join(', ') }],
     });
@@ -518,7 +544,9 @@ const QUERY_TOOL_CAP = 5;
 // toolExecutors (optional, Plan 12 Wave 1): { [toolName]: async (input) => resultObject },
 // injected by the route the same way as persistTurn — this file stays DB-free, the route owns
 // what a query tool actually does (catalogue reads, trip-health checks, etc).
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics) {
+//
+// profile (optional): request settings override for the evaluation harness; defaults to live.
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics, profile = LIVE_PROFILES.copilot) {
   const client = getClient();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -625,8 +653,7 @@ Stops carry one of four kinds of timing. Respect them:
       iterations += 1;
 
       const stream = client.messages.stream({
-        model: COPILOT_MODEL,
-        max_tokens: 8192,
+        ...requestSettings(profile),
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
         tools: [PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL],
@@ -775,7 +802,7 @@ Stops carry one of four kinds of timing. Respect them:
     if (reportTurnMetrics) {
       try {
         await reportTurnMetrics({
-          model: COPILOT_MODEL,
+          model: profile.model,
           inputTokens: totalUsage.input_tokens,
           outputTokens: totalUsage.output_tokens,
           cacheWriteTokens: totalUsage.cache_creation_input_tokens,
@@ -804,7 +831,7 @@ Stops carry one of four kinds of timing. Respect them:
     if (reportTurnMetrics) {
       try {
         await reportTurnMetrics({
-          model: COPILOT_MODEL,
+          model: profile.model,
           inputTokens: totalUsage.input_tokens,
           outputTokens: totalUsage.output_tokens,
           cacheWriteTokens: totalUsage.cache_creation_input_tokens,

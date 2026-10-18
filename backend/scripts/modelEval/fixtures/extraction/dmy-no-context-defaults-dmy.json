@@ -1,0 +1,44 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "dmy-no-context-defaults-dmy",
+  "description": "Ambiguous 03/04/2027 with no trip context: prompt rule 3 says pick DD/MM (3 April) and mark that field low confidence.",
+  "tags": [
+    "date-ambiguity",
+    "flight",
+    "no-context",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Lufthansa - Booking confirmation\nBooking code: Z8PL4W\n\nLH 400   Frankfurt (FRA) -> New York JFK\nDeparture 03/04/2027  07:45\nArrival   03/04/2027  10:20\nFare: Economy Light"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-04-03T07:45",
+        "endDatetime": "2027-04-03T10:20",
+        "origin": [
+          "FRA",
+          "Frankfurt"
+        ],
+        "destination": [
+          "JFK",
+          "New York"
+        ],
+        "confirmationRef": "Z8PL4W",
+        "details": {
+          "originCity": "Frankfurt",
+          "destinationCity": "New York",
+          "originCountryCode": "DE",
+          "destinationCountryCode": "US",
+          "flightNumber": "LH400"
+        }
+      }
+    ]
+  }
+}

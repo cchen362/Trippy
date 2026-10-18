@@ -1,0 +1,53 @@
+{
+  "_doc": "Plan 30 §5.2 discovery corpus: six destinations, all present in the dev catalogue (cityKey + countryCode match a discovery_destinations row) so the with-exclusions variant has a real exclusion list. claudeDestination is built exactly as routes/discovery.js and services/copilotGrounding.js build it: `${label}, ${countryNameFromCode(countryCode)} (${countryCode})`. Active-place counts were read from the dev DB on 2026-10-18 and are context for `role`, not an assertion.",
+  "destinations": [
+    {
+      "id": "taipei",
+      "cityKey": "taipei",
+      "countryCode": "TW",
+      "label": "Taipei",
+      "role": "large capital, CJK local names",
+      "note": "268 active places in the dev catalogue. Plan 27 W4 measured its name-quality baseline on this destination, so the defect rates are comparable to F-27-32."
+    },
+    {
+      "id": "kualalumpur",
+      "cityKey": "kualalumpur",
+      "countryCode": "MY",
+      "label": "Kuala Lumpur",
+      "role": "large capital",
+      "note": "187 active places. The dev row's display_name is the bare city key 'kualalumpur'; the label sent to the model is the human form, as the discovery route sends what the client typed."
+    },
+    {
+      "id": "chengdu",
+      "cityKey": "chengdu",
+      "countryCode": "CN",
+      "label": "Chengdu",
+      "role": "CJK-script place names",
+      "note": "241 active places. Local names are written in Chinese script; stresses name / localName / aliases separation."
+    },
+    {
+      "id": "okinawa",
+      "cityKey": "冲绳",
+      "countryCode": "JP",
+      "label": "冲绳",
+      "role": "CJK-script input string",
+      "note": "73 active places. The destination string itself is Chinese script (the stored display name), not a romanization — tests whether the model answers in the right register for a CJK-named destination."
+    },
+    {
+      "id": "ipoh",
+      "cityKey": "ipoh",
+      "countryCode": "MY",
+      "label": "Ipoh",
+      "role": "mid-size city standing in for 'small town'",
+      "note": "84 active places. NOT the smallest destination in the dev copy (Kaohsiung has 56, Chongqing CN 66) — the dev catalogue has no genuine small town, so Ipoh is the closest mid-size stand-in for a place that cannot honestly fill 30 items per category."
+    },
+    {
+      "id": "kaohsiung",
+      "cityKey": "kaohsiung",
+      "countryCode": "TW",
+      "label": "Kaohsiung",
+      "role": "sparsest per-category catalogue",
+      "note": "56 active places, the smallest in the copy; nature 5, wellness 6, culture 6, essentials 6, nightlife 7. Tests the padding defect (Plan 27 Q-27-6) where a city cannot fill every category."
+    }
+  ]
+}

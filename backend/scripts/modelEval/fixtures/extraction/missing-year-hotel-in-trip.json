@@ -1,0 +1,46 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-09-12",
+    "endDate": "2027-09-20",
+    "destinations": [
+      {
+        "city": "Lisbon",
+        "countryCode": "PT"
+      },
+      {
+        "city": "Porto",
+        "countryCode": "PT"
+      }
+    ]
+  },
+  "id": "missing-year-hotel-in-trip",
+  "description": "Hotel confirmation with day and month but no year and no times, on a September 2027 trip: year from trip range, times default to T15:00 / T11:00 (rules 3 and 4).",
+  "tags": [
+    "missing-year",
+    "hotel",
+    "default-times",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Reservation confirmed!\nHotel Palacio do Chiado Lisboa\nRua Garrett 120, Lisbon\n\nCheck-in: 14 Sep\nCheck-out: 17 Sep\n2 nights, 1 room, Superior Double\n\nConfirmation number: 5530918274\nBooked via Booking.com"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-09-14T15:00",
+        "endDatetime": "2027-09-17T11:00",
+        "confirmationRef": "5530918274",
+        "details": {
+          "city": "Lisbon",
+          "countryCode": "PT"
+        }
+      }
+    ]
+  }
+}

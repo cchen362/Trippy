@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 
 // --- Mock @anthropic-ai/sdk before importing the service ---
 const mockCreate = vi.fn();
@@ -21,7 +22,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
-const { discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases } = await import('../src/services/claude.js');
+const { extractBookings, discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
 // discoverDestination
@@ -1182,5 +1183,152 @@ describe('normalizeName (Plan 26 W1.3 — CJK name folding, F-26-9)', () => {
     // "People's" splits into two tokens — this is existing behaviour, unchanged
     // by the \p{L}\p{N}/u fix.
     expect(normalizeName("People's Liberation Monument!!")).toBe('people s liberation monument');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan 30 W0 — the optional `profile` parameter must not change a default request.
+// The sha256 literals below were captured at 4496a96, before the profile parameter existed;
+// they pin the exact serialized body (key order, prompt text, tool schemas) each workload sends
+// today. A deliberate change to a prompt or tool schema will move them — re-capture then.
+// ---------------------------------------------------------------------------
+
+describe('default request bodies are byte-identical (Plan 30 W0)', () => {
+  const sha256 = (body) => createHash('sha256').update(JSON.stringify(body)).digest('hex');
+
+  const EXTRACT_ARGS = {
+    files: [{ kind: 'text', content: 'Flight CA 421 PEK to CTU, 03/04/2027 08:30. Ref ABC123.' }],
+    contextText: 'Booked for the spring trip.',
+    tripContext: { startDate: '2027-04-01', endDate: '2027-04-10', destinations: [{ city: 'Chengdu', countryCode: 'CN' }] },
+  };
+  const EXTRACT_REPLY = {
+    content: [{ type: 'text', text: '```json\n{"isTravelRelated":true,"bookings":[]}\n```' }],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+    mockStream.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function runExtraction(extra = {}) {
+    // extractBookings stamps today's date into the body — pin it so the hash is stable.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-01-15T12:00:00Z'));
+    mockCreate.mockResolvedValue(EXTRACT_REPLY);
+    const result = await extractBookings({ ...EXTRACT_ARGS, ...extra });
+    return { body: mockCreate.mock.calls[0][0], result };
+  }
+
+  async function runDescriptor(extra = {}) {
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"photoQuery":"a b","sceneType":"market"}\n```' }] });
+    await generatePhotoDescriptor({ title: 'Hotpot Spot', resolvedName: 'Shu Daxia', city: 'Chengdu', country: 'China', type: 'food', ...extra });
+    return mockCreate.mock.calls[0][0];
+  }
+
+  async function runDiscovery(...profileArg) {
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
+    await discoverDestination('kyoto', ['Kinkakuji', 'Ramen Alley'], undefined, ...profileArg);
+    return mockStream.mock.calls[0][0];
+  }
+
+  async function runCopilot(reportTurnMetrics, ...profileArg) {
+    mockStream.mockReturnValue(makeMockStream(['Hello'], 'Hello'));
+    await streamCopilotResponse(
+      [{ role: 'user', content: 'How is day 2?' }],
+      { tripId: 't1', days: [{ id: 'd1', stops: [] }] },
+      makeMockRes(), {}, undefined, {}, reportTurnMetrics, ...profileArg,
+    );
+    return mockStream.mock.calls[0][0];
+  }
+
+  it('extractBookings', async () => {
+    const { body } = await runExtraction();
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
+    expect(body.model).toBe('claude-sonnet-4-6');
+    expect(body.max_tokens).toBe(8192);
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('output_config');
+    expect(sha256(body)).toBe('eb6fafb2148fe0bdcc070d737f73aab9d7292886466e5b4d6bd0fdbaad79aa74');
+  });
+
+  it('generatePhotoDescriptor', async () => {
+    const body = await runDescriptor();
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
+    expect(body.model).toBe('claude-haiku-4-5-20251001');
+    expect(body.max_tokens).toBe(256);
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('output_config');
+    expect(sha256(body)).toBe('7cfb9688dddadf9a568fd6c4d06b7409b279959ced6250cde5171c91af5d2ea6');
+  });
+
+  it('discoverDestination', async () => {
+    const body = await runDiscovery();
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
+    expect(body.model).toBe('claude-haiku-4-5-20251001');
+    expect(body.max_tokens).toBe(64000);
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('output_config');
+    expect(sha256(body)).toBe('0c8c2727661fb86d990849536a00b62414dccc13d64e91d65c35ec8d083bcbc6');
+  });
+
+  it('streamCopilotResponse', async () => {
+    const body = await runCopilot();
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages', 'tools']);
+    expect(body.model).toBe('claude-sonnet-4-6');
+    expect(body.max_tokens).toBe(8192);
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('output_config');
+    expect(sha256(body)).toBe('b6eb30a562b9483669a9c54178a9b04fac1cdb5772be0f361092a5b956460839');
+  });
+
+  describe('an explicit profile changes the request as intended', () => {
+    const profile = { model: 'claude-haiku-5-5', maxTokens: 1024, effort: 'low', thinking: { type: 'disabled' } };
+
+    function expectProfileFields(body) {
+      expect(body.model).toBe('claude-haiku-5-5');
+      expect(body.max_tokens).toBe(1024);
+      expect(body.thinking).toEqual({ type: 'disabled' });
+      expect(body.output_config).toEqual({ effort: 'low' });
+    }
+
+    it('extractBookings sends the profile and reports its model', async () => {
+      const { body, result } = await runExtraction({ profile });
+      expectProfileFields(body);
+      expect(result.model).toBe('claude-haiku-5-5');
+    });
+
+    it('generatePhotoDescriptor sends the profile', async () => {
+      expectProfileFields(await runDescriptor({ profile }));
+    });
+
+    it('discoverDestination sends the profile', async () => {
+      expectProfileFields(await runDiscovery(profile));
+    });
+
+    it('streamCopilotResponse sends the profile and reports its model', async () => {
+      const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+      expectProfileFields(await runCopilot(reportTurnMetrics, profile));
+      expect(reportTurnMetrics.mock.calls[0][0].model).toBe('claude-haiku-5-5');
+    });
+
+    it('omits thinking and output_config when the profile carries neither', async () => {
+      const body = await runDescriptor({ profile: { model: 'claude-haiku-5-5', maxTokens: 512 } });
+      expect(body.model).toBe('claude-haiku-5-5');
+      expect(body.max_tokens).toBe(512);
+      expect(body).not.toHaveProperty('thinking');
+      expect(body).not.toHaveProperty('output_config');
+    });
+
+    it('sends effort alone as output_config without a thinking field', async () => {
+      const body = await runDescriptor({ profile: { model: 'claude-haiku-5-5', maxTokens: 1024, effort: 'medium' } });
+      expect(body.output_config).toEqual({ effort: 'medium' });
+      expect(body).not.toHaveProperty('thinking');
+    });
   });
 });

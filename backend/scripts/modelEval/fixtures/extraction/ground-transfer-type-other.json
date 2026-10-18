@@ -1,0 +1,40 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-05-02",
+    "endDate": "2027-05-09",
+    "destinations": [
+      {
+        "city": "Chengdu",
+        "countryCode": "CN"
+      }
+    ]
+  },
+  "id": "ground-transfer-type-other",
+  "description": "Airport transfer: no fitting travel type, so type \"other\" (rule 8); pickup time only, end unknown.",
+  "tags": [
+    "other",
+    "transfer",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Private transfer booked - Chengdu Easy Rides\nConfirmation: TRF-55102\nPick-up: 2 May 2027, 22:55 at Chengdu Shuangliu International Airport, Terminal 2 arrivals\nDrop-off: Jinjiang Hotel, 80 Renmin South Road, Chengdu\nVehicle: 4-seat sedan, driver will hold a name sign.\nPay the driver in CNY on arrival."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "other",
+        "startDatetime": "2027-05-02T22:55",
+        "confirmationRef": "TRF-55102",
+        "details": {
+          "city": "Chengdu",
+          "countryCode": "CN"
+        }
+      }
+    ]
+  }
+}

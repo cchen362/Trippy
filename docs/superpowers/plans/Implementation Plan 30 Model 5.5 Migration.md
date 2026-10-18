@@ -181,7 +181,45 @@ Each wave: read this plan, implement only that wave, run `cd backend; npm test` 
 
 ### W0 — Baseline, harness, fixtures (no model change, no production change)
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-18 — **COMPLETE except step 1.** Step 1, the production `copilot_turn_metrics` / `[discover] ok` export, is an owner-only server step (Appendix A.1) and is still open; until it lands, every gate compares against the local control run below. No model, prompt or production request shape changed: `claude.js` gains only `LIVE_PROFILES` and an optional trailing `profile` argument on the four service functions. The four default request bodies are pinned by sha256 in `backend/tests/claude.test.js`; the hashes were captured against the unmodified `4496a96`, and re-checked by running those tests against HEAD's `claude.js`, where they pass. Backend suite green: 45 files, 982 tests. Harness: `backend/scripts/modelEval/` (README there). Run files are in the gitignored `backend/data/model-eval/runs/<workload>/control/2026-10-18T12-*.jsonl`.
+
+Baseline: control profile, 2026-10-18, harness on the dev machine, dev key.
+
+| Workload (model, max_tokens) | n | Outcome | Latency median / max | Output tok median / max | Cost per call (median) | Run total |
+|---|---|---|---|---|---|---|
+| Descriptors (Haiku 4.5, 256): 50 places | 50 | 0/50 null; 0 `max_tokens`; sceneType valid before coercion 50/50; in the acceptable set 50/50; 0 queries over 8 words (median 6) | wall 897 / 1,207 ms | 39 / 45 | $0.0004 | $0.020 |
+| Extraction (Sonnet 4.6, 8,192): 15 synthetic text fixtures, 0 private | 15 | 0 parse / `max_tokens` / refusal; booking count 15/15; critical fields 151/151; 0 critical errors; 0 high-confidence-but-wrong; `isTravelRelated` 14/15 (`non-travel-fare-promo` came back `true` with no bookings, where rule 6 says `false`) | wall 8.9 / 23.2 s | 668 / 1,921 | $0.0139 | $0.214 |
+| Discovery (Haiku 4.5, 64,000): 6 destinations × first / with-exclusions | 12 | `end_turn` 12/12; 8/8 categories on all 12; items per category median 10.75, worst minimum 6; total items median 91 (first 76.5, exclusions 97.5), minimum 69; 0/96 lines dropped; per raw item: editorial prefix 0.4%, alias = name 2.1%, dash clause 1.3%, description-in-brackets (heuristic, F-27-33) 5.2%; on the exclusions variant, 27.6% of raw items repeat an excluded name (`insertPlaces` dedupes them) | first category 20.5 / 33.1 s; total 169 / 313 s | 17,857 / 32,509 | $0.091 ($0.00104 per usable item) | $1.168 |
+| Co-pilot (Sonnet 4.6, 8,192/iter): 20 scenarios | 20 | tool sequence 20/20; proposes-as-expected 20/20; E-COP-1 10/10 on both measures; ids real 10/10; server validation 10/10; booking-linked targets 0; adds grounded with a `placeId` from that turn's results 10/10; `catalogueState` relayed 6/6; truncations 0/20; silent turns 0/20; query cap hit 1/20; cache read on iterations 2+ median 5,070 tokens | TTFD 962 / 4,347 ms; turn 6.7 / 30.0 s; iterations 1 / 2 | 190 / 1,699 | $0.0098 (mean $0.0124) | $0.247 |
+
+E-COP-1's two measures are SSE text before the proposal and a text block before the `tool_use`.
+
+**Spend.** Control pass $1.65, plus about $0.22 of smoke runs while building, so W0 cost ≈ **$1.87**. **§5.2 budget, revised from measured usage:** per-call cost is well under the estimates. Discovery control produces ~18K output tokens per generation ($0.09), not 40–50K ($0.25). Extraction is $0.014 per text fixture, the co-pilot $0.01 per turn, a descriptor $0.0004. The remaining W2–W5 first-pass candidate sweep projects to roughly **$3–6**, not $15–25. Extraction is the open term: it depends on how many owner images and PDFs Q-30-4 adds.
+
+**D-30-7 proof.** Printed by `discovery.mjs` and `copilot.mjs` on the control runs, for the owner DB (start / end, opened read-only) and for the copy (before / after). All counts were unchanged:
+
+| Count | Value |
+|---|---|
+| `discovery_places` | 1,955 |
+| `discovery_destinations` | 13 |
+| SUM(`generation_count`) | 21 |
+| `discovery_generation_daily` | 21 |
+| `discovery_verification_attempts` | 2,378 |
+| `place_resolution_cache` | 817 |
+| `copilot_messages` | 15 |
+| `copilot_proposals` | 8 |
+| `copilot_turn_metrics` | 7 |
+| destinations digest | `d0e53d333682` |
+
+In the co-pilot copy, `discovery_generation_daily` reads 24 both before and after. The extra 3 is the Kaohsiung cap written during setup, before the "before" count. `extraction.mjs` and `descriptor.mjs` import no database.
+
+**Facts corrected or learned:**
+- **§5.1 "`DB_PATH` pointed at the copy" cannot work.** `config.js` loads `backend/.env` with `override: true`. The harness calls `initDb(copy)` and asserts that `getDb().name` is the copy.
+- **Every dev catalogue is past its 7-day freshness window.** The co-pilot harness marks shanghai, hangzhou and taipei fresh and caps kaohsiung, in the copy only, before counting. The `generating` state is not exercised: reaching it would fire a real generation.
+- **F-30-11 / C-30-7: discovery output is about half the estimate** (above). The 96,000 candidate is 3× the control maximum; W3 sets the allowance from candidate measurements (D-30-6).
+- **A client abort mid-turn is recorded as an error.** With the real SDK, `finalMessage()` rejects on abort. The co-pilot then takes its catch path: it logs a stack trace, writes `error` to the dead socket, and records `copilot_turn_metrics` `error = 1` with zero usage. The unit test covers only a mock that resolves. Production error counts therefore include client disconnects, and an aborted turn's tokens go unrecorded. This is input for W1, not fixed here.
+- **The synthetic extraction corpus is at the ceiling for control** (151/151). The W4 gate's ability to tell candidates apart rests on the Q-30-4 private inputs, and no image or PDF path has been exercised yet.
+- **Haiku 4.5 can lose a whole category to malformed JSON.** In one smoke generation (ipoh/first), the food line had a `)` where a `}` belonged. The full control run dropped 0/96 lines.
 
 **Files.** `backend/scripts/modelEval/*` (new), `backend/scripts/modelEval/fixtures/*` (new), `.gitignore`, `backend/src/services/claude.js` (optional `profile` parameter on the four service functions — default = live behaviour), `backend/tests/claude.test.js` (prove the default path is unchanged: identical request bodies for all four calls).
 

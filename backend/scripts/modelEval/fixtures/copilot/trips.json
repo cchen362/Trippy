@@ -1,0 +1,429 @@
+{
+  "_doc": "Two synthetic trips seeded into the DB COPY by scripts/modelEval/copilot.mjs. Trip creation goes through the real createTrip(); day cities, bookings and stops are then written with parameterised SQL. Day, stop and booking ids are derived from sha256(tripKey + role + position) so the itinerary JSON in the co-pilot's system prompt is byte-identical across runs and profiles. Booking-linked stops mirror services/stops.js inferBookingStop (hotel: type hotel, 15:00 default; train: type transit at the departure time). Dates are in the future so no run depends on the day it is made.",
+  "trips": {
+    "A": {
+      "title": "Shanghai and Hangzhou (model eval A)",
+      "startDate": "2027-04-10",
+      "endDate": "2027-04-14",
+      "travellers": "couple",
+      "pace": "moderate",
+      "interestTags": [
+        "food",
+        "culture"
+      ],
+      "destinations": [
+        {
+          "city": "Shanghai",
+          "countryCode": "CN"
+        },
+        {
+          "city": "Hangzhou",
+          "countryCode": "CN"
+        }
+      ],
+      "dayCities": [
+        {
+          "day": 1,
+          "city": "Shanghai",
+          "countryCode": "CN"
+        },
+        {
+          "day": 2,
+          "city": "Shanghai",
+          "countryCode": "CN"
+        },
+        {
+          "day": 3,
+          "city": "Shanghai",
+          "countryCode": "CN"
+        },
+        {
+          "day": 4,
+          "city": "Hangzhou",
+          "countryCode": "CN"
+        },
+        {
+          "day": 5,
+          "city": "Hangzhou",
+          "countryCode": "CN"
+        }
+      ],
+      "bookings": {
+        "flightIn": {
+          "type": "flight",
+          "title": "MU 568",
+          "confirmationRef": "MU4X7Q",
+          "bookingSource": "MU",
+          "startDatetime": "2027-04-10T08:05",
+          "endDatetime": "2027-04-10T12:10",
+          "origin": "SIN - Singapore Changi",
+          "destination": "PVG - Shanghai Pudong",
+          "detailsJson": {}
+        },
+        "hotelShanghai": {
+          "type": "hotel",
+          "title": "The Peninsula Shanghai",
+          "confirmationRef": "PEN-48213",
+          "bookingSource": "Direct",
+          "startDatetime": "2027-04-10T15:00",
+          "endDatetime": "2027-04-13T11:00",
+          "origin": null,
+          "destination": "32 Zhongshan East 1st Road, Huangpu District, Shanghai",
+          "detailsJson": {
+            "locality": "Shanghai",
+            "countryCode": "CN"
+          }
+        },
+        "trainShanghaiHangzhou": {
+          "type": "train",
+          "title": "G7311 Shanghai Hongqiao to Hangzhou East",
+          "confirmationRef": "E3K9X2",
+          "bookingSource": "Trip.com",
+          "startDatetime": "2027-04-13T10:30",
+          "endDatetime": "2027-04-13T11:35",
+          "origin": "Shanghai",
+          "destination": "Hangzhou",
+          "detailsJson": {
+            "trainNumber": "G7311",
+            "originStation": "Shanghai Hongqiao",
+            "destinationStation": "Hangzhou East",
+            "originCity": "Shanghai",
+            "destinationCity": "Hangzhou",
+            "originCountryCode": "CN",
+            "destinationCountryCode": "CN"
+          }
+        },
+        "flightOut": {
+          "type": "flight",
+          "title": "MU 569",
+          "confirmationRef": "MU9B2K",
+          "bookingSource": "MU",
+          "startDatetime": "2027-04-14T20:30",
+          "endDatetime": "2027-04-15T00:55",
+          "origin": "HGH - Hangzhou Xiaoshan",
+          "destination": "Singapore",
+          "detailsJson": {}
+        }
+      },
+      "days": [
+        {
+          "day": 1,
+          "stops": [
+            {
+              "booking": "flightIn"
+            },
+            {
+              "booking": "hotelShanghai"
+            },
+            {
+              "title": "Dinner at Din Tai Fung Xintiandi",
+              "type": "food",
+              "time": "19:30",
+              "note": "Reservation under Chen, table for two",
+              "duration": "~1.5h",
+              "lat": 31.219,
+              "lng": 121.4748
+            }
+          ]
+        },
+        {
+          "day": 2,
+          "stops": [
+            {
+              "title": "The Bund at sunrise",
+              "type": "explore",
+              "time": null,
+              "note": null,
+              "duration": "~1h",
+              "bestTime": "morning",
+              "lat": 31.24,
+              "lng": 121.49
+            },
+            {
+              "title": "Yu Garden",
+              "type": "experience",
+              "time": null,
+              "note": "Buy tickets online ahead; the lane outside gets crowded by late morning",
+              "duration": "~2h",
+              "lat": 31.2272,
+              "lng": 121.4921
+            },
+            {
+              "title": "Lunch at Nan Xiang Steamed Bun",
+              "type": "food",
+              "time": null,
+              "note": null,
+              "duration": null,
+              "lat": 31.2276,
+              "lng": 121.4917
+            }
+          ]
+        },
+        {
+          "day": 3,
+          "stops": [
+            {
+              "title": "Tianzifang lanes",
+              "type": "explore",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "lat": 31.2112,
+              "lng": 121.4695
+            },
+            {
+              "title": "Propaganda Poster Art Centre",
+              "type": "experience",
+              "time": "14:00",
+              "note": null,
+              "duration": "~1h",
+              "lat": 31.2113,
+              "lng": 121.4491
+            },
+            {
+              "title": "Pottery workshop in Jing'an",
+              "type": "experience",
+              "time": "14:00",
+              "note": "Booked by phone, pay on arrival",
+              "duration": "~2h",
+              "locationStatus": "unresolved"
+            }
+          ]
+        },
+        {
+          "day": 4,
+          "stops": [
+            {
+              "booking": "trainShanghaiHangzhou"
+            },
+            {
+              "title": "West Lake sunset walk",
+              "type": "explore",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "bestTime": "evening",
+              "lat": 30.2433,
+              "lng": 120.15
+            },
+            {
+              "title": "Dinner at Grandma's Home (Wai Po Jia)",
+              "type": "food",
+              "time": null,
+              "note": null,
+              "duration": null,
+              "locationStatus": "unresolved"
+            }
+          ]
+        },
+        {
+          "day": 5,
+          "stops": [
+            {
+              "title": "Lingyin Temple",
+              "type": "experience",
+              "time": null,
+              "note": "Go early; bring cash for incense",
+              "duration": "~2.5h",
+              "bestTime": "morning",
+              "lat": 30.2403,
+              "lng": 120.101
+            },
+            {
+              "title": "Longjing tea village",
+              "type": "experience",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "lat": 30.216,
+              "lng": 120.113
+            },
+            {
+              "booking": "flightOut"
+            }
+          ]
+        }
+      ]
+    },
+    "B": {
+      "title": "Taipei and Kaohsiung (model eval B)",
+      "startDate": "2027-05-06",
+      "endDate": "2027-05-09",
+      "travellers": "couple",
+      "pace": "relaxed",
+      "interestTags": [
+        "food",
+        "nightlife"
+      ],
+      "destinations": [
+        {
+          "city": "Taipei",
+          "countryCode": "TW"
+        },
+        {
+          "city": "Kaohsiung",
+          "countryCode": "TW"
+        }
+      ],
+      "dayCities": [
+        {
+          "day": 1,
+          "city": "Taipei",
+          "countryCode": "TW"
+        },
+        {
+          "day": 2,
+          "city": "Taipei",
+          "countryCode": "TW"
+        },
+        {
+          "day": 3,
+          "city": "Kaohsiung",
+          "countryCode": "TW"
+        },
+        {
+          "day": 4,
+          "city": "Kaohsiung",
+          "countryCode": "TW"
+        }
+      ],
+      "bookings": {
+        "flightIn": {
+          "type": "flight",
+          "title": "CI 722",
+          "confirmationRef": "CI8M3T",
+          "bookingSource": "CI",
+          "startDatetime": "2027-05-06T09:15",
+          "endDatetime": "2027-05-06T13:40",
+          "origin": "SIN - Singapore Changi",
+          "destination": "TPE - Taiwan Taoyuan",
+          "detailsJson": {}
+        },
+        "hotelTaipei": {
+          "type": "hotel",
+          "title": "Hotel Proverbs Taipei",
+          "confirmationRef": "HPT-77120",
+          "bookingSource": "Booking.com",
+          "startDatetime": "2027-05-06T15:00",
+          "endDatetime": "2027-05-08T11:00",
+          "origin": null,
+          "destination": "No. 1, Section 4, Dunhua South Road, Da'an District, Taipei",
+          "detailsJson": {
+            "locality": "Taipei",
+            "countryCode": "TW"
+          }
+        },
+        "hsrTaipeiZuoying": {
+          "type": "train",
+          "title": "THSR 0623 Taipei to Zuoying",
+          "confirmationRef": "HSR-5521",
+          "bookingSource": "THSR",
+          "startDatetime": "2027-05-08T09:30",
+          "endDatetime": "2027-05-08T11:15",
+          "origin": "Taipei",
+          "destination": "Kaohsiung",
+          "detailsJson": {
+            "trainNumber": "0623",
+            "originStation": "Taipei",
+            "destinationStation": "Zuoying",
+            "originCity": "Taipei",
+            "destinationCity": "Kaohsiung",
+            "originCountryCode": "TW",
+            "destinationCountryCode": "TW"
+          }
+        },
+        "flightOut": {
+          "type": "flight",
+          "title": "CI 723",
+          "confirmationRef": "CI2R6V",
+          "bookingSource": "CI",
+          "startDatetime": "2027-05-09T21:00",
+          "endDatetime": "2027-05-10T00:55",
+          "origin": "KHH - Kaohsiung",
+          "destination": "Singapore",
+          "detailsJson": {}
+        }
+      },
+      "days": [
+        {
+          "day": 1,
+          "stops": [
+            {
+              "booking": "flightIn"
+            },
+            {
+              "booking": "hotelTaipei"
+            },
+            {
+              "title": "Elephant Mountain sunset hike",
+              "type": "experience",
+              "time": null,
+              "note": "Bring water; steps are steep",
+              "duration": "~2h",
+              "bestTime": "evening",
+              "lat": 25.027,
+              "lng": 121.576
+            },
+            {
+              "title": "Shilin Night Market",
+              "type": "food",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "lat": 25.0879,
+              "lng": 121.5241
+            }
+          ]
+        },
+        {
+          "day": 2,
+          "stops": [
+            {
+              "title": "National Palace Museum",
+              "type": "experience",
+              "time": "10:00",
+              "note": null,
+              "duration": "~3h",
+              "lat": 25.1024,
+              "lng": 121.5485
+            }
+          ]
+        },
+        {
+          "day": 3,
+          "stops": [
+            {
+              "booking": "hsrTaipeiZuoying"
+            },
+            {
+              "title": "Pier-2 Art Center",
+              "type": "explore",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "lat": 22.62,
+              "lng": 120.282
+            }
+          ]
+        },
+        {
+          "day": 4,
+          "stops": [
+            {
+              "title": "Lotus Pond and Dragon Tiger Pagodas",
+              "type": "experience",
+              "time": null,
+              "note": null,
+              "duration": "~2h",
+              "lat": 22.68,
+              "lng": 120.296
+            },
+            {
+              "booking": "flightOut"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
