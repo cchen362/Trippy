@@ -3,7 +3,9 @@
 //   cd backend; NODE_ENV=test node scripts/modelEval/extraction.mjs --profile control [--only id,id] [--limit n] [--concurrency 3] [--max-usd 10]
 //
 // Runs extractBookings() from the real service against every fixture:
-//   - committed synthetic cases: scripts/modelEval/fixtures/extraction/<id>.json
+//   - committed synthetic cases: scripts/modelEval/fixtures/extraction/<id>.json — text inline, or a
+//     rendered PNG/PDF named by relative `path` under fixtures/extraction/files/ (written by
+//     renderExtractionFixtures.mjs, Plan 30 W4)
 //   - the owner's private cases (gitignored): data/model-eval/private/extraction/<id>/fixture.json,
 //     whose files reference binaries by relative `path` instead of inline `content`. Private runs
 //     redact request/response text in the record; the raw input never lands in a run file.
@@ -21,23 +23,27 @@ import { getProfile, toServiceProfile, assertControlIsLive } from './profiles.mj
 
 const WORKLOAD = 'extraction';
 
+// A file is { kind, mediaType?, filename?, path } (binary or text read from disk, path relative to
+// the fixture's own folder) or { kind: 'text', content } with the text inline. Committed and private
+// fixtures share this resolver.
+function resolveFile(file, folder) {
+  if (!file.path) return file;
+  const bytes = readFileSync(resolve(folder, file.path));
+  const content = file.kind === 'text' ? bytes.toString('utf8') : bytes.toString('base64');
+  const { path, ...rest } = file;
+  return { ...rest, content };
+}
+
 function loadCommittedFixtures() {
   const dir = join(FIXTURES_DIR, WORKLOAD);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
     .sort()
-    .map((f) => ({ ...JSON.parse(readFileSync(join(dir, f), 'utf8')), private: false }));
-}
-
-// A private file is { kind, mediaType?, filename?, path } (binary or text read from disk, path
-// relative to the fixture folder) or { kind: 'text', content } like a committed one.
-function resolvePrivateFile(file, folder) {
-  if (!file.path) return file;
-  const bytes = readFileSync(resolve(folder, file.path));
-  const content = file.kind === 'text' ? bytes.toString('utf8') : bytes.toString('base64');
-  const { path, ...rest } = file;
-  return { ...rest, content };
+    .map((f) => {
+      const fixture = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+      return { ...fixture, files: fixture.files.map((file) => resolveFile(file, dir)), private: false };
+    });
 }
 
 function loadPrivateFixtures() {
@@ -53,7 +59,7 @@ function loadPrivateFixtures() {
     fixtures.push({
       ...fixture,
       id: fixture.id ?? entry.name,
-      files: fixture.files.map((f) => resolvePrivateFile(f, folder)),
+      files: fixture.files.map((f) => resolveFile(f, folder)),
       private: true,
     });
   }

@@ -1,0 +1,52 @@
+{
+  "id": "img-cjk-high-speed-train",
+  "description": "image render of cjk-high-speed-train: Chinese 12306-style ticket: station names and passenger labels in Chinese; city fields must be English exonyms, local script kept out of them (rule 5).",
+  "tags": [
+    "cjk",
+    "train",
+    "hard",
+    "image",
+    "rendered"
+  ],
+  "source": "cjk-high-speed-train",
+  "tripContext": {
+    "startDate": "2027-05-01",
+    "endDate": "2027-05-08",
+    "destinations": [
+      {
+        "city": "Chengdu",
+        "countryCode": "CN"
+      },
+      {
+        "city": "Chongqing",
+        "countryCode": "CN"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-cjk-high-speed-train.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "train",
+        "startDatetime": "2027-05-03T09:12",
+        "endDatetime": "2027-05-03T10:41",
+        "confirmationRef": "EA71234567",
+        "details": {
+          "originCity": "Chengdu",
+          "destinationCity": "Chongqing",
+          "originCountryCode": "CN",
+          "destinationCountryCode": "CN",
+          "trainNumber": "G8501"
+        }
+      }
+    ]
+  }
+}

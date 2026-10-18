@@ -1,0 +1,58 @@
+{
+  "id": "img-dmy-in-trip-mdy-wins",
+  "description": "image render of dmy-in-trip-mdy-wins: US-style 04/05/2027 on a trip that runs 1-14 April: only the MM/DD reading (5 April) is inside the trip range, so it must beat the \"common\" DD/MM default.",
+  "tags": [
+    "date-ambiguity",
+    "flight",
+    "overnight",
+    "hard",
+    "image",
+    "rendered"
+  ],
+  "source": "dmy-in-trip-mdy-wins",
+  "tripContext": {
+    "startDate": "2027-04-01",
+    "endDate": "2027-04-14",
+    "destinations": [
+      {
+        "city": "Tokyo",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-dmy-in-trip-mdy-wins.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-04-05T11:25",
+        "endDatetime": "2027-04-06T15:05",
+        "origin": [
+          "SFO",
+          "San Francisco"
+        ],
+        "destination": [
+          "HND",
+          "Haneda",
+          "Tokyo"
+        ],
+        "confirmationRef": "KQ7M2D",
+        "details": {
+          "originCity": "San Francisco",
+          "destinationCity": "Tokyo",
+          "originCountryCode": "US",
+          "destinationCountryCode": "JP",
+          "flightNumber": "UA837"
+        }
+      }
+    ]
+  }
+}

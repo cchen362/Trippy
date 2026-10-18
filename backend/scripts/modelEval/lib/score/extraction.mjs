@@ -12,7 +12,8 @@
 //   - "@NEXT:MM-DDTHH:MM" is the nearest occurrence of that month/day on or after the record's
 //     run date (prompt rule 3, no trip context)
 
-import { rate } from './common.mjs';
+import { rate, median, max, sum } from './common.mjs';
+import { normalizeFlightQuery } from '../../../../src/services/lookups.js';
 
 const norm = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v);
 const alnum = (v) => (typeof v === 'string' ? v.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') : v);
@@ -135,6 +136,32 @@ function pairBookings(expectedList, actualList, startedAt) {
   };
 }
 
+// §5.3's critical fields: dates, times, confirmation refs, type, origin/destination, city and
+// countryCode. Every other labelled field (flight/train number, localName) is scored separately, so
+// a format convention the prompt does not fix cannot move the gate's accuracy figure (W4).
+const CRITICAL_FIELDS = new Set([
+  'type', 'startDatetime', 'endDatetime', 'confirmationRef', 'origin', 'destination',
+  'details.originCity', 'details.destinationCity', 'details.city',
+  'details.originCountryCode', 'details.destinationCountryCode', 'details.countryCode',
+]);
+
+// W4: what Trippy itself does with an extracted flight. The booking card renders
+// `${carrierCode} ${flightNumber}` and the status lookup sends the pair to normalizeFlightQuery,
+// which accepts a number only (every stored flight is { carrierCode: 'SQ', flightNumber: '842' }).
+// A pair is usable when that real function accepts it and yields the labelled designator.
+function resolvesToDesignator(actual, wantDesignator) {
+  try {
+    const { flightDesignator } = normalizeFlightQuery({
+      carrierCode: actual?.details?.carrierCode ?? '',
+      flightNumber: actual?.details?.flightNumber ?? '',
+    });
+    return flightDesignator === alnum(String(wantDesignator)).toUpperCase();
+  } catch (err) {
+    if (err.status === 400) return false; // the app would refuse to look this flight up
+    throw err;
+  }
+}
+
 function scoreRecord(record) {
   const expected = record.extra?.expected;
   const out = record.output;
@@ -148,8 +175,13 @@ function scoreRecord(record) {
     gotBookings: Array.isArray(out?.bookings) ? out.bookings.length : null,
     fieldsChecked: 0,
     fieldsCorrect: 0,
+    otherChecked: 0,
+    otherCorrect: 0,
+    flightNumbers: 0,
+    flightNumbersUsable: 0,
     critical: [],
     highButWrong: [],
+    otherHighButWrong: [],
   };
   if (!out || !expected) return base;
 
@@ -174,12 +206,19 @@ function scoreRecord(record) {
     for (const path of expectedFieldPaths(exp)) {
       const want = expectedValueAt(exp, path);
       const ok = fieldMatches(act, path, want, record.startedAt);
-      base.fieldsChecked += 1;
+      const isCritical = CRITICAL_FIELDS.has(path);
+      if (isCritical) base.fieldsChecked += 1;
+      else base.otherChecked += 1;
+      if (path === 'details.flightNumber') {
+        base.flightNumbers += 1;
+        if (resolvesToDesignator(act, want)) base.flightNumbersUsable += 1;
+      }
       if (ok) {
-        base.fieldsCorrect += 1;
+        if (isCritical) base.fieldsCorrect += 1;
+        else base.otherCorrect += 1;
         continue;
       }
-      if (claimedHigh(act, path)) base.highButWrong.push(`${label}.${path}`);
+      if (claimedHigh(act, path)) (isCritical ? base.highButWrong : base.otherHighButWrong).push(`${label}.${path}`);
 
       if (path === 'startDatetime' || path === 'endDatetime') {
         const wantResolved = datetime(resolveNext(String(want), record.startedAt));
@@ -202,9 +241,65 @@ function scoreRecord(record) {
   return base;
 }
 
+// W4: the input kind a fixture exercises — rendered fixtures carry an "image" or "pdf" tag.
+function inputKind(record) {
+  const tags = record.extra?.tags ?? [];
+  if (tags.includes('image')) return 'image';
+  if (tags.includes('pdf')) return 'pdf';
+  return 'text';
+}
+
+function responseBlocks(record) {
+  return record.calls?.at(-1)?.response?.content ?? [];
+}
+
+function thinkingBlockCount(record) {
+  return responseBlocks(record).filter((b) => b.type === 'thinking' || b.type === 'redacted_thinking').length;
+}
+
+function textChars(record) {
+  return responseBlocks(record)
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .reduce((s, b) => s + b.text.length, 0);
+}
+
+// W4 (the W3 method): thinking text is empty under the default display "omitted", so thinking
+// tokens are estimated as output minus the text's tokens. The text's tokens-per-character ratio
+// is taken from the same run's responses that carried no thinking block (all output is text
+// there). With fewer than 3 such responses it falls back to the model's ratio below, measured
+// 2026-10-19 by counting the W0 control's 15 extraction responses (31,825 characters) with the
+// free count_tokens endpoint: it reproduced Sonnet 4.6's billed output to 0.4% (10,311 counted vs
+// 10,356 billed), and gave 12,638 on Sonnet 5.5's tokenizer.
+const COUNTED_TEXT_TOKENS_PER_CHAR = {
+  'claude-sonnet-4-6': 0.3240,
+  'claude-sonnet-5-5': 0.3971,
+};
+
+function thinkingEstimator(records) {
+  const plain = records.filter((r) => r.output && !thinkingBlockCount(r) && textChars(r) > 0);
+  const measured = plain.length >= 3
+    ? plain.reduce((s, r) => s + r.usage.output_tokens, 0) / plain.reduce((s, r) => s + textChars(r), 0)
+    : null;
+  const ratio = measured ?? COUNTED_TEXT_TOKENS_PER_CHAR[records[0]?.model] ?? null;
+  if (ratio === null) return { ratio: null, sample: plain.length, estimate: () => null };
+  return {
+    ratio,
+    sample: measured === null ? 'count_tokens' : plain.length,
+    estimate: (r) => (thinkingBlockCount(r) ? Math.max(0, Math.round(r.usage.output_tokens - textChars(r) * ratio)) : 0),
+  };
+}
+
+function accuracy(rows) {
+  const checked = rows.reduce((s, r) => s + r.fieldsChecked, 0);
+  const correct = rows.reduce((s, r) => s + r.fieldsCorrect, 0);
+  return checked ? `${correct}/${checked}` : 'n/a';
+}
+
 export function score(records) {
   const rows = records.map((r) => ({ record: r, ...scoreRecord(r) }));
   const n = rows.length;
+  const thinking = thinkingEstimator(records);
+  const thinkingTokens = records.map((r) => thinking.estimate(r));
   const scored = rows.filter((r) => r.ok);
   const fieldsChecked = scored.reduce((s, r) => s + r.fieldsChecked, 0);
   const fieldsCorrect = scored.reduce((s, r) => s + r.fieldsCorrect, 0);
@@ -224,13 +319,37 @@ export function score(records) {
     'booking count correct': rate(scored.filter((r) => r.countCorrect).length, scored.length),
     'critical-field accuracy': fieldsChecked ? `${fieldsCorrect}/${fieldsChecked} (${((100 * fieldsCorrect) / fieldsChecked).toFixed(1)}%)` : 'n/a',
     'critical errors': `${criticalTotal} across ${rows.filter((r) => r.critical.length).length}/${n} fixtures`,
-    'high confidence but wrong': hbw,
+    'high confidence but wrong (critical fields)': hbw,
+    'other labelled fields (flight/train no., localName) as labelled': `${scored.reduce((s, r) => s + r.otherCorrect, 0)}/${scored.reduce((s, r) => s + r.otherChecked, 0)}`,
+    'other fields: high confidence but differs from label': scored.reduce((s, r) => s + r.otherHighButWrong.length, 0),
+    'flight numbers usable by Trippy (normalizeFlightQuery)': `${scored.reduce((s, r) => s + r.flightNumbersUsable, 0)}/${scored.reduce((s, r) => s + r.flightNumbers, 0)}`,
     'fixtures with a critical error': rows.filter((r) => r.critical.length).map((r) => r.id).join(', ') || 'none',
+    'responses with a thinking block': rate(records.filter((r) => thinkingBlockCount(r)).length, n),
+    'est. thinking tokens median / max': thinking.ratio === null
+      ? `n/a (${thinking.sample} thinking-free responses)`
+      : `${median(thinkingTokens)} / ${max(thinkingTokens)} (text ${thinking.ratio.toFixed(3)} tok/char, n=${thinking.sample})`,
+    'cost per successful extraction ($)': scored.length ? (sum(records.map((r) => r.costUsd)) / scored.length).toFixed(5) : 'n/a',
   };
 
-  const perItem = rows.map((r) => ({
+  for (const kind of ['text', 'image', 'pdf']) {
+    const kindRows = rows.filter((r) => inputKind(r.record) === kind);
+    if (!kindRows.length) continue;
+    const kindRecords = kindRows.map((r) => r.record);
+    summary[`${kind}: n / critical-field acc / critical errors`] =
+      `${kindRows.length} / ${accuracy(kindRows.filter((r) => r.ok))} / ${kindRows.reduce((s, r) => s + r.critical.length, 0)}`;
+    summary[`${kind}: wall ms median / max`] = `${median(kindRecords.map((r) => r.wallMs))} / ${max(kindRecords.map((r) => r.wallMs))}`;
+    summary[`${kind}: input tok median / output tok median`] =
+      `${median(kindRecords.map((r) => r.usage.input_tokens))} / ${median(kindRecords.map((r) => r.usage.output_tokens))}`;
+    summary[`${kind}: cost median ($)`] = median(kindRecords.map((r) => r.costUsd))?.toFixed(5);
+  }
+
+  const perItem = rows.map((r, i) => ({
     id: r.id,
     ok: r.ok,
+    stop: r.record.stopReason,
+    think: thinkingBlockCount(r.record),
+    'est think tok': thinkingTokens[i],
+    'in tok': r.record.usage.input_tokens,
     'bookings exp/got': `${r.expectedBookings ?? '-'}/${r.gotBookings ?? '-'}`,
     'field acc': r.fieldsChecked ? `${r.fieldsCorrect}/${r.fieldsChecked}` : '-',
     'critical errors': r.critical.join('; ') || '',
@@ -243,8 +362,10 @@ export function score(records) {
     `${privateCount} of ${n} fixtures were private (owner-supplied); the rest are committed synthetic cases.`,
   ];
   if (hbw) {
-    notes.push(`high-confidence-but-wrong fields: ${rows.flatMap((r) => r.highButWrong.map((f) => `${r.id}:${f}`)).join(', ')}`);
+    notes.push(`high-confidence-but-wrong critical fields: ${rows.flatMap((r) => r.highButWrong.map((f) => `${r.id}:${f}`)).join(', ')}`);
   }
+  const otherHbw = rows.flatMap((r) => r.otherHighButWrong.map((f) => `${r.id}:${f}`));
+  if (otherHbw.length) notes.push(`other fields high-confidence but differing from the label: ${otherHbw.join(', ')}`);
   for (const f of failures) notes.push(`no output for ${f.fixtureId}: ${f.error?.message ?? 'unknown'}`);
   return { summary, perItem, notes };
 }

@@ -1,0 +1,100 @@
+{
+  "id": "img-multi-leg-outbound-connection-return",
+  "description": "image render of multi-leg-outbound-connection-return: One itinerary email with outbound, a connection and a return: three distinct flight bookings (rule 1), return arriving earlier on the clock than it departed.",
+  "tags": [
+    "flight",
+    "multi-leg",
+    "hard",
+    "image",
+    "rendered"
+  ],
+  "source": "multi-leg-outbound-connection-return",
+  "tripContext": {
+    "startDate": "2027-10-04",
+    "endDate": "2027-10-19",
+    "destinations": [
+      {
+        "city": "Chengdu",
+        "countryCode": "CN"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-multi-leg-outbound-connection-return.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-10-04T11:30",
+        "endDatetime": "2027-10-05T16:30",
+        "origin": [
+          "LAX",
+          "Los Angeles"
+        ],
+        "destination": [
+          "ICN",
+          "Incheon",
+          "Seoul"
+        ],
+        "confirmationRef": "T5HN8V",
+        "details": {
+          "originCity": "Los Angeles",
+          "destinationCity": "Seoul",
+          "originCountryCode": "US",
+          "destinationCountryCode": "KR",
+          "flightNumber": "KE012"
+        }
+      },
+      {
+        "type": "flight",
+        "startDatetime": "2027-10-05T19:30",
+        "endDatetime": "2027-10-05T22:20",
+        "origin": [
+          "ICN",
+          "Incheon",
+          "Seoul"
+        ],
+        "destination": [
+          "TFU",
+          "Chengdu"
+        ],
+        "confirmationRef": "T5HN8V",
+        "details": {
+          "originCity": "Seoul",
+          "destinationCity": "Chengdu",
+          "originCountryCode": "KR",
+          "destinationCountryCode": "CN",
+          "flightNumber": "KE893"
+        }
+      },
+      {
+        "type": "flight",
+        "startDatetime": "2027-10-19T14:10",
+        "endDatetime": "2027-10-19T11:10",
+        "origin": [
+          "TFU",
+          "Chengdu"
+        ],
+        "destination": [
+          "LAX",
+          "Los Angeles"
+        ],
+        "confirmationRef": "T5HN8V",
+        "details": {
+          "originCity": "Chengdu",
+          "destinationCity": "Los Angeles",
+          "originCountryCode": "CN",
+          "destinationCountryCode": "US",
+          "flightNumber": "KE894"
+        }
+      }
+    ]
+  }
+}

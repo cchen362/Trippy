@@ -1,0 +1,50 @@
+{
+  "id": "img-cjk-ryokan-japan",
+  "description": "image render of cjk-ryokan-japan: Japanese ryokan confirmation written in Japanese: check-in/out times are given, so no default-time rule; English city, local name preserved in details.localName.",
+  "tags": [
+    "cjk",
+    "hotel",
+    "hard",
+    "image",
+    "rendered"
+  ],
+  "source": "cjk-ryokan-japan",
+  "tripContext": {
+    "startDate": "2027-11-06",
+    "endDate": "2027-11-14",
+    "destinations": [
+      {
+        "city": "Kyoto",
+        "countryCode": "JP"
+      },
+      {
+        "city": "Osaka",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-cjk-ryokan-japan.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-10T10:00",
+        "confirmationRef": "KY-88213",
+        "details": {
+          "city": "Kyoto",
+          "countryCode": "JP",
+          "localName": "山水荘"
+        }
+      }
+    ]
+  }
+}

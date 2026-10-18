@@ -60,6 +60,9 @@ export const PROFILES = {
     'alt-low': { model: SONNET_55, maxTokens: 16000, effort: 'low' },
     // §5.2: effort `high` only on the fixtures tagged "hard".
     'alt-high': { model: SONNET_55, maxTokens: 16000, effort: 'high', subset: 'hard' },
+    // W4: a deliberately tiny allowance, run with --only on one long fixture, to produce the D-30-3
+    // cut-off error on Sonnet 5.5 in the harness (the plan forbids lowering it in code).
+    'forced-cutoff': { model: SONNET_55, maxTokens: 300, effort: 'medium' },
   },
   copilot: {
     control: { model: SONNET_46, maxTokens: 8192 },
