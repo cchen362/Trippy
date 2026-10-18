@@ -11,6 +11,14 @@ const TOOL_ACTIVITY_LABELS = {
   check_trip_health: 'Checking your trip…',
 };
 
+// D-30-4: a co-pilot turn is never silent. One line per server-reported notice,
+// in the co-pilot's own voice — no API vocabulary.
+const COPILOT_NOTICE_COPY = {
+  truncated: 'Reply cut short — ask me to continue.',
+  refused: "I can't help with that one — try asking another way.",
+  empty: 'Nothing came through that time — try asking again.',
+};
+
 // Plan 13 P2: the sheet NEVER changes height except by explicit user action
 // (drag or the expand/collapse control). Long replies scroll inside it at its
 // current height — no auto-expand, ever. This is the standing no-uninitiated-motion
@@ -488,16 +496,19 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
 
           {messages.map((msg, i) => (
             <div key={msg.id || `${msg.role}-${msg.createdAt || i}`}>
-              <CopilotMessage
-                role={msg.role}
-                content={msg.content}
-                isStreaming={false}
-                authorLabel={showAuthors ? msg.authorName : null}
-                context={msg.context}
-                days={days}
-                isDesktop={isDesktop}
-              />
-              {msg.notice === 'truncated' && (
+              {/* A text-less turn that ends in a notice shows the notice alone, not an empty bubble. */}
+              {!(msg.notice && !msg.content) && (
+                <CopilotMessage
+                  role={msg.role}
+                  content={msg.content}
+                  isStreaming={false}
+                  authorLabel={showAuthors ? msg.authorName : null}
+                  context={msg.context}
+                  days={days}
+                  isDesktop={isDesktop}
+                />
+              )}
+              {COPILOT_NOTICE_COPY[msg.notice] && (
                 <div
                   style={{
                     fontFamily: "'DM Mono', monospace",
@@ -507,7 +518,7 @@ export default function CopilotPanel({ copilot, context, trip, days, bookings, a
                     padding: '2px 0 8px',
                   }}
                 >
-                  Reply cut short — ask me to continue.
+                  {COPILOT_NOTICE_COPY[msg.notice]}
                 </div>
               )}
               {(proposalsByMessageId.get(msg.id) || []).map((p) => (

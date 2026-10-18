@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { copilotApi } from '../services/copilotApi.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
+// The server's per-turn notice vocabulary (D-30-4). Anything else is ignored,
+// exactly as unknown event types are.
+const COPILOT_NOTICES = new Set(['truncated', 'refused', 'empty']);
+
 function normalizeProposal(p) {
   return {
     id: p.id,
@@ -76,8 +80,8 @@ export function useCopilot(tripId) {
           setStreamingText(fullText);
         } else if (chunk.type === 'proposal') {
           proposalPayload = chunk;
-        } else if (chunk.type === 'notice' && chunk.notice === 'truncated') {
-          noticeFlag = 'truncated';
+        } else if (chunk.type === 'notice' && COPILOT_NOTICES.has(chunk.notice)) {
+          noticeFlag = chunk.notice;
         } else if (chunk.type === 'tool') {
           setActiveTool(chunk.state === 'started' ? chunk.tool : null);
         } else if (chunk.type === 'error') {
@@ -93,7 +97,8 @@ export function useCopilot(tripId) {
           }
         } else if (chunk.type === 'done' && !terminated) {
           terminated = true;
-          if (fullText || proposalPayload) {
+          // D-30-4: a turn is never silent — a notice alone earns an assistant row.
+          if (fullText || proposalPayload || noticeFlag) {
             const assistantId = crypto.randomUUID();
             setMessages(prev => [...prev, {
               id: assistantId,

@@ -22,35 +22,84 @@ export const COPILOT_MODEL = 'claude-sonnet-4-6';
 
 export const DISCOVERY_MODEL = 'claude-haiku-4-5-20251001';
 
-// The request settings each workload sends today. Plan 30 W0 lets the evaluation harness
+// D-30-1 (Plan 30): request settings are keyed by MODEL, never by workload alone — reverting a
+// workload's *_MODEL constant automatically restores that model's compatible parameters.
+// The settings are not interchangeable across models: Haiku 4.5 rejects output_config.effort
+// outright (a 400), while Sonnet 4.6 runs thinking-off by default and must not be sent a
+// `thinking` field it was never configured for (F-30-12). A rollback that reverted only the model
+// string and kept a newer model's effort/thinking would fail every request, so the settings live
+// under the model that accepts them and profileFor() looks them up by the configured model.
+// A profile is { model, maxTokens, thinking?, effort? } — `thinking` is sent verbatim, `effort`
+// becomes output_config.effort. Plan 30 W0 lets the evaluation harness
 // (backend/scripts/modelEval) inject another profile through each service function's optional
-// `profile` argument; D-30-1 (W1) replaces this with a model-keyed MODEL_PROFILES map.
-// A profile is { model, maxTokens, thinking?, effort? } — `thinking` is sent verbatim,
-// `effort` becomes output_config.effort.
-export const LIVE_PROFILES = Object.freeze({
-  extraction: Object.freeze({ model: EXTRACTION_MODEL, maxTokens: 8192 }),
-  descriptor: Object.freeze({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 256 }),
-  discovery: Object.freeze({
-    model: DISCOVERY_MODEL,
-    // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
-    // across 8 categories (~40-50k output tokens) — a smaller budget silently
-    // truncates the tail of the response, which is why production generations
-    // were systematically missing the last 1-2 categories in the prompt's
-    // ordering (architecture, wellness).
-    maxTokens: 64000,
+// `profile` argument.
+export const MODEL_PROFILES = Object.freeze({
+  'claude-sonnet-4-6': Object.freeze({
+    extraction: Object.freeze({ maxTokens: 8192 }),
+    copilot: Object.freeze({ maxTokens: 8192 }),
   }),
-  copilot: Object.freeze({ model: COPILOT_MODEL, maxTokens: 8192 }),
+  'claude-haiku-4-5-20251001': Object.freeze({
+    descriptor: Object.freeze({ maxTokens: 256 }),
+    discovery: Object.freeze({
+      // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
+      // across 8 categories (~40-50k output tokens) — a smaller budget silently
+      // truncates the tail of the response, which is why production generations
+      // were systematically missing the last 1-2 categories in the prompt's
+      // ordering (architecture, wellness).
+      maxTokens: 64000,
+    }),
+  }),
 });
+
+const WORKLOAD_MODELS = Object.freeze({
+  extraction: EXTRACTION_MODEL,
+  descriptor: PHOTO_DESCRIPTOR_MODEL,
+  discovery: DISCOVERY_MODEL,
+  copilot: COPILOT_MODEL,
+});
+
+// The profile a workload sends: its configured model first, then that model's settings for the
+// workload. Key order is { model, maxTokens, thinking?, effort? } — requestSettings() relies on
+// nothing else, but the harness compares profiles by JSON text.
+export function profileFor(workload) {
+  const model = WORKLOAD_MODELS[workload];
+  if (!model) {
+    throw new Error(`unknown workload "${workload}" (expected one of ${Object.keys(WORKLOAD_MODELS).join(', ')})`);
+  }
+  const settings = MODEL_PROFILES[model]?.[workload];
+  if (!settings) {
+    throw new Error(`no ${workload} profile for model "${model}" in MODEL_PROFILES — add one before pointing ${workload} at it`);
+  }
+  return { model, ...settings };
+}
+
+// A bad *_MODEL constant must fail at boot, not on the first request that uses it.
+for (const workload of Object.keys(WORKLOAD_MODELS)) profileFor(workload);
 
 // A profile as the request fields it controls. Spread where model/max_tokens sit so the key order
 // of a default (no thinking, no effort) body is exactly what it was before profiles existed.
-function requestSettings({ model, maxTokens, thinking, effort }) {
+export function requestSettings({ model, maxTokens, thinking, effort }) {
   return {
     model,
     max_tokens: maxTokens,
     ...(thinking ? { thinking } : {}),
     ...(effort ? { output_config: { effort } } : {}),
   };
+}
+
+// D-30-3 (Plan 30): every request path classifies the stop before trusting the content. A refusal
+// is HTTP 200 with stop_reason 'refusal' on current models; a cut-off (max_tokens, or the context
+// window — which includes adaptive thinking spent before any text) leaves content incomplete or
+// absent. `category` is stop_details.category when the SDK carries it: the non-streaming Message
+// does; SDK 0.91.1's streamed finalMessage never copies stop_details, later SDKs do — null is a
+// valid answer either way.
+export function classifyStop(message) {
+  const stopReason = message?.stop_reason ?? null;
+  const category = message?.stop_details?.category ?? null;
+  let outcome = 'complete';
+  if (stopReason === 'refusal') outcome = 'refused';
+  else if (stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') outcome = 'truncated';
+  return { outcome, stopReason, category };
 }
 
 // Closed D8 scene-type vocabulary (Plan 10 §1) — used by both discovery-authored
@@ -126,7 +175,7 @@ Rules:
 // non-streaming Claude call. files: [{ kind: 'text'|'image'|'pdf', mediaType, content }]
 // where content is a UTF-8 string for 'text' and base64 (no data-URI prefix) otherwise.
 // profile (optional): request settings override for the evaluation harness; defaults to live.
-export async function extractBookings({ files, contextText, tripContext, profile = LIVE_PROFILES.extraction }) {
+export async function extractBookings({ files, contextText, tripContext, profile = profileFor('extraction') }) {
   const client = getClient();
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -182,6 +231,27 @@ export async function extractBookings({ files, contextText, tripContext, profile
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('');
+
+  // D-30-3: a refusal or cut-off is named for what it is, never reported as "no JSON block". The
+  // frontend shows a status'd error's message verbatim, so these are written for the traveller.
+  const stop = classifyStop(response);
+  if (stop.outcome === 'refused') {
+    console.warn('[import] extraction refused stopReason=%s category=%s', stop.stopReason, stop.category);
+    throw Object.assign(
+      new Error(
+        `The booking reader declined to process this input${stop.category ? ` (category: ${stop.category})` : ''}. ` +
+        'Try pasting the confirmation text instead.',
+      ),
+      { status: 502, raw: fullText.slice(0, 2000) },
+    );
+  }
+  if (stop.outcome === 'truncated') {
+    console.warn('[import] extraction cut off stopReason=%s out=%d', stop.stopReason, outTok);
+    throw Object.assign(
+      new Error("The booking reader's output was cut off — try fewer pages or split the file."),
+      { status: 502, raw: fullText.slice(0, 2000) },
+    );
+  }
 
   const matches = [...fullText.matchAll(/```json\r?\n([\s\S]*?)\r?\n?```/g)];
   const lastMatch = matches.at(-1);
@@ -366,7 +436,7 @@ export function sanitizeGeneratedAliases(aliases, name) {
 // Streams discovery results as NDJSON. Calls onCategory({ category, items }) for each
 // completed line as Claude generates it. Returns the full accumulated results array for caching.
 // profile (optional): request settings override for the evaluation harness; defaults to live.
-export async function discoverDestination(destination, existingStopTitles = [], onCategory, profile = LIVE_PROFILES.discovery) {
+export async function discoverDestination(destination, existingStopTitles = [], onCategory, profile = profileFor('discovery')) {
   console.log('[discover] destination=%s existingStops=%d', destination, existingStopTitles.length);
 
   const client = getClient();
@@ -454,12 +524,41 @@ export async function discoverDestination(destination, existingStopTitles = [], 
     for (const line of lines) processLine(line);
   });
 
-  await stream.finalMessage();
+  let message;
+  try {
+    message = await stream.finalMessage();
+  } catch (err) {
+    console.error(
+      '[discover] end destination=%s stop_reason=error categories=%d dropped=%d error=%s',
+      destination, accumulated.length, droppedLineCount, err?.message,
+    );
+    throw err;
+  }
   // Flush any remaining content in buffer
   if (buffer.trim()) processLine(buffer);
 
   const categoriesWithItems = accumulated.filter((c) => c.items.length > 0).length;
   const totalItems = accumulated.reduce((sum, c) => sum + c.items.length, 0);
+
+  // D-30-3: one line per generation, on success and failure alike — a cut-off or refused
+  // generation must be visible in the logs, not inferred from a thin catalogue later.
+  const stop = classifyStop(message);
+  console.log(
+    '[discover] end destination=%s stop_reason=%s category=%s output_tokens=%d categories=%d items=%d dropped=%d',
+    destination, stop.stopReason, stop.category, message?.usage?.output_tokens ?? 0,
+    categoriesWithItems, totalItems, droppedLineCount,
+  );
+
+  // A truncated or refused generation is a failed generation: throwing here, before
+  // runCatalogueGeneration bumps freshness, leaves the catalogue stale exactly as the
+  // minimum-yield guard below does (categories that completed stay inserted — additive).
+  if (stop.outcome !== 'complete') {
+    throw new Error(
+      `[discover] generation ${stop.outcome} for destination=${destination}: stop_reason=${stop.stopReason}` +
+      `${stop.category ? ` category=${stop.category}` : ''}, ` +
+      `${categoriesWithItems} categories with items (${totalItems} items), ${droppedLineCount} lines dropped as unparseable`,
+    );
+  }
 
   if (categoriesWithItems < MIN_CATEGORIES_WITH_ITEMS) {
     throw new Error(
@@ -488,7 +587,7 @@ Rules:
 // every failure mode (missing key, network error, malformed output, invalid schema)
 // is caught and returns null so the caller falls through to resolvedName+city.
 // profile (optional): request settings override for the evaluation harness; defaults to live.
-export async function generatePhotoDescriptor({ title, resolvedName, city, country, type, profile = LIVE_PROFILES.descriptor }) {
+export async function generatePhotoDescriptor({ title, resolvedName, city, country, type, profile = profileFor('descriptor') }) {
   try {
     const client = getClient();
 
@@ -505,16 +604,30 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
       messages: [{ role: 'user', content: contextParts.join(', ') }],
     });
 
+    // D-30-3: every null below says why — a model-side regression must show in the logs, not
+    // only as worse photos.
+    const stop = classifyStop(response);
+    if (stop.outcome !== 'complete') {
+      console.warn('[photo] descriptor not usable', { title, stopReason: stop.stopReason, category: stop.category });
+      return null;
+    }
+
     const text = response.content
       .filter((block) => block.type === 'text')
       .map((block) => block.text)
       .join('');
 
     const match = text.match(/```json\r?\n([\s\S]*?)\r?\n?```/);
-    if (!match) return null;
+    if (!match) {
+      console.warn('[photo] descriptor has no JSON block', { title, stopReason: stop.stopReason });
+      return null;
+    }
 
     const parsed = JSON.parse(match[1]);
-    if (typeof parsed.photoQuery !== 'string' || !parsed.photoQuery.trim()) return null;
+    if (typeof parsed.photoQuery !== 'string' || !parsed.photoQuery.trim()) {
+      console.warn('[photo] descriptor is missing photoQuery', { title });
+      return null;
+    }
 
     const photoQuery = parsed.photoQuery.trim().split(/\s+/).slice(0, 8).join(' ');
     return { photoQuery, sceneType: coerceSceneType(parsed.sceneType) };
@@ -533,6 +646,13 @@ const QUERY_TOOL_NAMES = new Set([SEARCH_DISCOVERY_CATALOGUE_TOOL.name, CHECK_TR
 // post-cap response to answer with what it already has before the hard stop below kicks in.
 const QUERY_TOOL_CAP = 5;
 
+// D-30-4 (Plan 30): the co-pilot SSE writes nothing between flushHeaders() and the first text
+// delta or tool event, and a thinking-capable model can spend a long time there. Cloudflare's
+// tunnel closes an origin connection that sends no bytes for 100 s, so a {type:'ping'} goes out
+// every 8 s — the same interval the discovery route uses for its {type:'thinking'} keep-alive
+// (routes/discovery.js). The frontend parser ignores event types it does not know.
+export const COPILOT_PING_INTERVAL_MS = 8000;
+
 // persistTurn (optional): async callback the route owns. Called once after the model turn
 // completes with { assistantText, operations } — where operations is the tool_use payload or
 // null. It persists the assistant message + (when operations exist) the proposal record, and
@@ -546,19 +666,19 @@ const QUERY_TOOL_CAP = 5;
 // what a query tool actually does (catalogue reads, trip-health checks, etc).
 //
 // profile (optional): request settings override for the evaluation harness; defaults to live.
-export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics, profile = LIVE_PROFILES.copilot) {
+export async function streamCopilotResponse(conversationMessages, itineraryContext, res, req, persistTurn, toolExecutors = {}, reportTurnMetrics, profile = profileFor('copilot')) {
   const client = getClient();
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
 
   const write = (data) => {
     if (!res.destroyed && !res.writableEnded) {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     }
   };
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
   const systemPrompt = `You are a travel co-pilot helping a traveller manage and improve their trip itinerary.
 
@@ -638,7 +758,56 @@ Stops carry one of four kinds of timing. Respect them:
   let iterations = 0;
   let terminalUse = null; // the propose_itinerary_changes tool_use that ended the turn, if any
   let truncated = false;
+  let refused = false;
   let lastStopReason = null;
+
+  const addUsage = (usage) => {
+    totalUsage.input_tokens += usage?.input_tokens ?? 0;
+    totalUsage.output_tokens += usage?.output_tokens ?? 0;
+    totalUsage.cache_creation_input_tokens += usage?.cache_creation_input_tokens ?? 0;
+    totalUsage.cache_read_input_tokens += usage?.cache_read_input_tokens ?? 0;
+  };
+
+  // Exactly one reportTurnMetrics per turn, whichever exit path gets there first.
+  let metricsReported = false;
+  const recordMetrics = async ({ stopReason, proposalOps, error }) => {
+    if (!reportTurnMetrics || metricsReported) return;
+    metricsReported = true;
+    try {
+      await reportTurnMetrics({
+        model: profile.model,
+        inputTokens: totalUsage.input_tokens,
+        outputTokens: totalUsage.output_tokens,
+        cacheWriteTokens: totalUsage.cache_creation_input_tokens,
+        cacheReadTokens: totalUsage.cache_read_input_tokens,
+        ttfdMs,
+        totalMs: Date.now() - turnStart,
+        iterations,
+        queryCalls: executedQueryCalls,
+        stopReason,
+        proposalOps,
+        error,
+      });
+    } catch (err) {
+      console.error('[copilot] reportTurnMetrics failed:', err);
+    }
+  };
+
+  // A client that drops mid-turn is not an error (D-30-4): record the tokens already spent under
+  // stop_reason 'client_abort' with error = 0 (stop_reason is free text, so no migration), log one
+  // plain line, and write nothing more to a dead socket. The aborted iteration's partial usage is
+  // folded in by the caller before this runs.
+  const recordClientAbort = async () => {
+    streamDone = true;
+    console.log('[copilot] client aborted turn iterations=%d input=%d output=%d',
+      iterations, totalUsage.input_tokens, totalUsage.output_tokens);
+    await recordMetrics({ stopReason: 'client_abort', proposalOps: 0, error: 0 });
+  };
+
+  // Keep-alive for the whole turn (D-30-4). unref'd so it never holds a process or a test open;
+  // the finally below clears it on every exit path, including each early return on abort.
+  const pingTimer = setInterval(() => write({ type: 'ping' }), COPILOT_PING_INTERVAL_MS);
+  pingTimer.unref();
 
   try {
     console.log('[copilot] stream opened messages=%d', conversationMessages.length);
@@ -647,7 +816,7 @@ Stops carry one of four kinds of timing. Respect them:
       // Client dropped while a tool executor was running — don't open another stream
       // against a dead connection.
       if (aborted) {
-        streamDone = true;
+        await recordClientAbort();
         return fullText;
       }
       iterations += 1;
@@ -675,24 +844,28 @@ Stops carry one of four kinds of timing. Respect them:
 
       // The client dropped the connection but the SDK resolved anyway (abort() is
       // best-effort) — end quietly, no persistTurn/proposal/done writes (write() is already a
-      // no-op on a destroyed res, but skip the DB work too).
+      // no-op on a destroyed res, but skip the DB work too). The spent tokens still count.
+      addUsage(finalMessage?.usage);
       if (aborted) {
-        streamDone = true;
+        await recordClientAbort();
         return fullText;
       }
 
-      totalUsage.input_tokens += finalMessage?.usage?.input_tokens ?? 0;
-      totalUsage.output_tokens += finalMessage?.usage?.output_tokens ?? 0;
-      totalUsage.cache_creation_input_tokens += finalMessage?.usage?.cache_creation_input_tokens ?? 0;
-      totalUsage.cache_read_input_tokens += finalMessage?.usage?.cache_read_input_tokens ?? 0;
-      lastStopReason = finalMessage?.stop_reason ?? null;
-
-      // A max_tokens cut can land mid-prose or mid-tool_use. Either way the response is
-      // incomplete: end the turn now, before the terminal-tool check below, so a
-      // partially-parsed propose_itinerary_changes block never becomes terminalUse and
-      // never becomes a proposal (D5 — surfaced honestly, never silently re-run or discarded).
-      if (lastStopReason === 'max_tokens') {
+      // D-30-3: classify before trusting the content. A cut (max_tokens, or the context window —
+      // adaptive thinking spends output budget before any text) can land mid-prose or mid-tool_use,
+      // and a refusal carries no usable answer. Either way end the turn now, before the
+      // terminal-tool check below, so a partially-parsed propose_itinerary_changes block never
+      // becomes terminalUse and never becomes a proposal (D5 — surfaced honestly, never silently
+      // re-run or discarded).
+      const stop = classifyStop(finalMessage);
+      lastStopReason = stop.stopReason;
+      if (stop.outcome === 'truncated') {
         truncated = true;
+        break;
+      }
+      if (stop.outcome === 'refused') {
+        console.warn('[copilot] model refused turn category=%s', stop.category);
+        refused = true;
         break;
       }
 
@@ -768,6 +941,8 @@ Stops carry one of four kinds of timing. Respect them:
 
     if (truncated) {
       write({ type: 'notice', notice: 'truncated' });
+    } else if (refused) {
+      write({ type: 'notice', notice: 'refused' });
     }
 
     // Wave 2: the route's persistTurn callback saves the assistant message and (when
@@ -794,31 +969,22 @@ Stops carry one of four kinds of timing. Respect them:
       write({ type: 'proposal', ...proposalPayload });
     }
 
+    // D-30-4: a turn is never silent. One that produced neither text nor a proposal (a
+    // thinking-only reply) gets an 'empty' notice; truncated and refused turns already carry
+    // theirs, so at most one notice goes out per turn.
+    if (!truncated && !refused && !fullText && !proposalPayload) {
+      write({ type: 'notice', notice: 'empty' });
+    }
+
     console.log('[copilot] turn usage input=%d output=%d contextChars=%d proposal=%s iterations=%d queryCalls=%d stopReason=%s',
       totalUsage.input_tokens, totalUsage.output_tokens,
       JSON.stringify(itineraryContext).length, terminalUse ? 'yes' : 'no', iterations, executedQueryCalls, lastStopReason);
 
-    const proposalOps = operations ? operations.length : 0;
-    if (reportTurnMetrics) {
-      try {
-        await reportTurnMetrics({
-          model: profile.model,
-          inputTokens: totalUsage.input_tokens,
-          outputTokens: totalUsage.output_tokens,
-          cacheWriteTokens: totalUsage.cache_creation_input_tokens,
-          cacheReadTokens: totalUsage.cache_read_input_tokens,
-          ttfdMs,
-          totalMs: Date.now() - turnStart,
-          iterations,
-          queryCalls: executedQueryCalls,
-          stopReason: lastStopReason,
-          proposalOps,
-          error: 0,
-        });
-      } catch (err) {
-        console.error('[copilot] reportTurnMetrics failed:', err);
-      }
-    }
+    await recordMetrics({
+      stopReason: lastStopReason,
+      proposalOps: operations ? operations.length : 0,
+      error: 0,
+    });
 
     streamDone = true;
     console.log('[copilot] stream done fullText.length=%d', fullText.length);
@@ -826,30 +992,24 @@ Stops carry one of four kinds of timing. Respect them:
     res.end();
   } catch (err) {
     streamDone = true;
+    if (aborted) {
+      // With the real SDK a client abort makes finalMessage() REJECT (APIUserAbortError), so a
+      // dropped connection lands here — it is not an error. The SDK keeps a snapshot of the
+      // message being streamed (MessageStream.currentMessage): input and cache tokens come from
+      // its message_start, output_tokens only as far as the stream had reported when it was cut.
+      // Nothing is estimated beyond that. currentStream is still set here because it is only
+      // cleared after a finalMessage() that resolved (whose usage addUsage has then counted).
+      addUsage(currentStream?.currentMessage?.usage);
+      await recordClientAbort();
+      return fullText;
+    }
     console.error('[copilot] stream error:', err);
     write({ type: 'error', message: err.message });
-    if (reportTurnMetrics) {
-      try {
-        await reportTurnMetrics({
-          model: profile.model,
-          inputTokens: totalUsage.input_tokens,
-          outputTokens: totalUsage.output_tokens,
-          cacheWriteTokens: totalUsage.cache_creation_input_tokens,
-          cacheReadTokens: totalUsage.cache_read_input_tokens,
-          ttfdMs,
-          totalMs: Date.now() - turnStart,
-          iterations,
-          queryCalls: executedQueryCalls,
-          stopReason: lastStopReason,
-          proposalOps: 0,
-          error: 1,
-        });
-      } catch (metricsErr) {
-        console.error('[copilot] reportTurnMetrics failed:', metricsErr);
-      }
-    }
+    await recordMetrics({ stopReason: lastStopReason, proposalOps: 0, error: 1 });
     write({ type: 'done' });
     res.end();
+  } finally {
+    clearInterval(pingTimer);
   }
 
   return fullText;

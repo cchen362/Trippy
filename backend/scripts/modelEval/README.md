@@ -29,7 +29,7 @@ items once the projected spend for the whole list passes it, and exits with code
 `--keep-db` (keep the database copy for inspection).
 
 `control` is today's production configuration. Every script refuses to run a control pass if
-`profiles.mjs` has drifted from `LIVE_PROFILES` in `claude.js`.
+`profiles.mjs` has drifted from `profileFor(workload)` in `claude.js`.
 
 ## What a run writes
 

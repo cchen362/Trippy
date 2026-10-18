@@ -22,7 +22,12 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
-const { extractBookings, discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType, normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases } = await import('../src/services/claude.js');
+const {
+  extractBookings, discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType,
+  normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases,
+  MODEL_PROFILES, profileFor, requestSettings, classifyStop, COPILOT_PING_INTERVAL_MS,
+  EXTRACTION_MODEL, PHOTO_DESCRIPTOR_MODEL, COPILOT_MODEL, DISCOVERY_MODEL,
+} = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
 // discoverDestination
@@ -32,7 +37,10 @@ const { extractBookings, discoverDestination, streamCopilotResponse, generatePho
 // Re-used by streamCopilotResponse tests too. stopReason is optional — when omitted it's
 // derived from finalContent (tool_use present => 'tool_use', else 'end_turn'), matching real
 // SDK behavior, so existing callers that never passed it keep working unmodified.
-function makeMockStream(chunks, finalText, finalContent, stopReason) {
+// extras (optional): { usage, stopDetails, currentMessage } — usage replaces the default
+// 10/20 pair, stopDetails becomes stop_details on the final message (SDK >= 0.99 streams carry
+// it), currentMessage is the SDK's partial snapshot a rejected stream still exposes.
+function makeMockStream(chunks, finalText, finalContent, stopReason, extras = {}) {
   const listeners = {};
   const stream = {
     on(event, cb) {
@@ -52,10 +60,12 @@ function makeMockStream(chunks, finalText, finalContent, stopReason) {
       return {
         content,
         stop_reason: derivedStopReason,
-        usage: { input_tokens: 10, output_tokens: 20 },
+        ...(extras.stopDetails ? { stop_details: extras.stopDetails } : {}),
+        usage: extras.usage ?? { input_tokens: 10, output_tokens: 20 },
       };
     },
   };
+  if (extras.currentMessage) stream.currentMessage = extras.currentMessage;
   return stream;
 }
 
@@ -1032,7 +1042,7 @@ describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
     errorSpy.mockRestore();
   });
 
-  it('does NOT call reportTurnMetrics on the aborted-connection early-return path', async () => {
+  it('records a client_abort turn (not silence) when the connection drops and the SDK resolves anyway', async () => {
     const res = makeMockRes();
     const abortableStream = {
       on(event, cb) {
@@ -1051,7 +1061,14 @@ describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
 
     await streamCopilotResponse([{ role: 'user', content: 'hi' }], {}, res, {}, undefined, {}, reportTurnMetrics);
 
-    expect(reportTurnMetrics).not.toHaveBeenCalled();
+    // D-30-4: an aborted turn spent real tokens, so it is recorded once — as an abort, not an error.
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    const summary = reportTurnMetrics.mock.calls[0][0];
+    expect(summary.stopReason).toBe('client_abort');
+    expect(summary.error).toBe(0);
+    expect(summary.proposalOps).toBe(0);
+    expect(summary.inputTokens).toBe(1);
+    expect(summary.outputTokens).toBe(1);
   });
 });
 
@@ -1330,5 +1347,680 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
       expect(body.output_config).toEqual({ effort: 'medium' });
       expect(body).not.toHaveProperty('thinking');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan 30 W1 — model-keyed profiles (D-30-1), one stop classifier (D-30-3),
+// co-pilot keep-alive / never-silent / honest aborts (D-30-4).
+// ---------------------------------------------------------------------------
+
+// A thinking block as a thinking-capable model emits it under the default display: empty text,
+// a signature. It must be ignored by every parser and replayed untouched by the co-pilot loop.
+const THINKING_BLOCK = { type: 'thinking', thinking: '', signature: 'sig-abc' };
+const EXTRACT_OK_TEXT = '```json\n{"isTravelRelated":true,"summary":"x","bookings":[]}\n```';
+const DESCRIPTOR_OK_TEXT = '```json\n{"photoQuery":"night market skewers","sceneType":"market"}\n```';
+
+describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
+  it('returns each workload\'s live model and max_tokens, model first', () => {
+    expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 8192 });
+    expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 8192 });
+    expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 256 });
+    expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 64000 });
+    for (const workload of ['extraction', 'copilot', 'descriptor', 'discovery']) {
+      expect(Object.keys(profileFor(workload))).toEqual(['model', 'maxTokens']);
+    }
+  });
+
+  it('never gives Haiku 4.5 an effort or thinking field (it rejects output_config.effort)', () => {
+    for (const settings of Object.values(MODEL_PROFILES['claude-haiku-4-5-20251001'])) {
+      expect(settings).not.toHaveProperty('effort');
+      expect(settings).not.toHaveProperty('thinking');
+    }
+  });
+
+  it('never gives Sonnet 4.6 a thinking field (it runs thinking-off)', () => {
+    for (const settings of Object.values(MODEL_PROFILES['claude-sonnet-4-6'])) {
+      expect(settings).not.toHaveProperty('thinking');
+    }
+  });
+
+  it('the live profiles feed requestSettings without adding thinking or output_config', () => {
+    for (const workload of ['extraction', 'copilot', 'descriptor', 'discovery']) {
+      const fields = requestSettings(profileFor(workload));
+      expect(Object.keys(fields)).toEqual(['model', 'max_tokens']);
+    }
+  });
+
+  it('throws a clear error for an unknown workload', () => {
+    expect(() => profileFor('translation')).toThrow(/unknown workload "translation"/);
+  });
+
+  it('is frozen — a caller cannot rewrite what production sends', () => {
+    expect(Object.isFrozen(MODEL_PROFILES)).toBe(true);
+    expect(Object.isFrozen(MODEL_PROFILES['claude-sonnet-4-6'])).toBe(true);
+    expect(Object.isFrozen(MODEL_PROFILES['claude-sonnet-4-6'].extraction)).toBe(true);
+  });
+});
+
+describe('classifyStop (D-30-3)', () => {
+  it('maps refusal to refused and carries the category when the message has one', () => {
+    expect(classifyStop({ stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber' } }))
+      .toEqual({ outcome: 'refused', stopReason: 'refusal', category: 'cyber' });
+    expect(classifyStop({ stop_reason: 'refusal' }))
+      .toEqual({ outcome: 'refused', stopReason: 'refusal', category: null });
+  });
+
+  it('maps max_tokens and model_context_window_exceeded to truncated', () => {
+    expect(classifyStop({ stop_reason: 'max_tokens' }).outcome).toBe('truncated');
+    expect(classifyStop({ stop_reason: 'model_context_window_exceeded' }).outcome).toBe('truncated');
+  });
+
+  it('treats every other stop (and a missing message) as complete', () => {
+    for (const stop_reason of ['end_turn', 'tool_use', 'stop_sequence', 'pause_turn', undefined]) {
+      expect(classifyStop({ stop_reason }).outcome).toBe('complete');
+    }
+    expect(classifyStop(undefined)).toEqual({ outcome: 'complete', stopReason: null, category: null });
+  });
+});
+
+describe('extractBookings — thinking blocks and stop reasons (D-30-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+  });
+
+  const files = [{ kind: 'text', content: 'Flight CA 421 PEK to CTU' }];
+  const usage = { input_tokens: 5, output_tokens: 7 };
+
+  it('reads the JSON from text blocks and ignores a leading thinking block', async () => {
+    mockCreate.mockResolvedValue({
+      content: [THINKING_BLOCK, { type: 'text', text: EXTRACT_OK_TEXT }],
+      stop_reason: 'end_turn',
+      usage,
+    });
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction.isTravelRelated).toBe(true);
+  });
+
+  it('rejects a refusal with a specific 502 naming the category, never "no JSON block"', async () => {
+    mockCreate.mockResolvedValue({
+      content: [],
+      stop_reason: 'refusal',
+      stop_details: { type: 'refusal', category: 'cyber' },
+      usage,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.status).toBe(502);
+    expect(err.message).toBe(
+      'The booking reader declined to process this input (category: cyber). Try pasting the confirmation text instead.',
+    );
+    expect(err.message).not.toMatch(/no JSON block/);
+    warnSpy.mockRestore();
+  });
+
+  it('omits the category clause when the refusal carries none', async () => {
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '' }], stop_reason: 'refusal', usage });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.status).toBe(502);
+    expect(err.message).toBe('The booking reader declined to process this input. Try pasting the confirmation text instead.');
+    warnSpy.mockRestore();
+  });
+
+  it('rejects a max_tokens stop during thinking (no text at all) as cut off, never "no JSON block"', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'max_tokens', usage });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.status).toBe(502);
+    expect(err.message).toBe("The booking reader's output was cut off — try fewer pages or split the file.");
+    expect(err.message).not.toMatch(/no JSON block/);
+    warnSpy.mockRestore();
+  });
+
+  it('treats model_context_window_exceeded like max_tokens', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'model_context_window_exceeded', usage });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(extractBookings({ files })).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/cut off/) });
+    warnSpy.mockRestore();
+  });
+
+  it('keeps raw (first 2000 chars of text) on a truncation so the failure stays diagnosable', async () => {
+    mockCreate.mockResolvedValue({
+      content: [{ type: 'text', text: '```json\n{"isTravel' }],
+      stop_reason: 'max_tokens',
+      usage,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.raw).toBe('```json\n{"isTravel');
+    warnSpy.mockRestore();
+  });
+});
+
+describe('generatePhotoDescriptor — thinking blocks and stop reasons (D-30-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+  });
+
+  it('reads the JSON from text blocks and ignores a leading thinking block', async () => {
+    mockCreate.mockResolvedValue({
+      content: [THINKING_BLOCK, { type: 'text', text: DESCRIPTOR_OK_TEXT }],
+      stop_reason: 'end_turn',
+    });
+
+    const result = await generatePhotoDescriptor({ title: 'Night Market' });
+
+    expect(result).toEqual({ photoQuery: 'night market skewers', sceneType: 'market' });
+  });
+
+  it('returns null and warns with the reason on a refusal', async () => {
+    mockCreate.mockResolvedValue({
+      content: [],
+      stop_reason: 'refusal',
+      stop_details: { type: 'refusal', category: 'cyber' },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[photo] descriptor not usable',
+      { title: 'Some Place', stopReason: 'refusal', category: 'cyber' },
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('returns null and warns on a max_tokens stop during thinking', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'max_tokens' });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await generatePhotoDescriptor({ title: 'Some Place' });
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[photo] descriptor not usable',
+      { title: 'Some Place', stopReason: 'max_tokens', category: null },
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('warns on the model_context_window_exceeded stop too', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'model_context_window_exceeded' });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(await generatePhotoDescriptor({ title: 'Some Place' })).toBeNull();
+    expect(warnSpy).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
+
+  it('warns why when there is no JSON block, and when photoQuery is missing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'Sorry.' }], stop_reason: 'end_turn' });
+    expect(await generatePhotoDescriptor({ title: 'A' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor has no JSON block', { title: 'A', stopReason: 'end_turn' });
+
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"sceneType":"market"}\n```' }], stop_reason: 'end_turn' });
+    expect(await generatePhotoDescriptor({ title: 'B' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor is missing photoQuery', { title: 'B' });
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe('discoverDestination — end-of-generation line and stop reasons (D-30-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+  });
+
+  function endLine(logSpy) {
+    return logSpy.mock.calls.find((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] end'));
+  }
+
+  it('parses text deltas and ignores a leading thinking block, logging one end line on success', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const chunks = ndjsonChunks(FOUR_HEALTHY_CATEGORIES);
+    mockStream.mockReturnValue(makeMockStream(chunks, undefined, [THINKING_BLOCK, { type: 'text', text: chunks.join('') }], undefined, {
+      usage: { input_tokens: 100, output_tokens: 4321 },
+    }));
+
+    const result = await discoverDestination('kyoto', []);
+
+    expect(result).toHaveLength(4);
+    const line = endLine(logSpy);
+    expect(line).toBeDefined();
+    // destination, stop_reason, category, output_tokens, categories, items, dropped
+    expect(line.slice(1)).toEqual(['kyoto', 'end_turn', null, 4321, 4, 4, 0]);
+    expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] ok'))).toBe(true);
+    logSpy.mockRestore();
+  });
+
+  it('fails a refused generation, naming destination, reason and category, and logs the end line', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockStream.mockReturnValue(makeMockStream([], undefined, [], 'refusal', {
+      stopDetails: { type: 'refusal', category: 'cyber' },
+      usage: { input_tokens: 10, output_tokens: 0 },
+    }));
+
+    await expect(discoverDestination('kyoto', [])).rejects.toThrow(
+      /generation refused for destination=kyoto: stop_reason=refusal category=cyber, 0 categories with items/,
+    );
+
+    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'refusal', 'cyber', 0, 0, 0, 0]);
+    expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] ok'))).toBe(false);
+    logSpy.mockRestore();
+  });
+
+  it('fails a max_tokens stop during thinking (no text) as truncated, not as thin yield', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockStream.mockReturnValue(makeMockStream([], undefined, [THINKING_BLOCK], 'max_tokens'));
+
+    await expect(discoverDestination('kyoto', [])).rejects.toThrow(/generation truncated for destination=kyoto: stop_reason=max_tokens/);
+
+    expect(endLine(logSpy)[2]).toBe('max_tokens');
+    logSpy.mockRestore();
+  });
+
+  it('fails a truncated generation even when enough categories parsed — the catalogue must stay stale', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES), undefined, undefined, 'model_context_window_exceeded'));
+
+    await expect(discoverDestination('kyoto', [])).rejects.toThrow(/generation truncated.*model_context_window_exceeded/);
+
+    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'model_context_window_exceeded', null, 20, 4, 4, 0]);
+    logSpy.mockRestore();
+  });
+
+  it('logs the end line when the stream itself rejects, and rethrows', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockStream.mockReturnValue({
+      on() { return this; },
+      async finalMessage() { throw new Error('socket hang up'); },
+    });
+
+    await expect(discoverDestination('kyoto', [])).rejects.toThrow('socket hang up');
+
+    const line = errorSpy.mock.calls.find((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] end'));
+    expect(line).toBeDefined();
+    expect(line[0]).toContain('stop_reason=error');
+    expect(line[1]).toBe('kyoto');
+    expect(line.at(-1)).toBe('socket hang up');
+    errorSpy.mockRestore();
+  });
+});
+
+describe('streamCopilotResponse — thinking blocks and stop reasons (D-30-3, D-30-4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+  });
+
+  const noticesOf = (res) => parseEvents(res).filter((e) => e.type === 'notice');
+  const typesOf = (res) => parseEvents(res).map((e) => e.type);
+  const proposalContent = [
+    { type: 'text', text: 'Here is a plan.' },
+    { type: 'tool_use', id: 'tu_p', name: 'propose_itinerary_changes', input: { operations: [{ action: 'remove_stop', stopId: 's1' }] } },
+  ];
+
+  it('replays the assistant content, thinking block included and unchanged, into the next iteration', async () => {
+    const firstContent = [THINKING_BLOCK, toolUseBlock('search_discovery_catalogue', { destination: 'Kyoto' }, 'tu_1')];
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, firstContent))
+      .mockReturnValueOnce(makeMockStream(['Done.'], undefined, [THINKING_BLOCK, { type: 'text', text: 'Done.' }]));
+    const executor = vi.fn().mockResolvedValue({ places: [] });
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'ideas?' }], {}, res, {}, undefined, { search_discovery_catalogue: executor });
+
+    expect(mockStream).toHaveBeenCalledTimes(2);
+    const secondMessages = mockStream.mock.calls[1][0].messages;
+    expect(secondMessages[1]).toEqual({ role: 'assistant', content: firstContent });
+    expect(secondMessages[1].content[0]).toEqual({ type: 'thinking', thinking: '', signature: 'sig-abc' });
+    expect(secondMessages[2].role).toBe('user');
+    // Prose streamed from text events only; the thinking block contributes nothing.
+    expect(parseEvents(res).filter((e) => e.type === 'text').map((e) => e.content).join('')).toBe('Done.');
+    expect(noticesOf(res)).toEqual([]);
+  });
+
+  it('refusal: notice "refused", no proposal even with a tool_use present, then done', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, proposalContent, 'refusal'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const persistTurn = vi.fn().mockResolvedValue(null);
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn);
+
+    expect(noticesOf(res)).toEqual([{ type: 'notice', notice: 'refused' }]);
+    expect(typesOf(res)).not.toContain('proposal');
+    expect(typesOf(res).at(-1)).toBe('done');
+    expect(persistTurn).toHaveBeenCalledWith({ assistantText: '', operations: null });
+    warnSpy.mockRestore();
+  });
+
+  it('refusal reports the raw stop reason in the turn metrics', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [], 'refusal'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, makeMockRes(), {}, undefined, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'refusal', error: 0, proposalOps: 0 });
+    warnSpy.mockRestore();
+  });
+
+  it('max_tokens during thinking (content is only a thinking block): notice "truncated", then done', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK], 'max_tokens'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    expect(noticesOf(res)).toEqual([{ type: 'notice', notice: 'truncated' }]);
+    expect(typesOf(res).at(-1)).toBe('done');
+  });
+
+  it('model_context_window_exceeded is treated as truncated, discarding a cut proposal', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, proposalContent, 'model_context_window_exceeded'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    expect(noticesOf(res)).toEqual([{ type: 'notice', notice: 'truncated' }]);
+    expect(typesOf(res)).not.toContain('proposal');
+  });
+
+  it('a thinking-only end_turn emits exactly one "empty" notice before done', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [THINKING_BLOCK], 'end_turn'));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, vi.fn().mockResolvedValue(null));
+
+    expect(noticesOf(res)).toEqual([{ type: 'notice', notice: 'empty' }]);
+    const types = typesOf(res);
+    expect(types.indexOf('notice')).toBeLessThan(types.indexOf('done'));
+    expect(types.at(-1)).toBe('done');
+  });
+
+  it('a proposal-only turn (no text) is not "empty"', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [
+      THINKING_BLOCK,
+      { type: 'tool_use', id: 'tu_p', name: 'propose_itinerary_changes', input: { operations: [{ action: 'remove_stop', stopId: 's1' }] } },
+    ]));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, vi.fn().mockResolvedValue({ proposalId: 'p1', operations: [{ action: 'remove_stop', stopId: 's1' }] }));
+
+    expect(noticesOf(res)).toEqual([]);
+    expect(typesOf(res)).toContain('proposal');
+  });
+
+  it('a normal text turn emits no notice at all', async () => {
+    mockStream.mockReturnValueOnce(makeMockStream(['Hi there'], undefined, [THINKING_BLOCK, { type: 'text', text: 'Hi there' }]));
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    expect(noticesOf(res)).toEqual([]);
+  });
+});
+
+describe('streamCopilotResponse — keep-alive ping (D-30-4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // A stream whose final message waits on a promise the test controls.
+  function makeHeldStream() {
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    const stream = {
+      on() { return stream; },
+      abort() {},
+      finalMessage: () => held,
+    };
+    return { stream, release };
+  }
+
+  const pingsOf = (res) => parseEvents(res).filter((e) => e.type === 'ping');
+
+  it('is 8 s, matching the discovery route keep-alive', () => {
+    expect(COPILOT_PING_INTERVAL_MS).toBe(8000);
+  });
+
+  it('writes a ping every 8 s while the model is silent, not before, and stops after done', async () => {
+    const { stream, release } = makeHeldStream();
+    mockStream.mockReturnValueOnce(stream);
+
+    const res = makeMockRes();
+    const turn = streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    vi.advanceTimersByTime(COPILOT_PING_INTERVAL_MS - 1);
+    expect(pingsOf(res)).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(pingsOf(res)).toHaveLength(1);
+    vi.advanceTimersByTime(COPILOT_PING_INTERVAL_MS * 2);
+    expect(pingsOf(res)).toHaveLength(3);
+    // The keep-alive is the only thing on the wire so far.
+    expect(parseEvents(res).every((e) => e.type === 'ping')).toBe(true);
+
+    release({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } });
+    await turn;
+
+    const pingsAtDone = pingsOf(res).length;
+    expect(parseEvents(res).at(-1).type).toBe('done');
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(COPILOT_PING_INTERVAL_MS * 5);
+    expect(pingsOf(res)).toHaveLength(pingsAtDone);
+  });
+
+  it('clears the interval when the stream errors', async () => {
+    const { stream } = makeHeldStream();
+    stream.finalMessage = () => Promise.reject(new Error('boom'));
+    mockStream.mockReturnValueOnce(stream);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, makeMockRes());
+
+    expect(vi.getTimerCount()).toBe(0);
+    errorSpy.mockRestore();
+  });
+
+  it('clears the interval on the aborted early return too', async () => {
+    const res = makeMockRes();
+    const stream = {
+      on() { return stream; },
+      abort() {},
+      async finalMessage() {
+        res.triggerClose();
+        return { content: [], usage: { input_tokens: 1, output_tokens: 1 } };
+      },
+    };
+    mockStream.mockReturnValueOnce(stream);
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps pinging across a slow query-tool executor between iterations', async () => {
+    let releaseExecutor;
+    const executor = vi.fn(() => new Promise((resolve) => { releaseExecutor = () => resolve({ ok: true }); }));
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'X' }, 'tu_1')]))
+      .mockReturnValueOnce(makeMockStream(['Done'], 'Done'));
+
+    const res = makeMockRes();
+    const turn = streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined, { search_discovery_catalogue: executor });
+    // Let iteration 1 resolve and the executor start.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(executor).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(COPILOT_PING_INTERVAL_MS * 2);
+    expect(pingsOf(res)).toHaveLength(2);
+
+    releaseExecutor();
+    await turn;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('streamCopilotResponse — client abort is not an error (D-30-4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStream.mockReset();
+  });
+
+  // A stream whose finalMessage() fires the res 'close' handler and then REJECTS — what the real
+  // SDK does on abort() (APIUserAbortError). currentMessage is the SDK's partial snapshot.
+  function makeRejectingAbortStream(res, currentMessage) {
+    const stream = {
+      on() { return stream; },
+      abort() {},
+      currentMessage,
+      async finalMessage() {
+        res.triggerClose();
+        throw new Error('Request was aborted.');
+      },
+    };
+    return stream;
+  }
+
+  it('records one client_abort turn with the partial usage, error 0, and writes nothing else', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeRejectingAbortStream(res, {
+      usage: { input_tokens: 800, output_tokens: 12, cache_creation_input_tokens: 300, cache_read_input_tokens: 500 },
+    }));
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const persistTurn = vi.fn();
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, persistTurn, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({
+      model: COPILOT_MODEL,
+      stopReason: 'client_abort',
+      error: 0,
+      proposalOps: 0,
+      inputTokens: 800,
+      outputTokens: 12,
+      cacheWriteTokens: 300,
+      cacheReadTokens: 500,
+      iterations: 1,
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[copilot] client aborted turn'))).toBe(true);
+    expect(persistTurn).not.toHaveBeenCalled();
+    expect(parseEvents(res).filter((e) => e.type === 'error' || e.type === 'done')).toEqual([]);
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('adds the aborted iteration\'s partial usage to the iterations already completed', async () => {
+    const res = makeMockRes();
+    mockStream
+      .mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'X' }, 'tu_1')], undefined, {
+        usage: { input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 40, cache_read_input_tokens: 0 },
+      }))
+      .mockReturnValueOnce(makeRejectingAbortStream(res, {
+        usage: { input_tokens: 7, output_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 40 },
+      }));
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: vi.fn().mockResolvedValue({ ok: true }) }, reportTurnMetrics);
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({
+      stopReason: 'client_abort',
+      error: 0,
+      inputTokens: 107,
+      outputTokens: 13,
+      cacheWriteTokens: 40,
+      cacheReadTokens: 40,
+      iterations: 2,
+      queryCalls: 1,
+    });
+    logSpy.mockRestore();
+  });
+
+  it('records zero usage (not a crash) when the rejected stream has no snapshot yet', async () => {
+    const res = makeMockRes();
+    mockStream.mockReturnValueOnce(makeRejectingAbortStream(res, undefined));
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ stopReason: 'client_abort', error: 0, inputTokens: 0, outputTokens: 0 });
+    logSpy.mockRestore();
+  });
+
+  it('records the abort once when the client drops between iterations, during a query tool', async () => {
+    const res = makeMockRes();
+    const executor = vi.fn(async () => {
+      res.triggerClose();
+      return { ok: true };
+    });
+    mockStream.mockReturnValueOnce(makeMockStream([], undefined, [toolUseBlock('search_discovery_catalogue', { destination: 'X' }, 'tu_1')], undefined, {
+      usage: { input_tokens: 50, output_tokens: 5 },
+    }));
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined,
+      { search_discovery_catalogue: executor }, reportTurnMetrics);
+
+    expect(mockStream).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({
+      stopReason: 'client_abort', error: 0, inputTokens: 50, outputTokens: 5, iterations: 1, queryCalls: 1,
+    });
+    logSpy.mockRestore();
+  });
+
+  it('a genuine error (client still connected) keeps error 1 even when the stream exposes a snapshot', async () => {
+    const stream = {
+      on() { return stream; },
+      abort() {},
+      currentMessage: { usage: { input_tokens: 9, output_tokens: 9 } },
+      async finalMessage() { throw new Error('upstream 529'); },
+    };
+    mockStream.mockReturnValueOnce(stream);
+    const reportTurnMetrics = vi.fn().mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = makeMockRes();
+    await streamCopilotResponse([{ role: 'user', content: 'x' }], {}, res, {}, undefined, {}, reportTurnMetrics);
+
+    expect(reportTurnMetrics).toHaveBeenCalledOnce();
+    expect(reportTurnMetrics.mock.calls[0][0]).toMatchObject({ error: 1, proposalOps: 0, inputTokens: 0, outputTokens: 0 });
+    expect(reportTurnMetrics.mock.calls[0][0].stopReason).not.toBe('client_abort');
+    expect(parseEvents(res).find((e) => e.type === 'error')).toEqual({ type: 'error', message: 'upstream 529' });
+    errorSpy.mockRestore();
   });
 });

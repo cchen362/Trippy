@@ -242,7 +242,35 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 ### W1 — Compatibility hardening (model-agnostic; shippable before any switch)
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-18 — **COMPLETE, not deployed.** Still on the old models: no `*_MODEL` constant, prompt or tool schema changed, and the four W0 sha256 request-body pins pass with their literals untouched. Markers `D-30-1`, `D-30-3` and `D-30-4` are stamped in `claude.js`; `D-30-4` is also stamped in `useCopilot.js` and `CopilotPanel.jsx`.
+
+- **D-30-1.** `MODEL_PROFILES` is keyed by model id (Sonnet 4.6: extraction and co-pilot at 8,192; Haiku 4.5: descriptor 256, discovery 64,000). `profileFor(workload)` replaces W0's `LIVE_PROFILES` and throws on an unknown workload or a model with no profile for it. All four are resolved once at module load, so a bad constant fails at boot. Tests prove Haiku 4.5 profiles carry no `effort`/`thinking` and Sonnet 4.6 profiles carry no `thinking`. The harness's `assertControlIsLive` now compares against `profileFor`; all four controls still match.
+- **D-30-3.** One `classifyStop(message)` → `{ outcome: complete | truncated | refused, stopReason, category }`. `model_context_window_exceeded` counts as truncated. Each path:
+  - Extraction: 502 with traveller-readable copy for a refusal (category included when present) and for a cut-off. Never "no JSON block".
+  - Descriptors: return `null` with a `console.warn` naming the reason, on every null path.
+  - Discovery: always logs `[discover] end destination= stop_reason= category= output_tokens= categories= items= dropped=`. A truncated or refused generation throws before the freshness bump; `discoveryGeneration.js` is unchanged.
+  - Co-pilot: `truncated` / `refused` / `empty` notices, at most one per turn.
+- **D-30-4.** `{type:'ping'}` every `COPILOT_PING_INTERVAL_MS = 8000`. The timer is `unref`'d and cleared in a `finally` around the whole turn.
+  - `useCopilot` turns a notice alone into an assistant row; unknown notice values are ignored.
+  - `CopilotPanel` shows product-voice copy in the existing truncated-notice style, with no empty bubble above a notice-only row: "Reply cut short — ask me to continue." / "I can't help with that one — try asking another way." / "Nothing came through that time — try asking again."
+- **W0 abort finding — fixed.** A client abort is now recorded as `stop_reason = 'client_abort'`, `error = 0`, carrying the usage spent so far, with one plain log line, no stack trace and no `error` event. No migration. This covers all three abort paths: `finalMessage()` rejecting, `finalMessage()` resolving after the drop, and a drop between iterations. **Limit:** for the aborted iteration, input and cache tokens are real (from `message_start`), but `output_tokens` is only what the stream had reported. The API sends the output count in `message_delta`, so a mid-reply abort records ≈1. Nothing is estimated.
+- **SDK (D-30-2): landed at `0.135.0`** (from 0.91.1). `finalMessage()` now carries `stop_details` on streams (`MessageStream.js` copies it on `message_delta`), and `currentMessage` is still exposed. New transitive dependencies: `@opentelemetry/api`, `standardwebhooks`. `npm audit` lists no advisory for the SDK or its new dependencies; every finding predates this change. The W0 recorder still wraps `create` and `stream` on 0.135.0.
+
+**Evidence.**
+- Backend `npm test`: 46 files, 1,025 passed, 6 skipped (the opt-in live file), on SDK 0.135.0. HEAD was 45 files / 982. In two runs under parallel load, one 5 s timeout appeared in `collaboration.test.js`; it passes 14/14 alone and passed in a clean full re-run.
+- Frontend `npm test`: 44 files, 316 tests green. `npm run build` is clean.
+- `LIVE_ANTHROPIC=1` smoke (`backend/tests/live/anthropic.live.test.js`, 6 tests: extraction text+image raw and through `extractBookings`, descriptor raw and through `generatePhotoDescriptor`, co-pilot tools+stream, discovery NDJSON stream): green on 0.91.1 (17 s) and on 0.135.0 (19 s).
+- Browser pass, Playwright, real 375×812 viewport and 1280×860, dedicated W3-verify trip, Sonnet 4.6. A tap on the co-pilot `fetch` recorded every SSE event:
+  - Audit + catalogue-search turn: 12.5 s, one ping, reply unchanged.
+  - Long walkthrough turn: 32.4 s, pings 8,002 / 8,004 / 8,004 ms apart, none after `done`.
+  - Stop mid-turn: metrics row `client_abort`, `error 0`, input 2,475, cache read 4,372.
+  - Notices: `empty` and `refused` rendered from a Playwright-scripted SSE response (no server call) at 375 px. DM Mono, no empty bubble, and the refused notice sits under the partial text.
+- Spend ≈ $0.10: two smoke runs plus three real co-pilot turns.
+
+**Facts corrected or learned:**
+- The browser `fetch` behind the Vite dev proxy can resolve as late as the first body chunk. The client's first ping therefore landed ~7 s after `fetch` resolved, not 8 s. Spacing between pings is the meaningful measure.
+- `useCopilot`'s Stop comment says the server keeps the partial text. It does not: the abort path returns before `persistTurn`, so a stopped reply vanishes on reload (seen in the dev DB). This predates W1 and is left for a follow-up.
+- The live smoke is skipped (not excluded) under `npm test`; it makes zero calls without `LIVE_ANTHROPIC=1`.
 
 **Files.** `backend/src/services/claude.js`, `backend/src/routes/copilot.js` (only if the ping lives in the route rather than the service), `frontend/src/hooks/useCopilot.js`, `frontend/src/components/copilot/CopilotPanel.jsx` (render the new notices next to the existing `truncated` one), `backend/package.json` + lockfile (Q-30-2), `backend/tests/claude.test.js`, `backend/tests/copilot.test.js`, `frontend/src/hooks/useCopilot.test.js` or the panel test, `backend/tests/live/anthropic.live.test.js` (new, opt-in).
 

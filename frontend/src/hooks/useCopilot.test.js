@@ -74,6 +74,74 @@ describe('useCopilot truncation notice (Plan 15 Wave 1)', () => {
     expect(assistantMsg).toMatchObject({ content: 'Cut off mid', notice: 'truncated' });
   });
 
+  it('attaches notice: "refused" to the text that streamed before the refusal', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'text', content: 'I started to answer' });
+      onChunk({ type: 'notice', notice: 'refused' });
+      onChunk({ type: 'done' });
+    });
+
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('something');
+    });
+
+    const assistantMsg = result.current.messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg).toMatchObject({ content: 'I started to answer', notice: 'refused' });
+  });
+
+  it('appends one empty-content assistant row for an "empty" notice with no text or proposal', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'notice', notice: 'empty' });
+      onChunk({ type: 'done' });
+    });
+
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('anything');
+    });
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: '', notice: 'empty' });
+  });
+
+  it('treats keep-alive ping events as harmless', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'ping' });
+      onChunk({ type: 'text', content: 'Hello' });
+      onChunk({ type: 'ping' });
+      onChunk({ type: 'done' });
+    });
+
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('anything');
+    });
+
+    const assistantMsgs = result.current.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0]).toMatchObject({ content: 'Hello', notice: null });
+  });
+
+  it('ignores an unknown notice string: no row when nothing else arrived', async () => {
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'notice', notice: 'something_new' });
+      onChunk({ type: 'done' });
+    });
+
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      await result.current.send('anything');
+    });
+
+    expect(result.current.messages.filter((m) => m.role === 'assistant')).toHaveLength(0);
+  });
+
   it('ignores unknown SSE event types without throwing or affecting the final message', async () => {
     copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
       onChunk({ type: 'text', content: 'Hello' });

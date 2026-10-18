@@ -6,9 +6,10 @@
 // are stripped by toServiceProfile() before a profile reaches a service.
 //
 // "control" is today's production configuration. assertControlIsLive() refuses to run if it ever
-// drifts from LIVE_PROFILES in claude.js, so a control run always measures what production sends.
+// drifts from profileFor(workload) in claude.js (D-30-1: the model-keyed MODEL_PROFILES map), so a
+// control run always measures what production sends.
 
-import { LIVE_PROFILES } from '../../src/services/claude.js';
+import { profileFor } from '../../src/services/claude.js';
 
 const HAIKU_45 = 'claude-haiku-4-5-20251001';
 const HAIKU_55 = 'claude-haiku-5-5';
@@ -63,7 +64,7 @@ export function toServiceProfile(profile) {
 
 export function assertControlIsLive(workload) {
   const control = toServiceProfile(PROFILES[workload].control);
-  const live = LIVE_PROFILES[workload];
+  const live = profileFor(workload);
   if (JSON.stringify(control) !== JSON.stringify(live)) {
     throw new Error(
       `${workload} control profile ${JSON.stringify(control)} no longer matches the live profile ` +
