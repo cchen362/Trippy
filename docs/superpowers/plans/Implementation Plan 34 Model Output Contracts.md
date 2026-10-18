@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **WRITTEN, NOT APPROVED.** No wave has started. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default); the plan itself is still unapproved. Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
+**Status:** 2026-10-19 — **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -641,7 +641,7 @@ Run `git diff --check`, record total spend, and close.
 
 ## 7. Sequencing and rollback summary
 
-- **Order.** Plan 30 Deploy B → (owner approves this plan; Q-34-1 already answered) → W0 → W1 and W2 (sequential in one checkout; either order) → **Deploy** → W3 and W4 (harness-first; switch only on gate) → Deploy if either switched → W6. W5 runs whenever a notice arrives, and its prerequisite for Sonnet 4.6 is Plan 30 W5.
+- **Order.** Plan 30 Deploy B → W0 (plan approved and Q-34-1 answered 2026-10-19) → W1 and W2 (sequential in one checkout; either order) → **Deploy** → W3 and W4 (harness-first; switch only on gate) → Deploy if either switched → W6. W5 runs whenever a notice arrives, and its prerequisite for Sonnet 4.6 is Plan 30 W5.
 - **Shared files.** W1 and W2 both edit `claude.js`, `claude.test.js` and the live smoke, so they never run side by side. Plan 32 and Plan 30 W5 own the co-pilot section of the same files; this plan does not touch it.
 - **Rollback unit.** One wave's commit. No migration anywhere, and no stored-data change (D-34-3).
 - **Standing log checks after deploy.** These are not gates (Plan 30 §7 ruling):
