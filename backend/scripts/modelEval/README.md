@@ -33,6 +33,10 @@ rewrites the two volume/selection lines of the system prompt on the wire, from
 `lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
 actually sent. `claude.js` is never changed to measure a variant.
 
+Co-pilot profiles may carry `promptVariant` (rewrites the one "explain your reasoning" line) and `betas`
+(an `anthropic-beta` header passed as the stream call's options), both harness-only, from
+`lib/copilotPromptVariants.mjs` (Plan 30 W5, Q-30-3). They are installed after the recorder the same way.
+
 After a `DISCOVERY_MODEL` switch, `discoveryRouteCheck.mjs [--destination Tainan] [--country TW]` runs one
 real first generation through `POST /api/trips/:tripId/discover` on a database copy. It prints the SSE
 timeline (categories with the 8 s `thinking` ping), the inserted rows' provenance before and after the
