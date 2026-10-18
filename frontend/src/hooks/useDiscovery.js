@@ -1,4 +1,4 @@
-import { useCallback, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { discoveryApi } from '../services/discoveryApi.js';
 import { canonicalGeoKey } from '../utils/geoIdentity.js';
 import { normalizeName } from '../utils/placeNames.js';
@@ -164,6 +164,20 @@ export function useDiscovery(tripId) {
     abortRefs.current = {};
     cacheRef.current = {};
     forceRender();
+  }, []);
+
+  // Plan 33 M2: an unmounted owner (TripPage) must not keep reading a stream
+  // nobody can see. Aborting only closes this client's connection — the server
+  // still finishes the generation and saves it (F-33-6), and the next mount
+  // joins it. The cache is wiped with the controllers, not left behind: an
+  // aborted entry stays `loading: true` (discover()'s AbortError branch writes
+  // no state), and React StrictMode's dev mount -> cleanup -> mount would then
+  // find that entry and skip the pre-warm for good. Like reset() but without
+  // forceRender, since an unmounting component must never set state.
+  useEffect(() => () => {
+    Object.values(abortRefs.current).forEach((controller) => controller?.abort());
+    abortRefs.current = {};
+    cacheRef.current = {};
   }, []);
 
   return { discover, showMore, getDestination, isAnyLoading, reset };

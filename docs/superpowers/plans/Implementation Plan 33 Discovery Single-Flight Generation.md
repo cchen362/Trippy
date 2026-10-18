@@ -1,6 +1,6 @@
 # Implementation Plan 33 — Discovery Single-Flight Generation
 
-**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below).** M1 (backend): **COMPLETE 2026-10-19, not deployed** (record under "M1 record" below). M2 (frontend): HELD until Plan 32 M2 and the co-pilot "Drafting…" badge have merged. Nothing deployed: M1 ships with Plan 30 Deploy B. Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18), merged as findings in PR #15. No migration.
+**Status:** 2026-10-19 — **APPROVED by the owner (R1–R3 below).** M1 (backend): **COMPLETE 2026-10-19, not deployed** (record under "M1 record" below). M2 (frontend): **COMPLETE 2026-10-19, not deployed** (record under "M2 record" below; started once Plan 32 M2 and the co-pilot "Drafting…" badge had merged, per R3). Nothing deployed: M1 ships with Plan 30 Deploy B, and M2 ships with whichever deploy follows its merge. Written at `a46b38a` from the defect recorded in Plan 30's Deploy A owner QA (Bangkok, 2026-10-18), merged as findings in PR #15. No migration.
 
 ## Owner rulings — 2026-10-19 (do not reopen)
 
@@ -106,6 +106,20 @@ The production log fits this exactly: both requests carried TH (`[discover] dest
 `useDiscovery` aborts its in-flight requests when its owner unmounts, the same `abortRefs` loop `reset()` already uses. This is tidiness, not the fix: after M1, a remounted page joins the running generation whether or not the old stream was closed. It stops a dead page's stream from holding a connection for the rest of the 90 s. Aborting does **not** stop the server's generation (F-33-6).
 
 Known side effect: `api.js` `requestStream` calls `reader.cancel()` in its `finally` without handling the promise, so every abort leaves an unhandled rejection (an AbortError in the console). This was seen on the co-pilot's Stop during Plan 30 D-30-8 QA and left alone there as out of scope. M2 would make it show up on Discovery too, so M2 should fix that one line at the same time rather than add more console noise.
+
+### M2 record — 2026-10-19
+
+- **As built.**
+  - `useDiscovery.js`: an unmount-only effect aborts every in-flight controller and also wipes the cache. An aborted entry would otherwise stay `loading: true` (the AbortError branch writes no state), and StrictMode's dev mount → cleanup → mount would then skip the pre-warm for good.
+  - `api.js` `requestStream`: the `try/finally { reader.cancel() }` is removed, with the reason as a comment. The loop ends only on `done`, when the stream is already closed, or on a rejected `read()`, when the stream is errored and `cancel()` can only reject unhandled. `parseChunk` already catches every `onChunk`/JSON failure, so no other path can leave the stream readable. The `read()` rejection still reaches callers unchanged, with `err.name === 'AbortError'`.
+- **Tests.**
+  - 4 new in `useDiscovery.test.js`: unmount aborts; unmount → remount fires again; a real `StrictMode` pre-warm ends live; idle unmount is a no-op.
+  - 2 new in `api.test.js`: a normal stream still delivers every chunk, including a trailing one; an abort rejects with AbortError and fires no `unhandledRejection`.
+  - 4 of the 6 fail against the old code.
+  - Frontend suite **357 passed**; `npm run build` OK.
+- **Browser QA**, on a dev-DB copy (owner DB untouched) with Playwright, at **375 px and at 1280 px**:
+  - **Discovery unmount.** With a Discovery request held in flight, I opened Discover, then went "← Trips". The request was aborted (`net::ERR_ABORTED`), with 0 unhandled rejections, 0 console errors and 0 page errors. Re-entering the trip and opening Discover loaded Kyoto's 100 places from the real backend.
+  - **Co-pilot Stop**, with a real model call. The partial text stayed, "This reply was stopped. · Remove" appeared, and the Stop button cleared. There were 0 unhandled rejections and 0 console errors; the old code logged an AbortError here on every Stop. The server saved each stopped turn as a `notice = 'stopped'` row.
 
 **What this plan does not do.** It does not lift Discovery state out of `TripPage` into an app-wide store. A store would survive an in-app remount but not a reload or a PWA relaunch, so it would only fix part of the problem, and once M1 is in place it fixes nothing M1 doesn't. No catalogue repair is needed: Bangkok's 206 active rows are correct. The second generation's rows were stamped batch 0 instead of 1, so they skip the `−0.75 · batch` rank penalty (`services/discoveryRank.js`) a sequential run would have given them. That is a small reordering among real places, not worth a data fix.
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { StrictMode, useEffect } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { useDiscovery } from './useDiscovery.js';
 import { discoveryApi } from '../services/discoveryApi.js';
@@ -138,5 +139,83 @@ describe('useDiscovery — country_required decline (W4.5, F-26-26)', () => {
       destination: 'Suzhou',
       suggestedCountryCode: 'MY',
     });
+  });
+});
+
+describe('useDiscovery — unmount (Plan 33 M2)', () => {
+  it('aborts an in-flight discover request when the hook unmounts', () => {
+    let capturedSignal;
+    discoveryApi.discover.mockImplementation((tripId, destination, countryCode, interestTags, onChunk, signal) => {
+      capturedSignal = signal;
+      return new Promise(() => {});
+    });
+
+    const { result, unmount } = renderHook(() => useDiscovery('trip-1'));
+    act(() => {
+      result.current.discover('Testville', 'TV');
+    });
+    expect(capturedSignal.aborted).toBe(false);
+
+    unmount();
+
+    expect(capturedSignal.aborted).toBe(true);
+  });
+
+  it('lets a remounted hook fire discover again for the same key (StrictMode cycle)', () => {
+    const signals = [];
+    discoveryApi.discover.mockImplementation((tripId, destination, countryCode, interestTags, onChunk, signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+
+    // StrictMode in dev: effects run, clean up, run again on the same instance.
+    // The first discover's entry must not survive as a stuck `loading: true`.
+    const first = renderHook(() => useDiscovery('trip-1'));
+    act(() => {
+      first.result.current.discover('Testville', 'TV');
+    });
+    first.unmount();
+
+    const second = renderHook(() => useDiscovery('trip-1'));
+    act(() => {
+      second.result.current.discover('Testville', 'TV');
+    });
+
+    expect(discoveryApi.discover).toHaveBeenCalledTimes(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    expect(second.result.current.getDestination('Testville', 'TV').loading).toBe(true);
+  });
+
+  it('does not stay stuck loading under real StrictMode effect double-invocation', () => {
+    const signals = [];
+    discoveryApi.discover.mockImplementation((tripId, destination, countryCode, interestTags, onChunk, signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+
+    // Mirrors TripPage's pre-warm: discover() from a mount effect. StrictMode
+    // runs effect -> cleanup -> effect on the SAME instance (refs preserved).
+    const { result } = renderHook(
+      () => {
+        const discovery = useDiscovery('trip-1');
+        useEffect(() => {
+          discovery.discover('Testville', 'TV');
+        }, [discovery.discover]);
+        return discovery;
+      },
+      { wrapper: StrictMode },
+    );
+
+    expect(discoveryApi.discover).toHaveBeenCalledTimes(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    expect(result.current.getDestination('Testville', 'TV').loading).toBe(true);
+  });
+
+  it('is a no-op when unmounted while idle', () => {
+    const { unmount } = renderHook(() => useDiscovery('trip-1'));
+    expect(() => unmount()).not.toThrow();
+    expect(discoveryApi.discover).not.toHaveBeenCalled();
   });
 });
