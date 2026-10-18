@@ -11,11 +11,12 @@ vi.mock('../services/copilotApi.js', () => ({
     apply: vi.fn(),
     reject: vi.fn(),
     clear: vi.fn(),
+    removeExchange: vi.fn(),
   },
 }));
 
 vi.mock('../context/AuthContext.jsx', () => ({
-  useAuth: () => ({ user: { display_name: 'Test User' } }),
+  useAuth: () => ({ user: { id: 'user-1', display_name: 'Test User' } }),
 }));
 
 beforeEach(() => {
@@ -69,6 +70,139 @@ describe('useCopilot history normalisation (D-30-8)', () => {
 
     expect(result.current.messages[0].notice).toBe('stopped');
     expect(result.current.messages[1].notice).toBeNull();
+  });
+});
+
+// Plan 32: removing a stopped exchange. The `turn` event is the first event of every stream
+// and names the saved question row (D-32-2).
+describe('useCopilot remove a stopped exchange (Plan 32)', () => {
+  function abortError() {
+    const err = new Error('The operation was aborted.');
+    err.name = 'AbortError';
+    return err;
+  }
+
+  async function sendThenStopWithTurn(result, messageId = 'srv-q1') {
+    copilotApi.send.mockImplementation((_tripId, _text, _context, onChunk, signal) => new Promise((_resolve, reject) => {
+      onChunk({ type: 'turn', messageId });
+      onChunk({ type: 'text', content: 'Half an ans' });
+      signal.addEventListener('abort', () => reject(abortError()));
+    }));
+    let pending;
+    act(() => {
+      pending = result.current.send('Move Day 3 to Osaka');
+    });
+    await waitFor(() => expect(copilotApi.send).toHaveBeenCalled());
+    act(() => {
+      result.current.cancel();
+    });
+    await act(async () => {
+      await pending;
+    });
+  }
+
+  it('gives history rows serverId === id and keeps the asker userId', async () => {
+    copilotApi.history.mockResolvedValue({
+      messages: [
+        { id: 'h1', role: 'user', content: 'Q', createdAt: '2026-01-01', userId: 'user-9' },
+        { id: 'h2', role: 'assistant', content: 'A', createdAt: '2026-01-01', userId: null },
+      ],
+      proposals: [],
+    });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(2));
+
+    expect(result.current.messages[0]).toMatchObject({ serverId: 'h1', userId: 'user-9' });
+    expect(result.current.messages[1]).toMatchObject({ serverId: 'h2', userId: null });
+  });
+
+  it('stamps serverId from the turn event on the live user row, which carries the session user id', async () => {
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'turn', messageId: 'srv-q1' });
+      onChunk({ type: 'done' });
+    });
+    await act(async () => {
+      await result.current.send('hello');
+    });
+
+    expect(result.current.messages[1]).toMatchObject({ role: 'user', serverId: 'srv-q1', userId: 'user-1' });
+  });
+
+  it('leaves serverId null for a turn event without a string messageId', async () => {
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'turn' });
+      onChunk({ type: 'turn', messageId: 42 });
+      onChunk({ type: 'done' });
+    });
+    await act(async () => {
+      await result.current.send('hello');
+    });
+
+    expect(result.current.messages[1].serverId).toBeNull();
+  });
+
+  it('removes the question and its stopped reply after Stop with no reload', async () => {
+    copilotApi.removeExchange.mockResolvedValue({ removed: 2 });
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await sendThenStopWithTurn(result);
+    expect(result.current.messages.map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
+
+    await act(async () => {
+      await result.current.removeExchange('srv-q1');
+    });
+
+    expect(copilotApi.removeExchange).toHaveBeenCalledWith('trip-1', 'srv-q1');
+    expect(result.current.messages.map((m) => m.id)).toEqual(['history-1']);
+  });
+
+  it('restores both rows at their original position and rethrows when the remove fails', async () => {
+    const failure = Object.assign(new Error('This conversation changed — reload and try again.'), { status: 409 });
+    copilotApi.removeExchange.mockRejectedValue(failure);
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await sendThenStopWithTurn(result);
+
+    // A later exchange sits after the stopped one, so position matters.
+    copilotApi.send.mockImplementation(async (_tripId, _text, _context, onChunk) => {
+      onChunk({ type: 'turn', messageId: 'srv-q2' });
+      onChunk({ type: 'text', content: 'Fine' });
+      onChunk({ type: 'done' });
+    });
+    await act(async () => {
+      await result.current.send('second');
+    });
+    const before = result.current.messages.map((m) => m.id);
+    expect(before).toHaveLength(5);
+
+    let caught;
+    await act(async () => {
+      try {
+        await result.current.removeExchange('srv-q1');
+      } catch (err) {
+        caught = err;
+      }
+    });
+
+    expect(caught).toBe(failure);
+    expect(result.current.messages.map((m) => m.id)).toEqual(before);
+  });
+
+  it('still calls the API and rethrows when no local row matches', async () => {
+    const failure = Object.assign(new Error('nope'), { status: 404 });
+    copilotApi.removeExchange.mockRejectedValue(failure);
+    const { result } = renderHook(() => useCopilot('trip-1'));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+    await expect(result.current.removeExchange('unknown')).rejects.toBe(failure);
+    expect(copilotApi.removeExchange).toHaveBeenCalledWith('trip-1', 'unknown');
+    expect(result.current.messages).toHaveLength(1);
   });
 });
 
