@@ -25,6 +25,7 @@ import { discoverDestination } from '../../src/services/claude.js';
 import { countryNameFromCode } from '../../src/utils/countries.js';
 import { assertControlIsLive, getProfile, toServiceProfile } from './profiles.mjs';
 import { installRecorder, recordFixture } from './lib/recorder.mjs';
+import { installPromptVariant } from './lib/discoveryPromptVariants.mjs';
 import {
   EVAL_DATA_DIR, FIXTURES_DIR, buildRecord, filterItems, openRunFile, parseArgs, printProgress, runPool,
 } from './lib/runner.mjs';
@@ -94,7 +95,7 @@ function loadOrCaptureExclusions(db, fixtures) {
 
 // Runs the selected generations and returns the run file path (null for a dry run).
 async function sweep({ args, profile, items, exclusionsById, dryRun }) {
-  console.log(`profile ${args.profile}: ${JSON.stringify(toServiceProfile(profile))}`);
+  console.log(`profile ${args.profile}: ${JSON.stringify(toServiceProfile(profile))}${profile.promptVariant ? ` + prompt variant "${profile.promptVariant}"` : ''}`);
   console.log(`${items.length} generation(s)${dryRun ? ' (dry run, no API call)' : ''}:`);
   for (const { fixture, variant } of items) {
     const exclusion = exclusionsById[fixture.id];
@@ -106,6 +107,8 @@ async function sweep({ args, profile, items, exclusionsById, dryRun }) {
   if (dryRun || !items.length) return null;
 
   installRecorder();
+  // After the recorder, so the run file stores the patched system prompt (W3 second pass).
+  if (profile.promptVariant) installPromptVariant(profile.promptVariant);
   const run = openRunFile('discovery', args.profile);
   console.log(`run file: ${run.path}`);
 
@@ -138,6 +141,7 @@ async function sweep({ args, profile, items, exclusionsById, dryRun }) {
       extra: {
         destination: claudeDestination,
         variant,
+        promptVariant: profile.promptVariant ?? null,
         exclusionCount: exclusions.length,
         exclusionsSha: variant === 'exclusions' ? exclusion.sha256 : null,
         categoryTimes,

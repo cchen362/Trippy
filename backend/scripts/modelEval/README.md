@@ -28,6 +28,11 @@ items once the projected spend for the whole list passes it, and exits with code
 `discovery.mjs` and `copilot.mjs` also take `--dry-run` (set up and count, no API call) and
 `--keep-db` (keep the database copy for inspection).
 
+Discovery profiles may carry a harness-only `promptVariant` (Plan 30 W3 second pass): `discovery.mjs` then
+rewrites the two volume/selection lines of the system prompt on the wire, from
+`lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
+actually sent. `claude.js` is never changed to measure a variant.
+
 `control` is today's production configuration. Every script refuses to run a control pass if
 `profiles.mjs` has drifted from `profileFor(workload)` in `claude.js`.
 

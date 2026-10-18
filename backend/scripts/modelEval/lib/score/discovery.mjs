@@ -37,6 +37,17 @@ function rawStreamedText(record) {
   return blocks.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
 }
 
+// W3: thinking text is empty under the default display "omitted", so thinking tokens are estimated
+// as output minus the text's tokens, the text taken at 0.429 tokens per character — the ratio of
+// the Haiku 5.5 `thinking: disabled` run (alt-disabled-low, 2026-10-18), where output is all text.
+const TEXT_TOKENS_PER_CHAR = 0.429;
+
+function estimatedThinkingTokens(record) {
+  if (!thinkingBlockCount(record)) return 0;
+  const textTokens = Math.round(rawStreamedText(record).length * TEXT_TOKENS_PER_CHAR);
+  return Math.max(0, (record.usage?.output_tokens ?? 0) - textTokens);
+}
+
 function thinkingBlockCount(record) {
   return (record.calls?.[0]?.response?.content ?? []).filter((b) => b.type === 'thinking').length;
 }
@@ -153,6 +164,7 @@ function analyse(record, exclusionSets) {
     colonSurvivors,
     firstCategoryMs,
     thinkingBlocks: thinkingBlockCount(record),
+    thinkingTokens: estimatedThinkingTokens(record),
     costPerItem: outputItems.length ? record.costUsd / outputItems.length : null,
   };
 }
@@ -185,6 +197,7 @@ function summarise(analyses, prefix = '') {
     [label('time to first category ms: median / max')]: `${median(analyses.map((a) => a.firstCategoryMs))} / ${max(analyses.map((a) => a.firstCategoryMs))}`,
     [label('cost per usable item ($): median / worst')]: costs.length ? `${median(costs).toFixed(5)} / ${Math.max(...costs).toFixed(5)}` : '—',
     [label('thinking blocks (total)')]: sum((a) => a.thinkingBlocks),
+    [label('est. thinking tokens: median / max (share of output)')]: `${median(analyses.map((a) => a.thinkingTokens))} / ${max(analyses.map((a) => a.thinkingTokens))} (${(100 * sum((a) => a.thinkingTokens) / Math.max(1, sum((a) => a.record.usage.output_tokens))).toFixed(0)}%)`,
   };
 }
 

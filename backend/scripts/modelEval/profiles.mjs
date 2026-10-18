@@ -2,8 +2,8 @@
 //
 // A profile is what the service functions in src/services/claude.js accept as their optional
 // `profile` argument: { model, maxTokens, thinking?, effort? }. `thinking` is sent verbatim as the
-// request's `thinking` field; `effort` becomes `output_config.effort`. Harness-only keys (`subset`)
-// are stripped by toServiceProfile() before a profile reaches a service.
+// request's `thinking` field; `effort` becomes `output_config.effort`. Harness-only keys (`subset`,
+// `promptVariant`) are stripped by toServiceProfile() before a profile reaches a service.
 //
 // "control" is today's production configuration. assertControlIsLive() refuses to run if it ever
 // drifts from profileFor(workload) in claude.js (D-30-1: the model-keyed MODEL_PROFILES map), so a
@@ -32,6 +32,19 @@ export const PROFILES = {
     primary: { model: HAIKU_55, maxTokens: 96000, effort: 'low' },
     'alt-medium': { model: HAIKU_55, maxTokens: 96000, effort: 'medium' },
     'alt-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' } },
+    // W3 second pass (§4): the frozen prompt failed the gate on volume, so these measure the
+    // volume/selection wording variants in lib/discoveryPromptVariants.mjs. `promptVariant` is
+    // harness-only; discovery.mjs patches the system prompt on the wire, claude.js is unchanged.
+    'v-floor-ranked-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', promptVariant: 'floor-ranked' },
+    'v-floor-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', promptVariant: 'floor' },
+    'v-aim30-exit-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', promptVariant: 'aim30-exit' },
+    'v-floor-ranked-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'floor-ranked' },
+    'v-floor-low-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'floor' },
+    'v-aim30-exit-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'aim30-exit' },
+    // The shared-prompt question: the same variants on the control model (Haiku 4.5, 64,000).
+    '45-floor-ranked': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor-ranked' },
+    '45-floor': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor' },
+    '45-aim30-exit': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'aim30-exit' },
   },
   extraction: {
     control: { model: SONNET_46, maxTokens: 8192 },
@@ -59,9 +72,9 @@ export function getProfile(workload, name) {
   return profile;
 }
 
-// The object a service function receives: no harness-only keys.
+// The object a service function receives: no harness-only keys (`subset`, `promptVariant`).
 export function toServiceProfile(profile) {
-  const { subset, ...serviceProfile } = profile;
+  const { subset, promptVariant, ...serviceProfile } = profile;
   return serviceProfile;
 }
 

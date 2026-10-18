@@ -377,7 +377,7 @@ The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) 
 
 ### W3 — Discovery → Haiku 5.5
 
-**Status:** 2026-10-18 — **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js`, `claude.test.js` and `profiles.mjs` are untouched, so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
+**Status:** 2026-10-18 — **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** **Second pass (§4 prompt comparison, same day, below):** the best candidate is prompt variant A on Haiku 5.5 with `thinking: disabled` + `low`. It passes every §5.3 criterion but one: alias-identical-to-name is 2.4% against control's 2.1%. Under the per-measure reading the first pass used, that is a fail, so nothing was switched. It needs one owner ruling (*W3 second pass → Needs the owner*). `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js` and `claude.test.js` are untouched (the first pass left `profiles.mjs` untouched too; the second pass changed harness files only), so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
 
 **Sweep** (6 destinations × first / with-exclusions, harness, `--concurrency 3`, dev key, prompt frozen; control = the W0 Haiku 4.5 run on disk). Every run's prompt is at most 8,704 tokens (input + cache), far under Haiku 5.5's 100K price threshold. D-30-7 counts were unchanged for the copy and the owner DB on all three candidate runs.
 
@@ -448,6 +448,84 @@ Almost every non-verified item is `weak_match`: control 55, primary 43, disabled
 - Leaving discovery on Haiku 4.5 for now. F-30-13: its retirement floor has passed, so this window is finite.
 
 Deploy A (Q-30-5) was "after W3". W1, the D-30-8 follow-up and W2 are ready on their own, and whether Deploy A goes without W3 is also the owner's call.
+
+#### W3 second pass — prompt variants (§4)
+
+**Status:** 2026-10-18 — **One criterion short of the gate. Nothing switched, nothing deployed.** `claude.js` and `claude.test.js` are untouched, so the W0 discovery sha256 pin still holds. The owner approved this pass with the gate unchanged. §4's precondition holds: the first pass failed on volume, and literal instruction-following and length calibration are named causes in the official prompting guidance.
+
+**Method.** Variants are applied in the harness only. `scripts/modelEval/lib/discoveryPromptVariants.mjs` replaces the two volume/selection lines of `DISCOVER_SYSTEM` on the wire. The wrapper is installed after the recorder, so each run file stores the patched system prompt. It throws unless each original line appears exactly once. Every naming, alias, photoQuery, sceneType and other curation rule is byte-identical. Profiles carry a harness-only `promptVariant` key, which `toServiceProfile` strips. The scorer gained the thinking-token estimate the first pass computed by hand: output minus text × 0.429 tokens per character. Same 6 destinations × first/exclusions, same frozen exclusion lists, `--concurrency 3`, dev key. D-30-7 counts were unchanged for the copy and the owner DB on all five sweeps and the spot check.
+
+**The two original lines:**
+- quality: `- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItFits", do not include it.`
+- volume: `- Aim for 30 items per category. Fewer sharp picks beats padding with mediocre ones — do not force 30 if the city cannot support it.`
+
+**The three variants (exact replacement text; a line not listed is kept):**
+- **A `floor-ranked`:**
+  - quality → `- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.`
+  - volume → `- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places, and say nothing about any shortfall.`
+- **B `floor`:** volume as in A; the quality line is the original. This tells which line drives volume.
+- **C `aim30-exit`:** volume → `- Aim for 30 items per category. Stop short of 30 only when the destination has genuinely run out of places that meet these rules.` The quality line is the original. This tests whether the "fewer sharp picks" sentence alone causes the collapse.
+
+| Metric (n = 12 each) | Control: Haiku 4.5 (W0) | A, 5.5 `low` | B, 5.5 `low` | C, 5.5 `low` | **A, 5.5 `disabled` + `low`** | A on Haiku 4.5, 64,000 |
+|---|---|---|---|---|---|---|
+| `stop_reason` | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 | `end_turn` 12/12 |
+| Categories with items, worst / median | 8 / 8 | 8 / 8 | **7** / 8 | 8 / 8 | 8 / 8 | **7** / 8 |
+| Items per category, median of medians / worst min | 10.75 / 6 | **7.5** / 3 | **7.5** / 0 | **4** / 1 | **11** / 2 | 10 / 0 |
+| Total items median / min (first; excl) | 91 / 69 (76.5; 97.5) | 59 / 40 (60.5; 53) | 60 / 26 (61; 55.5) | 32.5 / 13 (34.5; 19.5) | 88.5 / 23 (91.5; 83) | 78 / 61 (70; 89.5) |
+| Dropped unparseable lines | 0/96 | 0/96 | **2/97** | 0/97 | 0/96 | **14/110** |
+| Editorial prefix (raw) | 0.4% | 0.0% | 0.0% | 0.0% | 0.0% | 1.0% |
+| Alias identical to name (raw) | 2.1% | 1.6% | 0.8% | 1.0% | **2.4%** (24/995 vs 24/1119) | 1.0% |
+| Dash clause (raw) | 1.3% | 0.0% | 0.0% | 0.0% | 0.0% | 5.4% |
+| Description-in-brackets (heuristic, raw) | 5.2% | 0.0% | 0.0% | 0.0% | 0.1% | 9.6% |
+| Exclusions variant: raw items repeating an excluded name | 27.6% | 0.0% | 0.0% | 0.0% | 31.0% | 33.0% |
+| Time to first category, median / max | 20.5 / 33.1 s | **35.9** / 62.4 s | **40.8** / 58.9 s | 23.4 / 35.2 s | 11.6 / 15.1 s | 19.2 / 29.4 s |
+| Total time, median / max | 169 / 313 s | 83 / 103 s | 85 / 113 s | 54 / 103 s | 77 / 93 s | 176 / 217 s |
+| Output tokens median / max (thinking included) | 17,857 / 32,509 | 19,330 / 25,002 | 19,335 / 25,931 | 11,743 / 24,372 | 19,485 / 22,715 | 17,109 / 22,251 |
+| Estimated thinking tokens, median / max (share) | 0 | 5,295 / 11,687 (35%) | 6,292 / 10,108 (34%) | 3,258 / 5,779 (30%) | 0 | 0 |
+| Cost per generation, median | $0.091 | $0.0099 | $0.0103 | $0.0060 | $0.0100 | $0.087 |
+| Cost per usable item, median | $0.00104 | $0.00017 | $0.00017 | $0.00020 | $0.00011 | $0.00109 |
+| Run total | $1.168 | $0.1195 | $0.1210 | $0.0743 | $0.1126 | $1.0615 |
+
+Run files: `data/model-eval/runs/discovery/<profile>/2026-10-18T15-*.jsonl`, profiles `v-floor-ranked-low`, `v-floor-low`, `v-aim30-exit-low`, `v-floor-ranked-disabled-low`, `45-floor-ranked`.
+
+**Reality/location spot check** (`discoverySpotCheck.mjs --profile control,v-floor-ranked-disabled-low`, seed 30, 10 per destination, `BEGIN … ROLLBACK` on a DB copy). Taipei 0/10 vs 0/10, Kuala Lumpur 2 vs 4, Chengdu 0 vs 0, 冲绳 0 vs 0, Ipoh 2 vs 1, Kaohsiung 0 vs 3. **Verified: control 4/60 (7%), candidate 8/60 (13%).** Control reproduced its first-pass sample and its 4/60 exactly. Almost every remaining item is `weak_match` (control 55 plus 1 `no_result`; candidate 52). The process used 656 of 1,000 Nominatim requests and all 50 Google escalations, which ran out partway through. The budget is process-local, as in the first pass.
+
+**Gate (§5.3), applied as the first pass applied it — each name measure against control separately, raw model output:**
+
+| Criterion | A `low` | B `low` | C `low` | **A `disabled` + `low`** |
+|---|---|---|---|---|
+| 8/8 categories wherever control had 8/8 | pass | fail (7/8) | pass | pass (12/12) |
+| Items per category median ≥ 8.6 | fail (7.5) | fail (7.5) | fail (4) | **pass (11)** |
+| Dropped lines ≤ control (0) | pass | fail (2) | pass | pass |
+| `end_turn` on every run | pass | pass | pass | pass |
+| Name-quality defects ≤ control, each measure | pass | pass | pass | **fail: alias = name 2.4% vs 2.1%.** Prefix, dash and bracket are all lower. |
+| Verified share ≥ control | not run | not run | not run | pass (13% vs 7%) |
+| First category ≤ control + 5 s (25.5 s); total ≤ control + 20% (203 s) | fail (35.9 s) | fail (40.8 s) | pass | pass (11.6 s; 77 s) |
+| Cost per usable item ≤ control | pass | pass | pass | pass ($0.00011) |
+
+**What the evidence says, in product terms.** With variant A and thinking off, Haiku 5.5 fills a fresh destination about as fully as today: about 89 places against 91, 8 of 8 categories every time. The first category shows in about 12 s instead of 20 s, and the whole generation takes about 77 s instead of 169 s. The cost per usable place is about a tenth. Twice as many sampled places verify on the first pass (13% vs 7%). The gate's one remaining objection is that slightly more items (24 of 995 against 24 of 1,119) list their own name again as an alias. Production already strips every such alias before anything is stored (`sanitizeGeneratedAliases`), so a traveller can never see one or be affected by one.
+
+**Facts corrected or learned:**
+- **The cause is confirmed, and it is the volume contract, read literally.** An explicit floor is what restores volume. Variant C keeps "aim for 30" and only narrows the exit, and it still yields 4 per category. With adaptive thinking (`low`), the model treats "at least 8" as the target and ignores "10–15": median 7.5 for both A and B, so the quality line's gating wording is not the driver. With thinking off, the same wording lands inside the range (11).
+- **For discovery, `thinking: disabled` is the right Haiku 5.5 setting once the prompt has a floor. §4's primary (`low`) was wrong for this workload.** At `low` the model spends about 35% of its output planning the whole list before the first line (first category 36–41 s). It also lands under the floor.
+- **A shared prompt is not viable.** Variant A on Haiku 4.5 loses a category and drops 14 lines. 13 of those are one Ipoh "show more" that appended a markdown "Curator's Notes" essay after the JSON; the other is a malformed food line. Its dash-clause and description-in-brackets rates rise to 5.4% and 9.6%. If discovery switches, the prompt must be keyed by model through the D-30-1 profile, so a rollback restores the old prompt with the old model.
+- **Haiku 5.5 can split one NDJSON object across two lines.** It happened in variant B (Kaohsiung essentials), and `processLine` dropped the whole category. It happened 1 time in 48 Haiku 5.5 generations this pass, and never in the candidate's 12.
+- **One candidate run ignored the floor.** Kuala Lumpur "show more" (187 exclusions) returned 23 places, 2–3 per category, including generic entries such as "Sauna and Steam Facility (Bukit Bintang)"; control returned 84 there. The gate is on medians, so this does not fail it. But it is the one place in the sweep where the same town shrinks.
+- **The candidate's near-zero bracket rate overstates its name-quality gain (F-27-33).** Read row by row, the wellness category pads with generic non-places in both control and the candidate. The candidate writes them without brackets ("Chengdu Yoga Studio in Taikoo Li", "Ipoh Old Town Shade Benches", "Naminoue Shrine Sea Breeze Sit"), so the heuristic does not flag them. The Q-27-6 padding defect is still there. Moving from "aim for 30" to "10–15, at least 8" does not resolve Q-27-6. Q-27-6 stays the owner's open breadth-vs-quality question.
+- **The alias = name measure is noisy at this sample size.** The same prompt family has measured 1.0% (A on 4.5), 2.1% (control) and 5.1% (Plan 27 W4.3, 5 of 98 items). 24/995 against 24/1,119 is not a distinguishable difference.
+- **§5.3's name-quality line is ambiguous.** It names "editorial prefix *survivors*" (after the backstop) beside raw measures, and compares them to "control's rate" in the singular. The first pass read it as each raw measure separately, and this pass keeps that reading so the gate stays unchanged. Read as one combined raw defect rate, the candidate is 2.5% against control's 7.7%, which passes. Read as survivors after the backstops, both are 0%.
+
+**Spend.** Anthropic **$1.489** (A low $0.120, B $0.121, C $0.074, A disabled $0.113, A on Haiku 4.5 $1.062), under the $2 cap. The spot check made no model call: 656 Nominatim requests and 50 Google escalations, within the process-local budgets.
+
+**Needs the owner — one ruling.** Only the owner may loosen §5.3. Do you accept alias-identical-to-name at 2.4% against 2.1% for this candidate, given that production strips every such alias before storage?
+- **If yes** (recommended — the evidence supports it), the switch is mechanical:
+  - A model-keyed discovery prompt: Haiku 5.5's profile carries variant A's two lines, and Haiku 4.5 keeps today's text.
+  - A `'claude-haiku-5-5'` discovery profile `{ maxTokens: 48000, effort: 'low', thinking: { type: 'disabled' } }` (D-30-6: about 2 × the observed maximum of 22,715).
+  - `DISCOVERY_MODEL = 'claude-haiku-5-5'`, a rewritten 64K comment, a re-captured discovery sha256 pin, and a new pin on the prompt text.
+  - Then the route generation on the DB copy, the `LIVE_ANTHROPIC=1` smoke, and the backend suite.
+- **If no:** stay on Haiku 4.5 (F-30-13: a finite window). Sonnet 5.5 is not indicated: Haiku 5.5 already matches control's volume at about a tenth of the cost, and "accept fewer verified items" is no longer the trade, because the candidate returns as many items with more verified.
+
+Separately, the owner may want to rule on the reading of §5.3's name-quality line for W4–W5.
 
 **Rollback:** nothing to roll back; no production constant changed.
 
