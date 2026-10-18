@@ -616,6 +616,7 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
   - The first request's places were stored but not shown until the reload. The duplicate also spent one of Bangkok's three daily generations (`MAX_GENERATIONS_PER_DESTINATION_PER_DAY`).
   - No discovery file changed in Deploy A (`f2383de..a12f473`).
   - Being investigated in its own session: the double request, probably the `TripPage` pre-warm and the panel sending different cache keys, plus the missing server-side single-flight. That session produces findings first; nothing is fixed here.
+  - **Findings (2026-10-19): Plan 33 — Discovery Single-Flight Generation.** The keys were *not* different: the pre-warm and the panel both send `bangkok|TH` and the client deduplicates them. The second request comes from anything that rebuilds `TripPage` mid-generation (leave the trip and return, reload, PWA relaunch, settings save), and the server has no single-flight, so it starts a second generation. Proposed fix: concurrent requests join the running generation. Awaiting owner approval.
 - **"Show more" yield:** 90 generated, 50 new; the other 40 (44%) repeated stored names, which `insertPlaces` drops. That is above the 31% exclusion-repeat rate W3 measured for this profile. It is one data point, against a 156-name exclusion list, so watch it over the observation window.
 - **Observation window:** 7 days from 2026-10-18, to 2026-10-25. Watch descriptor `null` warnings and the discovery stop reasons.
 
