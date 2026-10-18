@@ -191,6 +191,49 @@ describe('normalizeExtractedBooking', () => {
   });
 });
 
+describe('flight number normalisation', () => {
+  const meta = { artifactId: 'a1', model: 'm', extractedAt: 'now' };
+  const withFlight = (carrierCode, flightNumber) => flightBooking({
+    details: { ...flightBooking().details, carrierCode, flightNumber },
+  });
+
+  it.each([
+    ['KE012', 'KE', '012'],
+    ['KE 012', 'KE', '012'],
+    ['ke-012', 'KE', '012'],
+  ])('strips the airline code from %s when it matches carrierCode', (number, carrier, expected) => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight(carrier, number), meta);
+    expect(detailsJson.carrierCode).toBe('KE');
+    expect(detailsJson.flightNumber).toBe(expected);
+  });
+
+  it('leaves a number-only flight number unchanged', () => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight('KE', '012'), meta);
+    expect(detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: '012' });
+  });
+
+  it('fills a missing carrierCode from the designator', () => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight(null, 'KE012'), meta);
+    expect(detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: '012' });
+  });
+
+  it('leaves a designator for a different airline (codeshare) exactly as extracted', () => {
+    const { detailsJson } = normalizeExtractedBooking(withFlight('KE', 'OZ202'), meta);
+    expect(detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: 'OZ202' });
+  });
+
+  it('only touches flights', () => {
+    const train = flightBooking({ type: 'train', details: { ...flightBooking().details, carrierCode: 'KE', flightNumber: 'KE012' } });
+    expect(normalizeExtractedBooking(train, meta).detailsJson.flightNumber).toBe('KE012');
+  });
+
+  it('is idempotent on confirm (re-normalising its own output)', () => {
+    const once = normalizeExtractedBooking(withFlight('KE', 'KE012'), meta);
+    const twice = normalizeExtractedBooking(once, meta);
+    expect(twice.detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: '012' });
+  });
+});
+
 describe('timezone validation', () => {
   it('passes through a valid IANA timezone', () => {
     const result = normalizeExtractedBooking(flightBooking({ originTz: 'Asia/Shanghai' }), { artifactId: 'a1', model: 'm', extractedAt: 'now' });

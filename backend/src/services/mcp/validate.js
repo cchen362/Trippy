@@ -15,6 +15,7 @@ import {
   normalizeTz,
   findDuplicateConfirmationRef,
   bookingDatePosition,
+  normalizeFlightDetails,
 } from '../importer.js';
 import { resolvePlace } from '../placeResolver.js';
 import { cityFromIata, cityFromAirportString } from '../../utils/airports.js';
@@ -234,7 +235,8 @@ async function validateOneBooking(booking, index, { tripRow, existingBookingRows
     }
   }
 
-  const detailsJson = booking.detailsJson && typeof booking.detailsJson === 'object' ? booking.detailsJson : {};
+  const rawDetailsJson = booking.detailsJson && typeof booking.detailsJson === 'object' ? booking.detailsJson : {};
+  const detailsJson = type === 'flight' ? normalizeFlightDetails(rawDetailsJson) : rawDetailsJson;
 
   // D-28-10: tz omitted (not "invalid" — that's handled above) is informational only.
   const tzGapsToCheck = [];
