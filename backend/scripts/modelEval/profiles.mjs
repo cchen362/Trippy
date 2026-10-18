@@ -3,7 +3,7 @@
 // A profile is what the service functions in src/services/claude.js accept as their optional
 // `profile` argument: { model, maxTokens, thinking?, effort? }. `thinking` is sent verbatim as the
 // request's `thinking` field; `effort` becomes `output_config.effort`. Harness-only keys (`subset`,
-// `promptVariant`) are stripped by toServiceProfile() before a profile reaches a service.
+// `promptVariant`, `betas`) are stripped by toServiceProfile() before a profile reaches a service.
 //
 // "control" is today's production configuration. assertControlIsLive() refuses to run if it ever
 // drifts from profileFor(workload) in claude.js (D-30-1: the model-keyed MODEL_PROFILES map), so a
@@ -74,6 +74,14 @@ export const PROFILES = {
     'alt-medium': { model: SONNET_55, maxTokens: 16000, effort: 'medium' },
     // Thinking-off control for Sonnet 5.5 (F-30-4): between_tools at effort <= high.
     'alt-between-tools': { model: SONNET_55, maxTokens: 16000, effort: 'medium', thinking: { type: 'between_tools' } },
+    // Plan 30 W5 (Q-30-3): remedies for the missing explanation above the change preview, measured
+    // at effort low. `betas` and `promptVariant` are harness-only: copilot.mjs applies them on the
+    // wire (lib/copilotPromptVariants.mjs); claude.js is unchanged.
+    // (a) show the model's progress updates: thinking display 'updates' behind its beta header.
+    'alt-updates-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', thinking: { type: 'adaptive', display: 'updates' }, betas: ['thinking-display-updates-2026-08-18'] },
+    // (c) rewrite the one prompt line that asks for the explanation.
+    'v-reply-text-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', promptVariant: 'reply-text' },
+    'v-reply-text-short-low': { model: SONNET_55, maxTokens: 16000, effort: 'low', promptVariant: 'reply-text-short' },
   },
 };
 
@@ -87,9 +95,9 @@ export function getProfile(workload, name) {
   return profile;
 }
 
-// The object a service function receives: no harness-only keys (`subset`, `promptVariant`).
+// The object a service function receives: no harness-only keys (`subset`, `promptVariant`, `betas`).
 export function toServiceProfile(profile) {
-  const { subset, promptVariant, ...serviceProfile } = profile;
+  const { subset, promptVariant, betas, ...serviceProfile } = profile;
   return serviceProfile;
 }
 
