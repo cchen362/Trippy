@@ -249,7 +249,7 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 ### W1 — Compatibility hardening (model-agnostic; shippable before any switch)
 
-**Status:** 2026-10-18 — **COMPLETE, not deployed.** Still on the old models: no `*_MODEL` constant, prompt or tool schema changed, and the four W0 sha256 request-body pins pass with their literals untouched. Markers `D-30-1`, `D-30-3` and `D-30-4` are stamped in `claude.js`; `D-30-4` is also stamped in `useCopilot.js` and `CopilotPanel.jsx`.
+**Status:** 2026-10-18 — **COMPLETE; DEPLOYED in Deploy A at `a12f473` (2026-10-18).** Still on the old models: no `*_MODEL` constant, prompt or tool schema changed, and the four W0 sha256 request-body pins pass with their literals untouched. Markers `D-30-1`, `D-30-3` and `D-30-4` are stamped in `claude.js`; `D-30-4` is also stamped in `useCopilot.js` and `CopilotPanel.jsx`.
 
 - **D-30-1.** `MODEL_PROFILES` is keyed by model id (Sonnet 4.6: extraction and co-pilot at 8,192; Haiku 4.5: descriptor 256, discovery 64,000). `profileFor(workload)` replaces W0's `LIVE_PROFILES` and throws on an unknown workload or a model with no profile for it. All four are resolved once at module load, so a bad constant fails at boot. Tests prove Haiku 4.5 profiles carry no `effort`/`thinking` and Sonnet 4.6 profiles carry no `thinking`. The harness's `assertControlIsLive` now compares against `profileFor`; all four controls still match.
 - **D-30-3.** One `classifyStop(message)` → `{ outcome: complete | truncated | refused, stopReason, category }`. `model_context_window_exceeded` counts as truncated. Each path:
@@ -293,7 +293,7 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 #### W1 follow-up — a stopped reply is kept (D-30-8)
 
-**Status:** 2026-10-18 — **COMPLETE, not deployed.** Owner-approved after a findings note. Migration **036** (`copilot_messages.notice`) ships with the next deploy that carries this commit.
+**Status:** 2026-10-18 — **COMPLETE; DEPLOYED in Deploy A at `a12f473` (2026-10-18); migration 036 applied in production at 16:00:33 UTC.** Owner-approved after a findings note. Migration **036** (`copilot_messages.notice`) ships with the next deploy that carries this commit.
 
 - **The bug.** When the traveller pressed Stop, the reply vanished on reload. The next turn's model context then held two user messages in a row, so the API merged the stopped question into the new one.
   - It regressed in Plan 11 W2 (`a661e25`). That change moved the assistant-row save into `persistTurn`, which runs on the success path only. The client comment that said otherwise was true when it was written (`44e3dc5`).
@@ -326,7 +326,7 @@ In the co-pilot copy, `discovery_generation_daily` reads 24 both before and afte
 
 ### W2 — Photo descriptors → Haiku 5.5
 
-**Status:** 2026-10-18 — **COMPLETE, not deployed.** `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5'`, profile `{ maxTokens: 1024, effort: 'low' }` (the primary candidate won outright). Discovery, extraction and the co-pilot are untouched; the other three W0 sha256 request-body pins pass with their literals unchanged. Haiku 4.5's descriptor row (`{ maxTokens: 256 }`) stays in `MODEL_PROFILES`, and a test pins that it does.
+**Status:** 2026-10-18 — **COMPLETE; DEPLOYED in Deploy A at `a12f473` (2026-10-18).** `PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5'`, profile `{ maxTokens: 1024, effort: 'low' }` (the primary candidate won outright). Discovery, extraction and the co-pilot are untouched; the other three W0 sha256 request-body pins pass with their literals unchanged. Haiku 4.5's descriptor row (`{ maxTokens: 256 }`) stays in `MODEL_PROFILES`, and a test pins that it does.
 
 **Sweep** (50-place fixture set, harness, sequential, dev key, 2026-10-18; control = W0 Haiku 4.5 run, now named `baseline-45` on disk):
 
@@ -377,7 +377,7 @@ The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) 
 
 ### W3 — Discovery → Haiku 5.5
 
-**Status:** 2026-10-18 — **COMPLETE, not deployed.** `DISCOVERY_MODEL = 'claude-haiku-5-5'`, with profile `{ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' }` and Haiku 5.5's own prompt selection rules (variant A), keyed by model. The owner accepted the one §5.3 shortfall on 2026-10-18. Details are under *W3 switch* below; the first-pass and second-pass records follow unchanged. **First-pass record:** **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** **Second pass (§4 prompt comparison, same day, below):** the best candidate is prompt variant A on Haiku 5.5 with `thinking: disabled` + `low`. It passes every §5.3 criterion but one: alias-identical-to-name is 2.4% against control's 2.1%. Under the per-measure reading the first pass used, that is a fail, so nothing was switched. It needs one owner ruling (*W3 second pass → Needs the owner*). `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js` and `claude.test.js` are untouched (the first pass left `profiles.mjs` untouched too; the second pass changed harness files only), so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
+**Status:** 2026-10-18 — **COMPLETE; DEPLOYED in Deploy A at `a12f473` (2026-10-18).** `DISCOVERY_MODEL = 'claude-haiku-5-5'`, with profile `{ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' }` and Haiku 5.5's own prompt selection rules (variant A), keyed by model. The owner accepted the one §5.3 shortfall on 2026-10-18. Details are under *W3 switch* below; the first-pass and second-pass records follow unchanged. **First-pass record:** **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** **Second pass (§4 prompt comparison, same day, below):** the best candidate is prompt variant A on Haiku 5.5 with `thinking: disabled` + `low`. It passes every §5.3 criterion but one: alias-identical-to-name is 2.4% against control's 2.1%. Under the per-measure reading the first pass used, that is a fail, so nothing was switched. It needs one owner ruling (*W3 second pass → Needs the owner*). `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js` and `claude.test.js` are untouched (the first pass left `profiles.mjs` untouched too; the second pass changed harness files only), so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
 
 **Sweep** (6 destinations × first / with-exclusions, harness, `--concurrency 3`, dev key, prompt frozen; control = the W0 Haiku 4.5 run on disk). Every run's prompt is at most 8,704 tokens (input + cache), far under Haiku 5.5's 100K price threshold. D-30-7 counts were unchanged for the copy and the owner DB on all three candidate runs.
 
@@ -529,7 +529,7 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 
 #### W3 switch — owner-accepted, discovery on Haiku 5.5
 
-**Status:** 2026-10-18 — **COMPLETE, not deployed.**
+**Status:** 2026-10-18 — **COMPLETE; DEPLOYED in Deploy A at `a12f473` (2026-10-18).**
 
 **Owner ruling, recorded as §5.3 requires.** The owner "accepts alias-identical-to-name 2.4% vs 2.1% for variant A on Haiku 5.5 thinking disabled + low". This is the only loosening; every other §5.3 criterion passed as measured above.
 
@@ -567,10 +567,10 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 **Spend.** The route run and the live smoke cost a few cents at Haiku 5.5 rates. The W3 total is about $1.73 of Anthropic spend: $0.213 for the first pass, $1.489 for the second pass, and about $0.03 for the switch checks.
 
 **Not done here (W6 owns them).**
-- `docs/ENGINEERING.md:121` still says discovery and photo descriptors use Haiku 4.5. That has been stale for descriptors since W2, and is now stale for discovery too.
+- `docs/ENGINEERING.md:121` (the models bullet) was corrected at Deploy A, because it had become a false statement about production. W6 still adds the effort/cache line.
 - The `docs/DECISIONS.md` rows.
 
-**Deploy A** (W1, D-30-8, W2, W3, and Plan 31 W1, which is held for it) is ready. Deploying is the owner's call; nothing has been deployed.
+**Deploy A** went out on 2026-10-18 at `a12f473`. The record is under *Deploy A record* below.
 
 **Rollback:** set `DISCOVERY_MODEL` back to `'claude-haiku-4-5-20251001'`. That one line restores Haiku 4.5's settings and its original prompt; the rollback test pins the resulting body to the W0 hash. A stale refresh on the old model fills in any partial batch (Plan 26 semantics). No catalogue rebuild and no mass refresh (`docs/DECISIONS.md`).
 
@@ -581,6 +581,34 @@ Separately, the owner may want to rule on the reading of §5.3's name-quality li
 **Gate.** §5.3 discovery. **Rollback:** revert the constant; a stale-refresh on the old model complements any partial batch (Plan 26 semantics). No catalogue rebuild, no mass refresh, before or after (`docs/DECISIONS.md`).
 
 **Deploy A (default, Q-30-5):** after W3 — `/deploy` with the standard pre-deploy backup; post-deploy: one descriptor on a new manual stop, one discovery "show more" on a fresh destination the owner chooses, container logs show `[discover]` lines with `stop_reason=end_turn` and 8 categories. Observation window: 7 days (one catalogue freshness cycle); watch descriptor `null` warnings and discovery stop reasons.
+
+**Deploy A record (2026-10-18; owner-requested).** Production now runs `a12f473`.
+
+- **What shipped:** W1, D-30-8, W2, W3 and Plan 31 W1, plus the docs for Plans 30, 31 and 32.
+- **How it reached `main`.** `main` now carries a "Protect Default" ruleset, created 2026-10-02: changes must arrive through a pull request, with 0 approvals required. The direct push every earlier deploy used was refused. The release went through [PR #2](https://github.com/cchen362/Trippy/pull/2) as a merge commit, so every commit hash is unchanged. The repository has no CI checks.
+- **Pre-flight:**
+  - Backend: 45 files, 1,055 tests passed.
+  - Frontend: 44 files, 327 tests passed; `vite build` OK.
+  - `LIVE_ANTHROPIC=1` smoke: 6/6.
+  - No secrets and no tracked data in the diff (`f2383de..a12f473`, 63 files).
+  - The only dependency change is `@anthropic-ai/sdk` ^0.135.0. No new environment variable.
+- **Backup:** `~/Trippy/backups/trippy-pre-plan30A-20261018-095916.db`, `integrity_check` ok, 12.9 MB. Migrations through 035; 5 trips, 105 stops, 3,014 discovery places, 22 co-pilot messages. Nightly backup cron confirmed active.
+- **Server:**
+  - `git pull --ff-only` moved `f2383de` to `a12f473`; then `docker compose up -d --build`.
+  - Startup log: `Migration applied: 036_copilot_message_notice.sql`, then `Trippy backend running … [production]`. No error lines.
+  - `/api/health` returns `{"status":"ok","db":"connected","mcp":{"enabled":true,…}}`.
+- **Live state after the deploy:**
+  - `_migrations` max is 36. `copilot_messages.notice` exists, and 0 rows are set (no backfill, as designed).
+  - Counts are identical to the backup.
+  - The container's `claude.js` has `DISCOVERY_MODEL` and `PHOTO_DESCRIPTOR_MODEL` set to `'claude-haiku-5-5'`; the SDK is 0.135.0.
+- **Production key, checked in place of the Appendix A step 2 Console check:**
+  - One minimal request per shape, run from inside the container with the production key. Discovery's `thinking: disabled` + `low` and the descriptor's `low` both returned `end_turn`, so no workspace allow-list blocks `claude-haiku-5-5`.
+  - The rate-limit tier cannot be read from the server. It stays an owner Console item, and is low-risk at this volume.
+- **Not yet verified (owner click-script, given in the session report):**
+  - a new manual stop gets a photo (descriptor + Plan 31 W1);
+  - "show more" or a first open on a fresh destination streams 8 categories, after which the agent reads the `[discover] end … stop_reason=end_turn categories=8` line from the container log;
+  - a stopped co-pilot reply survives a reload, labelled "This reply was stopped." (D-30-8).
+- **Observation window:** 7 days from 2026-10-18.
 
 ### W4 — Extraction → Sonnet 5.5
 

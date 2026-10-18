@@ -84,7 +84,7 @@ Always use parameterised queries (never string interpolation). Run migrations in
 - `backend/src/index.js` is the composition root: middleware, `/api` route mounting, production static serving, SPA fallback, and the terminal error handler.
 - Route files validate HTTP input and access; service files own business logic and orchestration; `db/` owns the connection, ordered migrations, and catalogue queries.
 - Access is enforced through `requireAuth`, `requireAdmin`, `requireTripAccess`, and the day/stop/booking ownership helpers. Never trust an object id without proving it belongs to a trip the current user can access.
-- SQLite uses WAL mode, foreign keys, and ordered `.sql`/`.js` migrations recorded in **`_migrations`** (the table is `_migrations`, not `schema_migrations` — in dev and production alike). Both extensions run through the same ordered runner: several tables (`discovery_destinations`/`discovery_places` in 016, `trip_scopes` in 023) are created by `.js` migrations, so never conclude a table is missing by grepping `*.sql` alone. The next migration must be additive and use the next free sequence number — **037**. 036 (`copilot_messages.notice`, Plan 30 D-30-8) is applied in dev and ships with the next production deploy; 035 (`mcp_upload_tickets`, Plan 28 W3) is the highest applied in production (Deploy B, 2026-09-16).
+- SQLite uses WAL mode, foreign keys, and ordered `.sql`/`.js` migrations recorded in **`_migrations`** (the table is `_migrations`, not `schema_migrations` — in dev and production alike). Both extensions run through the same ordered runner: several tables (`discovery_destinations`/`discovery_places` in 016, `trip_scopes` in 023) are created by `.js` migrations, so never conclude a table is missing by grepping `*.sql` alone. The next migration must be additive and use the next free sequence number — **037**. 036 (`copilot_messages.notice`, Plan 30 D-30-8) is the highest applied, in dev and in production (Plan 30 Deploy A, 2026-10-18).
 - External I/O is asynchronous, but database writes remain synchronous through `better-sqlite3`. Multi-row or proposal-apply changes that must succeed together belong in a transaction.
 
 ### Hosted MCP (Plan 28)
@@ -118,7 +118,7 @@ Always use parameterised queries (never string interpolation). Run migrations in
 
 - Discovery is a normalized shared catalogue: `discovery_destinations` + `discovery_places`, keyed by canonical geography identity and country code. The old `discovery_cache` and `global_discovery_cache` tables are retired.
 - Catalogue freshness is seven days. Fresh rows are reused; stale rows are refreshed and merged; explicit "show more" appends. Generation is daily-budgeted and place verification is resolver-budgeted.
-- Discovery generation and photo descriptors use Haiku 4.5. Booking extraction and the co-pilot use Sonnet 4.6 unless a later, explicit model migration changes the live constants.
+- Discovery generation and photo descriptors use Haiku 5.5 (Plan 30 W2/W3). Discovery runs with thinking disabled, and its prompt's volume rules are keyed by model (`DISCOVERY_SELECTION_RULES`, D-30-1). Booking extraction and the co-pilot use Sonnet 4.6 unless a later, explicit model migration changes the live constants. Read `MODEL_PROFILES` in `claude.js` for the live settings.
 - Stop photos persist the Unsplash photo id, URL, attribution, query, scene type, and source. Displaying/selecting Unsplash results must retain attribution and download tracking. A stored photo is reused rather than fetched on every render.
 
 ### Co-Pilot
