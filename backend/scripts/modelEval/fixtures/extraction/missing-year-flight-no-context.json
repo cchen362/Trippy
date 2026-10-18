@@ -1,0 +1,44 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "missing-year-flight-no-context",
+  "description": "Flight with weekday-less \"14 Dec\" and no year, no trip context: nearest future occurrence relative to the run date.",
+  "tags": [
+    "missing-year",
+    "flight",
+    "no-context",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Air France e-ticket receipt\nReservation: WN3XQ9\n\nAF 1024   CDG Paris Charles de Gaulle -> LIS Lisbon\n14 Dec   Departs 07:10   Arrives 08:55 (local time)\nPassenger: DEMO/TRAVELLER MR"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "@NEXT:12-14T07:10",
+        "endDatetime": "@NEXT:12-14T08:55",
+        "origin": [
+          "CDG",
+          "Paris"
+        ],
+        "destination": [
+          "LIS",
+          "Lisbon"
+        ],
+        "confirmationRef": "WN3XQ9",
+        "details": {
+          "originCity": "Paris",
+          "destinationCity": "Lisbon",
+          "originCountryCode": "FR",
+          "destinationCountryCode": "PT",
+          "flightNumber": "AF1024"
+        }
+      }
+    ]
+  }
+}

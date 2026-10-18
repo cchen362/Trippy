@@ -1,0 +1,40 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-10-08",
+    "endDate": "2027-10-14",
+    "destinations": [
+      {
+        "city": "Istanbul",
+        "countryCode": "TR"
+      }
+    ]
+  },
+  "id": "hotel-dates-only-explicit-year",
+  "description": "Hotel with full dates and no times at all: defaults T15:00 / T11:00 and an assumption (rule 4); country code inferred for the hotel (rule 5a).",
+  "tags": [
+    "hotel",
+    "default-times"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Your stay at Karakoy Residence is confirmed\nCheck-in: Friday, 8 October 2027\nCheck-out: Monday, 11 October 2027\nGuests: 2 adults\nReservation number: HRX-4471902\nAddress: Kemankes Caddesi 33, Karakoy, Istanbul"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-10-08T15:00",
+        "endDatetime": "2027-10-11T11:00",
+        "confirmationRef": "HRX-4471902",
+        "details": {
+          "city": "Istanbul",
+          "countryCode": "TR"
+        }
+      }
+    ]
+  }
+}

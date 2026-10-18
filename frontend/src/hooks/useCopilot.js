@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { copilotApi } from '../services/copilotApi.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
+// The notices the server sends over SSE (D-30-4). Anything else is ignored,
+// exactly as unknown event types are. 'stopped' and 'interrupted' (D-30-8) are
+// deliberately absent: the server never writes them to the stream — Stop kills the
+// socket and an error ends the turn with {type:'error'} — so the client stamps them
+// itself, at the two places below, and an SSE event claiming either is not trusted.
+const COPILOT_NOTICES = new Set(['truncated', 'refused', 'empty']);
+
 function normalizeProposal(p) {
   return {
     id: p.id,
@@ -17,6 +24,7 @@ function normalizeMessage(message) {
   return {
     ...message,
     context: message.context ?? null,
+    notice: message.notice ?? null,
   };
 }
 
@@ -69,6 +77,34 @@ export function useCopilot(tripId) {
     let terminated = false;
     let proposalPayload = null;
     let noticeFlag = null;
+
+    const appendAssistantRow = ({ content, notice }) => {
+      const id = crypto.randomUUID();
+      setMessages(prev => [...prev, {
+        id,
+        role: 'assistant',
+        content,
+        createdAt: new Date().toISOString(),
+        notice,
+      }]);
+      return id;
+    };
+
+    // The turn finished server-side: its text, notice and (if any) proposal become one row.
+    const commitTurn = (notice) => {
+      const assistantId = appendAssistantRow({ content: fullText, notice });
+      if (proposalPayload) {
+        setProposals(prev => [...prev, normalizeProposal({
+          id: proposalPayload.proposalId,
+          messageId: assistantId,
+          operations: proposalPayload.operations,
+          warnings: proposalPayload.warnings,
+          status: proposalPayload.status || 'pending',
+          statusReason: proposalPayload.statusReason ?? null,
+        })]);
+      }
+    };
+
     try {
       await copilotApi.send(tripId, text, context, (chunk) => {
         if (chunk.type === 'text') {
@@ -76,57 +112,38 @@ export function useCopilot(tripId) {
           setStreamingText(fullText);
         } else if (chunk.type === 'proposal') {
           proposalPayload = chunk;
-        } else if (chunk.type === 'notice' && chunk.notice === 'truncated') {
-          noticeFlag = 'truncated';
+        } else if (chunk.type === 'notice' && COPILOT_NOTICES.has(chunk.notice)) {
+          noticeFlag = chunk.notice;
         } else if (chunk.type === 'tool') {
           setActiveTool(chunk.state === 'started' ? chunk.tool : null);
         } else if (chunk.type === 'error') {
           terminated = true;
           setError(new Error(chunk.message));
-          if (fullText) {
-            setMessages(prev => [...prev, {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: fullText,
-              createdAt: new Date().toISOString(),
-            }]);
-          }
+          // D-30-8 (Plan 30): a provider error mid-turn keeps its partial text, labelled
+          // 'interrupted' — even with no text yet, as the server saves the row either way.
+          appendAssistantRow({ content: fullText, notice: 'interrupted' });
         } else if (chunk.type === 'done' && !terminated) {
           terminated = true;
-          if (fullText || proposalPayload) {
-            const assistantId = crypto.randomUUID();
-            setMessages(prev => [...prev, {
-              id: assistantId,
-              role: 'assistant',
-              content: fullText,
-              createdAt: new Date().toISOString(),
-              notice: noticeFlag,
-            }]);
-            if (proposalPayload) {
-              setProposals(prev => [...prev, normalizeProposal({
-                id: proposalPayload.proposalId,
-                messageId: assistantId,
-                operations: proposalPayload.operations,
-                warnings: proposalPayload.warnings,
-                status: proposalPayload.status || 'pending',
-                statusReason: proposalPayload.statusReason ?? null,
-              })]);
-            }
-          }
+          // D-30-4: a turn is never silent — a notice alone earns an assistant row.
+          if (fullText || proposalPayload || noticeFlag) commitTurn(noticeFlag);
         }
       }, controller.signal);
     } catch (err) {
       if (err.name !== 'AbortError') {
         setError(err);
-      } else if (!terminated && fullText) {
-        // Client-initiated Stop: the server still persists whatever text it had
-        // accumulated, so keep the same partial text locally to match history on reload.
-        setMessages(prev => [...prev, {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: fullText,
-          createdAt: new Date().toISOString(),
-        }]);
+      } else if (!terminated) {
+        terminated = true;
+        if (proposalPayload) {
+          // The server finished and saved the turn normally in the sliver between its
+          // proposal event and `done`; Stop arrived too late to change that, so it is
+          // not labelled 'stopped'.
+          commitTurn(noticeFlag);
+        } else {
+          // D-30-8 (Plan 30): the server saves exactly one assistant row for a stopped
+          // turn — the partial text, even if empty — labelled 'stopped'. Mirror it here
+          // so the live thread matches what a reload will show.
+          appendAssistantRow({ content: fullText, notice: 'stopped' });
+        }
       }
     } finally {
       setStreaming(false);

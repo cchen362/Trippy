@@ -129,6 +129,65 @@ describe('CopilotPanel truncation notice (Plan 15 Wave 1)', () => {
     expect(screen.getByText('Reply cut short — ask me to continue.')).toBeInTheDocument();
   });
 
+  it.each([
+    ['refused', "I can't help with that one — try asking another way."],
+    ['empty', 'Nothing came through that time — try asking again.'],
+    ['stopped', 'This reply was stopped.'],
+    ['interrupted', 'This reply was interrupted — ask again.'],
+  ])('renders the %s notice copy', (notice, copy) => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{
+          id: 'm1',
+          role: 'assistant',
+          content: 'Partial text',
+          createdAt: new Date().toISOString(),
+          notice,
+        }],
+      }),
+    });
+
+    expect(screen.getByText(copy)).toBeInTheDocument();
+    expect(screen.getByText('Partial text')).toBeInTheDocument();
+  });
+
+  it('renders the notice without an empty bubble when the row has no content', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{ id: 'm1', role: 'assistant', content: '', createdAt: new Date().toISOString(), notice: 'empty' }],
+      }),
+    });
+
+    const notice = screen.getByText('Nothing came through that time — try asking again.');
+    expect(notice).toBeInTheDocument();
+    // The notice's wrapper holds only the notice: no sibling bubble precedes it.
+    expect(notice.parentElement.children).toHaveLength(1);
+  });
+
+  it('renders a stopped row that has no text as the notice alone, with no empty bubble', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{ id: 'm1', role: 'assistant', content: '', createdAt: new Date().toISOString(), notice: 'stopped' }],
+      }),
+    });
+
+    const notice = screen.getByText('This reply was stopped.');
+    expect(notice).toBeInTheDocument();
+    expect(notice.parentElement.children).toHaveLength(1);
+    expect(document.body.querySelector('div[style*="border-radius: 2px 12px 12px 12px"]')).toBeNull();
+  });
+
+  it('still renders the bubble for an empty-content row with no notice (proposal-only turn)', () => {
+    renderPanel({
+      copilot: makeCopilot({
+        messages: [{ id: 'm1', role: 'assistant', content: '', createdAt: new Date().toISOString() }],
+      }),
+    });
+
+    expect(screen.queryByText('Start from your trip')).not.toBeInTheDocument();
+    expect(document.body.querySelector('div[style*="border-radius: 2px 12px 12px 12px"]')).not.toBeNull();
+  });
+
   it('does not render the notice for a message without a notice field', () => {
     renderPanel({
       copilot: makeCopilot({

@@ -91,8 +91,9 @@ describe('migrations', () => {
     // 028 (copilot_proposals), 029 (copilot message context), 030
     // (copilot_turn_metrics), 031 (expenses), 032
     // (discovery_verification_attempts), 033 (integration_tokens), 034
-    // (mcp_drafts), and 035 (mcp_upload_tickets).
-    expect(count.c).toBe(35);
+    // (mcp_drafts), 035 (mcp_upload_tickets), and 036
+    // (copilot_message_notice).
+    expect(count.c).toBe(36);
   });
 
   it('adds nullable co-pilot message context storage', () => {

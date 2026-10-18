@@ -1,0 +1,28 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-04-01",
+    "endDate": "2027-04-14",
+    "destinations": [
+      {
+        "city": "Tokyo",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "id": "non-travel-dinner-invite",
+  "description": "A dinner-party invitation with a date, time and address: not travel (rule 6), no booking may be fabricated.",
+  "tags": [
+    "non-travel"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Hi all!\n\nDinner at ours on Saturday 17 April at 7:30pm. 14 Elm Grove, Bristol.\nBring a bottle if you like. I am doing a big pot of chilli, veggie option too.\nLet me know by Thursday if you can come.\n\nSam"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": false,
+    "bookings": []
+  }
+}

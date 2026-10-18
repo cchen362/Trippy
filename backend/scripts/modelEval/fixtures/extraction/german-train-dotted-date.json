@@ -1,0 +1,44 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-08-20",
+    "endDate": "2027-08-26",
+    "destinations": [
+      {
+        "city": "Munich",
+        "countryCode": "DE"
+      }
+    ]
+  },
+  "id": "german-train-dotted-date",
+  "description": "Deutsche Bahn booking in German with a dotted two-digit-year date (21.08.27); München and Hauptbahnhof must come back as English city names (rule 5).",
+  "tags": [
+    "train",
+    "non-english",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Ihre Buchungsbestätigung\nAuftragsnummer: 7GH2KP\n\nHinfahrt am Sa, 21.08.27\nBerlin Hbf  ab 08:00\nMünchen Hbf  an 12:05\nICE 1005\n2. Klasse, Wagen 25, Platz 61 (Fenster)"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "train",
+        "startDatetime": "2027-08-21T08:00",
+        "endDatetime": "2027-08-21T12:05",
+        "confirmationRef": "7GH2KP",
+        "details": {
+          "originCity": "Berlin",
+          "destinationCity": "Munich",
+          "originCountryCode": "DE",
+          "destinationCountryCode": "DE",
+          "trainNumber": "ICE1005"
+        }
+      }
+    ]
+  }
+}

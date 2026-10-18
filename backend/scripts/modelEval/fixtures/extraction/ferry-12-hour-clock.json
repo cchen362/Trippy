@@ -1,0 +1,48 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-08-10",
+    "endDate": "2027-08-18",
+    "destinations": [
+      {
+        "city": "Santorini",
+        "countryCode": "GR"
+      }
+    ]
+  },
+  "id": "ferry-12-hour-clock",
+  "description": "Greek ferry ticket with a 12-hour clock, ordinal date and a vessel name instead of a number: type ferry, times converted to 24-hour.",
+  "tags": [
+    "ferry"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Blue Star Ferries e-ticket\nBooking ref: BS-20884417\nVessel: Blue Star Delos\nPiraeus -> Santorini (Thira)\nThursday, August 12th 2027\nDeparts 7:25 AM    Arrives 1:15 PM\nEconomy seat, 2 adults"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "ferry",
+        "startDatetime": "2027-08-12T07:25",
+        "endDatetime": "2027-08-12T13:15",
+        "origin": [
+          "Piraeus"
+        ],
+        "destination": [
+          "Santorini",
+          "Thira"
+        ],
+        "confirmationRef": "BS-20884417",
+        "details": {
+          "originCity": "Piraeus",
+          "destinationCity": "Santorini",
+          "originCountryCode": "GR",
+          "destinationCountryCode": "GR"
+        }
+      }
+    ]
+  }
+}

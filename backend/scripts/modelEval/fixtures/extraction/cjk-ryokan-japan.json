@@ -1,0 +1,46 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-11-06",
+    "endDate": "2027-11-14",
+    "destinations": [
+      {
+        "city": "Kyoto",
+        "countryCode": "JP"
+      },
+      {
+        "city": "Osaka",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "id": "cjk-ryokan-japan",
+  "description": "Japanese ryokan confirmation written in Japanese: check-in/out times are given, so no default-time rule; English city, local name preserved in details.localName.",
+  "tags": [
+    "cjk",
+    "hotel",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "ご予約確認書\n宿泊施設：旅館 山水荘\n所在地：京都市東山区清水三丁目\nチェックイン：2027年11月8日 15:00\nチェックアウト：2027年11月10日 10:00\nご宿泊：2泊（2名様・和室）\n予約番号：KY-88213\nご来館をお待ちしております。"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-10T10:00",
+        "confirmationRef": "KY-88213",
+        "details": {
+          "city": "Kyoto",
+          "countryCode": "JP",
+          "localName": "山水荘"
+        }
+      }
+    ]
+  }
+}

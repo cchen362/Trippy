@@ -17,6 +17,8 @@ function mapPhoto(photo) {
     id: photo.id,
     url: photo.urls?.regular || photo.urls?.full || '',
     alt: photo.alt_description || photo.description || '',
+    altDescription: photo.alt_description || '',
+    description: photo.description || '',
     photographer: photo.user?.name || '',
     photographerUrl: buildReferralUrl(photo.user?.links?.html || ''),
     unsplashUrl: buildReferralUrl(photo.links?.html || ''),
@@ -107,27 +109,58 @@ function significantTokens(query, city, country) {
   return tokenize(query).filter((token) => !excluded.has(token));
 }
 
+// Plan 31 D-31-2: whole-word, plural-tolerant match over alt_description + description + tags (Plan 10 W2.1 specified description; search results carry no tags in practice).
 function passesGate(photo, sigTokens) {
   if (sigTokens.length === 0) return true;
-  const haystack = `${photo.alt || ''} ${(photo.tags || []).join(' ')}`.toLowerCase();
-  return sigTokens.some((token) => haystack.includes(token));
+  const words = new Set(
+    tokenize(`${photo.altDescription || ''} ${photo.description || ''} ${(photo.tags || []).join(' ')}`),
+  );
+  return sigTokens.some((token) => {
+    if (words.has(token) || words.has(`${token}s`) || words.has(`${token}es`)) return true;
+    if (token.endsWith('es') && words.has(token.slice(0, -2))) return true;
+    return token.endsWith('s') && words.has(token.slice(0, -1));
+  });
+}
+
+// First unused, gate-passing photo in Unsplash relevance order, or null.
+function firstQualifying(pool, exclude, sigTokens) {
+  for (const photo of pool) {
+    if (exclude.has(photo.id)) continue;
+    if (!passesGate(photo, sigTokens)) continue;
+    return photo;
+  }
+  return null;
 }
 
 // Replaces the old index-hashing pickPhoto (dayIndex*7 + stopSeed) that picked an
-// arbitrary result out of relevance order — that was the bug (Plan 10 Wave 2). Results
-// from searchPhotos are already Unsplash-relevance-ordered; selectPhoto walks that order
-// and returns the first result that is both unused within the trip (excludeIds) and
-// relevant to the query (passesGate), falling back to a broader, gate-free search when
-// nothing in the primary pool qualifies.
+// arbitrary result out of relevance order — that was the bug (Plan 10 Wave 2). Order:
+//   1. Primary search of the full query; the first result that is unused within the
+//      trip (excludeIds) and relevant (passesGate) wins.
+//   2. Only if the primary search returned ZERO results: retry with the first 4 words,
+//      then the first 3 words of the query (each skipped unless strictly shorter than
+//      the last query sent), re-deriving the gate tokens from the shortened query.
+//   3. Otherwise a broader, gate-free scene fallback. Primary results that all fail the
+//      gate go straight here, with no retry.
+// Plan 31 D-31-1: zero-result retry with a shortened query; reopens Plan 10 D2's tier count (owner-approved 2026-10-18).
 export async function selectPhoto({ query, sceneType, country, city, excludeIds = [] }) {
   const exclude = new Set(excludeIds);
   const sigTokens = significantTokens(query, city, country);
 
   const primary = await searchPhotos(query);
-  for (const photo of primary) {
-    if (exclude.has(photo.id)) continue;
-    if (!passesGate(photo, sigTokens)) continue;
-    return photo;
+  const hit = firstQualifying(primary, exclude, sigTokens);
+  if (hit) return hit;
+
+  if (primary.length === 0) {
+    const words = query.trim().split(/\s+/);
+    let lastSentWords = words.length;
+    for (const retryWords of [4, 3]) {
+      if (retryWords >= lastSentWords) continue;
+      const retryQuery = words.slice(0, retryWords).join(' ');
+      lastSentWords = retryWords;
+      const retried = await searchPhotos(retryQuery);
+      const retryHit = firstQualifying(retried, exclude, significantTokens(retryQuery, city, country));
+      if (retryHit) return retryHit;
+    }
   }
 
   let fallbackQuery;

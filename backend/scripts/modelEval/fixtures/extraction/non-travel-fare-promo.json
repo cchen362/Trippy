@@ -1,0 +1,20 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "non-travel-fare-promo",
+  "description": "A flight-deal marketing email with routes, prices and a sale end date but no booking: nothing extractable, so isTravelRelated false (rule 6).",
+  "tags": [
+    "non-travel",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "SKYDEALS WEEKLY - Fares you will love!\n\nLondon to Tokyo from GBP 489 return\nNew York to Lisbon from USD 329 one-way\nSydney to Bali from AUD 219 one-way\n\nBook by 31 August to lock in these prices. Seats are limited and fares may change.\nSearch now on skydeals.example - no booking has been made on your account."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": false,
+    "bookings": []
+  }
+}

@@ -1,0 +1,345 @@
+{
+  "_doc": "Plan 30 §5.2 co-pilot scenarios: exactly 20, run against the seeded trips in trips.json (trip A = Shanghai to Hangzhou, trip B = Taipei to Kaohsiung). messages are the conversation the model sees, ending in the traveller's final turn; stops and days are referred to by name and day number, never by id. `view` (optional, on a message) makes the script prefix the same '[Viewing: ...]' line routes/copilot.js contextLine() writes for a stored message context. `longThread: N` makes the script prepend N deterministic filler messages (alternating user/assistant, generated from templates in copilot.mjs) before `messages`. expect.tools is the ordered list of tool names the turn should use, including 'propose_itinerary_changes' when it proposes; toolsMode 'exact' needs the executed sequence to equal it, 'includes' needs it to appear as an ordered subsequence. Optional expect fields: forbidTools (names that must not appear), healthDayNumber (check_trip_health must be scoped to that day), searchCategory (a search must carry that category), timeAllowed (the traveller asked for a clock time, so a non-null time is not a fabrication). catalogueState, when present, is the state a search for that destination returns in the seeded copy — the setup makes shanghai, hangzhou and taipei fresh and kaohsiung generation_capped (and nothing is ever 'generating': that state would fire a real background generation, which D-30-7 forbids, so it cannot be exercised by this harness).",
+  "scenarios": [
+    {
+      "id": "plain-train-details",
+      "trip": "A",
+      "description": "Plain factual question answerable from the itinerary alone",
+      "messages": [
+        { "role": "user", "content": "What time does our train to Hangzhou leave, and which day is it?" }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Answers from the itinerary: day 4 (13 April), 10:30, Shanghai Hongqiao to Hangzhou East, booking G7311. No tool call, no proposal."
+      }
+    },
+    {
+      "id": "plain-day-three-booked",
+      "trip": "B",
+      "description": "Plain question about what is booked and planned on one day",
+      "messages": [
+        { "role": "user", "content": "What have we got booked for day 3, and is anything else planned that day?" }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Day 3 is the Taipei to Zuoying high-speed rail at 09:30 (booking-linked) plus Pier-2 Art Center, untimed. No tool call, no proposal."
+      }
+    },
+    {
+      "id": "audit-whole-trip",
+      "trip": "A",
+      "description": "Whole-trip audit through check_trip_health",
+      "messages": [
+        { "role": "user", "content": "Can you audit my whole trip and tell me what's missing or contradictory?" }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": ["check_trip_health"],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Calls check_trip_health once, leads with the warnings (no hotel for the night of 13 April, two stops both at 14:00 on day 3), mentions unresolved locations at most lightly, and offers fixes without proposing yet."
+      }
+    },
+    {
+      "id": "audit-day-three",
+      "trip": "A",
+      "description": "Day-scoped audit while viewing day 3",
+      "messages": [
+        { "role": "user", "content": "Does this day look okay? Anything clashing?", "view": { "tab": "plan", "day": 3 } }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": ["check_trip_health"],
+        "toolsMode": "exact",
+        "healthDayNumber": 3,
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Scopes check_trip_health to day 3's dayId and reports the 14:00 clash between the Propaganda Poster Art Centre and the pottery workshop. Does not invent further concerns."
+      }
+    },
+    {
+      "id": "grounded-add-local-dinner",
+      "trip": "A",
+      "description": "Grounded add of a food stop in a fresh destination",
+      "messages": [
+        { "role": "user", "content": "We'd love one proper local dinner on our second night in Shanghai that isn't a tourist trap. Pick the one you think is best and add it to day 2 for me, no need to ask me first." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "catalogueState": "fresh",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Searches Shanghai (food), explains the pick in prose, then proposes one add_stop on day 2 carrying that result's placeId, time null, type food."
+      }
+    },
+    {
+      "id": "grounded-add-nature-category",
+      "trip": "A",
+      "description": "Category-filtered grounded ask",
+      "messages": [
+        { "role": "user", "content": "Day 5 in Hangzhou needs a quiet outdoors break between the temple and the tea village. Something in nature, please. Pick the best one you find and add it, no need to ask me first." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "searchCategory": "nature",
+        "catalogueState": "fresh",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Searches Hangzhou with category nature, proposes one add_stop on day 5 with the placeId from the result and no clock time."
+      }
+    },
+    {
+      "id": "grounded-add-night-market",
+      "trip": "B",
+      "description": "Grounded add of a late-night food stop",
+      "messages": [
+        { "role": "user", "content": "Add a different late-night street food spot to day 1 in Taipei for after Elephant Mountain. Not Shilin, we have that already. Pick one and add it, no need to ask me first." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "catalogueState": "fresh",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Searches Taipei, avoids Shilin Night Market, proposes one add_stop on day 1 with a placeId from the result and time null."
+      }
+    },
+    {
+      "id": "booking-refusal-hotel",
+      "trip": "A",
+      "description": "Booking-linked refusal: move the hotel stop",
+      "messages": [
+        { "role": "user", "content": "Move my Peninsula check-in to day 2, we're arriving a day later than planned." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "includes",
+        "forbidTools": ["propose_itinerary_changes"],
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Explains warmly that the hotel is a booking and has to be changed in Logistics. No proposal."
+      }
+    },
+    {
+      "id": "booking-refusal-train-retime",
+      "trip": "A",
+      "description": "Booking-linked refusal: retime the train",
+      "messages": [
+        { "role": "user", "content": "The G7311 to Hangzhou is too early for us. Change it to leave at 14:00 instead of 10:30." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "includes",
+        "forbidTools": ["propose_itinerary_changes"],
+        "timeAllowed": true,
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Explains the train is tied to a real booking and is managed in Logistics. No proposal, no move of the train stop."
+      }
+    },
+    {
+      "id": "out-of-scope-suzhou",
+      "trip": "A",
+      "description": "Destination that is not on the trip",
+      "messages": [
+        { "role": "user", "content": "Suggest a great dinner spot in Suzhou and add it to day 3, we're thinking of a day trip." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "includes",
+        "forbidTools": ["propose_itinerary_changes"],
+        "catalogueState": "out_of_scope",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Declines warmly and suggests adding Suzhou to the trip first. The system prompt says not to call the search tool for an off-trip place; if it does call it the result is out_of_scope. Must not name a Suzhou restaurant from its own knowledge."
+      }
+    },
+    {
+      "id": "generation-capped-kaohsiung",
+      "trip": "B",
+      "description": "Destination whose daily generation budget is spent",
+      "messages": [
+        { "role": "user", "content": "What else is worth doing in Kaohsiung that we haven't planned yet? Just ideas for now, don't change anything." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": ["search_discovery_catalogue"],
+        "toolsMode": "includes",
+        "forbidTools": ["propose_itinerary_changes"],
+        "catalogueState": "generation_capped",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Searches Kaohsiung, gets generation_capped with the stored places, says plainly that this destination's suggestions were already refreshed the maximum number of times today, and works only with the returned places."
+      }
+    },
+    {
+      "id": "multi-search-near-cap",
+      "trip": "A",
+      "description": "Many categories across both cities, pressing the five-search cap",
+      "messages": [
+        { "role": "user", "content": "I want picks across the board: a food spot, a nature spot, a nightlife spot and a culture spot in Shanghai, and the same four in Hangzhou. Add all eight to sensible days." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "search_discovery_catalogue", "search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "catalogueState": "fresh",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Runs several searches (at most five execute; further calls get the budget notice), then answers with what it has. Every add_stop carries a placeId from a result. Hard-stop path (nothing but over-cap calls twice) must not trigger."
+      }
+    },
+    {
+      "id": "remove-pottery",
+      "trip": "A",
+      "description": "Remove a non-booking stop",
+      "messages": [
+        { "role": "user", "content": "Remove the pottery workshop on day 3, we've decided to skip it." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["propose_itinerary_changes"],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "One remove_stop for the pottery workshop's real stopId. May mention the note it carries (booked by phone) in prose."
+      }
+    },
+    {
+      "id": "move-lingyin",
+      "trip": "A",
+      "description": "Move a non-booking stop to another day",
+      "messages": [
+        { "role": "user", "content": "Move Lingyin Temple from day 5 to day 4, we'd rather do it right after we arrive in Hangzhou." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["propose_itinerary_changes"],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "One move_stop for Lingyin Temple's stopId with toDayId equal to day 4's real id, a position after the train stop, no invented time."
+      }
+    },
+    {
+      "id": "update-palace-museum",
+      "trip": "B",
+      "description": "Update duration and note on a non-booking stop",
+      "messages": [
+        { "role": "user", "content": "On day 2, make the National Palace Museum visit about 4 hours and add a note to buy tickets online first." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["propose_itinerary_changes"],
+        "toolsMode": "exact",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "One update_stop for the museum's stopId with fields duration (~4h) and note; the 10:00 time is left alone."
+      }
+    },
+    {
+      "id": "timing-fit-in-museum",
+      "trip": "A",
+      "description": "Timing rule: fit something in without a clock time",
+      "messages": [
+        { "role": "user", "content": "Can you fit a visit to the Shanghai Museum into day 2 somewhere? No particular time." }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Searches Shanghai for the museum, proposes an add_stop on day 2 with time null and the placeId from the result. If the catalogue has no such place it says so honestly instead of inventing one (then proposes false is acceptable). Never invents an HH:MM."
+      }
+    },
+    {
+      "id": "stale-apply-handoff",
+      "trip": "A",
+      "description": "History where an earlier proposal went stale and the traveller asks again",
+      "messages": [
+        { "role": "user", "content": "Can you move dinner on day 1 to 8pm instead of 7:30?" },
+        { "role": "assistant", "content": "Of course. I've put together one change that moves Dinner at Din Tai Fung Xintiandi to 20:00. Have a look at the preview and apply it when you're happy with it." },
+        { "role": "user", "content": "It says the trip changed since this suggestion was made, and to ask again to get a fresh one. Can you redo that dinner change for me?" }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["propose_itinerary_changes"],
+        "toolsMode": "exact",
+        "timeAllowed": true,
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Produces a fresh update_stop for the Din Tai Fung dinner with time 20:00 using the current stopId, with a short explanation first. Does not argue about why the earlier one went stale."
+      }
+    },
+    {
+      "id": "abort-mid-turn",
+      "trip": "A",
+      "description": "Client drops the connection after the first streamed text",
+      "abortAfterFirstText": true,
+      "messages": [
+        { "role": "user", "content": "Walk me through a really detailed day-by-day plan for the whole trip, with your reasoning for each day." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "includes",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "On the first text delta the harness destroys the response and emits close. The service must stop quietly: no proposal, no done event written after the drop, no unhandled rejection, no hang."
+      }
+    },
+    {
+      "id": "long-thread-window",
+      "trip": "B",
+      "description": "Long conversation near the 50-message window",
+      "longThread": 46,
+      "messages": [
+        { "role": "user", "content": "Okay, last thing. Does day 4 look too light? If so, suggest one thing but don't add it yet." }
+      ],
+      "expect": {
+        "proposes": false,
+        "tools": [],
+        "toolsMode": "includes",
+        "forbidTools": ["propose_itinerary_changes"],
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": false,
+        "notes": "Answers the final question from the current itinerary (day 4 is the Lotus Pond only) without being derailed by the 46 filler messages. If it names a concrete new place it searched Kaohsiung first (capped state relayed)."
+      }
+    },
+    {
+      "id": "mixed-language-night-market",
+      "trip": "B",
+      "description": "Mixed Chinese and English request",
+      "messages": [
+        { "role": "user", "content": "帮我在 Taipei 第二天晚上加一个有名的 night market 小吃，不要太贵的，你挑最好的一个直接加进去就行" }
+      ],
+      "expect": {
+        "proposes": true,
+        "tools": ["search_discovery_catalogue", "propose_itinerary_changes"],
+        "toolsMode": "includes",
+        "catalogueState": "fresh",
+        "mustNotTargetBookingLinked": true,
+        "groundedAdds": true,
+        "notes": "Searches Taipei, replies in the traveller's register (Chinese or mixed), proposes one add_stop on day 2 with a placeId from the result and time null."
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-05-01",
+    "endDate": "2027-05-08",
+    "destinations": [
+      {
+        "city": "Chengdu",
+        "countryCode": "CN"
+      },
+      {
+        "city": "Chongqing",
+        "countryCode": "CN"
+      }
+    ]
+  },
+  "id": "cjk-high-speed-train",
+  "description": "Chinese 12306-style ticket: station names and passenger labels in Chinese; city fields must be English exonyms, local script kept out of them (rule 5).",
+  "tags": [
+    "cjk",
+    "train",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "【12306】订票成功\n订单号：EA71234567\n乘车日期：2027年05月03日\nG8501次  成都东站 09:12开 → 重庆西站 10:41到\n席别：二等座  车厢：06车  座位号：11C\n请凭本人有效身份证件原件进站乘车。"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "bookings": [
+      {
+        "type": "train",
+        "startDatetime": "2027-05-03T09:12",
+        "endDatetime": "2027-05-03T10:41",
+        "confirmationRef": "EA71234567",
+        "details": {
+          "originCity": "Chengdu",
+          "destinationCity": "Chongqing",
+          "originCountryCode": "CN",
+          "destinationCountryCode": "CN",
+          "trainNumber": "G8501"
+        }
+      }
+    ]
+  }
+}
