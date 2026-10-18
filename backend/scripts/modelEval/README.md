@@ -33,6 +33,12 @@ rewrites the two volume/selection lines of the system prompt on the wire, from
 `lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
 actually sent. `claude.js` is never changed to measure a variant.
 
+After a `DISCOVERY_MODEL` switch, `discoveryRouteCheck.mjs [--destination Tainan] [--country TW]` runs one
+real first generation through `POST /api/trips/:tripId/discover` on a database copy. It prints the SSE
+timeline (categories with the 8 s `thinking` ping), the inserted rows' provenance before and after the
+verification drain, and the resolver budgets. Then it deletes the copy and checks that the owner
+database's counts did not move.
+
 `control` is today's production configuration. Every script refuses to run a control pass if
 `profiles.mjs` has drifted from `profileFor(workload)` in `claude.js`.
 

@@ -26,6 +26,7 @@ const {
   extractBookings, discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType,
   normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases,
   MODEL_PROFILES, profileFor, requestSettings, classifyStop, COPILOT_PING_INTERVAL_MS,
+  DISCOVERY_SELECTION_RULES, discoverySystemPrompt,
   EXTRACTION_MODEL, PHOTO_DESCRIPTOR_MODEL, COPILOT_MODEL, DISCOVERY_MODEL,
 } = await import('../src/services/claude.js');
 
@@ -210,7 +211,7 @@ describe('discoverDestination — NDJSON streaming', () => {
     vi.clearAllMocks();
   });
 
-  it('calls messages.stream with haiku model, 64000 max_tokens, and destination in user message', async () => {
+  it('calls messages.stream with Haiku 5.5, thinking disabled at effort low, 48000 max_tokens, and destination in user message', async () => {
     const chunks = ndjsonChunks(FOUR_HEALTHY_CATEGORIES);
     mockStream.mockReturnValue(makeMockStream(chunks));
 
@@ -218,11 +219,12 @@ describe('discoverDestination — NDJSON streaming', () => {
 
     expect(mockStream).toHaveBeenCalledOnce();
     const call = mockStream.mock.calls[0][0];
-    expect(call.model).toBe('claude-haiku-4-5-20251001');
-    // Haiku 4.5's streaming output ceiling — raised from 16000, which
-    // truncated the tail of every real generation (production incident:
-    // categories systematically missing past the truncation point).
-    expect(call.max_tokens).toBe(64000);
+    expect(call.model).toBe('claude-haiku-5-5');
+    // Plan 30 W3 / D-30-6: about 2x the largest measured generation (22,715 output tokens).
+    expect(call.max_tokens).toBe(48000);
+    expect(call.thinking).toEqual({ type: 'disabled' });
+    expect(call.output_config).toEqual({ effort: 'low' });
+    expect(call.system).toBe(discoverySystemPrompt('claude-haiku-5-5'));
     expect(call.messages[0].content).toContain('kyoto');
   });
 
@@ -1288,11 +1290,20 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
   it('discoverDestination', async () => {
     const body = await runDiscovery();
+    // Plan 30 W3: the second deliberate move off the W0 pin — Haiku 5.5, thinking disabled at
+    // effort 'low', with Haiku 5.5's discovery selection rules (the sha256 below was re-captured
+    // for this body).
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'thinking', 'output_config', 'system', 'messages']);
+    expect(body.model).toBe('claude-haiku-5-5');
+    expect(body.max_tokens).toBe(48000);
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(sha256(body)).toBe('4feadef79f9f7b407c58f264aacc3c7e898184a6e130682918677e43d4a18a1e');
+  });
+
+  it('discoverDestination rolled back to Haiku 4.5 sends the exact W0 body (Plan 30 W3 rollback)', async () => {
+    const body = await runDiscovery({ model: 'claude-haiku-4-5-20251001', ...MODEL_PROFILES['claude-haiku-4-5-20251001'].discovery });
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
-    expect(body.model).toBe('claude-haiku-4-5-20251001');
-    expect(body.max_tokens).toBe(64000);
-    expect(body).not.toHaveProperty('thinking');
-    expect(body).not.toHaveProperty('output_config');
     expect(sha256(body)).toBe('0c8c2727661fb86d990849536a00b62414dccc13d64e91d65c35ec8d083bcbc6');
   });
 
@@ -1368,13 +1379,15 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(profileFor('extraction')).toEqual({ model: EXTRACTION_MODEL, maxTokens: 8192 });
     expect(profileFor('copilot')).toEqual({ model: COPILOT_MODEL, maxTokens: 8192 });
     expect(profileFor('descriptor')).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, maxTokens: 1024, effort: 'low' });
-    expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 64000 });
-    for (const workload of ['extraction', 'copilot', 'discovery']) {
+    expect(profileFor('discovery')).toEqual({ model: DISCOVERY_MODEL, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' });
+    for (const workload of ['extraction', 'copilot']) {
       expect(Object.keys(profileFor(workload))).toEqual(['model', 'maxTokens']);
     }
     // Plan 30 W2: Haiku 5.5 runs adaptive thinking unless told otherwise, so its descriptor
     // profile carries an effort; no thinking field (low effort did not think in the sweep).
     expect(Object.keys(profileFor('descriptor'))).toEqual(['model', 'maxTokens', 'effort']);
+    // Plan 30 W3: discovery turns thinking off explicitly (key order is what the harness compares).
+    expect(Object.keys(profileFor('discovery'))).toEqual(['model', 'maxTokens', 'thinking', 'effort']);
   });
 
   it('never gives Haiku 4.5 an effort or thinking field (it rejects output_config.effort)', () => {
@@ -1395,12 +1408,18 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(MODEL_PROFILES['claude-haiku-5-5'].descriptor).toEqual({ maxTokens: 1024, effort: 'low' });
   });
 
-  it('the live profiles feed requestSettings without thinking, and with output_config only for the descriptor', () => {
-    for (const workload of ['extraction', 'copilot', 'discovery']) {
+  it('keeps the Haiku 4.5 discovery row, so a one-line constant revert restores a compatible body (Plan 30 W3 rollback)', () => {
+    expect(MODEL_PROFILES['claude-haiku-4-5-20251001'].discovery).toEqual({ maxTokens: 64000 });
+    expect(MODEL_PROFILES['claude-haiku-5-5'].discovery).toEqual({ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' });
+  });
+
+  it('the live profiles feed requestSettings: no thinking or output_config for the Sonnet workloads', () => {
+    for (const workload of ['extraction', 'copilot']) {
       const fields = requestSettings(profileFor(workload));
       expect(Object.keys(fields)).toEqual(['model', 'max_tokens']);
     }
     expect(Object.keys(requestSettings(profileFor('descriptor')))).toEqual(['model', 'max_tokens', 'output_config']);
+    expect(Object.keys(requestSettings(profileFor('discovery')))).toEqual(['model', 'max_tokens', 'thinking', 'output_config']);
   });
 
   it('throws a clear error for an unknown workload', () => {
@@ -1411,6 +1430,48 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(Object.isFrozen(MODEL_PROFILES)).toBe(true);
     expect(Object.isFrozen(MODEL_PROFILES['claude-sonnet-4-6'])).toBe(true);
     expect(Object.isFrozen(MODEL_PROFILES['claude-sonnet-4-6'].extraction)).toBe(true);
+  });
+});
+
+// Plan 30 W3 second pass — the discovery prompt's volume/selection rules are keyed by model.
+// The prompt-text sha256 literals pin each model's full prompt, so an edit to either is deliberate.
+describe('discovery prompt keyed by model (D-30-1, Plan 30 W3)', () => {
+  const sha256Text = (text) => createHash('sha256').update(text).digest('hex');
+
+  it('pins each model\'s discovery prompt text', () => {
+    // Haiku 4.5: byte-identical to the DISCOVER_SYSTEM constant before W3.
+    expect(sha256Text(discoverySystemPrompt('claude-haiku-4-5-20251001'))).toBe('34c3742fbd01638a66e1e9ba9a2d35c13c5270004407a5abb099bdff495c362e');
+    // Haiku 5.5: the measured W3 second-pass variant A.
+    expect(sha256Text(discoverySystemPrompt('claude-haiku-5-5'))).toBe('b851c503f3e9ff456e26ac742c0cf3875b6ed8d68e8d96ec714b152098f814d9');
+  });
+
+  it('differs between models only in the two selection lines', () => {
+    const p45 = discoverySystemPrompt('claude-haiku-4-5-20251001');
+    const p55 = discoverySystemPrompt('claude-haiku-5-5');
+    const r45 = DISCOVERY_SELECTION_RULES['claude-haiku-4-5-20251001'];
+    const r55 = DISCOVERY_SELECTION_RULES['claude-haiku-5-5'];
+    expect(p55).not.toBe(p45);
+    expect(p55.replace(r55.quality, () => r45.quality).replace(r55.volume, () => r45.volume)).toBe(p45);
+  });
+
+  it('every model with a discovery profile has selection rules, and the map is frozen', () => {
+    for (const [model, workloads] of Object.entries(MODEL_PROFILES)) {
+      if (workloads.discovery) expect(() => discoverySystemPrompt(model)).not.toThrow();
+    }
+    expect(Object.isFrozen(DISCOVERY_SELECTION_RULES)).toBe(true);
+    expect(Object.isFrozen(DISCOVERY_SELECTION_RULES['claude-haiku-5-5'])).toBe(true);
+  });
+
+  it('sends the rolled-back model its own prompt, and refuses a model with no rules', async () => {
+    mockStream.mockReset();
+    mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
+    await discoverDestination('kyoto', [], undefined, { model: 'claude-haiku-4-5-20251001', maxTokens: 64000 });
+    expect(mockStream.mock.calls[0][0].system).toBe(discoverySystemPrompt('claude-haiku-4-5-20251001'));
+
+    mockStream.mockReset();
+    await expect(discoverDestination('kyoto', [], undefined, { model: 'claude-sonnet-4-6', maxTokens: 1000 }))
+      .rejects.toThrow(/no discovery selection rules for model "claude-sonnet-4-6"/);
+    expect(mockStream).not.toHaveBeenCalled();
   });
 });
 

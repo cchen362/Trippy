@@ -28,10 +28,18 @@ export const PROFILES = {
     'alt-medium': { model: HAIKU_55, maxTokens: 1024, effort: 'medium', subset: 15 },
   },
   discovery: {
-    control: { model: HAIKU_45, maxTokens: 64000 },
-    primary: { model: HAIKU_55, maxTokens: 96000, effort: 'low' },
-    'alt-medium': { model: HAIKU_55, maxTokens: 96000, effort: 'medium' },
-    'alt-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' } },
+    // W3 flipped DISCOVERY_MODEL: control is now Haiku 5.5 with thinking disabled at effort low and
+    // the model-keyed prompt rules (claude.js DISCOVERY_SELECTION_RULES) — the measured
+    // 'v-floor-ranked-disabled-low' with its measured allowance. 'baseline-45' is the W0 control
+    // under its old name, runnable for a re-measure, never asserted against the live profile. The
+    // run files under runs/discovery/control/ dated 2026-10-18T12-* are that W0 Haiku 4.5 control.
+    control: { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' },
+    'baseline-45': { model: HAIKU_45, maxTokens: 64000 },
+    // The W3 first-pass candidates measured the frozen prompt; promptVariant 'original' keeps them
+    // on it now that Haiku 5.5's live rules are variant A.
+    primary: { model: HAIKU_55, maxTokens: 96000, effort: 'low', promptVariant: 'original' },
+    'alt-medium': { model: HAIKU_55, maxTokens: 96000, effort: 'medium', promptVariant: 'original' },
+    'alt-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'original' },
     // W3 second pass (§4): the frozen prompt failed the gate on volume, so these measure the
     // volume/selection wording variants in lib/discoveryPromptVariants.mjs. `promptVariant` is
     // harness-only; discovery.mjs patches the system prompt on the wire, claude.js is unchanged.

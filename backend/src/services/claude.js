@@ -20,7 +20,9 @@ export const PHOTO_DESCRIPTOR_MODEL = 'claude-haiku-5-5';
 
 export const COPILOT_MODEL = 'claude-sonnet-4-6';
 
-export const DISCOVERY_MODEL = 'claude-haiku-4-5-20251001';
+// Plan 30 W3: Haiku 5.5 with thinking disabled, and the prompt's volume rules keyed by model
+// (DISCOVERY_SELECTION_RULES). Reverting this constant restores Haiku 4.5's settings and prompt.
+export const DISCOVERY_MODEL = 'claude-haiku-5-5';
 
 // D-30-1 (Plan 30): request settings are keyed by MODEL, never by workload alone — reverting a
 // workload's *_MODEL constant automatically restores that model's compatible parameters.
@@ -44,15 +46,24 @@ export const MODEL_PROFILES = Object.freeze({
     // largest output seen at any effort, and a cut-off still degrades to the Plan 10 D3 null
     // fallback (resolvedName + city), so the allowance can never block a stop.
     descriptor: Object.freeze({ maxTokens: 1024, effort: 'low' }),
+    discovery: Object.freeze({
+      // Plan 30 W3 second pass / D-30-6: with thinking disabled the largest generation in 12 was
+      // 22,715 output tokens (median 19,485); 48,000 is about 2x that. Thinking is disabled
+      // because at effort 'low' adaptive thinking planned the whole list before the first line
+      // (first category 36 s against 12 s) and settled on the prompt's floor instead of its
+      // target. A cut-off is still classified (D-30-3) and leaves the catalogue stale.
+      maxTokens: 48000,
+      thinking: Object.freeze({ type: 'disabled' }),
+      effort: 'low',
+    }),
   }),
   'claude-haiku-4-5-20251001': Object.freeze({
     descriptor: Object.freeze({ maxTokens: 256 }),
     discovery: Object.freeze({
-      // Haiku 4.5's streaming output ceiling. The prompt asks for ~30 items
-      // across 8 categories (~40-50k output tokens) — a smaller budget silently
-      // truncates the tail of the response, which is why production generations
-      // were systematically missing the last 1-2 categories in the prompt's
-      // ordering (architecture, wellness).
+      // Rollback row since Plan 30 W3. Haiku 4.5's streaming output ceiling: a 16,000 budget once
+      // cut off the last categories of real generations (architecture, wellness). Plan 30 W0
+      // measured 17,857 median / 32,509 max output tokens per generation on this prompt, not the
+      // ~40-50K once estimated; 64,000 stays so a revert sends exactly the pre-W3 body.
       maxTokens: 64000,
     }),
   }),
@@ -316,7 +327,34 @@ export function normalizeName(str) {
     .trim();
 }
 
-const DISCOVER_SYSTEM = `You are a discerning travel curator. Return ONLY newline-delimited JSON — one object per line, one line per category, nothing else. No prose, no markdown fences, no wrapper object.
+// D-30-1 (Plan 30 W3 second pass): the two volume/selection lines of the discovery prompt are
+// keyed by model, like the request settings, so reverting DISCOVERY_MODEL restores the prompt the
+// old model was measured with. Haiku 4.5 keeps its original text. Haiku 5.5 follows a number
+// literally: "Aim for 30 … do not force 30" gave 2–5 items per category, so its rules name a
+// target and a floor and rank within that count instead of gating inclusion. The same wording on
+// Haiku 4.5 broke its output format (a category lost, 14 lines dropped), which is why the rules
+// are per model rather than shared. Every other line of the prompt is identical for both models.
+export const DISCOVERY_SELECTION_RULES = Object.freeze({
+  'claude-haiku-4-5-20251001': Object.freeze({
+    quality: '- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItFits", do not include it.',
+    volume: '- Aim for 30 items per category. Fewer sharp picks beats padding with mediocre ones — do not force 30 if the city cannot support it.',
+  }),
+  'claude-haiku-5-5': Object.freeze({
+    quality: '- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.',
+    volume: '- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places, and say nothing about any shortfall.',
+  }),
+});
+
+// The discovery system prompt for a model (without the per-request exclusion list).
+export function discoverySystemPrompt(model) {
+  const rules = DISCOVERY_SELECTION_RULES[model];
+  if (!rules) {
+    throw new Error(`no discovery selection rules for model "${model}" in DISCOVERY_SELECTION_RULES — add them before pointing discovery at it`);
+  }
+  return discoverSystemWith(rules);
+}
+
+const discoverSystemWith = ({ quality, volume }) => `You are a discerning travel curator. Return ONLY newline-delimited JSON — one object per line, one line per category, nothing else. No prose, no markdown fences, no wrapper object.
 
 Each line must match exactly:
 {"category":"<name>","items":[...]}
@@ -338,10 +376,13 @@ Additional item fields:
 Curation rules:
 - Avoid the generic tourist front page. Only include a famous landmark if it is genuinely unmissable AND you can explain a specific, compelling reason to visit beyond its name.
 - Prioritise places with authentic local character: neighbourhood favourites, spots that reward insider knowledge, experiences with real depth.
-- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItFits", do not include it.
-- Aim for 30 items per category. Fewer sharp picks beats padding with mediocre ones — do not force 30 if the city cannot support it.
+${quality}
+${volume}
 - Use the most specific, locally-used name for each place. Do not append generic suffixes unless part of the official name.
 - Do not repeat the same place across categories.`;
+
+// A model without discovery selection rules must fail at boot, not on its first generation.
+discoverySystemPrompt(DISCOVERY_MODEL);
 
 // Minimum distinct categories (each with at least one item) a generation must
 // yield to be considered usable. Below this, the catalogue committed would be
@@ -365,7 +406,7 @@ function canonicalizeCategoryName(raw) {
   return DISCOVERY_CATEGORIES.includes(normalized) ? normalized : null;
 }
 
-// Backstop for the "name" instruction in DISCOVER_SYSTEM (W4.1a) — not the primary fix, the
+// Backstop for the "name" instruction in the discovery prompt (W4.1a) — not the primary fix, the
 // prompt is. Strips an editorial/award label prefix ending in a colon at bracket depth zero
 // (e.g. "Michelin Bib Gourmand: Ay-Chung Flour-Shaping" -> "Ay-Chung Flour-Shaping").
 //
@@ -408,7 +449,7 @@ export function stripEditorialNamePrefix(name) {
   return tail;
 }
 
-// Structural half of the "aliases" instruction in DISCOVER_SYSTEM (W4.3) — same
+// Structural half of the "aliases" instruction in the discovery prompt (W4.3) — same
 // stated-then-enforced pattern as photoQuery's word cap. The prompt already forbids repeating
 // "name" verbatim as an alias, but a Plan 27 W4.3 A/B run measured the model doing it anyway in
 // 5 of 98 generated items (e.g. name "Taipei Story House", aliases ["Taipei Story House"]).
@@ -452,7 +493,8 @@ export async function discoverDestination(destination, existingStopTitles = [], 
     ? `\nAlready shown or in itinerary — do not suggest these or close variants:\n${existingStopTitles.map((t) => `- ${t}`).join('\n')}`
     : '';
 
-  const systemPrompt = existingLine ? `${DISCOVER_SYSTEM}${existingLine}` : DISCOVER_SYSTEM;
+  const baseSystem = discoverySystemPrompt(profile.model);
+  const systemPrompt = existingLine ? `${baseSystem}${existingLine}` : baseSystem;
 
   const stream = client.messages.stream({
     ...requestSettings(profile),

@@ -377,7 +377,7 @@ The two generic photos are not a Haiku 5.5 fault. `selectPhoto` (`unsplash.js`) 
 
 ### W3 — Discovery → Haiku 5.5
 
-**Status:** 2026-10-18 — **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** **Second pass (§4 prompt comparison, same day, below):** the best candidate is prompt variant A on Haiku 5.5 with `thinking: disabled` + `low`. It passes every §5.3 criterion but one: alias-identical-to-name is 2.4% against control's 2.1%. Under the per-measure reading the first pass used, that is a fail, so nothing was switched. It needs one owner ruling (*W3 second pass → Needs the owner*). `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js` and `claude.test.js` are untouched (the first pass left `profiles.mjs` untouched too; the second pass changed harness files only), so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
+**Status:** 2026-10-18 — **COMPLETE, not deployed.** `DISCOVERY_MODEL = 'claude-haiku-5-5'`, with profile `{ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' }` and Haiku 5.5's own prompt selection rules (variant A), keyed by model. The owner accepted the one §5.3 shortfall on 2026-10-18. Details are under *W3 switch* below; the first-pass and second-pass records follow unchanged. **First-pass record:** **BLOCKED AT THE GATE. No candidate passes §5.3. Nothing switched, nothing deployed.** **Second pass (§4 prompt comparison, same day, below):** the best candidate is prompt variant A on Haiku 5.5 with `thinking: disabled` + `low`. It passes every §5.3 criterion but one: alias-identical-to-name is 2.4% against control's 2.1%. Under the per-measure reading the first pass used, that is a fail, so nothing was switched. It needs one owner ruling (*W3 second pass → Needs the owner*). `DISCOVERY_MODEL` is still `claude-haiku-4-5-20251001`. `claude.js` and `claude.test.js` are untouched (the first pass left `profiles.mjs` untouched too; the second pass changed harness files only), so the W0 discovery sha256 pin still holds. Steps 4–5 (switch, allowance, route verification) were not run, because the brief says to stop rather than loosen the bar.
 
 **Sweep** (6 destinations × first / with-exclusions, harness, `--concurrency 3`, dev key, prompt frozen; control = the W0 Haiku 4.5 run on disk). Every run's prompt is at most 8,704 tokens (input + cache), far under Haiku 5.5's 100K price threshold. D-30-7 counts were unchanged for the copy and the owner DB on all three candidate runs.
 
@@ -527,7 +527,54 @@ Run files: `data/model-eval/runs/discovery/<profile>/2026-10-18T15-*.jsonl`, pro
 
 Separately, the owner may want to rule on the reading of §5.3's name-quality line for W4–W5.
 
-**Rollback:** nothing to roll back; no production constant changed.
+#### W3 switch — owner-accepted, discovery on Haiku 5.5
+
+**Status:** 2026-10-18 — **COMPLETE, not deployed.**
+
+**Owner ruling, recorded as §5.3 requires.** The owner "accepts alias-identical-to-name 2.4% vs 2.1% for variant A on Haiku 5.5 thinking disabled + low". This is the only loosening; every other §5.3 criterion passed as measured above.
+
+**What changed.**
+- **`claude.js`:**
+  - `DISCOVERY_MODEL = 'claude-haiku-5-5'`.
+  - A new `MODEL_PROFILES['claude-haiku-5-5'].discovery` of `{ maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' }`. D-30-6: about 2 × the 22,715-token maximum of the measured run. The measured run's allowance was 96,000, but no generation came near it, so the allowance is not a variable here.
+  - The discovery prompt's two volume/selection lines moved into `DISCOVERY_SELECTION_RULES`, keyed by model. `discoverySystemPrompt(model)` builds the prompt; `discoverDestination` selects it from `profile.model`. Marker `D-30-1` sits above the map.
+  - Haiku 4.5's row and rules are kept verbatim. A model with no rules fails at boot and on use.
+  - The stale "~30 items ≈ 40–50K tokens" comment on the Haiku 4.5 row now states the W0 measurement (17,857 median / 32,509 max).
+  - Not changed: `MIN_CATEGORIES_WITH_ITEMS`, `discoveryGeneration.js`, and every lifecycle and budget path.
+- **`claude.test.js` pins:**
+  - The discovery request-body pin is re-captured: `4feadef7…`.
+  - A new rollback pin proves Haiku 4.5's profile still sends the exact W0 body: `0c8c2727…`, unchanged.
+  - New prompt-text pins: Haiku 4.5 `34c3742f…`, byte-identical to the pre-W3 constant; Haiku 5.5 `b851c503…`, byte-identical to the system prompt the measured runs recorded. Both were checked against the run file.
+  - Further tests: the two prompts differ only in the two lines; every model with a discovery profile has rules; a model without rules is refused before any request.
+- **Harness:**
+  - `profiles.mjs` `control` is now the live Haiku 5.5 profile. `baseline-45` is the W0 control.
+  - The first-pass 5.5 profiles carry `promptVariant: 'original'`, so they still measure the frozen prompt.
+  - `discoveryPromptVariants.mjs` reads the live rules per model, and variant A is a byte-for-byte no-op on Haiku 5.5.
+  - New `discoveryRouteCheck.mjs`.
+
+**Route verification** (`NODE_ENV=test node scripts/modelEval/discoveryRouteCheck.mjs`, which runs the real `POST /api/trips/:tripId/discover` on a DB copy; session minted in the copy):
+- **Destination:** Tainan, TW, a first generation, absent from the dev catalogue.
+- **Generation:** `[discover] end … stop_reason=end_turn output_tokens=15707 categories=8 items=73 dropped=0`.
+- **SSE stream:** `thinking` at 8.0 s; essentials at 10.5 s; then one ping between each pair of categories (6 in all); wellness and `done` at 61.5 s.
+- **Per-category counts:** 10, 10, 11, 10, 9, 9, 3 and 11. Architecture's 3 is under the floor, as the prompt allows.
+- **Verification queue:** rows were inserted and enqueued per category. When the stream ended, 50 were `pending`, 15 already `unverified` and 8 already `verified`, because verification starts as each category lands. After the drain: 10 verified and active, 2 verified and archived as provider-id duplicates, 61 unverified (16% verified).
+- **Budgets and side effects:** the process-local budget used 262 of 1,000 resolver requests and 50 of 50 escalations. `generation_count` is 1. The copy was deleted, and the owner DB counts were unchanged.
+
+**Checks.**
+- `LIVE_ANTHROPIC=1 npx vitest run tests/live`: 6/6 passed. The discovery shape ran on the new profile.
+- `cd backend; npm test`: 45 files passed (1 skipped), 1,055 tests passed, 6 skipped (the live suite).
+
+**Spend.** The route run and the live smoke cost a few cents at Haiku 5.5 rates. The W3 total is about $1.73 of Anthropic spend: $0.213 for the first pass, $1.489 for the second pass, and about $0.03 for the switch checks.
+
+**Not done here (W6 owns them).**
+- `docs/ENGINEERING.md:121` still says discovery and photo descriptors use Haiku 4.5. That has been stale for descriptors since W2, and is now stale for discovery too.
+- The `docs/DECISIONS.md` rows.
+
+**Deploy A** (W1, D-30-8, W2, W3, and Plan 31 W1, which is held for it) is ready. Deploying is the owner's call; nothing has been deployed.
+
+**Rollback:** set `DISCOVERY_MODEL` back to `'claude-haiku-4-5-20251001'`. That one line restores Haiku 4.5's settings and its original prompt; the rollback test pins the resulting body to the W0 hash. A stale refresh on the old model fills in any partial batch (Plan 26 semantics). No catalogue rebuild and no mass refresh (`docs/DECISIONS.md`).
+
+*First-pass rollback note (superseded by the switch):* nothing to roll back; no production constant changed.
 
 **Steps.** Sweep per §5.2; measure actual `output_tokens` (thinking included) per generation and set the allowance (D-30-6); pick the profile (candidate: effort `low`, 96,000); set `DISCOVERY_MODEL`; update the `claude.js:350` comment to state the new reasoning (the 64K ceiling rationale is Haiku-4.5-specific and must not survive as a false fact) and `claude.test.js:210`; keep `MIN_CATEGORIES_WITH_ITEMS` and all lifecycle/budget behaviour untouched; one real local generation through the route (fresh destination in the dev DB copy — *not* production) to confirm per-category streaming and the `thinking` ping still interleave; confirm the resolver verification queue behaves identically on the new rows (budgets, provenance `pending`).
 
