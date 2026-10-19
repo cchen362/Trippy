@@ -14,6 +14,7 @@ import { createShareLink, getSharedTrip, revokeShareLink } from '../src/services
 import { createStop } from '../src/services/stops.js';
 import { createTrip, getTripDetail, listTripsForUser } from '../src/services/trips.js';
 import * as claudeService from '../src/services/claude.js';
+import * as unsplashService from '../src/services/unsplash.js';
 
 let tmpDir;
 let owner;
@@ -22,11 +23,11 @@ let otherUser;
 let tripDetail;
 
 beforeEach(async () => {
-  // Access rules are under test here, not photos: createStop would otherwise send a real Haiku
-  // descriptor call and a live Unsplash search on every run (paid, and slow enough to time out).
-  // No descriptor, and any network call fails loudly instead of reaching a provider.
+  // Access rules are under test here, not photos: createStop would otherwise send a Haiku
+  // descriptor call and an Unsplash search on every run. Stub both at the service boundary;
+  // tests/setup/noNetwork.js fails the test if anything else reaches past it.
   vi.spyOn(claudeService, 'generatePhotoDescriptor').mockResolvedValue(null);
-  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('collaboration tests make no network calls'));
+  vi.spyOn(unsplashService, 'selectPhoto').mockResolvedValue(null);
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-collab-test-'));
   initDb(join(tmpDir, 'test.db'));
   await runMigrations();

@@ -211,7 +211,7 @@ Directory roles are documented where they live — read `frontend/src/` and `bac
 
 ## Verification Expectations
 
-- Backend: `cd backend; npm test`
+- Backend: `cd backend; npm test`. It makes no network calls: `tests/setup/noNetwork.js` fails any test that reaches a non-loopback host, so stub the provider boundary instead (see `docs/DECISIONS.md`). The paid live smoke runs separately: `$env:LIVE_ANTHROPIC='1'; npx vitest run tests/live`.
 - Frontend: `cd frontend; npm test` and `npm run build`
 - UI changes: verify the affected flow at 375px and desktop; exercise touch/pointer distinctions where relevant.
 - Migration changes: prove ordered application on a disposable/copy database and keep existing migration files unchanged.

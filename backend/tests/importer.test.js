@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -407,6 +407,10 @@ describe('createArtifactAndExtract — warnings', () => {
 describe('confirmArtifact', () => {
   it('creates bookings sequentially, stamps importedFrom server-side, and marks the artifact confirmed', async () => {
     const trip = makeTrip();
+    // Confirming a flight syncs its arrival-airport stop, which resolves through Nominatim.
+    // Place resolution is not under test here: answer with Nominatim's empty result.
+    const nominatim = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+    onTestFinished(() => nominatim.mockRestore());
     mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
       flightBooking({ confirmationRef: 'LEG1' }),
       flightBooking({ confirmationRef: 'LEG2', title: 'MU5402' }),
