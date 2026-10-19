@@ -2,9 +2,11 @@
 
 Date: 2026-10-18 (Asia/Singapore)
 
+Reviewed and updated: 2026-10-19, after Plan 30 Deploy B.
+
 Status: Open product discovery. No feature direction has been selected, no implementation plan is requested for these ideas yet, and no implementation is authorized by this brief.
 
-Companion: [Sonnet and Haiku upgrade assessment](2026-10-18-sonnet-haiku-55-upgrade-assessment.md). The upgrades are intended engineering work; this exploration is independent inspiration.
+Historical companion: [Sonnet and Haiku upgrade assessment](2026-10-18-sonnet-haiku-55-upgrade-assessment.md). The upgrade is deployed; that pre-migration review is rationale, not today's runtime baseline. This session is standalone product discovery and does not ask for another migration assessment or implementation plan.
 
 ## 1. Owner intent
 
@@ -18,9 +20,26 @@ Read current code, [ENGINEERING.md](../../ENGINEERING.md), [DECISIONS.md](../../
 
 Today's product combines bookings/documents, a flexible daily itinerary, maps, shared expenses, catalogue discovery, collaboration and a proposal-based co-pilot. The current co-pilot has three tools: catalogue search, deterministic health checks and itinerary proposals. Its [trip context](../../../backend/src/services/copilotTools.js) intentionally omits coordinates, document metadata and booking `details_json`. Swapping models does not supply the evidence, tools or product state needed for richer experiences.
 
+### Shipped baseline and existing follow-ups
+
+The owner reports both model upgrades completed and deployed. The current constants and `MODEL_PROFILES` in [claude.js](../../../backend/src/services/claude.js) confirm the 5.5 configuration. [Plan 30](../plans/Implementation%20Plan%2030%20Model%205.5%20Migration.md), Deploy B at `a2c47d5`, records all four workloads live in production. This brief review checked repository evidence, not the live server. The owner's Deploy B production pass passed the same day, and Plan 30 is CLOSED (W6 close-out merged 2026-10-19).
+
+| Workload | Current model | Current profile |
+|---|---|---|
+| Booking extraction | Sonnet 5.5 | Adaptive thinking; medium effort; 16,000-token allowance |
+| Co-pilot | Sonnet 5.5 | Adaptive thinking; low effort; 16,000-token allowance per response |
+| Photo descriptors | Haiku 5.5 | Adaptive thinking; low effort; 1,024-token allowance |
+| Discovery | Haiku 5.5 | Thinking disabled; low effort; 48,000-token allowance |
+
+These are measured profiles for existing workloads, not limits on what future features may use. Read the live profiles when starting discovery. In particular, Haiku discovery does not currently use adaptive thinking, and neither model currently gains web research or browser access merely from being upgraded.
+
+Use Plan 30's evaluations and owner rulings as evidence. Discovery's recorded adaptive-low experiment delayed the first category and under-delivered the requested volume, motivating the deployed thinking-disabled profile. Co-pilot migration required D-30-9: acknowledge the proposal tool call, then obtain its explanation as final text in another model step. Thinking summaries are not forwarded as the answer. These results show why capabilities, response contracts and user experience must be assessed together; they do not establish that thinking is unsuitable for different discovery or research tasks.
+
+Read the status headers of [Plan 31: photo relevance](../plans/Implementation%20Plan%2031%20Stop%20Photo%20Relevance.md), [Plan 32: stopped exchanges](../plans/Implementation%20Plan%2032%20Remove%20a%20Stopped%20Exchange.md), [Plan 33: discovery single-flight](../plans/Implementation%20Plan%2033%20Discovery%20Single-Flight%20Generation.md) and [Plan 34: output contracts](../plans/Implementation%20Plan%2034%20Model%20Output%20Contracts.md). Plan 34 is in progress (W0 measurement complete 2026-10-19; W1 onward not yet shipped); it covers structured extraction/descriptor output and measured follow-ups. Distinguish shipped work from approved future work. Do not present migration hardening or these follow-ups as the new product discovery, or make finishing them a prerequisite to writing this assessment.
+
 The interesting hypothesis is cheap breadth followed by selective judgment: Haiku investigates or structures many bounded questions; Sonnet synthesizes supported findings into useful choices. This is an application workflow hypothesis, not a requirement to build a multi-agent architecture or use Anthropic's advisor tool.
 
-Published inputs, checked during this assessment on 2026-10-18:
+Published inputs, checked during the original assessment on 2026-10-18 (recheck official documentation for any capability on which a selected opportunity depends):
 
 - [Haiku specifications](https://platform.claude.com/docs/en/models/haiku-5-5/overview): lower short-prompt pricing and adaptive effort support repeated preparatory work. Cheap tokens do not make browsing, retrieval, verification or external providers free.
 - [Sonnet feature changes](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5): adaptive effort and richer conversation/tool management offer orchestration options. Advanced beta features are optional dependencies, not reasons to redesign by themselves.
@@ -42,11 +61,11 @@ For each serious candidate explain:
 5. Required changes to architecture, interaction and product boundaries. Existing architecture is a starting point, not the maximum ambition.
 6. The hardest failure mode, who bears its cost and how the experience exposes uncertainty rather than hiding it.
 7. Rough discovery/prototype/product effort and ongoing operating cost, with assumptions; avoid false precision.
-8. A convincing experiment and a result that would falsify the opportunity. Compare old/new models with the same tools/evidence where a model-enablement claim matters.
+8. A convincing experiment and a result that would falsify the opportunity. Reuse existing migration measurements for established claims. Propose a targeted old/new comparison with the same tools/evidence only where a genuinely unresolved model-enablement claim matters; do not rerun the migration sweep by default. Separate designing an experiment from permission to run paid calls or mutate external systems.
 
 Compare candidates on traveller value, differentiation, evidence availability, model contribution, operating economics and ability to demonstrate the experience. Use reasoned judgments rather than arbitrary numerical scores. Choose one flagship, explain why alternatives lose, and state the leading unresolved risk.
 
-Return a discovery assessment with a day-in-the-life scenario and the smallest convincing proof of the selected experience. That proof may require substantial architectural work; it should not be reduced to a safe cosmetic enhancement. Defer its numbered implementation plan until the owner reviews the direction. The model migration plan remains independent.
+Return a standalone discovery assessment in `docs/superpowers/reviews/`, with a day-in-the-life scenario and the smallest convincing proof of the selected experience. That proof may require substantial architectural work; it should not be reduced to a safe cosmetic enhancement. Defer its numbered implementation plan until the owner reviews the direction. This session does not implement, deploy or reopen the completed model migration.
 
 ## 4. Optional seeds, not a shortlist or specification
 
@@ -88,8 +107,8 @@ These are questions, not an adopted graph database, agent framework, autonomy le
 
 ## 6. Pasteable orchestrator prompt
 
-> Independently assess and plan the Sonnet/Haiku 5.5 migration using the companion upgrade review. Treat both upgrades as the owner's intended outcome and verify settings, compatibility and acceptance evidence yourself. Return that implementation plan separately.
+> Read `docs/ENGINEERING.md` in full, then `docs/DECISIONS.md` and this brief. Sonnet 5.5 and Haiku 5.5 are deployed across Trippy's four AI workloads. Ground the exploration in the current code, Plan 30's measured results and deployment record, and the status of Plans 31–34. Distinguish shipped capability, unfinished verification, approved follow-ups and new possibilities. Do not reassess or replan the migration.
 >
-> Then explore what Trippy could become with the upgraded models. You have a blank cheque for ideation and may challenge architecture, interface and product scope. Do not optimize for the smallest change or execute the backlog. Use this brief's concepts as optional stimuli, discover distinct alternatives of your own, and be willing to reject every seed. Seek a complete traveller experience that reveals value the owner has not already specified.
+> Explore what Trippy could become with this baseline. You have a blank cheque for ideation and may challenge architecture, interface and product scope. The deployed effort settings are not a ceiling for future features. Do not optimize for the smallest change or execute the backlog. Use this brief's concepts as optional stimuli, discover distinct alternatives of your own, and be willing to reject every seed. Seek a complete traveller experience that reveals value the owner has not already specified.
 >
-> Distinguish new capabilities, newly viable reliability/economics and ideas that were already feasible. Compare opportunities objectively, select a flagship, describe a day in the life, identify its evidence/integration requirements and hardest failure mode, and propose a convincing experiment that could disprove its value. Existing decisions may be challenged explicitly in discovery, not silently changed in implementation. Do not draft the feature's implementation plan until its direction is reviewed. Product discovery must not block or expand the model migration.
+> Distinguish new capabilities, newly viable reliability/economics and ideas that were already feasible. Compare opportunities objectively, select a flagship, describe a day in the life, identify its evidence/integration requirements and hardest failure mode, and propose a convincing experiment that could disprove its value. Reuse existing evaluation evidence; identify targeted new tests only where needed. Existing decisions may be challenged explicitly in discovery, not silently changed in implementation. Produce a standalone exploration assessment in `docs/superpowers/reviews/`. Do not implement, deploy or draft the feature's implementation plan until its direction is reviewed.
