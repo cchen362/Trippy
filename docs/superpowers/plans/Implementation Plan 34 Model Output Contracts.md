@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **W1 + W2 DEPLOYED** to production at `6827267` (with the backend unit-suite network guard). The deploy carried two runtime files, `claude.js` and `importer.js`; there was no migration and no frontend change. A pre-deploy online backup passed `integrity_check` and is at `~/backups/predeploy-plan34.db`. Startup was clean, and `/api/health` answered ok on the host and through `trippy.zyroi.com`. The owner's production pass (§8) is still open: one real screenshot import, one fare-promo paste, one manual stop. Next: W3 and W4. Earlier: **W2 COMPLETE** (descriptor under the API-enforced schema; gate passed after owner rulings Q-34-5 and Q-34-6). **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
+**Status:** 2026-10-19 — **W3 COMPLETE (harness only): D-34-9 measured, gate failed, D-31-1 kept** (§6 W3; nothing to deploy). Next: W4. Earlier: **W1 + W2 DEPLOYED** to production at `6827267` (with the backend unit-suite network guard). The deploy carried two runtime files, `claude.js` and `importer.js`; there was no migration and no frontend change. A pre-deploy online backup passed `integrity_check` and is at `~/backups/predeploy-plan34.db`. Startup was clean, and `/api/health` answered ok on the host and through `trippy.zyroi.com`. The owner's production pass (§8) is still open: one real screenshot import, one fare-promo paste, one manual stop. Next: W3 and W4. Earlier: **W2 COMPLETE** (descriptor under the API-enforced schema; gate passed after owner rulings Q-34-5 and Q-34-6). **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -195,7 +195,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
   - discovery-path stops would still need the prefix retry, so adopting the pair adds a second retry mechanism rather than replacing one;
   - storing the broad query would need a catalogue column.
 
-  W3 measures the pair and decides by its gate. *Gate:* W3.
+  W3 measures the pair and decides by its gate. *Gate:* W3. **Settled at W3 (2026-10-19): keep D-31-1.** The best chain cut fallbacks by 1.67 of 50, against the 3 the gate requires (§6 W3). Marker `D-34-9` sits beside D-31-1's in `selectPhoto`.
 - **D-34-10 — Discovery runs with adaptive thinking if, and only if, thinking-on matches the shipped thinking-off profile on volume, quality and first-category time.** If it matches, prefer it: the provider's guidance is to lower effort rather than turn thinking off (Plan 30 F-30-4), and one fewer disabled capability is one fewer field a later model can reject. If it matches on everything but time to first category, the owner rules (Q-34-4). *Gate:* W4. Re-captures only the discovery pins.
 - **D-34-11 — A retiring model's rows leave the code on the deprecation notice, not on a date guess.**
   - When Anthropic announces retirement of `claude-haiku-4-5-20251001` or `claude-sonnet-4-6`, W5 removes that model's `MODEL_PROFILES` row, its `DISCOVERY_SELECTION_RULES` entry (Haiku 4.5), its rollback pins and tests, and its harness `baseline-*` profiles (the run files stay on disk).
@@ -854,7 +854,82 @@ Unsplash: about 840 harness searches over two hourly windows (lowest `X-Ratelimi
 
 ### W3 — Model-authored fallback query, measured (D-34-9)
 
-**Status:** NOT STARTED. Requires W2.
+**Status:** 2026-10-19 — **COMPLETE, gate FAILED on its first clause: D-31-1 is kept.** The work is harness-only. No runtime behaviour changed; the only `backend/src` edit is the one-line `D-34-9` comment beside D-31-1's marker in `selectPhoto`. The decision is recorded in DECISIONS.md, so the question is not re-run. No owner question arises, because the gate's third clause is asked only if the first two pass.
+
+**What landed (harness).**
+- `lib/descriptorContractVariants.mjs`, variant `broad-query`. On the wire, after the recorder, it does two things:
+  - It inserts one prompt line before the `sceneType` rule and sends the live schema plus a required `broadQuery`, built from the live constant and appended last.
+  - It strips `broadQuery` from the answer before the real `generatePhotoDescriptor` validates it, so the live service runs unchanged. The run file keeps the raw answer.
+
+  A system prompt or schema that is not the live one throws.
+- `profiles.mjs`: `w3-broad`, which is the live descriptor settings plus that variant. `descriptor.mjs` writes `extra.broadQuery`. The descriptor scorer validates against the schema the request carried and adds `broadQuery` rows.
+- `photoQueryReplay.mjs` replays four chains, each with `excludeIds: []`, on the same live Unsplash searches:
+  - **A0** is today's `selectPhoto`.
+  - **A1** fires D-31-1's prefix retry on any primary miss, not only on zero results.
+  - **B0** searches `broadQuery` after a zero-result primary.
+  - **B1** searches `broadQuery` after any primary miss.
+
+  A process-local cache shares each search across chains. This is valid because Unsplash search is deterministic for a fixed query (W0). A fetch guard allows only `GET /search/photos`.
+- The harness copy of A0 is checked against the **real** `selectPhoto` on every place. Both must send identical query lists and choose the identical photo, or the run throws. Parity held on all 150 places.
+- `photoBlindSheet.mjs` builds a seeded, shuffled sheet of every recovered photo, showing only the place and the photo. It also writes a key and a verdict template, and scores per chain after the verdicts are in.
+
+**Measurement** (2026-10-19, Haiku 5.5 `low`, dev keys).
+- Descriptor runs: `runs/descriptor/w3-broad/2026-10-19T05-43-13-074Z`, `…T05-43-36-604Z`, `…T05-43-58-687Z`.
+- Replay: `runs/photo-query-replay/w3-broad/2026-10-19T05-45-10-498Z.json`.
+- Blind sheet, verdicts and score: `runs/photo-blind/2026-10-19T05-45-22-350Z/`.
+
+| Descriptor, 50 places × 3 runs | Result |
+|---|---|
+| Schema-valid · refusals · `max_tokens` · null | 50/50 · 0 · 0 · 0 per run |
+| `broadQuery` present · words median / max · over 4 words · same as `photoQuery` | 150/150 · 3 / 5 · 2/150 · 0 |
+| `photoQuery` words median / max | 7 / 9 (unchanged from W2) |
+| Cost per descriptor | $0.00012 (W2 contract $0.00009) |
+
+| Chain (same primary queries) | Fallbacks per run | Mean | vs A0 | Recovered per run | Recovered photos showing a different place (blind) |
+|---|---|---|---|---|---|
+| **A0** today (D-31-1) | 6 / 7 / 6 | **6.33** | — | 3 / 5 / 2 | **3 of 10 (30 %)** |
+| A1 prefix retry on any miss | 4 / 6 / 5 | 5.00 | −1.33 | 5 / 6 / 3 | 6 of 14 (43 %) |
+| B0 `broadQuery` on zero results | 6 / 7 / 5 | 6.00 | −0.33 | 3 / 5 / 3 | 1 of 11 (9 %) |
+| **B1** `broadQuery` on any miss | 5 / 6 / 3 | **4.67** | **−1.67** | 4 / 6 / 5 | **1 of 15 (7 %)** |
+
+- A0's mean of 6.33 matches W2's 6.7 and W0's 6.3, so the extra field did not shift the primary queries.
+- Primary outcomes per run (hit / zero results / all results failed the gate): 41/5/4, 38/9/3 and 42/5/3.
+
+**Gate (§5.1 Photo query pair).**
+1. Mean fallbacks at least 3 of 50 below D-31-1's (≤ 3.33): **✘.** The best chain, B1, reached 4.67.
+2. Wrong-place rate on recovered photos no worse than D-31-1's: ✔ for B0 and B1.
+3. Owner acceptance: not asked, because clause 1 failed.
+
+**Why the headroom is small.** Under B1 the same few stops fall back in every run: Din Tai Fung, Tim Ho Wan, Pastéis de Belém and the Hanoi cooking class. Fado, The Mall and the hamam each fall back once. For these stops, the primary search returns photos whose captions do not name the place, or it returns nothing, and the broad query's photos fail the relevance gate too. A different fallback query cannot add a caption the photo does not have.
+
+**Blind read.**
+- **Method.** 16 distinct recovered photos (50 chain uses). The sheet showed only the stop and the photo, with seed 34. The orchestrator gave every verdict before opening the key. The verdicts were: right (shows the stop, or the dish or activity itself), generic (the right kind of thing, not misleading), or wrong (identifiably a different place, or an unrelated subject).
+- **Results.** 7 right, 6 generic, 3 wrong.
+- **The wrong photos.**
+  - Tsukiji's 4-word retry gave Asakusa's Nakamise street. This is the case Plan 31 recorded, and it appeared in all 3 runs.
+  - Chatuchak's retry under A1 gave a Bangkok highway.
+  - Laomendong's broad query "Nanjing old street" gave a shopping street of neon-lit stores, matched on "Nanjing".
+- **The pattern.** The broad query trades specificity for safety. It lands on "Tokyo seafood market" or "Seoul Han River park", where today's retry sometimes lands on the wrong landmark. The sample is small (10–15 recoveries per chain, one reader), so the rates are indicative and they decide nothing alone. Clause 1 decided the gate.
+
+**Recorded so that it is not re-proposed.** Firing D-31-1's retry on gate-fail as well (A1) recovered more but chose the wrong place most often. It is not a cheaper alternative.
+
+**D-30-7.** No script opens a database. The fetch guard blocked download tracking, so nothing was tracked.
+
+**Checks.**
+- `cd backend; npm test`: 45 files, **1,219 passed**, 6 skipped.
+- `node --check` on every new script.
+- The subagent's offline self-tests ran against a stubbed Unsplash and a stubbed `create`. They covered parity, the cache, the strip of `broadQuery` and its pass-through cases, and the sheet and score.
+
+**Spend.** Anthropic **$0.018** (3 × $0.0059). Unsplash: **138 real searches** and 846 cache hits; the lowest `X-Ratelimit-Remaining` was 664. For the read, the 16 thumbnails were fetched from the image CDN; that is not the API.
+
+**Files.**
+- `backend/scripts/modelEval/lib/descriptorContractVariants.mjs`, `photoQueryReplay.mjs` and `photoBlindSheet.mjs` (new);
+- `profiles.mjs`, `descriptor.mjs`, `lib/score/descriptor.mjs` and `README.md`;
+- `backend/src/services/unsplash.js` (a comment only);
+- `docs/DECISIONS.md`;
+- this plan.
+
+**The original plan for this wave, kept for history:**
 
 **Files (harness-only unless the gate passes).**
 - `backend/scripts/modelEval/lib/descriptorContractVariants.mjs` (new): swaps in the §4.2 W3 schema and one prompt line on the wire, after the recorder;

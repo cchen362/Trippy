@@ -142,6 +142,7 @@ function firstQualifying(pool, exclude, sigTokens) {
 //   3. Otherwise a broader, gate-free scene fallback. Primary results that all fail the
 //      gate go straight here, with no retry.
 // Plan 31 D-31-1: zero-result retry with a shortened query; reopens Plan 10 D2's tier count (owner-approved 2026-10-18).
+// D-34-9 (Plan 34 W3): a model-authored broad fallback query was measured against this retry and not adopted; firing this retry on gate-fail as well was worse.
 export async function selectPhoto({ query, sceneType, country, city, excludeIds = [] }) {
   const exclude = new Set(excludeIds);
   const sigTokens = significantTokens(query, city, country);

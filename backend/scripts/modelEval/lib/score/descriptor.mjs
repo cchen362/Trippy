@@ -17,6 +17,7 @@ import {
 import { median, max, rate } from './common.mjs';
 
 const words = (s) => (typeof s === 'string' ? s.trim().split(/\s+/).filter(Boolean) : []);
+const sameQuery = (a, b) => words(a).join(' ').toLowerCase() === words(b).join(' ').toLowerCase();
 
 const isSchemaContract = (record) => Boolean(record.calls?.at(-1)?.request?.output_config?.format);
 
@@ -43,10 +44,14 @@ function rawDescriptor(record) {
   }
 }
 
+// The schema the request actually carried (a Plan 34 W3 'broad-query' request carries the live schema plus a
+// required broadQuery), else the live constant.
+const requestSchema = (record) => record.calls?.at(-1)?.request?.output_config?.format?.schema ?? PHOTO_DESCRIPTOR_OUTPUT_SCHEMA;
+
 // Schema-valid per validateAgainstSchema (which case-normalises enums: the exact-vocabulary check
 // stays in sceneValid) and a non-empty photoQuery.
-function schemaValid(parsed) {
-  if (!parsed || !validateAgainstSchema(parsed, PHOTO_DESCRIPTOR_OUTPUT_SCHEMA).ok) return false;
+function schemaValid(parsed, schema) {
+  if (!parsed || !validateAgainstSchema(parsed, schema).ok) return false;
   return typeof parsed.photoQuery === 'string' && parsed.photoQuery.trim().length > 0;
 }
 
@@ -67,12 +72,13 @@ export function score(records) {
       maxTokens: r.stopReason === 'max_tokens',
       schemaContract: isSchemaContract(r),
       endTurn: r.stopReason === 'end_turn',
-      schemaOk: schemaValid(parsed),
+      schemaOk: schemaValid(parsed, requestSchema(r)),
       rawQuery,
       rawScene,
       sceneValid: rawScene !== null && SCENE_TYPES.includes(rawScene),
       acceptable: r.output?.sceneType ? (place.acceptableSceneTypes ?? []).includes(r.output.sceneType) : false,
       queryWords: rawQuery ? words(rawQuery).length : null,
+      broadQuery: typeof r.extra?.broadQuery === 'string' ? r.extra.broadQuery.trim() : null,
     };
   });
 
@@ -95,10 +101,22 @@ export function score(records) {
     'photoQuery words median / max': `${median(withQuery.map((r) => r.queryWords))} / ${max(withQuery.map((r) => r.queryWords))}`,
   };
 
+  // Plan 34 W3: rows only when the run asked for a broadQuery (profile w3-broad).
+  const hasBroad = records.some((r) => 'broadQuery' in (r.extra ?? {}));
+  if (hasBroad) {
+    const withBroad = rows.filter((r) => r.broadQuery);
+    const broadWords = withBroad.map((r) => words(r.broadQuery).length);
+    summary['broadQuery present'] = rate(withBroad.length, n);
+    summary['broadQuery words median / max'] = `${median(broadWords)} / ${max(broadWords)}`;
+    summary['broadQuery > 4 words'] = rate(broadWords.filter((w) => w > 4).length, withBroad.length);
+    summary['broadQuery identical to photoQuery'] = rate(withBroad.filter((r) => r.rawQuery && sameQuery(r.broadQuery, r.rawQuery)).length, withBroad.length);
+  }
+
   const perItem = rows.map((r) => ({
     id: r.id,
     title: r.title,
     photoQuery: r.rawQuery,
+    ...(hasBroad ? { broadQuery: r.broadQuery } : {}),
     sceneType: r.rawScene,
     acceptable: r.acceptable,
     'out tok': r.record.usage.output_tokens,

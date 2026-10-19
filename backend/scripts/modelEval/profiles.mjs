@@ -26,6 +26,10 @@ export const PROFILES = {
     'alt-disabled-low': { model: HAIKU_55, maxTokens: 1024, effort: 'low', thinking: { type: 'disabled' } },
     // §4: effort `medium` is measured on a 15-item subset only.
     'alt-medium': { model: HAIKU_55, maxTokens: 1024, effort: 'medium', subset: 15 },
+    // Plan 34 W3 (§4.2, §5.1): the live settings with a third field, `broadQuery`, added on the wire
+    // (lib/descriptorContractVariants.mjs; claude.js is unchanged). Harness-only: it feeds
+    // photoQueryReplay.mjs and is adopted into claude.js only if the replay says it beats D-31-1.
+    'w3-broad': { model: HAIKU_55, maxTokens: 1024, effort: 'low', promptVariant: 'broad-query' },
   },
   discovery: {
     // W3 flipped DISCOVERY_MODEL: control is now Haiku 5.5 with thinking disabled at effort low and

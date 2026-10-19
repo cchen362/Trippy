@@ -6,6 +6,10 @@
 // scripts/modelEval/fixtures/descriptor-places.json. A numeric profile `subset` keeps the first N
 // places. One JSON line per place goes to data/model-eval/runs/descriptor/<profile>/<timestamp>.jsonl.
 //
+// A profile may carry a harness-only `promptVariant` (Plan 34 W3: 'broad-query', profile 'w3-broad'): it is installed from
+// lib/descriptorContractVariants.mjs after the recorder, so the run file stores the request actually sent and the raw
+// answer, and each record's `extra.broadQuery` holds the broadQuery the model wrote. claude.js is unchanged.
+//
 // D-30-7: no database is imported or opened; the only external call is the Anthropic Messages API.
 
 import { readFileSync } from 'node:fs';
@@ -13,6 +17,7 @@ import { join } from 'node:path';
 import { installRecorder, recordFixture } from './lib/recorder.mjs';
 import { FIXTURES_DIR, parseArgs, openRunFile, buildRecord, runPool, filterItems, printProgress } from './lib/runner.mjs';
 import { getProfile, toServiceProfile, assertControlIsLive } from './profiles.mjs';
+import { installDescriptorContractVariant, rawBroadQuery } from './lib/descriptorContractVariants.mjs';
 
 const WORKLOAD = 'descriptor';
 
@@ -23,6 +28,8 @@ async function main() {
   if (args.profile === 'control') assertControlIsLive(WORKLOAD);
 
   installRecorder();
+  // After the recorder, so the run file stores the request that was actually sent (Plan 34 §4.2).
+  if (profile.promptVariant) installDescriptorContractVariant(profile.promptVariant);
   const { generatePhotoDescriptor } = await import('../../src/services/claude.js');
 
   let places = JSON.parse(readFileSync(join(FIXTURES_DIR, 'descriptor-places.json'), 'utf8'));
@@ -35,6 +42,7 @@ async function main() {
     `descriptor / ${args.profile} (${profile.model}): ${places.length} places, ` +
     `concurrency ${args.concurrency}, --max-usd ${args.maxUsd}`,
   );
+  if (profile.promptVariant) console.log(`prompt variant: ${profile.promptVariant}`);
   console.log('D-30-7: this script imports no database; only the Anthropic API is called.');
 
   async function runOne(place) {
@@ -51,6 +59,7 @@ async function main() {
       output: recorded.result ?? null,
       extra: { place },
     });
+    if (profile.promptVariant) record.extra.broadQuery = rawBroadQuery(record);
     runFile.write(record);
     return record;
   }

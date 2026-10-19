@@ -156,3 +156,40 @@ harness several times and pass each run file once (`--run`), rather than one run
 No database is imported. `--max-calls` is a hard stop, and the run stops early if
 `X-Ratelimit-Remaining` drops below 50 (the key's limit is 1,000 requests/hour; a pass is at most
 4 calls x 50 places).
+
+## Descriptor `broadQuery` and the photo query replay (Plan 34 W3)
+
+```bash
+NODE_ENV=test node scripts/modelEval/descriptor.mjs --profile w3-broad          # a descriptor run with broadQuery
+NODE_ENV=test node scripts/modelEval/photoQueryReplay.mjs --profile w3-broad [--run <descriptor run .jsonl>]... [--max-calls 400]
+node scripts/modelEval/photoBlindSheet.mjs --replay <photo-query-replay .json> [--seed 34]
+node scripts/modelEval/photoBlindSheet.mjs --score <data/model-eval/runs/photo-blind/<timestamp>>
+```
+
+The `w3-broad` descriptor profile is the live settings (Haiku 5.5, effort low) with a harness-only
+`promptVariant: 'broad-query'`. `lib/descriptorContractVariants.mjs` installs it after the recorder: it adds one
+`- broadQuery:` line before the `- sceneType:` line of the system prompt and sends a copy of the live schema with a
+required `broadQuery` string, throwing unless the request carries exactly the live `PHOTO_DESCRIPTOR_SYSTEM` and
+schema. The run file stores the request actually sent and the raw answer; the real `generatePhotoDescriptor` is given
+the answer with `broadQuery` removed (its live schema is `additionalProperties: false`), and each record's
+`extra.broadQuery` holds what the model wrote. `claude.js` is unchanged. The descriptor scorer validates against the
+schema the request carried and adds `broadQuery` rows (present, words median / max, over 4 words, identical to
+`photoQuery`) when a run has them.
+
+`photoQueryReplay.mjs` takes one or more descriptor run files (`--run` repeats; default the newest for the profile) and,
+for every record with an output, runs four chains with `excludeIds: []`: `A0` today's `selectPhoto` (zero-result
+prefix retry, D-31-1), `A1` the prefix retry on any primary miss, `B0` primary, then `broadQuery` on a zero-result
+primary, then the scene fallback, `B1` the same on any primary miss. `A0` is also run through the real `selectPhoto`
+and the two must send the same queries and choose the same photo, or the script throws `parity failure`. Unlike
+`photoFallback.mjs` it keeps a cache of successful search responses keyed by request URL, because W0 measured search as
+deterministic for a fixed query: one result then serves every chain and run file, and only real network calls count toward
+`--max-calls` (default 400; it stops with exit code 2 if `X-Ratelimit-Remaining` drops below 50 or the next place could
+pass the cap). The same fetch guard applies (search only, no download tracking, no database). It writes
+`data/model-eval/runs/photo-query-replay/<profile>/<timestamp>.json` with per-place chain outcomes (`step` is `primary`,
+`retry4`, `retry3`, `broad`, `scene` or `none`) and per-chain fallbacks, recovered counts and means, and prints a table.
+
+`photoBlindSheet.mjs` (offline) turns a replay into a blind read of the photos the chains recovered by retry or broad
+(deduplicated by place and photo, shuffled with a seeded PRNG). `--replay` writes `sheet.html` (stop and photo only, no
+query or chain), `key.json` and a `verdicts.json` template to `data/model-eval/runs/photo-blind/<timestamp>/`; fill in
+each verdict as `right`, `generic` or `wrong`, then `--score <dir>` prints per chain (pooled across runs, each use
+counted) the recovered, right, generic and wrong counts and the wrong-place rate, and writes `score.json`.
