@@ -108,14 +108,22 @@ describe.skipIf(process.env.LIVE_ANTHROPIC !== '1')('live Anthropic smoke (Plan 
     expect(textOf(response).length).toBeGreaterThan(0);
   }, 120_000);
 
-  it('extraction through the real extractBookings: fenced JSON parsed from text blocks', async () => {
+  it('extraction through the real extractBookings: schema-constrained JSON mapped to the app shape', async () => {
     const { extraction, model, usage } = await extractBookings({
       files: [{ kind: 'text', content: 'Flight CA 421, Beijing PEK to Chengdu CTU, 3 April 2027 08:30-11:55. Booking ref ABC123.' }],
     });
 
     expect(model).toBe(profileFor('extraction').model);
-    expect(typeof extraction.isTravelRelated).toBe('boolean');
-    expect(Array.isArray(extraction.bookings)).toBe(true);
+    expect(Object.keys(extraction)).toEqual(['isTravelRelated', 'summary', 'language', 'bookings']);
+    expect(extraction.isTravelRelated).toBe(true);
+    expect(extraction.bookings).toHaveLength(1);
+    const [booking] = extraction.bookings;
+    expect(booking.type).toBe('flight');
+    expect(booking.details.carrierCode).toBe('CA');
+    expect(booking.details.flightNumber).toBe('421');
+    expect(Object.values(booking.details)).not.toContain('');
+    expect(typeof booking.confidence.fields).toBe('object');
+    expect(booking).not.toHaveProperty('fieldConfidence');
     expect(usage.input_tokens).toBeGreaterThan(0);
     expect(usage.output_tokens).toBeGreaterThan(0);
   }, 120_000);

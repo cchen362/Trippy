@@ -25,15 +25,9 @@ const { addAttachment } = await import('../src/services/attachments.js');
 const { createArtifactAndExtract, deleteArtifact } = await import('../src/services/importer.js');
 const { createExpense } = await import('../src/services/expenses.js');
 const { inviteCollaborator } = await import('../src/services/collaboration.js');
+const { extractionReply } = await import('./helpers/extractionReply.js');
 
 const trainTicketBase64 = readFileSync(join(__dirname, 'fixtures/train-ticket.png')).toString('base64');
-
-function claudeResponse(json) {
-  return {
-    content: [{ type: 'text', text: '```json\n' + JSON.stringify(json) + '\n```' }],
-    usage: { input_tokens: 100, output_tokens: 50 },
-  };
-}
 
 function flightBooking(overrides = {}) {
   return {
@@ -96,7 +90,7 @@ describe('booking documents resolution', () => {
 
   it('returns import-sourced documents for an artifact-linked booking', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse({
+    mockCreate.mockResolvedValue(extractionReply({
       isTravelRelated: true, summary: 'test', language: 'en', bookings: [flightBooking()],
     }));
     const extracted = await createArtifactAndExtract(owner.id, {
@@ -119,7 +113,7 @@ describe('booking documents resolution', () => {
 
   it('combines import and attachment documents, import entries first', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse({
+    mockCreate.mockResolvedValue(extractionReply({
       isTravelRelated: true, summary: 'test', language: 'en', bookings: [flightBooking()],
     }));
     const extracted = await createArtifactAndExtract(owner.id, {
@@ -143,7 +137,7 @@ describe('booking documents resolution', () => {
 
   it('gracefully drops import documents once the source artifact is deleted', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse({
+    mockCreate.mockResolvedValue(extractionReply({
       isTravelRelated: true, summary: 'test', language: 'en', bookings: [flightBooking()],
     }));
     const extracted = await createArtifactAndExtract(owner.id, {

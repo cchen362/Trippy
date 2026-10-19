@@ -17,8 +17,10 @@
 //     numbers (a codeshare) is labelled with an ARRAY, any of which is acceptable. details.carrierCode
 //     may be labelled too ("KE", "U2") where the carrier split is itself under test.
 //   - expected.kind is the three-way result kind: "bookings", "travel_no_booking" or "not_travel"
-//     (Plan 34 D-34-3 / Q-34-1). Today's output has no kind field, so it is derived from
-//     isTravelRelated + bookings; the W1 contract answers it directly and W0 records a baseline.
+//     (Plan 34 D-34-3 / Q-34-1). Under the W1 contract the model answers it as `result.kind` in its
+//     single JSON text block, and that answered value is scored. A run file recorded before W1 (the
+//     W0 baselines: a fenced block, no kind field) cannot be read that way, so its kind is derived
+//     from the app-shaped isTravelRelated + bookings; the summary line says which source a run used.
 
 import { rate, median, max, sum } from './common.mjs';
 import { normalizeFlightQuery } from '../../../../src/services/lookups.js';
@@ -46,11 +48,26 @@ function datetime(v) {
   return typeof v === 'string' ? v.slice(0, 16) : v;
 }
 
-// Plan 34 D-34-3 / Q-34-1: the model will answer a three-way kind under the W1 contract; today's
-// output maps onto it, so W0 records a baseline. "Not travel yet bookings" is an invalid state.
+const RESULT_KINDS = ['bookings', 'travel_no_booking', 'not_travel'];
+
+// Plan 34 D-34-3 / Q-34-1: the app-shaped output maps onto the three-way kind, which is how a
+// pre-W1 run (no kind field) is scored. "Not travel yet bookings" is an invalid state.
 function derivedKind(out) {
   if (out.isTravelRelated === false) return 'not_travel';
   return out.bookings?.length ? 'bookings' : 'travel_no_booking';
+}
+
+// The kind the model itself answered: `result.kind` of the last call's single text block. Null when
+// the block is not the W1 JSON (a pre-W1 fenced response, a redacted private record, no answer).
+function answeredKind(record) {
+  const texts = responseBlocks(record).filter((b) => b.type === 'text' && typeof b.text === 'string');
+  if (texts.length !== 1) return null;
+  try {
+    const kind = JSON.parse(texts[0].text)?.result?.kind;
+    return RESULT_KINDS.includes(kind) ? kind : null;
+  } catch {
+    return null;
+  }
 }
 
 function containsEitherWay(a, b) {
@@ -204,15 +221,20 @@ function scoreRecord(record) {
     flightNumbersUsable: 0,
     flightNumbersRewritten: 0,
     expectedKind: expected?.kind ?? null,
-    gotKind: out ? derivedKind(out) : null,
+    gotKind: null,
+    kindAnswered: false,
     kindCorrect: null,
     invalidState: false,
     critical: [],
     highButWrong: [],
     otherHighButWrong: [],
   };
+  if (out && !expected) base.gotKind = answeredKind(record) ?? derivedKind(out);
   if (!out || !expected) return base;
 
+  const answered = answeredKind(record);
+  base.kindAnswered = answered !== null;
+  base.gotKind = answered ?? derivedKind(out);
   base.isTravelCorrect = out.isTravelRelated === expected.isTravelRelated;
   base.kindCorrect = expected.kind ? base.gotKind === expected.kind : null;
   base.invalidState = out.isTravelRelated === false && out.bookings?.length > 0;
@@ -325,6 +347,17 @@ function thinkingEstimator(records) {
   };
 }
 
+// Plan 34 §5.1: the first call of each schema pays the grammar compile, and production extraction
+// is rare enough that most real calls are cold, so those calls are listed apart and kept out of the
+// median. A call is cold when it started before the first call of the run finished: with a pool
+// every call in flight at that moment started without a compiled grammar. startedAt is the end
+// time minus wallMs (runner.buildRecord), so a call's span is [startedAt, startedAt + wallMs].
+function coldCalls(records) {
+  const spans = records.map((r) => ({ r, start: Date.parse(r.startedAt), end: Date.parse(r.startedAt) + r.wallMs }));
+  const firstEnd = Math.min(...spans.map((x) => x.end));
+  return spans.filter((x) => x.start < firstEnd).map((x) => x.r);
+}
+
 function accuracy(rows) {
   const checked = rows.reduce((s, r) => s + r.fieldsChecked, 0);
   const correct = rows.reduce((s, r) => s + r.fieldsCorrect, 0);
@@ -346,15 +379,26 @@ export function score(records) {
   const maxTokens = records.filter((r) => r.stopReason === 'max_tokens').length;
   const refusals = records.filter((r) => r.stopReason === 'refusal').length;
   const privateCount = rows.filter((r) => r.private).length;
+  const endTurn = records.filter((r) => r.stopReason === 'end_turn');
+  const answeredCount = scored.filter((r) => r.kindCorrect !== null && r.kindAnswered).length;
+  const kindLabel = answeredCount > 0
+    ? 'result kind correct (as answered: result.kind)'
+    : 'result kind correct (derived from isTravelRelated + bookings)';
+  const cold = coldCalls(records);
+  const warm = records.filter((r) => !cold.includes(r));
 
   const summary = {
     'parse / service failures': rate(failures.length, n),
     'max_tokens stops': rate(maxTokens, n),
     'refusals': rate(refusals, n),
     'isTravelRelated correct': rate(scored.filter((r) => r.isTravelCorrect).length, scored.length),
-    'result kind correct (derived from isTravelRelated + bookings)': rate(
+    [kindLabel]: `${rate(
       scored.filter((r) => r.kindCorrect).length,
       scored.filter((r) => r.kindCorrect !== null).length,
+    )} (answered ${answeredCount}/${scored.filter((r) => r.kindCorrect !== null).length})`,
+    'schema-valid parse of end_turn responses': rate(
+      endTurn.filter((r) => r.output).length,
+      endTurn.length,
     ),
     'invalid state: not travel yet bookings': scored.filter((r) => r.invalidState).length,
     'booking count correct': rate(scored.filter((r) => r.countCorrect).length, scored.length),
@@ -370,6 +414,10 @@ export function score(records) {
     'est. thinking tokens median / max': thinking.ratio === null
       ? `n/a (${thinking.sample} thinking-free responses)`
       : `${median(thinkingTokens)} / ${max(thinkingTokens)} (text ${thinking.ratio.toFixed(3)} tok/char, n=${thinking.sample})`,
+    'cold (grammar compile) calls: wall ms': cold.map((r) => `${r.fixtureId} ${r.wallMs}`).join(', ') || 'none',
+    'wall ms median / max excluding cold calls': warm.length
+      ? `${median(warm.map((r) => r.wallMs))} / ${max(warm.map((r) => r.wallMs))} (n=${warm.length})`
+      : 'n/a',
     'cost per successful extraction ($)': scored.length ? (sum(records.map((r) => r.costUsd)) / scored.length).toFixed(5) : 'n/a',
   };
 

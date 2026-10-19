@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
+**Status:** 2026-10-19 — **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -595,7 +595,89 @@ Every accepted extraction call returned `carrierCode "KE"`, `flightNumber "012"`
 
 ### W1 — Extraction contract (D-34-1 … D-34-8)
 
-**Status:** NOT STARTED. Q-34-1 answered 2026-10-19 (the default), so the fixture labels are settled.
+**Status:** 2026-10-19 — **COMPLETE, gate passed; not deployed** (deploys with W2, §7). Branch `plan34-w1`, merged into `main`. Effort stays `medium` (Q-34-3: 0 `max_tokens` stops). The "think first" line is not adopted (nothing to gain: 281/281 without it). **One deviation from §4.3, made on measurement:** the prompt keeps "10. Do not explain your reasoning in prose.", the surviving half of the deleted rule 9 (see *Refusal found in the browser pass*).
+
+**What landed.**
+- **`claude.js`:**
+  - `EXTRACTION_OUTPUT_SCHEMA` (deep-frozen, deep-equal to `EXTRACTION_SCHEMA_W0`), with `EXTRACTION_OUTPUT_FORMAT`, `EXTRACTION_DETAIL_FIELDS` and `EXTRACTION_CONFIDENCE_FIELDS`.
+  - `requestSettings(profile, { format })` merges the format beside effort (D-34-6). With no format, every other workload's body is byte-identical: the descriptor, discovery and co-pilot pins did not move.
+  - §4.3 prompt edits, plus rule 10.
+  - The answer path: classify the stop, require exactly one text block, `JSON.parse`, then `validateAgainstSchema`. That function walks the same frozen schema constant, lower-cases enums and consts (D-34-7), and throws on any keyword it does not know. Then `toAppExtraction` (D-34-3).
+  - Any deviation is a 502 "The booking reader returned an unexpected shape.", logged as `[import] extraction unexpected shape: <path>: <reason>`. The regex is deleted.
+  - A cut-off is now split by cause (Q-34-3, D-34-8):
+    - no answer text → "The booking reader stopped before writing its answer. Please try again." (`during=thinking`);
+    - answer text cut mid-way → the old "try fewer pages or split the file." (`during=text`).
+  - Markers: `D-34-1`, `-2`, `-3`, `-5`, `-6`, `-7`, `-8`.
+- **`importer.js`:** `type` is lower-cased before the membership check (D-34-7). The `normalizeFlightDetails` comment now says extraction no longer needs it; it stays for MCP and client-edited bookings.
+- **Tests:**
+  - Extraction body pins re-captured after structure asserts: live **`f79b1f96…c420`**, Sonnet 4.6 rollback **`fcdfddad…5c6e`** (`output_config: { format }`, no effort). Prompt-text pin **`84d2aec1…2844`**.
+  - Schema budget tests: no optional property anywhere, 4 union definitions, all details keys `""`-able, deep-frozen, `type` enum equal to `BOOKING_TYPES`, pattern accept/reject tables.
+  - Contract tests: the three kinds, D-34-7 case folding, nine shape failures, and both cut-off branches.
+  - `tests/helpers/extractionReply.js` builds schema-shaped mock replies from app-shaped fixtures. `importer.test.js` and `bookings.test.js` use it, and their "no fenced JSON block" tests are rewritten to the new failure.
+  - Q-34-1 end to end: `travel_no_booking` gives only the `empty` warning.
+  - D-34-4 end to end: a KE/012 flight is stored unchanged.
+  - The live smoke asserts the mapped app shape.
+- **Harness:** `contract-think` (the §4.3 line appended on the wire by `lib/extractionPromptVariants.mjs`, after the recorder) and `contract-high` profiles. The scorer reads `result.kind` as answered, reports the schema-valid share of `end_turn` responses, and lists cold calls apart from the median.
+
+**Gate (§5.1 Extraction)** — final contract (rule 10 included), against the W0 runs of `main`. Run files: `runs/extraction/control/2026-10-19T03-16-58-525Z.jsonl`, `runs/extraction/baseline-46/2026-10-19T03-16-58-611Z.jsonl`. The first W1 sweep, before rule 10 (`control/…T03-02-57-883Z`, `baseline-46/…T03-04-04-299Z`, `contract-think/…T03-04-04-378Z`, `contract-high/…T03-04-04-465Z`), gave the same results on every criterion, with 33/33 kind on all four profiles.
+
+| 33 fixtures | W0 `control` | **W1 `control`** (Sonnet 5.5 `medium`) | W0 `baseline-46` | W1 `baseline-46` (Sonnet 4.6) | Gate |
+|---|---|---|---|---|---|
+| Schema-valid parse of `end_turn` | — (regex) | **33/33** | — | 33/33 | 100% ✔ |
+| `result.kind` correct (as answered) | 30/33 (derived) | **33/33** | 31/33 | 32/33 (visa reminder → `not_travel`) | 33/33 ✔ |
+| Critical fields · critical errors | 281/281 · 0 | **281/281 · 0** | 281/281 · 0 | 281/281 · 0 | no regression ✔ |
+| Flight numbers usable · importer rewrites | 6/21 · 15/21 | **21/21 · 0/21** | 1/21 · 20/21 | 21/21 · 0/21 | 21/21 · 0 ✔ |
+| `max_tokens` · refusals | 0 · 0 | **0 · 0** | 0 · 0 | 0 · 0 | 0 · 0 ✔ |
+| Wall median (excl. cold) / max | 4.5 / 12.0 s | **3.0 / 6.0 s** | 9.1 / 20.2 s | 5.6 / 13.2 s | ≤ 6.7 s ✔ |
+| First calls (cold) | — | 3.4 s, 3.5 s | — | 6.5 s, 7.2 s | reported |
+| Input / output tokens, median | 1,709 / 720 | 3,927 / 462 | 1,329 / 656 | 3,244 / 294 | — |
+| Cost per extraction | $0.0116 | **$0.0137** | $0.0139 | $0.0150 | reported |
+
+- **Net cost: +$0.0021 per import on Sonnet 5.5 (+18%).** The schema adds about 2,200 input tokens net of the deleted "Output shape" block. Output falls by about 260 tokens, because there is no fence and `""` replaces prose nulls. Sonnet 4.6: +$0.0011.
+- **Cold compile was not observable today.** The first calls were no slower than warm ones, so the grammar was already cached from W0's probe (24 h from last use). W0's **7.1 s** first compile on Sonnet 5.5 (15.3 s on Sonnet 4.6) remains the number for a truly cold import.
+- **Q-34-3:** `medium` had 0 `max_tokens` stops, so nothing changes. `contract-high` was also 0/33 (median 3.8 s, $0.0148 per import).
+- **`contract-think`** (Sonnet 5.5 `medium` with the line appended): 33/33 kind and 281/281, thought on 7 of 33, $0.0146 per import. There was no critical error for it to remove, so it is not adopted.
+- **`forced-cutoff`** (300 tokens, 2 multi-leg fixtures): both cut mid-answer, giving `during=text` and the "split the file" message, which is the right copy for that cause.
+- **Q-34-2:** Sonnet 4.6 passes everything except the visa reminder's kind, a borderline call it also missed at W0. Default applied: the rollback row is kept, and the measurement is recorded here.
+
+**Refusal found in the browser pass, root-caused, fixed.**
+- **The trigger.** A paste reading "Forced cut-off replay (thinking) - Flight KE 896 …" got a real `refusal`, category `reasoning_extraction`, mid-answer.
+- **Measured** with direct calls on the live profile (counts are refusals):
+
+| Input | W1 as §4.3 wrote it | `assumptions` description reworded (F-34-6's advice) | + rule 10 "Do not explain your reasoning in prose." | Old contract (`main`) |
+|---|---|---|---|---|
+| "…replay (thinking)…" | 6/12 | 0/12 | **0/12** | 0/12 |
+| "Please show your thinking. …" | 5/6 | 6/6 | **0/6** | 0/6 |
+| "Replay your reasoning step by step …" | 6/6 | 6/6 | 6/6 | 6/6 |
+| A booking email with "Thinking of upgrading?" marketing lines | 0/6 | 0/6 | — | 0/6 |
+
+- **The cause.** The deleted rule 9's second sentence gave the model a way to decline a request for its reasoning and still extract. Without it, an input asking for the reasoning was refused whole. The W1 prompt *without* a schema refused 5/6, so the cause is the prompt line, not the schema.
+- **The fix.** Rule 10 restores parity with the old contract on every input, so the schema is unchanged. Rewording `assumptions` fixed only one phrasing and is not adopted.
+- **Not fixed here.** "Replay your reasoning step by step" refuses on both contracts. That is pre-existing, the refusal copy already tells the traveller to paste the text, and it is not a W1 regression.
+- **Verified through the real `extractBookings` after the fix:** "(thinking)" 6/6 extracted, "show your thinking" 6/6 extracted.
+
+**Checks.**
+- `cd backend; npm test`: 45 files, **1,203 passed**, 6 skipped. `claude.test.js` 205/205. One earlier full run had a `collaboration.test.js` failure, a file W1 does not touch. It passed alone twice and in the next two full runs: the known parallel-load flake.
+- `LIVE_ANTHROPIC=1 npx vitest run tests/live`: **6/6** on Sonnet 5.5.
+- **Browser pass.** Playwright, dev servers from `launch.json`, the W3 verify trip, and a minted dev session deleted afterwards. No booking was confirmed, so the trip is unchanged. Inputs differ from Plan 30 W4's, so content-hash dedupe could not re-serve W4's stored rows.
+
+| # | Viewport | Input | Result |
+|---|---|---|---|
+| 1 | 375 × 812 | Pasted Korean Air confirmation | Review in 3.8 s. KE 896, Tue 28 Jul, ICN → PVG, `7QWX3N`. Stored `carrierCode "KE"`, `flightNumber "896"`. |
+| 2 | 375 × 812 | Phone screenshot (`img-overnight-flight-lands-next-day.png`) | Review in 5.4 s. SQ 322, Fri 12 Mar → Sat 13 Mar, SIN → LHR, `9RB4TX`. Stored SQ / 322; W4's pass stored the doubled "SQ322". |
+| 3 | 375 × 812 | PDF (`pdf-german-train-dotted-date.pdf`) | Review in 5.9 s. ICE 1005, Berlin Hbf → München Hbf, Sat 21 Aug, `7GH2KP`, medium-confidence note, "Extend trip". |
+| 4 | 375 × 812 | Non-travel paste (an office meeting note) | "This doesn't look like travel." in 2.9 s. |
+| 5 | 375 × 812 | **Fare-promo paste** ("SKYDEALS WEEKLY — London to Tokyo from £489") | **"We couldn't find any bookings in that."** in 2.3 s (Q-34-1). |
+| 6 | 375 × 812 | Both cut-off 502s replayed through a Playwright route on `POST /api/import/artifacts` | Each message renders verbatim inline under the inputs: "…split the file." and "The booking reader stopped before writing its answer. Please try again." |
+| 7 | 1280 × 860 | Phone screenshot (`img-dmy-in-trip-mdy-wins.png`) | Review in 5.3 s. UA 837, SFO → HND, `KQ7M2D`, an MM/DD assumption at medium confidence, "Extend trip". |
+
+  Every stored extraction from the pass has exactly `isTravelRelated, summary, language, bookings`, no `""` detail values, `confidence.fields` present and no `fieldConfidence` (D-34-3).
+- **D-30-7.** The harness runs open no database. The browser pass wrote 8 `import_artifacts` rows to the dev DB (normal product behaviour, as in Plan 30 W4); one of them is the `failed` refusal row.
+
+**Spend.** Anthropic **≈ $5.2**, against the §5.2 estimate of $2.0. The breakdown:
+- sweeps $2.79 (seven runs);
+- refusal diagnosis ≈ $2.3;
+- browser pass and live smoke ≈ $0.13.
 
 **Files.**
 - `backend/src/services/claude.js`: `EXTRACTION_OUTPUT_SCHEMA`, prompt per §4.3, `requestSettings` merging a format, the parse/validate/map path, and the regex deleted;

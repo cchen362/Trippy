@@ -35,9 +35,9 @@ export const DISCOVERY_MODEL = 'claude-haiku-5-5';
 // string and kept a newer model's effort/thinking would fail every request, so the settings live
 // under the model that accepts them and profileFor() looks them up by the configured model.
 // A profile is { model, maxTokens, thinking?, effort? } — `thinking` is sent verbatim, `effort`
-// becomes output_config.effort. Plan 30 W0 lets the evaluation harness
-// (backend/scripts/modelEval) inject another profile through each service function's optional
-// `profile` argument.
+// becomes output_config.effort (a workload's output format joins it there, D-34-6). Plan 30 W0
+// lets the evaluation harness (backend/scripts/modelEval) inject another profile through each
+// service function's optional `profile` argument.
 export const MODEL_PROFILES = Object.freeze({
   'claude-sonnet-5-5': Object.freeze({
     // Plan 30 W4 / D-30-6: on 23 fixtures (text, phone screenshots, PDFs) the largest output was
@@ -117,12 +117,16 @@ for (const workload of Object.keys(WORKLOAD_MODELS)) profileFor(workload);
 
 // A profile as the request fields it controls. Spread where model/max_tokens sit so the key order
 // of a default (no thinking, no effort) body is exactly what it was before profiles existed.
-export function requestSettings({ model, maxTokens, thinking, effort }) {
+// D-34-6 (Plan 34): an output `format` is a property of the workload, not of the model, so it comes
+// in beside the profile and is merged into the same output_config as the model's effort (effort
+// first). Sonnet 4.6 and Haiku 4.5 rows carry no effort, so they send output_config: { format }.
+// With no format the result is exactly what it was, so every unstructured workload's body is unchanged.
+export function requestSettings({ model, maxTokens, thinking, effort }, { format } = {}) {
   return {
     model,
     max_tokens: maxTokens,
     ...(thinking ? { thinking } : {}),
-    ...(effort ? { output_config: { effort } } : {}),
+    ...(effort || format ? { output_config: { ...(effort ? { effort } : {}), ...(format ? { format } : {}) } } : {}),
   };
 }
 
@@ -160,41 +164,11 @@ export function coerceSceneType(value) {
 // Plan 2A D6: the schema's city fields below (details.originCity/destinationCity/city)
 // must come back as canonical English — this is what deriveDayGeo's seed layer reads.
 // Local-script names are preserved in the title/station fields, not here.
-const EXTRACTION_SYSTEM = `You are a travel-booking extraction engine. You receive raw content (pasted text, email text, screenshots, or PDFs of travel confirmations) and must extract every distinct booking as structured JSON.
-
-Output ONLY a single fenced JSON code block (\`\`\`json fence). No prose before or after it.
-
-Output shape:
-{
-  "isTravelRelated": boolean,
-  "summary": "one-line human summary of what was found",
-  "language": "ISO 639-1 code of the input's primary language, e.g. \\"en\\", \\"zh\\"",
-  "bookings": [
-    {
-      "type": "flight" | "train" | "bus" | "ferry" | "hotel" | "other",
-      "title": "short human title, e.g. flight/train number or hotel name",
-      "confirmationRef": string | null,
-      "bookingSource": string | null,
-      "startDatetime": "YYYY-MM-DDTHH:MM" | null,
-      "endDatetime": "YYYY-MM-DDTHH:MM" | null,
-      "origin": string | null,
-      "destination": string | null,
-      "terminalOrStation": string | null,
-      "originTz": "IANA timezone" | null,
-      "destinationTz": "IANA timezone" | null,
-      "details": {
-        "originCity": string | null, "destinationCity": string | null,
-        "originCountryCode": "ISO 3166-1 alpha-2" | null, "destinationCountryCode": string | null,
-        "city": string | null, "countryCode": "ISO 3166-1 alpha-2" | null,
-        "carrierCode": string | null, "flightNumber": string | null, "airlineName": string | null,
-        "trainNumber": string | null, "originStation": string | null, "destinationStation": string | null,
-        "seatClass": string | null, "address": string | null, "localName": string | null, "note": string | null
-      },
-      "confidence": { "overall": "high"|"medium"|"low", "fields": { "fieldName": "high"|"medium"|"low" } },
-      "assumptions": ["short strings describing any inference you made"]
-    }
-  ]
-}
+// Plan 34 W1: rule 10 is the surviving half of the old fenced-block rule 9, kept on measurement. Under
+// the schema contract, an input that asks the model to show its reasoning ("Please show your
+// thinking…") drew a reasoning_extraction refusal on 5/6 and 6/12 calls without it, and 0 with it —
+// the same as the pre-schema contract. It lets the model decline that request and still extract.
+export const EXTRACTION_SYSTEM = `You are a travel-booking extraction engine. You receive raw content (pasted text, email text, screenshots, or PDFs of travel confirmations) and must extract every distinct booking as structured JSON.
 
 Rules:
 1. Extract every distinct booking present in the input — a single email or screenshot may contain more than one (e.g. outbound + return flight, or multiple train legs).
@@ -205,10 +179,348 @@ Rules:
 4. Hotel bookings that only specify check-in/check-out dates without times: default startDatetime to T15:00 and endDatetime to T11:00, and add an assumption noting the default check-in/check-out time was applied.
 5. Multilingual input: put the English/exonym city name in details.originCity / details.destinationCity / details.city; preserve the original local-script name in details.localName; set the top-level "language" field to the input's primary language code.
 5a. Hotel and "other" bookings: set details.countryCode to the ISO 3166-1 alpha-2 code of the country details.city is in, using the same confidence discipline as originCountryCode/destinationCountryCode — null if you cannot infer it with reasonable confidence, never a guess.
-6. If the input is not travel-related (or contains no extractable booking), return isTravelRelated:false, bookings:[], and a one-line summary explaining why. Do not fabricate a booking to fill the array.
+6. Classify the input in \`result.kind\`: \`bookings\` when it contains at least one booking you can extract; \`travel_no_booking\` when it is about travel but holds no booking (a fare sale, a newsletter, a price alert, travel advice); \`not_travel\` otherwise. Never invent a booking to reach \`bookings\`.
 7. Timezones: emit your best-guess IANA timezone (e.g. "Asia/Shanghai") for originTz/destinationTz. If you are not reasonably confident, use null — do not guess a generic value like "UTC".
 8. Ground transfers, car rentals, tour tickets, event tickets, and anything that does not fit flight/train/bus/ferry/hotel should use type "other" with a descriptive title (e.g. "Airport transfer — Chengdu Shuangliu to hotel").
-9. Output nothing outside the single fenced JSON block. Do not explain your reasoning in prose.`;
+9. Put the airline code in \`details.carrierCode\` and only the number in \`details.flightNumber\`.
+10. Do not explain your reasoning in prose.`;
+
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const v of Object.values(value)) deepFreeze(v);
+  }
+  return value;
+}
+
+// D-34-1 (Plan 34): the extraction answer is an API-enforced output contract. The request carries this
+// schema as output_config.format, decoding is constrained to it, and the answer is the response's
+// single text block holding only JSON. It supersedes Plan 2A D4's fenced block in prose and the regex
+// that found it. Hand-written and frozen on purpose (D-34-2): the body sent is the schema written here.
+// D-34-5: the budget is 4 of 16 union definitions (a $ref counts once per definition, not per use) and
+// 0 of 24 optional properties; compile time doubles with each optional property of one object (W0
+// measured 16 optional `details` fields rejected after 180 s). A later field must be another required
+// string that may be "" (not given), never an optional property, and a test walks the schema to hold
+// that line. `details` keys use "" for "not given" and every pattern accepts "", so no key costs a
+// union; toAppExtraction() drops the "" keys again so the returned and stored shape is unchanged.
+// The `type` list repeats importer.js BOOKING_TYPES (importer imports this module, so it cannot be
+// imported back without a cycle); a test pins the equality.
+const EXTRACTION_BOOKING_TYPES = Object.freeze(['flight', 'train', 'bus', 'ferry', 'hotel', 'other']);
+
+// The sixteen `details` keys, in schema order. Every one is a required string in the schema.
+export const EXTRACTION_DETAIL_FIELDS = Object.freeze([
+  'originCity', 'destinationCity', 'originCountryCode', 'destinationCountryCode', 'city', 'countryCode',
+  'carrierCode', 'flightNumber', 'airlineName', 'trainNumber', 'originStation', 'destinationStation',
+  'seatClass', 'address', 'localName', 'note',
+]);
+
+// The names a model may attach a per-field confidence to (booking fields plus the details keys it
+// can be unsure of). The schema carries them as an array of { field, level } because an open-keyed
+// map needs additionalProperties other than false, which structured outputs do not support.
+export const EXTRACTION_CONFIDENCE_FIELDS = Object.freeze([
+  'type', 'title', 'confirmationRef', 'bookingSource', 'startDatetime', 'endDatetime',
+  'origin', 'destination', 'terminalOrStation', 'originTz', 'destinationTz',
+  'originCity', 'destinationCity', 'originCountryCode', 'destinationCountryCode',
+  'city', 'countryCode', 'carrierCode', 'flightNumber', 'airlineName', 'trainNumber',
+  'originStation', 'destinationStation', 'seatClass', 'address', 'localName',
+]);
+
+export const EXTRACTION_OUTPUT_SCHEMA = deepFreeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'language', 'result'],
+  properties: {
+    summary: {
+      type: 'string',
+      description: 'One line for the traveller: what was found, or why nothing could be imported.',
+    },
+    language: {
+      type: 'string',
+      pattern: '^[a-z]{2}$',
+      description: "ISO 639-1 code of the input's primary language, e.g. en, zh.",
+    },
+    result: {
+      anyOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['kind', 'bookings'],
+          properties: {
+            kind: { const: 'bookings' },
+            bookings: { type: 'array', minItems: 1, items: { $ref: '#/$defs/booking' } },
+          },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['kind'],
+          properties: { kind: { const: 'travel_no_booking' } },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['kind'],
+          properties: { kind: { const: 'not_travel' } },
+        },
+      ],
+    },
+  },
+  $defs: {
+    nullableText: { type: ['string', 'null'] },
+    localDatetime: {
+      anyOf: [
+        { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$' },
+        { type: 'null' },
+      ],
+    },
+    ianaZone: {
+      anyOf: [
+        { type: 'string', pattern: '^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$' },
+        { type: 'null' },
+      ],
+    },
+    booking: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'type', 'title', 'confirmationRef', 'bookingSource', 'startDatetime', 'endDatetime',
+        'origin', 'destination', 'terminalOrStation', 'originTz', 'destinationTz',
+        'details', 'confidence', 'fieldConfidence', 'assumptions',
+      ],
+      properties: {
+        type: { enum: [...EXTRACTION_BOOKING_TYPES] },
+        title: { type: 'string', description: 'Short human title, e.g. the flight or train number, or the hotel name.' },
+        confirmationRef: { $ref: '#/$defs/nullableText' },
+        bookingSource: { $ref: '#/$defs/nullableText' },
+        startDatetime: { $ref: '#/$defs/localDatetime' },
+        endDatetime: { $ref: '#/$defs/localDatetime' },
+        origin: { $ref: '#/$defs/nullableText' },
+        destination: { $ref: '#/$defs/nullableText' },
+        terminalOrStation: { $ref: '#/$defs/nullableText' },
+        originTz: { $ref: '#/$defs/ianaZone' },
+        destinationTz: { $ref: '#/$defs/ianaZone' },
+        details: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Every key is required: write "" for anything the input does not give. Never guess a value to fill a key.',
+          required: [...EXTRACTION_DETAIL_FIELDS],
+          properties: {
+            originCity: { type: 'string', description: 'Canonical English city name.' },
+            destinationCity: { type: 'string', description: 'Canonical English city name.' },
+            originCountryCode: { type: 'string', pattern: '^([A-Z]{2})?$' },
+            destinationCountryCode: { type: 'string', pattern: '^([A-Z]{2})?$' },
+            city: { type: 'string', description: 'Canonical English city name (hotel and other bookings).' },
+            countryCode: { type: 'string', pattern: '^([A-Z]{2})?$' },
+            carrierCode: {
+              type: 'string',
+              pattern: '^(([A-Z]{3}|[A-Z]{2}|[A-Z][0-9]|[0-9][A-Z]))?$',
+              description: 'Airline code only: the 2-character IATA code (KE, U2) or the 3-letter ICAO code.',
+            },
+            flightNumber: {
+              type: 'string',
+              pattern: '^([0-9]{1,4}[A-Z]?)?$',
+              description: 'The flight number only, as printed, without the airline code: for KE012 write 012.',
+            },
+            airlineName: { type: 'string' },
+            trainNumber: { type: 'string' },
+            originStation: { type: 'string' },
+            destinationStation: { type: 'string' },
+            seatClass: { type: 'string' },
+            address: { type: 'string' },
+            localName: { type: 'string', description: 'The name in its original local script.' },
+            note: { type: 'string' },
+          },
+        },
+        confidence: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['overall'],
+          properties: { overall: { enum: ['high', 'medium', 'low'] } },
+        },
+        fieldConfidence: {
+          type: 'array',
+          description: 'One entry for each field you are not fully sure of; omit fields you read with certainty.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['field', 'level'],
+            properties: {
+              field: { enum: [...EXTRACTION_CONFIDENCE_FIELDS] },
+              level: { enum: ['high', 'medium', 'low'] },
+            },
+          },
+        },
+        assumptions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Short statements of any inference you made, e.g. 'Year inferred from the trip dates.'",
+        },
+      },
+    },
+  },
+});
+
+export const EXTRACTION_OUTPUT_FORMAT = Object.freeze({ type: 'json_schema', schema: EXTRACTION_OUTPUT_SCHEMA });
+
+// D-34-2 (Plan 34): the schema's own rules re-checked in code after JSON.parse, never a second or
+// different contract. It understands exactly the keywords EXTRACTION_OUTPUT_SCHEMA uses and throws on
+// any other, so a later schema edit cannot leave a rule silently unchecked.
+// D-34-7: enum and const membership is checked after case normalisation, and the returned copy carries the schema's own spelling.
+// Returns { ok: true, value } with a normalised deep copy, or { ok: false, error } naming the first
+// problem as '<json path>: <reason>'. For an anyOf the error reported is the deepest one, which is
+// the branch that came closest to matching.
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+  'type', 'const', 'enum', 'anyOf', '$ref', '$defs', 'required', 'properties',
+  'additionalProperties', 'items', 'minItems', 'pattern', 'description',
+]);
+
+const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'null']);
+
+function jsonTypeOf(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+const childPath = (path, key) => (path ? `${path}.${key}` : key);
+
+function checkNode(value, schema, root, path) {
+  for (const keyword of Object.keys(schema)) {
+    if (!SUPPORTED_SCHEMA_KEYWORDS.has(keyword)) {
+      throw new Error(`validateAgainstSchema does not support the "${keyword}" keyword (at ${path || 'the root'})`);
+    }
+  }
+  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
+    throw new Error(`validateAgainstSchema supports only additionalProperties: false (at ${path || 'the root'})`);
+  }
+
+  if (schema.$ref !== undefined) {
+    const match = /^#\/\$defs\/([A-Za-z0-9_]+)$/.exec(schema.$ref);
+    const target = match ? root.$defs?.[match[1]] : undefined;
+    if (!target) throw new Error(`validateAgainstSchema cannot resolve $ref "${schema.$ref}" (at ${path || 'the root'})`);
+    return checkNode(value, target, root, path);
+  }
+
+  let current = value;
+  const actual = jsonTypeOf(current);
+
+  if (schema.type !== undefined) {
+    const allowed = Array.isArray(schema.type) ? schema.type : [schema.type];
+    for (const name of allowed) {
+      if (!SCHEMA_TYPES.has(name)) {
+        throw new Error(`validateAgainstSchema does not support type "${name}" (at ${path || 'the root'})`);
+      }
+    }
+    if (!allowed.includes(actual)) {
+      return { ok: false, path, reason: `expected ${allowed.join(' or ')}, got ${actual}` };
+    }
+  }
+
+  const canonical = (candidates, kind) => {
+    const match = candidates.find((c) => (
+      typeof c === 'string' && typeof current === 'string' ? c.toLowerCase() === current.toLowerCase() : c === current
+    ));
+    if (match === undefined) {
+      return { ok: false, path, reason: `${kind} ${candidates.map((c) => JSON.stringify(c)).join(', ')}, got ${JSON.stringify(current)}` };
+    }
+    current = match;
+    return null;
+  };
+  if (schema.const !== undefined) {
+    const failed = canonical([schema.const], 'must be');
+    if (failed) return failed;
+  }
+  if (schema.enum !== undefined) {
+    const failed = canonical(schema.enum, 'must be one of');
+    if (failed) return failed;
+  }
+
+  if (schema.anyOf !== undefined) {
+    let deepest = null;
+    for (const branch of schema.anyOf) {
+      const attempt = checkNode(current, branch, root, path);
+      if (attempt.ok) return attempt;
+      if (!deepest || attempt.path.length > deepest.path.length) deepest = attempt;
+    }
+    return deepest;
+  }
+
+  if (schema.pattern !== undefined && typeof current === 'string' && !new RegExp(schema.pattern).test(current)) {
+    return { ok: false, path, reason: `does not match ${schema.pattern}` };
+  }
+
+  if (schema.properties !== undefined && actual === 'object') {
+    for (const key of schema.required ?? []) {
+      if (!Object.hasOwn(current, key)) return { ok: false, path: childPath(path, key), reason: 'is required' };
+    }
+    const copy = {};
+    for (const [key, child] of Object.entries(current)) {
+      if (!Object.hasOwn(schema.properties, key)) {
+        if (schema.additionalProperties === false) return { ok: false, path: childPath(path, key), reason: 'is not an allowed property' };
+        copy[key] = child;
+        continue;
+      }
+      const result = checkNode(child, schema.properties[key], root, childPath(path, key));
+      if (!result.ok) return result;
+      copy[key] = result.value;
+    }
+    current = copy;
+  }
+
+  if (actual === 'array') {
+    if (schema.minItems !== undefined && current.length < schema.minItems) {
+      return { ok: false, path, reason: `needs at least ${schema.minItems} item${schema.minItems === 1 ? '' : 's'}` };
+    }
+    if (schema.items !== undefined) {
+      const copy = [];
+      for (let i = 0; i < current.length; i += 1) {
+        const result = checkNode(current[i], schema.items, root, `${path}[${i}]`);
+        if (!result.ok) return result;
+        copy.push(result.value);
+      }
+      current = copy;
+    }
+  }
+
+  return { ok: true, value: current };
+}
+
+export function validateAgainstSchema(value, schema, root = schema) {
+  const result = checkNode(value, schema, root, '');
+  return result.ok ? result : { ok: false, error: `${result.path || 'the answer'}: ${result.reason}` };
+}
+
+// D-34-3 (Plan 34): the model answers a three-way classification; the app keeps the two fields it
+// has always read. This folds a validated answer into { isTravelRelated, summary, language, bookings }
+// with each booking exactly as the old fenced block produced it: fieldConfidence folded back into
+// confidence.fields, and every details key the model left "" removed. Q-34-1 (owner, default):
+// travel_no_booking counts as travel with nothing to import, so the review screen says
+// "We couldn't find any bookings in that." and only not_travel says it is not travel.
+export function toAppExtraction(value) {
+  const { summary, language, result } = value;
+  const bookings = result.kind === 'bookings'
+    ? result.bookings.map((b) => ({
+      type: b.type,
+      title: b.title,
+      confirmationRef: b.confirmationRef,
+      bookingSource: b.bookingSource,
+      startDatetime: b.startDatetime,
+      endDatetime: b.endDatetime,
+      origin: b.origin,
+      destination: b.destination,
+      terminalOrStation: b.terminalOrStation,
+      originTz: b.originTz,
+      destinationTz: b.destinationTz,
+      details: Object.fromEntries(Object.entries(b.details).filter(([, v]) => v !== '')),
+      confidence: {
+        overall: b.confidence.overall,
+        fields: Object.fromEntries(b.fieldConfidence.map((f) => [f.field, f.level])),
+      },
+      assumptions: b.assumptions,
+    }))
+    : [];
+  return { isTravelRelated: result.kind !== 'not_travel', summary, language, bookings };
+}
 
 // Extracts structured bookings from pasted text / uploaded images / PDFs via a single
 // non-streaming Claude call. files: [{ kind: 'text'|'image'|'pdf', mediaType, content }]
@@ -257,7 +569,7 @@ export async function extractBookings({ files, contextText, tripContext, profile
   console.log('[import] extract files=%d', files.length);
 
   const response = await client.messages.create({
-    ...requestSettings(profile),
+    ...requestSettings(profile, { format: EXTRACTION_OUTPUT_FORMAT }),
     system: EXTRACTION_SYSTEM,
     messages: [{ role: 'user', content }],
   });
@@ -266,12 +578,10 @@ export async function extractBookings({ files, contextText, tripContext, profile
   const outTok = response.usage?.output_tokens ?? 0;
   console.log('[import] extract files=%d in=%d out=%d', files.length, inTok, outTok);
 
-  const fullText = response.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
+  const textBlocks = response.content.filter((block) => block.type === 'text');
+  const fullText = textBlocks.map((block) => block.text).join('');
 
-  // D-30-3: a refusal or cut-off is named for what it is, never reported as "no JSON block". The
+  // D-30-3: a refusal or cut-off is named for what it is, never reported as a bad shape. The
   // frontend shows a status'd error's message verbatim, so these are written for the traveller.
   const stop = classifyStop(response);
   if (stop.outcome === 'refused') {
@@ -285,40 +595,48 @@ export async function extractBookings({ files, contextText, tripContext, profile
     );
   }
   if (stop.outcome === 'truncated') {
-    console.warn('[import] extraction cut off stopReason=%s out=%d', stop.stopReason, outTok);
+    // D-34-8 / Q-34-3: under a schema the usual cut-off is the model spending the whole allowance
+    // thinking before it writes a character of the answer (F-34-7), which is not the traveller's
+    // file being too long. No answer text at all means that runaway; text that began and was cut
+    // is a genuinely long output, so only that case tells the traveller to split the file.
+    const during = fullText.trim() ? 'text' : 'thinking';
+    console.warn('[import] extraction cut off during=%s stopReason=%s out=%d', during, stop.stopReason, outTok);
     throw Object.assign(
-      new Error("The booking reader's output was cut off — try fewer pages or split the file."),
+      new Error(during === 'thinking'
+        ? 'The booking reader stopped before writing its answer. Please try again.'
+        : "The booking reader's output was cut off — try fewer pages or split the file."),
       { status: 502, raw: fullText.slice(0, 2000) },
     );
   }
 
-  const matches = [...fullText.matchAll(/```json\r?\n([\s\S]*?)\r?\n?```/g)];
-  const lastMatch = matches.at(-1);
-  if (!lastMatch) {
-    throw Object.assign(new Error('Claude extraction returned no JSON block'), {
-      status: 502,
-      raw: fullText.slice(0, 2000),
-    });
+  // D-34-2: classify the stop first (above), then parse exactly one text block and validate it.
+  // Nothing is repaired: any deviation is a named 502 with the text kept for diagnosis.
+  if (textBlocks.length !== 1) {
+    throw extractionShapeError(`expected exactly one text block, got ${textBlocks.length}`, fullText);
   }
-
+  const answerText = textBlocks[0].text;
   let parsed;
   try {
-    parsed = JSON.parse(lastMatch[1]);
+    parsed = JSON.parse(answerText);
   } catch (e) {
-    throw Object.assign(new Error(`Claude extraction returned malformed JSON: ${e.message}`), {
-      status: 502,
-      raw: lastMatch[1].slice(0, 2000),
-    });
+    throw extractionShapeError(`not JSON (${e.message})`, answerText);
   }
+  const checked = validateAgainstSchema(parsed, EXTRACTION_OUTPUT_SCHEMA);
+  if (!checked.ok) throw extractionShapeError(checked.error, answerText);
 
-  if (typeof parsed.isTravelRelated !== 'boolean' || !Array.isArray(parsed.bookings)) {
-    throw Object.assign(new Error('Claude extraction JSON missing required fields'), {
-      status: 502,
-      raw: JSON.stringify(parsed).slice(0, 2000),
-    });
-  }
+  return {
+    extraction: toAppExtraction(checked.value),
+    model: profile.model,
+    usage: { input_tokens: inTok, output_tokens: outTok },
+  };
+}
 
-  return { extraction: parsed, model: profile.model, usage: { input_tokens: inTok, output_tokens: outTok } };
+function extractionShapeError(reason, rawText) {
+  console.warn('[import] extraction unexpected shape: %s', reason);
+  return Object.assign(new Error('The booking reader returned an unexpected shape.'), {
+    status: 502,
+    raw: rawText.slice(0, 2000),
+  });
 }
 
 // Strips punctuation and common geographic suffixes so "Dujiangyan & Scenic Area"

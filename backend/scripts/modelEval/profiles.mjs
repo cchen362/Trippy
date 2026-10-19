@@ -67,6 +67,13 @@ export const PROFILES = {
     // W4: a deliberately tiny allowance, run with --only on one long fixture, to produce the D-30-3
     // cut-off error on Sonnet 5.5 in the harness (the plan forbids lowering it in code).
     'forced-cutoff': { model: SONNET_55, maxTokens: 300, effort: 'medium' },
+    // Plan 34 W1 (§5.1, Q-34-3): measured under the schema-constrained contract, full corpus (no
+    // subset). 'contract-think' sends the live settings with the §4.3 'think-first' sentence added
+    // on the wire (lib/extractionPromptVariants.mjs; claude.js is unchanged) and is adopted only if
+    // it removes a critical error or raises critical-field accuracy without a max_tokens stop.
+    // 'contract-high' is the same contract at effort high, the Q-34-3 remedy if medium runs away.
+    'contract-think': { model: SONNET_55, maxTokens: 16000, effort: 'medium', promptVariant: 'think-first' },
+    'contract-high': { model: SONNET_55, maxTokens: 16000, effort: 'high' },
   },
   copilot: {
     // W5 flipped COPILOT_MODEL: control is now Sonnet 5.5 at effort low under the D-30-9

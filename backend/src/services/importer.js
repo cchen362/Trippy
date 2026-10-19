@@ -144,10 +144,13 @@ export function normalizeTz(tz) {
 // Shared with the MCP draft validator (Plan 28 W2.1) — never duplicate this
 // normalization logic in the MCP write path.
 // Trippy stores a flight as carrierCode "KE" + flightNumber "012": manual entry,
-// the flight card and the status lookup all assume it. Extraction models and MCP
-// clients often send the full designator "KE012" in flightNumber instead. The
-// airline code is stripped only when it matches carrierCode (or fills a missing
-// one); a different airline (a codeshare) or an unparseable value is left as given.
+// the flight card and the status lookup all assume it. MCP clients and the confirm
+// step's client-edited bookings often send the full designator "KE012" in
+// flightNumber instead. Extraction no longer does: under the Plan 34 D-34-4 schema
+// the API pattern forces the split form, so this is a no-op there (a test proves
+// it) and stays only for the callers that are not schema-constrained. The airline
+// code is stripped only when it matches carrierCode (or fills a missing one); a
+// different airline (a codeshare) or an unparseable value is left as given.
 export function normalizeFlightDetails(details) {
   const designator = parseFlightDesignator(details.flightNumber);
   if (!designator) return details;
@@ -159,7 +162,11 @@ export function normalizeFlightDetails(details) {
 // Maps one extracted-booking object (Claude's schema) into createBooking()'s payload shape.
 // Exported so confirmArtifact() can re-run it on client-edited bookings before persisting.
 export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt }) {
-  const type = BOOKING_TYPES.includes(raw.type) ? raw.type : 'other';
+  // D-34-7: the API does not guarantee enum capitalisation, so "Flight" must stay a
+  // flight instead of silently becoming 'other'. Also covers client-edited bookings
+  // at confirm, which are not schema-constrained.
+  const typeKey = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : '';
+  const type = BOOKING_TYPES.includes(typeKey) ? typeKey : 'other';
   const title = (raw.title || '').trim() || 'Untitled booking';
 
   // raw.details is Claude's extraction schema; raw.detailsJson is this function's own

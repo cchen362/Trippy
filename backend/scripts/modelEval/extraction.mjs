@@ -20,6 +20,7 @@ import {
   FIXTURES_DIR, PRIVATE_DIR, parseArgs, openRunFile, buildRecord, runPool, filterItems, printProgress,
 } from './lib/runner.mjs';
 import { getProfile, toServiceProfile, assertControlIsLive } from './profiles.mjs';
+import { installExtractionPromptVariant } from './lib/extractionPromptVariants.mjs';
 
 const WORKLOAD = 'extraction';
 
@@ -73,6 +74,8 @@ async function main() {
   if (args.profile === 'control') assertControlIsLive(WORKLOAD);
 
   installRecorder();
+  // After the recorder, so the run file stores the prompt that was actually sent (Plan 34 §4.3).
+  if (profile.promptVariant) installExtractionPromptVariant(profile.promptVariant);
   const { extractBookings } = await import('../../src/services/claude.js');
 
   let fixtures = [...loadCommittedFixtures(), ...loadPrivateFixtures()];
@@ -86,6 +89,7 @@ async function main() {
     `extraction / ${args.profile} (${profile.model}): ${fixtures.length} fixtures ` +
     `(${privateCount} private), concurrency ${args.concurrency}, --max-usd ${args.maxUsd}`,
   );
+  if (profile.promptVariant) console.log(`prompt variant: ${profile.promptVariant}`);
   console.log('D-30-7: this script imports no database; only the Anthropic API is called.');
 
   async function runOne(fixture) {
@@ -105,7 +109,12 @@ async function main() {
       fixtureId: fixture.id,
       recorded,
       output: recorded.result?.extraction ?? null,
-      extra: { private: fixture.private, tags: fixture.tags ?? [], expected: fixture.expected },
+      extra: {
+        private: fixture.private,
+        tags: fixture.tags ?? [],
+        expected: fixture.expected,
+        promptVariant: profile.promptVariant ?? null,
+      },
     });
     runFile.write(record);
     return record;

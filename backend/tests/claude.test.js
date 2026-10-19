@@ -28,6 +28,8 @@ const {
   MODEL_PROFILES, profileFor, requestSettings, classifyStop, COPILOT_PING_INTERVAL_MS,
   DISCOVERY_SELECTION_RULES, discoverySystemPrompt,
   EXTRACTION_MODEL, PHOTO_DESCRIPTOR_MODEL, COPILOT_MODEL, DISCOVERY_MODEL,
+  EXTRACTION_SYSTEM, EXTRACTION_OUTPUT_SCHEMA, EXTRACTION_OUTPUT_FORMAT,
+  EXTRACTION_DETAIL_FIELDS, EXTRACTION_CONFIDENCE_FIELDS, validateAgainstSchema, toAppExtraction,
 } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
@@ -1266,7 +1268,8 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     tripContext: { startDate: '2027-04-01', endDate: '2027-04-10', destinations: [{ city: 'Chengdu', countryCode: 'CN' }] },
   };
   const EXTRACT_REPLY = {
-    content: [{ type: 'text', text: '```json\n{"isTravelRelated":true,"bookings":[]}\n```' }],
+    content: [{ type: 'text', text: JSON.stringify({ summary: 'x', language: 'en', result: { kind: 'travel_no_booking' } }) }],
+    stop_reason: 'end_turn',
     usage: { input_tokens: 1, output_tokens: 1 },
   };
 
@@ -1313,21 +1316,31 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
   it('extractBookings', async () => {
     const { body } = await runExtraction();
-    // Plan 30 W4: the third deliberate move off the W0 pin — Sonnet 5.5 at effort 'medium',
-    // adaptive thinking left on (no thinking field), prompt unchanged (the sha256 below was
-    // re-captured for this body).
+    // Plan 30 W4 moved this pin to Sonnet 5.5 at effort 'medium' with adaptive thinking left on.
+    // Plan 34 W1: the fourth deliberate move off the W0 pin — the D-34-1 schema contract and the §4.3 prompt (structure asserted first, sha256 re-captured).
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
     expect(body.model).toBe('claude-sonnet-5-5');
     expect(body.max_tokens).toBe(16000);
-    expect(body.output_config).toEqual({ effort: 'medium' });
+    expect(body.output_config).toEqual({ effort: 'medium', format: EXTRACTION_OUTPUT_FORMAT });
+    expect(Object.keys(body.output_config)).toEqual(['effort', 'format']);
+    expect(body.output_config.format.type).toBe('json_schema');
+    expect(body.output_config.format.schema).toBe(EXTRACTION_OUTPUT_SCHEMA);
+    expect(body.system).toBe(EXTRACTION_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('57a2beddff7300eed3c46995b1579f079f642827990630395f5c29139b0e73bf');
+    expect(sha256(body)).toBe('f79b1f96f41ba333e47409eeb59d249c5e6abe1fdd40d65a071b31309611c420');
   });
 
-  it('extractBookings rolled back to Sonnet 4.6 sends the exact W0 body (Plan 30 W4 rollback)', async () => {
+  it('extractBookings rolled back to Sonnet 4.6 sends the same contract with no effort (Plan 30 W4 rollback, D-34-6)', async () => {
     const { body } = await runExtraction({ profile: { model: 'claude-sonnet-4-6', ...MODEL_PROFILES['claude-sonnet-4-6'].extraction } });
-    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'system', 'messages']);
-    expect(sha256(body)).toBe('eb6fafb2148fe0bdcc070d737f73aab9d7292886466e5b4d6bd0fdbaad79aa74');
+    // Plan 34 W1: the fourth deliberate move off the W0 pin — the D-34-1 schema contract and the §4.3 prompt (structure asserted first, sha256 re-captured).
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
+    expect(body.model).toBe('claude-sonnet-4-6');
+    expect(body.max_tokens).toBe(8192);
+    expect(body.output_config).toEqual({ format: EXTRACTION_OUTPUT_FORMAT });
+    expect(body.output_config.format.schema).toBe(EXTRACTION_OUTPUT_SCHEMA);
+    expect(body.system).toBe(EXTRACTION_SYSTEM);
+    expect(body).not.toHaveProperty('thinking');
+    expect(sha256(body)).toBe('fcdfddad740029b903a224b4a7af414280cb5ae875c1ca66445c09d703ca5c6e');
   });
 
   it('generatePhotoDescriptor', async () => {
@@ -1398,7 +1411,11 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 
     it('extractBookings sends the profile and reports its model', async () => {
       const { body, result } = await runExtraction({ profile });
-      expectProfileFields(body);
+      expect(body.model).toBe('claude-haiku-5-5');
+      expect(body.max_tokens).toBe(1024);
+      expect(body.thinking).toEqual({ type: 'disabled' });
+      // D-34-6: extraction's output format rides in the same output_config as the profile's effort.
+      expect(body.output_config).toEqual({ effort: 'low', format: EXTRACTION_OUTPUT_FORMAT });
       expect(result.model).toBe('claude-haiku-5-5');
     });
 
@@ -1440,7 +1457,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 // A thinking block as a thinking-capable model emits it under the default display: empty text,
 // a signature. It must be ignored by every parser and replayed untouched by the co-pilot loop.
 const THINKING_BLOCK = { type: 'thinking', thinking: '', signature: 'sig-abc' };
-const EXTRACT_OK_TEXT = '```json\n{"isTravelRelated":true,"summary":"x","bookings":[]}\n```';
+const EXTRACT_OK_TEXT = JSON.stringify({ summary: 'x', language: 'en', result: { kind: 'travel_no_booking' } });
 const DESCRIPTOR_OK_TEXT = '```json\n{"photoQuery":"night market skewers","sceneType":"market"}\n```';
 
 describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
@@ -1503,6 +1520,26 @@ describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
     expect(Object.keys(requestSettings(profileFor('extraction')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('descriptor')))).toEqual(['model', 'max_tokens', 'output_config']);
     expect(Object.keys(requestSettings(profileFor('discovery')))).toEqual(['model', 'max_tokens', 'thinking', 'output_config']);
+  });
+
+  it('merges a workload output format beside the model\'s effort, effort first (D-34-6)', () => {
+    const format = { type: 'json_schema', schema: { type: 'object' } };
+    const withBoth = requestSettings(profileFor('extraction'), { format });
+    expect(Object.keys(withBoth)).toEqual(['model', 'max_tokens', 'output_config']);
+    expect(withBoth.output_config).toEqual({ effort: 'medium', format });
+    expect(Object.keys(withBoth.output_config)).toEqual(['effort', 'format']);
+  });
+
+  it('sends a format alone as output_config when the model\'s row has no effort (D-34-6)', () => {
+    const format = { type: 'json_schema', schema: { type: 'object' } };
+    const rollback = requestSettings({ model: 'claude-sonnet-4-6', ...MODEL_PROFILES['claude-sonnet-4-6'].extraction }, { format });
+    expect(rollback).toEqual({ model: 'claude-sonnet-4-6', max_tokens: 8192, output_config: { format } });
+  });
+
+  it('is unchanged when no format is given (every other workload\'s body)', () => {
+    expect(requestSettings(profileFor('descriptor'))).toEqual({ model: PHOTO_DESCRIPTOR_MODEL, max_tokens: 1024, output_config: { effort: 'low' } });
+    expect(requestSettings({ model: 'claude-sonnet-4-6', maxTokens: 8192 })).toEqual({ model: 'claude-sonnet-4-6', max_tokens: 8192 });
+    expect(requestSettings(profileFor('discovery'), {})).toEqual(requestSettings(profileFor('discovery')));
   });
 
   it('throws a clear error for an unknown workload', () => {
@@ -1630,29 +1667,33 @@ describe('extractBookings — thinking blocks and stop reasons (D-30-3)', () => 
     warnSpy.mockRestore();
   });
 
-  it('rejects a max_tokens stop during thinking (no text at all) as cut off, never "no JSON block"', async () => {
+  it('a max_tokens stop during thinking (no answer text) says it stopped, and never tells the traveller to split the file (D-34-8, Q-34-3)', async () => {
     mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'max_tokens', usage });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const err = await extractBookings({ files }).catch((e) => e);
 
     expect(err.status).toBe(502);
-    expect(err.message).toBe("The booking reader's output was cut off — try fewer pages or split the file.");
-    expect(err.message).not.toMatch(/no JSON block/);
+    expect(err.message).toBe('The booking reader stopped before writing its answer. Please try again.');
+    expect(err.message).not.toMatch(/split/);
+    expect(warnSpy).toHaveBeenCalledWith('[import] extraction cut off during=%s stopReason=%s out=%d', 'thinking', 'max_tokens', 7);
     warnSpy.mockRestore();
   });
 
-  it('treats model_context_window_exceeded like max_tokens', async () => {
-    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'model_context_window_exceeded', usage });
+  it('a max_tokens stop with whitespace-only text counts as during thinking', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK, { type: 'text', text: '  \n' }], stop_reason: 'max_tokens', usage });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await expect(extractBookings({ files })).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/cut off/) });
+    await expect(extractBookings({ files })).rejects.toMatchObject({
+      status: 502,
+      message: 'The booking reader stopped before writing its answer. Please try again.',
+    });
     warnSpy.mockRestore();
   });
 
-  it('keeps raw (first 2000 chars of text) on a truncation so the failure stays diagnosable', async () => {
+  it('a max_tokens stop after the answer began is a genuinely long output and keeps the split-the-file advice', async () => {
     mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: '```json\n{"isTravel' }],
+      content: [{ type: 'text', text: '{"summary":"x","lang' }],
       stop_reason: 'max_tokens',
       usage,
     });
@@ -1660,8 +1701,305 @@ describe('extractBookings — thinking blocks and stop reasons (D-30-3)', () => 
 
     const err = await extractBookings({ files }).catch((e) => e);
 
-    expect(err.raw).toBe('```json\n{"isTravel');
+    expect(err.status).toBe(502);
+    expect(err.message).toBe("The booking reader's output was cut off — try fewer pages or split the file.");
+    expect(err.raw).toBe('{"summary":"x","lang');
+    expect(warnSpy).toHaveBeenCalledWith('[import] extraction cut off during=%s stopReason=%s out=%d', 'text', 'max_tokens', 7);
     warnSpy.mockRestore();
+  });
+
+  it('treats model_context_window_exceeded like max_tokens', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK], stop_reason: 'model_context_window_exceeded', usage });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(extractBookings({ files })).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/cut off|stopped before/) });
+    warnSpy.mockRestore();
+  });
+
+  it('keeps raw (first 2000 chars of text) on a truncation so the failure stays diagnosable', async () => {
+    mockCreate.mockResolvedValue({
+      content: [{ type: 'text', text: '{"summary":"x","lang'.padEnd(2500, 'x') }],
+      stop_reason: 'max_tokens',
+      usage,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.raw).toBe('{"summary":"x","lang'.padEnd(2500, 'x').slice(0, 2000));
+    warnSpy.mockRestore();
+  });
+});
+
+// Plan 34 W1 — the extraction answer is an API-enforced schema (D-34-1), parsed from exactly one
+// text block and re-checked in code (D-34-2), then mapped back to the app's own shape (D-34-3).
+const emptyDetails = () => Object.fromEntries(EXTRACTION_DETAIL_FIELDS.map((key) => [key, '']));
+const schemaBooking = (over = {}, detailOver = {}) => ({
+  type: 'flight',
+  title: 'KE012',
+  confirmationRef: 'ABC123',
+  bookingSource: null,
+  startDatetime: '2027-04-03T08:30',
+  endDatetime: '2027-04-03T12:10',
+  origin: 'ICN',
+  destination: 'JFK',
+  terminalOrStation: null,
+  originTz: 'Asia/Seoul',
+  destinationTz: 'America/New_York',
+  details: { ...emptyDetails(), originCity: 'Seoul', destinationCity: 'New York', carrierCode: 'KE', flightNumber: '012', ...detailOver },
+  confidence: { overall: 'high' },
+  fieldConfidence: [{ field: 'startDatetime', level: 'low' }],
+  assumptions: ['Year inferred from the trip dates.'],
+  ...over,
+});
+const schemaAnswer = (result, extra = {}) => JSON.stringify({ summary: 'One flight.', language: 'en', result, ...extra });
+const bookingsAnswer = (booking = schemaBooking()) => schemaAnswer({ kind: 'bookings', bookings: [booking] });
+
+describe('extractBookings — schema contract (Plan 34 D-34-1/D-34-2/D-34-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+  });
+
+  const files = [{ kind: 'text', content: 'Flight KE012 ICN to JFK' }];
+  const usage = { input_tokens: 5, output_tokens: 7 };
+  const reply = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn', usage });
+
+  it('maps a bookings result to exactly the app shape the importer has always read (D-34-3)', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer()));
+
+    const { extraction, model, usage: reported } = await extractBookings({ files });
+
+    expect(Object.keys(extraction)).toEqual(['isTravelRelated', 'summary', 'language', 'bookings']);
+    expect(extraction.isTravelRelated).toBe(true);
+    expect(extraction.summary).toBe('One flight.');
+    expect(extraction.language).toBe('en');
+    const [booking] = extraction.bookings;
+    expect(Object.keys(booking)).toEqual([
+      'type', 'title', 'confirmationRef', 'bookingSource', 'startDatetime', 'endDatetime', 'origin', 'destination',
+      'terminalOrStation', 'originTz', 'destinationTz', 'details', 'confidence', 'assumptions',
+    ]);
+    expect(booking).not.toHaveProperty('fieldConfidence');
+    expect(booking.confidence).toEqual({ overall: 'high', fields: { startDatetime: 'low' } });
+    expect(booking.details).toEqual({ originCity: 'Seoul', destinationCity: 'New York', carrierCode: 'KE', flightNumber: '012' });
+    expect(Object.values(booking.details)).not.toContain('');
+    expect(booking.bookingSource).toBeNull();
+    expect(booking.assumptions).toEqual(['Year inferred from the trip dates.']);
+    expect(model).toBe('claude-sonnet-5-5');
+    expect(reported).toEqual({ input_tokens: 5, output_tokens: 7 });
+  });
+
+  it('reads a leading thinking block and one schema text block', async () => {
+    mockCreate.mockResolvedValue({ content: [THINKING_BLOCK, { type: 'text', text: bookingsAnswer() }], stop_reason: 'end_turn', usage });
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction.bookings).toHaveLength(1);
+  });
+
+  it('maps travel_no_booking to a travel-related answer with no bookings (Q-34-1)', async () => {
+    mockCreate.mockResolvedValue(reply(schemaAnswer({ kind: 'travel_no_booking' }, { summary: 'A fare sale, nothing booked.' })));
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction).toEqual({ isTravelRelated: true, summary: 'A fare sale, nothing booked.', language: 'en', bookings: [] });
+  });
+
+  it('maps not_travel to isTravelRelated false with no bookings', async () => {
+    mockCreate.mockResolvedValue(reply(schemaAnswer({ kind: 'not_travel' })));
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction.isTravelRelated).toBe(false);
+    expect(extraction.bookings).toEqual([]);
+  });
+
+  it('keeps every key even when all details are empty (details becomes an empty object)', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer(schemaBooking({ type: 'other', title: 'Airport transfer', fieldConfidence: [] }, { originCity: '', destinationCity: '', carrierCode: '', flightNumber: '' }))));
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction.bookings[0].details).toEqual({});
+    expect(extraction.bookings[0].confidence).toEqual({ overall: 'high', fields: {} });
+  });
+
+  it('D-34-7: case-normalises enum values and returns the schema spelling', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer(schemaBooking({
+      type: 'Flight',
+      confidence: { overall: 'HIGH' },
+      fieldConfidence: [{ field: 'FlightNumber', level: 'Low' }],
+    }))));
+
+    const { extraction } = await extractBookings({ files });
+
+    expect(extraction.bookings[0].type).toBe('flight');
+    expect(extraction.bookings[0].confidence).toEqual({ overall: 'high', fields: { flightNumber: 'low' } });
+  });
+
+  describe('a shape failure is a named 502 with raw kept, never a repair', () => {
+    const cases = [
+      ['two text blocks', { content: [{ type: 'text', text: '{}' }, { type: 'text', text: '{}' }], stop_reason: 'end_turn', usage }, /exactly one text block, got 2/],
+      ['no text block at all after a normal stop', { content: [THINKING_BLOCK], stop_reason: 'end_turn', usage }, /exactly one text block, got 0/],
+      ['text that is not JSON (a fenced block)', reply('```json\n{}\n```'), /not JSON/],
+      ['a missing result', reply(JSON.stringify({ summary: 'x', language: 'en' })), /result: is required/],
+      ['an extra unknown key', reply(schemaAnswer({ kind: 'not_travel' }, { isTravelRelated: false })), /isTravelRelated: is not an allowed property/],
+      ['kind bookings with an empty bookings array', reply(schemaAnswer({ kind: 'bookings', bookings: [] })), /result\.bookings: needs at least 1 item/],
+      ['a booking under kind not_travel', reply(schemaAnswer({ kind: 'not_travel', bookings: [schemaBooking()] })), /result\.bookings: is not an allowed property/],
+      ['a flight number that carries the airline code', reply(bookingsAnswer(schemaBooking({}, { flightNumber: 'KE012' }))), /result\.bookings\[0\]\.details\.flightNumber: does not match/],
+      ['a bare UTC timezone', reply(bookingsAnswer(schemaBooking({ originTz: 'UTC' }))), /result\.bookings\[0\]\.originTz/],
+    ];
+
+    it.each(cases)('%s', async (_name, response, reason) => {
+      mockCreate.mockResolvedValue(response);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const err = await extractBookings({ files }).catch((e) => e);
+
+      expect(err.status).toBe(502);
+      expect(err.message).toBe('The booking reader returned an unexpected shape.');
+      expect(typeof err.raw).toBe('string');
+      expect(warnSpy).toHaveBeenCalledWith('[import] extraction unexpected shape: %s', expect.stringMatching(reason));
+      warnSpy.mockRestore();
+    });
+
+    it('keeps the first 2000 characters of the answer text as raw', async () => {
+      mockCreate.mockResolvedValue(reply(`not json ${'x'.repeat(3000)}`));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const err = await extractBookings({ files }).catch((e) => e);
+
+      expect(err.raw).toHaveLength(2000);
+      expect(err.raw.startsWith('not json ')).toBe(true);
+      warnSpy.mockRestore();
+    });
+  });
+
+  it('a refusal is still named as a refusal, never as a shape failure', async () => {
+    mockCreate.mockResolvedValue({ content: [], stop_reason: 'refusal', usage });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files }).catch((e) => e);
+
+    expect(err.message).toMatch(/declined to process this input/);
+    warnSpy.mockRestore();
+  });
+});
+
+describe('validateAgainstSchema / toAppExtraction (D-34-2, D-34-3)', () => {
+  it('returns a normalised deep copy and leaves its input untouched', () => {
+    const input = JSON.parse(bookingsAnswer(schemaBooking({ type: 'Hotel' })));
+    const before = JSON.stringify(input);
+
+    const result = validateAgainstSchema(input, EXTRACTION_OUTPUT_SCHEMA);
+
+    expect(result.ok).toBe(true);
+    expect(result.value.result.bookings[0].type).toBe('hotel');
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it('names the first problem with its JSON path', () => {
+    const input = JSON.parse(bookingsAnswer(schemaBooking({}, { carrierCode: 'KE012' })));
+    const result = validateAgainstSchema(input, EXTRACTION_OUTPUT_SCHEMA);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/^result\.bookings\[0\]\.details\.carrierCode: does not match \^/);
+    expect(validateAgainstSchema([], EXTRACTION_OUTPUT_SCHEMA)).toEqual({ ok: false, error: 'the answer: expected object, got array' });
+  });
+
+  it('accepts null where the schema allows it and rejects it where it does not', () => {
+    expect(validateAgainstSchema(JSON.parse(bookingsAnswer(schemaBooking({ startDatetime: null, originTz: null }))), EXTRACTION_OUTPUT_SCHEMA).ok).toBe(true);
+    expect(validateAgainstSchema(JSON.parse(bookingsAnswer(schemaBooking({ title: null }))), EXTRACTION_OUTPUT_SCHEMA).ok).toBe(false);
+  });
+
+  it('throws on a keyword it does not check, so a schema edit cannot go unchecked', () => {
+    expect(() => validateAgainstSchema(1, { type: 'string', maxLength: 3 })).toThrow(/does not support the "maxLength" keyword/);
+    expect(() => validateAgainstSchema(1, { type: 'integer' })).toThrow(/does not support type "integer"/);
+    expect(() => validateAgainstSchema({}, { type: 'object', additionalProperties: { type: 'string' } })).toThrow(/additionalProperties: false/);
+    expect(() => validateAgainstSchema({}, { $ref: '#/$defs/missing' })).toThrow(/cannot resolve \$ref/);
+  });
+
+  it('toAppExtraction drops "" details and folds fieldConfidence into confidence.fields', () => {
+    const mapped = toAppExtraction(JSON.parse(bookingsAnswer(schemaBooking({ fieldConfidence: [{ field: 'title', level: 'medium' }, { field: 'origin', level: 'low' }] }))));
+    expect(mapped.bookings[0].confidence).toEqual({ overall: 'high', fields: { title: 'medium', origin: 'low' } });
+    expect(mapped.bookings[0].details).toEqual({ originCity: 'Seoul', destinationCity: 'New York', carrierCode: 'KE', flightNumber: '012' });
+  });
+});
+
+describe('extraction output schema budget (D-34-5)', () => {
+  const children = (node) => [
+    ...Object.values(node.properties ?? {}),
+    ...(node.items ? [node.items] : []),
+    ...(node.anyOf ?? []),
+    ...Object.values(node.$defs ?? {}),
+  ];
+  const allNodes = (node) => [node, ...children(node).flatMap(allNodes)];
+  const nodes = allNodes(EXTRACTION_OUTPUT_SCHEMA);
+  const details = EXTRACTION_OUTPUT_SCHEMA.$defs.booking.properties.details;
+
+  it('has no optional property anywhere: every object requires exactly its own keys', () => {
+    const objects = nodes.filter((n) => n.properties);
+    expect(objects.length).toBeGreaterThan(5);
+    for (const node of objects) {
+      expect(node.additionalProperties).toBe(false);
+      expect([...node.required].sort()).toEqual(Object.keys(node.properties).sort());
+    }
+  });
+
+  it('spends 4 of 16 union definitions, counted once per definition ($ref is not followed)', () => {
+    const unions = nodes.filter((n) => Array.isArray(n.anyOf) || Array.isArray(n.type));
+    expect(unions).toHaveLength(4);
+    expect(unions.length).toBeLessThanOrEqual(16);
+  });
+
+  it('details requires all 16 keys as strings, and every pattern accepts ""', () => {
+    expect(details.required).toEqual(EXTRACTION_DETAIL_FIELDS);
+    expect(EXTRACTION_DETAIL_FIELDS).toHaveLength(16);
+    expect(Object.keys(details.properties)).toEqual(EXTRACTION_DETAIL_FIELDS);
+    for (const prop of Object.values(details.properties)) {
+      expect(prop.type).toBe('string');
+      if (prop.pattern) expect(new RegExp(prop.pattern).test('')).toBe(true);
+    }
+  });
+
+  it('lists every confidence field name once, and the details keys it can be unsure of are among them', () => {
+    const enumList = EXTRACTION_OUTPUT_SCHEMA.$defs.booking.properties.fieldConfidence.items.properties.field.enum;
+    expect(enumList).toEqual(EXTRACTION_CONFIDENCE_FIELDS);
+    expect(new Set(enumList).size).toBe(26);
+    for (const key of ['originCity', 'carrierCode', 'flightNumber', 'localName']) expect(enumList).toContain(key);
+  });
+
+  it('is deep-frozen, as is the format that carries it', () => {
+    for (const node of nodes) expect(Object.isFrozen(node)).toBe(true);
+    expect(Object.isFrozen(EXTRACTION_OUTPUT_SCHEMA.required)).toBe(true);
+    expect(Object.isFrozen(EXTRACTION_OUTPUT_FORMAT)).toBe(true);
+    expect(EXTRACTION_OUTPUT_FORMAT).toEqual({ type: 'json_schema', schema: EXTRACTION_OUTPUT_SCHEMA });
+  });
+
+  it('keeps the booking type list identical to the importer\'s BOOKING_TYPES', () => {
+    expect(EXTRACTION_OUTPUT_SCHEMA.$defs.booking.properties.type.enum).toEqual(['flight', 'train', 'bus', 'ferry', 'hotel', 'other']);
+  });
+
+  it('carrierCode and flightNumber patterns enforce the code/number split (D-34-4)', () => {
+    const carrier = new RegExp(details.properties.carrierCode.pattern);
+    for (const ok of ['KE', 'U2', '3K', 'KAL', '']) expect(carrier.test(ok)).toBe(true);
+    for (const bad of ['54', 'KE012', 'ke']) expect(carrier.test(bad)).toBe(false);
+    const number = new RegExp(details.properties.flightNumber.pattern);
+    for (const ok of ['012', '2490A', '']) expect(number.test(ok)).toBe(true);
+    for (const bad of ['KE012', '12345']) expect(number.test(bad)).toBe(false);
+  });
+});
+
+describe('extraction prompt text (Plan 34 §4.3)', () => {
+  it('pins the prompt text', () => {
+    expect(createHash('sha256').update(EXTRACTION_SYSTEM).digest('hex')).toBe('84d2aec19bbb27f26d6dbdae804548478c2479838b615b14295a5bfa89452844');
+  });
+
+  it('carries the classification rule and the carrier/number rule, and no output-format instruction', () => {
+    expect(EXTRACTION_SYSTEM).toContain('6. Classify the input in `result.kind`: `bookings` when it contains at least one booking you can extract; `travel_no_booking` when it is about travel but holds no booking (a fare sale, a newsletter, a price alert, travel advice); `not_travel` otherwise. Never invent a booking to reach `bookings`.');
+    expect(EXTRACTION_SYSTEM).toContain('9. Put the airline code in `details.carrierCode` and only the number in `details.flightNumber`.');
+    // Kept on measurement (W1 browser pass): without it, inputs that ask to see the reasoning draw a
+    // reasoning_extraction refusal under the schema; the old contract never did.
+    expect(EXTRACTION_SYSTEM.endsWith('\n10. Do not explain your reasoning in prose.')).toBe(true);
+    for (const gone of ['fenced', '```', 'Output shape', 'isTravelRelated']) expect(EXTRACTION_SYSTEM).not.toContain(gone);
   });
 });
 

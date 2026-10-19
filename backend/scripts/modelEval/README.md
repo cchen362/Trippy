@@ -33,6 +33,15 @@ rewrites the two volume/selection lines of the system prompt on the wire, from
 `lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
 actually sent. `claude.js` is never changed to measure a variant.
 
+Extraction profiles may carry `promptVariant` too (Plan 34 W1): `extraction.mjs` installs it from
+`lib/extractionPromptVariants.mjs` after the recorder, wrapping `Messages.prototype.create`, and throws unless the
+request's system prompt is exactly the live `EXTRACTION_SYSTEM`, so a no-op patch cannot be measured under a variant's
+name. The two Plan 34 extraction profiles run the full corpus (no subset): `contract-think` is the live settings with
+the `think-first` sentence (§4.3, F-34-7) appended on the wire, and `contract-high` is the same contract at effort
+`high` (Q-34-3). The scorer reads the kind the model answered (`result.kind`), reports the schema-valid share of
+`end_turn` responses, and lists the cold calls (grammar compile) apart from the latency median (§5.1); run files
+recorded before W1 still score, with the kind derived from the app-shaped output.
+
 Co-pilot profiles may carry `betas` (an `anthropic-beta` header passed as the stream call's options), harness-only,
 from `lib/copilotRequestPatch.mjs` (Plan 30 W5, Q-30-3); it is installed after the recorder the same way. The
 two co-pilot prompt variants measured on 2026-10-19 (no effect) were rejected in favour of the acknowledgement

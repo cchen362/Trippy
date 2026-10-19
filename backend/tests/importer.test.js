@@ -35,17 +35,12 @@ const {
   getArtifactFile,
   deleteArtifact,
   normalizeExtractedBooking,
+  normalizeFlightDetails,
 } = await import('../src/services/importer.js');
+const { extractionReply, textReply } = await import('./helpers/extractionReply.js');
 
 const flightEmailText = readFileSync(join(__dirname, 'fixtures/flight-email.txt'), 'utf8');
 const trainTicketBase64 = readFileSync(join(__dirname, 'fixtures/train-ticket.png')).toString('base64');
-
-function claudeResponse(json) {
-  return {
-    content: [{ type: 'text', text: '```json\n' + JSON.stringify(json) + '\n```' }],
-    usage: { input_tokens: 100, output_tokens: 50 },
-  };
-}
 
 function extractionWithBookings(bookings, overrides = {}) {
   return {
@@ -168,6 +163,20 @@ describe('normalizeExtractedBooking', () => {
     expect(result.type).toBe('other');
   });
 
+  // D-34-7: the API does not guarantee enum capitalisation, so the type check lower-cases first.
+  it.each([
+    ['Flight', 'flight'],
+    [' HOTEL ', 'hotel'],
+    ['Train', 'train'],
+    ['spaceship', 'other'],
+    [42, 'other'],
+    [undefined, 'other'],
+    [null, 'other'],
+  ])('maps type %j to %s (D-34-7)', (type, expected) => {
+    const result = normalizeExtractedBooking(flightBooking({ type }), { artifactId: 'a1', model: 'm', extractedAt: 'now' });
+    expect(result.type).toBe(expected);
+  });
+
   it('falls back to a default title when missing', () => {
     const result = normalizeExtractedBooking(flightBooking({ title: '' }), { artifactId: 'a1', model: 'm', extractedAt: 'now' });
     expect(result.title).toBe('Untitled booking');
@@ -243,10 +252,39 @@ describe('flight number normalisation', () => {
     expect(normalizeExtractedBooking(train, meta).detailsJson.flightNumber).toBe('KE012');
   });
 
+  // D-34-4: the schema pattern forces the split form, so extraction output passes through unchanged.
+  it.each([
+    [{ carrierCode: 'KE', flightNumber: '012' }],
+    [{ carrierCode: 'U2', flightNumber: '8123' }],
+    [{ carrierCode: 'BA', flightNumber: '2490A' }],
+    [{ carrierCode: 'CA', flightNumber: '421' }],
+  ])('normalizeFlightDetails is a no-op on the schema-shaped flight %j (D-34-4)', (details) => {
+    expect(normalizeFlightDetails(details)).toEqual(details);
+  });
+
   it('is idempotent on confirm (re-normalising its own output)', () => {
     const once = normalizeExtractedBooking(withFlight('KE', 'KE012'), meta);
     const twice = normalizeExtractedBooking(once, meta);
     expect(twice.detailsJson).toMatchObject({ carrierCode: 'KE', flightNumber: '012' });
+  });
+});
+
+describe('schema-shaped flights through extraction (D-34-4)', () => {
+  it('stores carrierCode and flightNumber exactly as the model answered, with no empty-string details', async () => {
+    const flight = flightBooking({
+      title: 'KE012',
+      details: { ...flightBooking().details, carrierCode: 'KE', flightNumber: '012', airlineName: 'Korean Air' },
+    });
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flight])));
+
+    const result = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] });
+
+    const stored = JSON.parse(getDb().prepare('SELECT extracted_json FROM import_artifacts').get().extracted_json);
+    for (const details of [result.extraction.bookings[0].detailsJson, stored.bookings[0].detailsJson]) {
+      expect(details).toMatchObject({ carrierCode: 'KE', flightNumber: '012', airlineName: 'Korean Air' });
+      expect(Object.values(details)).not.toContain('');
+      expect(details.trainNumber).toBeUndefined();
+    }
   });
 });
 
@@ -269,7 +307,7 @@ describe('timezone validation', () => {
 
 describe('createArtifactAndExtract — hash dedupe', () => {
   it('returns cached:true and skips a second Claude call for an identical re-post', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
 
     const first = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] });
     expect(first.cached).toBe(false);
@@ -294,7 +332,7 @@ describe('createArtifactAndExtract — warnings', () => {
       type: 'flight', title: 'Existing', confirmationRef: 'abc123',
     });
 
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking({ confirmationRef: 'ABC123' })])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking({ confirmationRef: 'ABC123' })])));
     const result = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: [{ kind: 'text', content: flightEmailText }] });
 
     const dup = result.warnings.find((w) => w.type === 'duplicate');
@@ -304,7 +342,7 @@ describe('createArtifactAndExtract — warnings', () => {
 
   it('flags bookings before trip start and after trip end', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
       flightBooking({ startDatetime: '2026-09-01T08:00', confirmationRef: 'BEFORE' }),
       flightBooking({ startDatetime: '2026-09-25T08:00', confirmationRef: 'AFTER' }),
     ])));
@@ -322,16 +360,39 @@ describe('createArtifactAndExtract — warnings', () => {
   });
 
   it('flags notTravelRelated and empty together for a non-booking capture', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([], { isTravelRelated: false, summary: 'A photo of a cat' })));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([], { isTravelRelated: false, summary: 'A photo of a cat' })));
 
     const result = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: 'a cat photo' }] });
 
     expect(result.warnings).toEqual(expect.arrayContaining([{ type: 'notTravelRelated' }, { type: 'empty' }]));
   });
 
+  it('maps a travel email with no booking to isTravelRelated true and only the empty warning (Q-34-1)', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([], { summary: 'A fare sale newsletter' })));
+
+    const result = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: 'SKYDEALS WEEKLY - London to Tokyo from 489' }] });
+
+    expect(result.extraction.isTravelRelated).toBe(true);
+    expect(result.extraction.bookings).toEqual([]);
+    const types = result.warnings.map((w) => w.type);
+    expect(types).toContain('empty');
+    expect(types).not.toContain('notTravelRelated');
+  });
+
+  it('maps a not_travel reply to both the notTravelRelated and empty warnings (Q-34-1)', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([], { isTravelRelated: false, summary: 'A photo of a cat' })));
+
+    const result = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: 'a cat photo' }] });
+
+    expect(result.extraction.isTravelRelated).toBe(false);
+    expect(result.extraction.bookings).toEqual([]);
+    const types = result.warnings.map((w) => w.type);
+    expect(types).toEqual(expect.arrayContaining(['notTravelRelated', 'empty']));
+  });
+
   it('flags a low-confidence booking', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
       flightBooking({ confidence: { overall: 'low', fields: {} } }),
     ])));
 
@@ -346,7 +407,7 @@ describe('createArtifactAndExtract — warnings', () => {
 describe('confirmArtifact', () => {
   it('creates bookings sequentially, stamps importedFrom server-side, and marks the artifact confirmed', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
       flightBooking({ confirmationRef: 'LEG1' }),
       flightBooking({ confirmationRef: 'LEG2', title: 'MU5402' }),
     ])));
@@ -379,7 +440,7 @@ describe('confirmArtifact', () => {
 
 describe('access control', () => {
   it('returns a 404-style error for a user with no relationship to the artifact', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
     const extracted = await createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] });
 
     const inviteCode = authService.getInviteCode();
@@ -399,7 +460,7 @@ describe('access control', () => {
     const collaborator = authService.register('collab', 'password123', 'Collaborator', inviteCode).user;
     inviteCollaborator(owner.id, trip.trip.id, 'collab');
 
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
     const extracted = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: [{ kind: 'text', content: flightEmailText }] });
 
     expect(() => getArtifactDetail(collaborator.id, extracted.artifact.id)).not.toThrow();
@@ -407,25 +468,37 @@ describe('access control', () => {
 });
 
 describe('malformed Claude output', () => {
-  it('marks the artifact failed when no fenced JSON block is returned', async () => {
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'not json at all' }], usage: {} });
-
-    await expect(createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] })).rejects.toThrow();
-
-    const db = getDb();
-    const row = db.prepare('SELECT status, error FROM import_artifacts').get();
-    expect(row.status).toBe('failed');
-    expect(row.error).toBeTruthy();
+  // The importer logs the failure and claude.js logs the shape violation; both are expected here.
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('marks the artifact failed when the fenced block contains invalid JSON', async () => {
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '```json\n{not valid\n```' }], usage: {} });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('marks the artifact failed when the reader returns an unexpected shape', async () => {
+    mockCreate.mockResolvedValue(textReply('not json at all'));
 
     await expect(createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] })).rejects.toThrow();
 
-    const db = getDb();
-    const row = db.prepare('SELECT status, error FROM import_artifacts').get();
+    const row = getDb().prepare('SELECT status, error FROM import_artifacts').get();
     expect(row.status).toBe('failed');
+    expect(row.error).toContain('unexpected shape');
+  });
+
+  it('marks the artifact failed when the JSON breaks the schema (flightNumber carrying the airline code)', async () => {
+    const reply = extractionReply(extractionWithBookings([flightBooking()]));
+    const answered = JSON.parse(reply.content[0].text);
+    answered.result.bookings[0].details.flightNumber = 'KE012';
+    mockCreate.mockResolvedValue(textReply(JSON.stringify(answered)));
+
+    await expect(createArtifactAndExtract(owner.id, { tripId: null, inputs: [{ kind: 'text', content: flightEmailText }] })).rejects.toThrow();
+
+    const row = getDb().prepare('SELECT status, error FROM import_artifacts').get();
+    expect(row.status).toBe('failed');
+    expect(row.error).toContain('unexpected shape');
   });
 });
 
@@ -454,7 +527,7 @@ describe('input validation', () => {
 
 describe('image input path', () => {
   it('sends a correctly-shaped image content block to Claude', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
 
     await createArtifactAndExtract(owner.id, {
       tripId: null,
@@ -471,7 +544,7 @@ describe('image input path', () => {
 
 describe('getArtifactFile', () => {
   it('returns the exact bytes and media type of the stored input file', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
     const extracted = await createArtifactAndExtract(owner.id, {
       tripId: null,
       inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
@@ -483,7 +556,7 @@ describe('getArtifactFile', () => {
   });
 
   it('404s for a user with no relationship to the artifact', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
     const extracted = await createArtifactAndExtract(owner.id, {
       tripId: null,
       inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
@@ -501,7 +574,7 @@ describe('getArtifactFile', () => {
   });
 
   it('404s for a nonexistent position on a valid artifact', async () => {
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
     const extracted = await createArtifactAndExtract(owner.id, {
       tripId: null,
       inputs: [{ kind: 'image', mediaType: 'image/png', content: trainTicketBase64 }],
@@ -519,7 +592,7 @@ describe('getArtifactFile', () => {
 describe('reextractArtifact and listArtifactsForTrip and deleteArtifact', () => {
   it('re-extracts stored files and lists/deletes artifacts scoped to a trip', async () => {
     const trip = makeTrip();
-    mockCreate.mockResolvedValue(claudeResponse(extractionWithBookings([flightBooking()])));
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
 
     const extracted = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: [{ kind: 'text', content: flightEmailText }] });
     expect(mockCreate).toHaveBeenCalledOnce();
