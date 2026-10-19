@@ -121,7 +121,7 @@ When a change — a model upgrade, a dependency bump, a fix, a feature — can b
 
 - Discovery is a normalized shared catalogue: `discovery_destinations` + `discovery_places`, keyed by canonical geography identity and country code. The old `discovery_cache` and `global_discovery_cache` tables are retired.
 - Catalogue freshness is seven days. Fresh rows are reused; stale rows are refreshed and merged; explicit "show more" appends. Generation is daily-budgeted and place verification is resolver-budgeted.
-- Discovery generation and photo descriptors use Haiku 5.5 (Plan 30 W2/W3). Discovery runs with thinking disabled, and its prompt's volume rules are keyed by model (`DISCOVERY_SELECTION_RULES`, D-30-1). Booking extraction and the co-pilot use Sonnet 4.6 unless a later, explicit model migration changes the live constants. Read `MODEL_PROFILES` in `claude.js` for the live settings.
+- Discovery generation and photo descriptors use Haiku 5.5 (Plan 30 W2/W3). Discovery runs with thinking disabled, and its prompt's volume rules are keyed by model (`DISCOVERY_SELECTION_RULES`, D-30-1). Booking extraction and the co-pilot use Sonnet 5.5 (effort `medium` and `low` respectively; the co-pilot explains after its proposal call, D-30-9). Sonnet 4.6 and Haiku 4.5 stay in `MODEL_PROFILES` as rollback rows. Read `MODEL_PROFILES` in `claude.js` for the live settings, and `docs/DECISIONS.md` ("Model 5.5 migration") for why each was chosen.
 - Stop photos persist the Unsplash photo id, URL, attribution, query, scene type, and source. Displaying/selecting Unsplash results must retain attribution and download tracking. A stored photo is reused rather than fetched on every render.
 
 ### Co-Pilot
@@ -187,7 +187,7 @@ Used once per component. On type badges, active indicators, confirmation refs. N
 
 Check `docs/DECISIONS.md` before proposing any change to a paid provider's tier, quota, or resolver strategy — several of these are settled and explicitly closed.
 
-- Anthropic: reuse a fresh discovery catalogue; preserve prompt-cache stability; do not add model calls for deterministic work.
+- Anthropic: reuse a fresh discovery catalogue; preserve prompt-cache stability; do not add model calls for deterministic work. Thinking effort is fixed per workload in `MODEL_PROFILES` and never varied per request, because changing `output_config.effort` between requests invalidates the prompt cache. Settings are keyed by model (D-30-1): a rollback is one `*_MODEL` constant, and a profile sent to the wrong model is a 400.
 - Unsplash: persist selected photo metadata, retain attribution, and call the required download-tracking endpoint. Never re-fetch a stored selection merely to render it.
 - Google Places: use one session token across autocomplete and the completing details request. Request only fields the workflow needs.
 - Place resolution: use the shared cache and resolver pipeline. Respect Nominatim pacing and discovery resolver budgets.

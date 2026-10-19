@@ -76,7 +76,7 @@ The following are not implemented product capabilities unless a newer plan ships
 | Backend | Node.js ESM + Express 4 | JSON REST plus SSE streams |
 | Database | SQLite + `better-sqlite3` | WAL, foreign keys, ordered SQL/JS migrations |
 | Authentication | Invite-code registration + opaque cookie sessions | bcrypt passwords; 30-day httpOnly session cookie |
-| AI | Anthropic Claude | Sonnet 4.6 for extraction/co-pilot; Haiku 4.5 for discovery/descriptors |
+| AI | Anthropic Claude | Sonnet 5.5 for extraction/co-pilot; Haiku 5.5 for discovery/descriptors |
 | Places/geocoding | Google Places + Nominatim | Cached, language-normalized place resolution |
 | Photos | Unsplash | Persisted selection, attribution, download tracking |
 | Flight lookup | AeroDataBox through RapidAPI, optional | Manual normalized fallback when unconfigured |
@@ -335,10 +335,10 @@ Discovery is catalogue-first, not a per-trip generated blob.
 
 | Workflow | Live model | Reasoning/cost posture |
 |---|---|---|
-| Booking/document extraction | Claude Sonnet 4.6 | High-accuracy structured extraction across text/image/PDF |
-| Discovery generation | Claude Haiku 4.5 | High-volume categorized generation with SSE |
-| Photo descriptors | Claude Haiku 4.5 | Small deterministic descriptor task |
-| Co-pilot reasoning/actions | Claude Sonnet 4.6 | Conversational reasoning plus native tool use |
+| Booking/document extraction | Claude Sonnet 5.5 | High-accuracy structured extraction across text/image/PDF; effort `medium`, 16,000 |
+| Discovery generation | Claude Haiku 5.5 | High-volume categorized generation with SSE; thinking disabled, 48,000 |
+| Photo descriptors | Claude Haiku 5.5 | Small deterministic descriptor task; effort `low`, 1,024 |
+| Co-pilot reasoning/actions | Claude Sonnet 5.5 | Conversational reasoning plus native tool use; effort `low`, 16,000 per step |
 
 Model names in `backend/src/services/claude.js` are the live truth. A model upgrade is an architecture/cost change, not a documentation-only edit.
 
