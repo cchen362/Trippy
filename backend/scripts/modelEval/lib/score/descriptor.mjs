@@ -4,8 +4,8 @@
 //
 // Two answer contracts are scored, told apart per record by the recorded request:
 //   - schema (Plan 34 W2): the request carried output_config.format; the answer is exactly one text
-//     block holding only JSON. The service returns null (never truncates) when photoQuery has more
-//     than 8 words.
+//     block holding only JSON. A photoQuery over 8 words is sent as written and logged (D-34-12),
+//     never cut.
 //   - fenced (W0 baselines and the 5.5 control): the answer is the first ```json fence in prose,
 //     and the service truncated an over-long photoQuery to 8 words.
 
@@ -107,7 +107,7 @@ export function score(records) {
 
   const notes = [];
   if (withQuery.some((r) => r.queryWords > 8 && r.schemaContract)) {
-    notes.push('photoQuery > 8 words (raw): under the schema contract the service returns null for such a query (no truncation).');
+    notes.push('photoQuery > 8 words (raw): under the schema contract the service sends such a query as written and logs a warning (D-34-12; never cut).');
   }
   const invalid = rows.filter((r) => !r.fallback && !r.sceneValid);
   if (invalid.length) notes.push(`out-of-vocabulary sceneType: ${invalid.map((r) => `${r.id}=${r.rawScene}`).join(', ')}`);

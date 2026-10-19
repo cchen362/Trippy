@@ -1197,20 +1197,26 @@ describe('generatePhotoDescriptor (Plan 10 Wave 3, Plan 34 W2 contract)', () => 
     warnSpy.mockRestore();
   });
 
-  it('accepts exactly 8 words', async () => {
+  it('accepts exactly 8 words without an over-limit warning', async () => {
     respondWith('{"photoQuery": "one two three four five six seven eight", "sceneType": "generic"}');
+    const warnSpy = warnings();
 
     const result = await generatePhotoDescriptor({ title: 'Eight Word Place' });
 
     expect(result).toEqual({ photoQuery: 'one two three four five six seven eight', sceneType: 'generic' });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
-  it('returns null, never a cut-down query, for more than 8 words', async () => {
-    respondWith('{"photoQuery": "one two three four five six seven eight nine", "sceneType": "generic"}');
+  it('sends a query over 8 words as written (whitespace-normalised, never cut) and logs it', async () => {
+    respondWith('{"photoQuery": "  one two  three four five six seven eight nine ", "sceneType": "generic"}');
     const warnSpy = warnings();
 
-    expect(await generatePhotoDescriptor({ title: 'Long Query Place' })).toBeNull();
-    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'Long Query Place', reason: 'photoQuery has 9 words (limit 8)' });
+    expect(await generatePhotoDescriptor({ title: 'Long Query Place' })).toEqual({
+      photoQuery: 'one two three four five six seven eight nine',
+      sceneType: 'generic',
+    });
+    expect(warnSpy).toHaveBeenCalledWith('[photo] descriptor over word limit', { title: 'Long Query Place', words: 9, limit: 8 });
     warnSpy.mockRestore();
   });
 

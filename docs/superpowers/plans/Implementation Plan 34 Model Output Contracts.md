@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **W2 not merged; branch `plan34-w2`** (§6 W2). The first gate failed 3 criteria. Q-34-5 was ruled (cost not gated; a visual-detail prompt variant), and that variant passes everything except the null rate: 9-word queries are discarded. Waiting on owner ruling **Q-34-6**. **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
+**Status:** 2026-10-19 — **W2 COMPLETE** (descriptor under the API-enforced schema; gate passed after owner rulings Q-34-5 and Q-34-6; merged to `main`, not deployed: W1 and W2 deploy together, §7). Next: the W1+W2 deploy, then W3 or W4. **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -702,7 +702,13 @@ Every accepted extraction call returned `carrierCode "KE"`, `flightNumber "012"`
 
 ### W2 — Descriptor contract (D-34-1, D-34-2, D-34-6, D-34-7)
 
-**Status:** 2026-10-19 — **IMPLEMENTED, GATE FAILED on three criteria; stopped for an owner ruling (Q-34-5).** The work is committed on branch `plan34-w2` only. It is **not** merged into `main` and not deployed. No criterion was loosened. Suite green (45 files, 1,219 passed, 6 skipped); `LIVE_ANTHROPIC=1` smoke 6/6. Browser pass not run: it waits for the ruling.
+**Status:** 2026-10-19 — **COMPLETE, gate passed; not deployed** (deploys with W1, §7). Merged into `main`. Two owner rulings changed the wave, each on measurement:
+- **Q-34-5:** cost per descriptor is reported, not gated. The visual-detail prompt variant is adopted.
+- **Q-34-6:** a query over 8 words is sent as written and logged (D-34-12).
+
+The final gate and the photo-level blind read are in *Final gate* below. The history follows in order.
+
+**First pass (history):** IMPLEMENTED, GATE FAILED on three criteria; stopped for an owner ruling (Q-34-5). The work is committed on branch `plan34-w2` only. It is **not** merged into `main` and not deployed. No criterion was loosened. Suite green (45 files, 1,219 passed, 6 skipped); `LIVE_ANTHROPIC=1` smoke 6/6. Browser pass not run: it waits for the ruling.
 
 **What is on the branch.**
 - **`claude.js`:**
@@ -771,7 +777,56 @@ Every accepted extraction call returned `carrierCode "KE"`, `flightNumber "012"`
   - Cutting to 8 is ruled out: it is the silent repair D-34-2 forbids, and it splits names such as "Hong Kong".
 - **Recommendation: send the query as written and log a warning past 8 words.** The limit exists to keep searches findable, and the measurement shows a 9-word query is findable. Discarding it loses more than it protects. With that ruling the variant's runs give 0 nulls in 150, and every other criterion above already passes.
 
-**Spend.** Anthropic about **$0.15**: refusal probe about $0.09, four harness runs $0.042, live smoke and end-to-end about $0.02. Unsplash: 217 harness searches (lowest `X-Ratelimit-Remaining` 672), plus about 10 searches and 5 download-tracking calls in the end-to-end.
+**Q-34-6 ruled by the owner (2026-10-19): send as written.** Marker `D-34-12` sits on the over-limit branch of `generatePhotoDescriptor`. A query over 8 words is whitespace-normalised and sent unchanged, never cut, with `[photo] descriptor over word limit { title, words, limit }`. The 8 words stay in the prompt and the schema description as guidance. D-31-1's shorter retries still cover a query that finds nothing. The empty-query check is still `null`.
+
+**Final gate** (the code as merged; W0 runs as above). Runs: `control/2026-10-19T04-03-05-370Z`, `…T04-04-04-380Z`, `…T04-05-09-027Z`; `baseline-45/2026-10-19T04-03-05-370Z`. Photo-fallback: `photo-fallback/control/2026-10-19T04-06-30-908Z`, `…T04-06-41-807Z`, `…T04-06-51-312Z`. Fresh W0 passes with photo URLs: `…T04-06-55-835Z`, `…T04-07-00-473Z`, `…T04-07-04-840Z`; they reproduced 7 / 7 / 5 exactly.
+
+| Criterion | W0 `control` | W2 `control` (3 runs) | W2 `baseline-45` | Gate |
+|---|---|---|---|---|
+| Schema-valid · in vocabulary pre-coercion · refusals · `max_tokens` | — · 50/50 · 0 · 0 | 50/50 · 50/50 · 0 · 0 ×3 | 50/50 · 50/50 · 0 · 0 | ✔ |
+| Null rate ≤ control's | 0/50 | **0/50 ×3** | 0/50 | ✔ |
+| Queries over 8 words (sent as written) | 0/150 | 2 · 2 · 2 /50 | 1/50 | reported |
+| Median latency ≤ control + 500 ms (1,430 ms) | 930 ms | 1,084 · 1,255 · 1,253 ms | 1,353 ms | ✔ |
+| `selectPhoto` fallbacks, mean ≤ 8.3 | 7 / 7 / 5, mean 6.3 | 7 / 6 / 7, mean 6.7 | — | ✔ |
+| Blind pairwise, 20 queries (variant run) | — | 55 % | — | ✔ |
+| Cost per descriptor | $0.00006 | $0.00009 | $0.00065 | reported (Q-34-5) |
+
+**Photo-level blind read** (owner-requested; it goes beyond the §5.1 gate).
+- **Method.** Each W2 run's chosen photo against its W0 counterpart: 150 place-pairs. Identical photo ids are automatic ties. Differing pairs went on contact sheets, left/right shuffled (seed 34), and the key was opened after voting.
+- **Result.**
+  - **72 identical photos.**
+  - **78 differing pairs:** 16 new-contract wins, 12 old-contract wins, 50 ties.
+  - **Score: 51.3 % over all 150** (52.6 % of the differing pairs).
+- **Where each side lost.**
+  - New: Banpo Hangang Park ×3 (the fountain), Kabuki-za ×3, Bangkok Chinatown ×2, Dotonbori, Haji Lane, Thip Samai, El Born.
+  - Old: Blue Lagoon ×3, Gora Kadan ×3, Fado ×2, Central, Hot pot, Shinjuku Station, Wat Pho, the Bund, Boqueria, Din Tai Fung, El Born.
+  - Neither: both contracts miss Berghain (no photos exist inside) and Haji Lane's murals.
+- **Reading:** the new contract is no worse than the old one at the photo level, on 150 places. That is the regression check W2 needed. It is not evidence that it is better.
+
+**Unit-suite defect found and fixed (pre-existing, not caused by W2).**
+- **What it was.** `collaboration.test.js`'s "lets collaborators access and edit itinerary data" timed out intermittently, even when run alone. Its `createStop` ran with no mocks, so every run made a **real Haiku descriptor call (1.6 s, billed) and a live Unsplash search (3.3 s)** against the 5 s test timeout. Measured with a `fetch` log. Memory had filed this as a "parallel-load flake".
+- **The fix** follows `locationIntegration.test.js`'s pattern: the descriptor is stubbed to `null`, and `fetch` rejects with a named error, so a future live call fails loudly instead of spending. The test now takes about 0.7 s.
+- **Not done here:** a suite-wide network guard, proposed as its own follow-up.
+
+**Checks.**
+- `cd backend; npm test`: 45 files, **1,219 passed**, 6 skipped, twice in a row after the fix.
+- `LIVE_ANTHROPIC=1 npx vitest run tests/live`: **6/6**.
+- **Plan 10 temp-DB end-to-end** (five manual stops, real `createStop`, live Unsplash, temp DB deleted). All 5 got a descriptor, an in-vocabulary scene and a photo, with no warnings. Shilin Night Market now keeps "Shilin Night Market Taipei food stalls crowded evening" / `market`.
+- **Browser pass.** Built-in pane, dev servers from `launch.json`, W3 verify trip, a minted 1-day session deleted afterwards. Both stops were deleted through `DELETE /api/stops/:id` afterwards (the trip is back to its 6 stops); the one-shot login file is deleted.
+
+| # | Viewport | Action | Result |
+|---|---|---|---|
+| 1 | 375 × 812 | Add place → "Yu Garden" (autocomplete) | Stored "Yu Garden Shanghai classical pavilion pond rockery" / `landmark_architecture`, auto photo of the pavilion and willows. No `[photo]` warning in the backend log. |
+| 2 | 1280 × 860 | Add place → "Tianzifang" | Stored "Tianzifang Shanghai narrow lane art studios" / `street_neighborhood`, auto photo of the lane. Both cards render with the photo treatment. |
+
+**D-30-7.** The harness runs open no database. The browser pass wrote 2 stops and deleted them, and wrote one `auth_sessions` row and deleted it.
+
+**Spend (whole wave).** Anthropic about **$0.25**:
+- refusal probe about $0.09;
+- 12 harness runs about $0.13;
+- live smoke ×2, end-to-end ×2 and the browser pass about $0.03.
+
+Unsplash: about 840 harness searches over two hourly windows (lowest `X-Ratelimit-Remaining` 669), about 25 searches, and about 12 download-tracking calls from the end-to-end runs and the browser pass. Photo thumbnails for the blind read came from the image CDN, not the API.
 
 **Q-34-5 — owner ruling needed before W2 can merge.**
 - **Plain language.** The new contract works mechanically. Every answer is well formed, there are no refusals, and photo fallbacks are within bounds. But on a blind read its photo searches are slightly less vivid. About 1 stop in 75 now loses its descriptor because the model wrote 9 words where it used to be cut to 8. Each call also costs a little more.

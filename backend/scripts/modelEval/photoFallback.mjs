@@ -164,6 +164,7 @@ async function main() {
         sceneType,
         sent,
         chosenId,
+        chosenUrl: chosen?.url ?? null,
         ...classify(photoQuery, sent, chosenId),
         ...(error ? { error } : {}),
       });

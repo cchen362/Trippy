@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -13,6 +13,7 @@ import {
 import { createShareLink, getSharedTrip, revokeShareLink } from '../src/services/share.js';
 import { createStop } from '../src/services/stops.js';
 import { createTrip, getTripDetail, listTripsForUser } from '../src/services/trips.js';
+import * as claudeService from '../src/services/claude.js';
 
 let tmpDir;
 let owner;
@@ -21,6 +22,11 @@ let otherUser;
 let tripDetail;
 
 beforeEach(async () => {
+  // Access rules are under test here, not photos: createStop would otherwise send a real Haiku
+  // descriptor call and a live Unsplash search on every run (paid, and slow enough to time out).
+  // No descriptor, and any network call fails loudly instead of reaching a provider.
+  vi.spyOn(claudeService, 'generatePhotoDescriptor').mockResolvedValue(null);
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('collaboration tests make no network calls'));
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-collab-test-'));
   initDb(join(tmpDir, 'test.db'));
   await runMigrations();
@@ -42,6 +48,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   getDb().close();
   rmSync(tmpDir, { recursive: true });
 });

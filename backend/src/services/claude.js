@@ -964,10 +964,10 @@ export async function discoverDestination(destination, existingStopTitles = [], 
 }
 
 // D-34-1 (Plan 34): the photo descriptor's output contract is an API-enforced JSON schema, never a fenced block asked for in prose.
-// D-34-2: the server still checks what the schema cannot say; an over-long photoQuery is a contract violation that returns null, never a silent cut.
+// D-34-2: the server still checks what the schema cannot say (shape, emptiness); the word limit is prompt guidance, not a check (D-34-12).
 // The enum is built from SCENE_TYPES so the Plan 10 D8 vocabulary has one source (a copy is spread so deepFreeze leaves SCENE_TYPES itself unfrozen).
 // photoQuery deliberately has NO pattern: the W0 compile probe rejected a {0,7} range quantifier ("Cannot apply a range quantifier to this regex")
-// and seven optional groups ("Schema is too complex."), so the 8-word limit is checked by the server after parsing.
+// and seven optional groups ("Schema is too complex."), so the 8-word limit is prompt guidance: the server logs a query past it and sends it unchanged (D-34-12), never cuts it.
 export const PHOTO_DESCRIPTOR_OUTPUT_SCHEMA = deepFreeze({
   type: 'object',
   additionalProperties: false,
@@ -1001,8 +1001,8 @@ Rules:
 // Single cheap Haiku call generating { photoQuery, sceneType } for a manually-added
 // stop that carries no descriptor of its own (Plan 10 D3). Must never block stop creation:
 // every failure mode (missing key, network error, a stop that did not complete, output that
-// breaks the D-34-1 schema contract or the 8-word limit) is caught and returns null so the
-// caller falls through to resolvedName+city. Nothing is repaired: no fence stripping, no truncation.
+// breaks the D-34-1 schema contract) is caught and returns null so the
+// caller falls through to resolvedName+city. Nothing is repaired: no fence stripping, no truncation; a query past the 8-word guidance is logged and sent as written (D-34-12).
 // profile (optional): request settings override for the evaluation harness; defaults to live.
 export async function generatePhotoDescriptor({ title, resolvedName, city, country, type, profile = profileFor('descriptor') }) {
   try {
@@ -1048,8 +1048,9 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
 
     const words = checked.value.photoQuery.trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return unusable('photoQuery is empty');
+    // D-34-12 (Plan 34 Q-34-6, owner): an over-limit query is sent as written and logged — the grammar cannot count words, cutting splits names ("Hong Kong"), and discarding lost descriptors that find photos.
     if (words.length > PHOTO_DESCRIPTOR_MAX_WORDS) {
-      return unusable(`photoQuery has ${words.length} words (limit ${PHOTO_DESCRIPTOR_MAX_WORDS})`);
+      console.warn('[photo] descriptor over word limit', { title, words: words.length, limit: PHOTO_DESCRIPTOR_MAX_WORDS });
     }
 
     return { photoQuery: words.join(' '), sceneType: checked.value.sceneType };
