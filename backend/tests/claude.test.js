@@ -1283,7 +1283,7 @@ describe('PHOTO_DESCRIPTOR_OUTPUT_SCHEMA (Plan 34 W2, D-34-1)', () => {
 
 describe('photo descriptor prompt text (Plan 34 W2, D-34-1)', () => {
   it('pins the prompt text', () => {
-    expect(createHash('sha256').update(PHOTO_DESCRIPTOR_SYSTEM).digest('hex')).toBe('65583c3780d33fd9358fd3c2904ac772401eb1b6ef82ea56112a996c27dbf8ec');
+    expect(createHash('sha256').update(PHOTO_DESCRIPTOR_SYSTEM).digest('hex')).toBe('fdbbf529358f0a7e0e619e34fa8d50ab36a78e1a206a07d6f6241970c5a52b5f');
   });
 
   it('carries no output-format instruction', () => {
@@ -1467,7 +1467,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     expect(body.output_config.format.schema).toBe(PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
     expect(body.system).toBe(PHOTO_DESCRIPTOR_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('e314da70f549b5a2ae5d237b0299ca6df0d6e1b2c5e9b1da2424e144a2a359ca');
+    expect(sha256(body)).toBe('3a3cea4dd690745402da85fdbe36aca16ff575304470ee28ef9ea98b17048840');
   });
 
   it('generatePhotoDescriptor rolled back to Haiku 4.5 sends the same contract with no effort (Plan 30 W2 rollback, D-34-6)', async () => {
@@ -1479,7 +1479,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     expect(body.output_config.format.schema).toBe(PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
     expect(body.system).toBe(PHOTO_DESCRIPTOR_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('54f82721e040e93104c5f484a371b31e9c2be99a38fe531b2639afc7cf175393');
+    expect(sha256(body)).toBe('e9aa83fd0d6c08df4e0641ddfa756907bc27b3062b83dd2655bad0ba1de00c48');
   });
 
   it('discoverDestination', async () => {

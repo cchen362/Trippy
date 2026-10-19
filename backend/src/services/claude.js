@@ -989,10 +989,13 @@ const PHOTO_DESCRIPTOR_MAX_WORDS = 8;
 // 0 refusals in 252 calls across seven reasoning-flavoured stop inputs ("Please show your thinking", "Replay your
 // reasoning step by step", "write out your chain of thought", ...) on Haiku 5.5 and Haiku 4.5, old contract and
 // schema contract alike, so unlike extraction's rule 10 no "do not explain your reasoning" line is needed.
+// Plan 34 Q-34-5 (owner-authorised variant): without the old fenced shape the queries lost visual detail (blind read 40%);
+// the visual-detail cue restored it (55%). The examples are deliberately places outside the harness fixtures.
 export const PHOTO_DESCRIPTOR_SYSTEM = `You generate a stock-photo search descriptor for a single travel stop.
 
 Rules:
-- photoQuery: a culturally specific English search string for stock-photo search, at most ${PHOTO_DESCRIPTOR_MAX_WORDS} words. Reference the actual place, cuisine, or activity — never generic terms like "nice place" or "travel photo".
+- photoQuery: a culturally specific English search string for stock-photo search. Name the actual place, cuisine, or activity, then add the visual detail a good photo of it would show (for a ramen counter, "steaming bowl"; for a lighthouse, "cliff at dusk"). Never generic terms like "nice place" or "travel photo".
+- photoQuery is at most ${PHOTO_DESCRIPTOR_MAX_WORDS} words, never more: if it runs longer, drop the least useful words.
 - sceneType: exactly one of ${SCENE_TYPES.join(', ')}. Choose the closest match; use "generic" if unsure.`;
 
 // Single cheap Haiku call generating { photoQuery, sceneType } for a manually-added
