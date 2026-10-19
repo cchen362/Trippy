@@ -1,0 +1,21 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "travel-no-booking-price-alert",
+  "description": "A fare-tracker price alert for searched dates: travel-related, but the email itself says nothing has been booked, so no booking may be created from the searched route and dates.",
+  "tags": [
+    "travel-no-booking",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "FareWatch price alert\n\nGood news - the price dropped for a route you are tracking.\n\nSingapore (SIN) to Osaka (KIX)\nFrom SGD 412 return, down 18% since last week\nSearched dates: 12 Nov 2027 - 19 Nov 2027\n\nPrices are updated every few hours and may change. You have not booked this trip. View the deal on farewatch.example to check availability.\n\nYou are receiving this because you set a price alert. Manage alerts in your account."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "travel_no_booking",
+    "bookings": []
+  }
+}

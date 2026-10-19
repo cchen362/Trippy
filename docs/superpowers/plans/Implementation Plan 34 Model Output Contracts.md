@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
+**Status:** 2026-10-19 — **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands through a branch and PR (`main` is PR-protected).
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -110,6 +110,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 **F-34-12 — Found in passing (not in scope).**
 - `CARRIER_CODE_RE` and `FLIGHT_DESIGNATOR_RE` (`lookups.js:375,377`) accept letters only. They reject IATA codes containing a digit (`U2`, `3K`, `9W`), so a status lookup for such a flight 400s. This is true of manual entry today as well.
 - The schema in §4.1 accepts the true IATA shape, so extraction will store `U2` correctly; only the lookup refuses it. This needs its own small follow-up, not this plan.
+- **Fixed since, in `94ee798`** (found at W0, 2026-10-19). `lookups.js` now defines `CARRIER_CODE = '[A-Z]{3}|[A-Z]{2}|[A-Z][0-9]|[0-9][A-Z]'` (`:378`): one digit allowed, never two, so a bare `"5401"` cannot read as airline `"54"`. The §4.1 `carrierCode` pattern now mirrors it (D-34-4), because the plan's `[A-Z0-9]{2}` would accept an all-digit code the lookup rejects.
 
 **F-34-13 — Discovery's thinking question, from Plan 30 W3's second pass.**
 - **At adaptive `low`.** Haiku 5.5 treats "at least 8" as the target, landing at a median of 7.5 items per category. Its first category arrives at 35.9 s median.
@@ -171,15 +172,15 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
   - **Rule 6** becomes the classification rule in §4.3. The mapping of `travel_no_booking` is Q-34-1.
   - *Gate:* W1.
 - **D-34-4 — `flightNumber` is the number only, and `carrierCode` the airline code only, enforced by `pattern`.**
-  - **Patterns.** `flightNumber` uses `^[0-9]{1,4}[A-Z]?$`, which is Trippy's own `FLIGHT_NUMBER_RE`. `carrierCode` uses `^([A-Z0-9]{2}|[A-Z]{3})$`, the true IATA/ICAO shape (F-34-12).
+  - **Patterns.** `flightNumber` uses `^[0-9]{1,4}[A-Z]?$`, which is Trippy's own `FLIGHT_NUMBER_RE`. `carrierCode` uses `^([A-Z]{3}|[A-Z]{2}|[A-Z][0-9]|[0-9][A-Z])$`, Trippy's own `CARRIER_CODE` (revised at W0 from `^([A-Z0-9]{2}|[A-Z]{3})$`, F-34-12). Under D-34-5 both also accept `""` (`^(…)?$`), meaning "not given".
   - **Why the normaliser stays.** `normalizeFlightDetails` stays, because MCP clients and the confirm step's client-edited bookings are not schema-constrained. For extraction it becomes a no-op; a W1 test proves that.
   - *Gate:* W1. Every labelled flight number is usable (§5.1).
-- **D-34-5 — The schema's budget is spent deliberately.** Every nullable field costs one of the 16 union slots. Every optional field costs one of the 24 optional slots. The extraction schema uses 10 unions and 16 optionals (§4.1):
+- **D-34-5 — The schema's budget is spent deliberately (revised at W0 from the compile probe).** Every nullable field costs one of the 16 union slots. Every optional property costs far more than its one of the 24 optional slots: **the compile cost doubles with each optional property of one object** (W0, Sonnet 5.5, first call with compile: 8 optional `details` fields 6.3 s, 10 → 18.0 s, 12 → 72.0 s, 14 or the planned 16 → rejected after the 180 s compile limit with "Schema is too complex."). Production extraction is rare, so most real imports meet a cold grammar (24 h cache, F-34-6) and pay that compile in front of the traveller. So:
   - Top-level booking fields stay **required and nullable** (9 unions), because `normalizeExtractedBooking` reads them as `raw.x || null`.
-  - `details` fields become **optional**, because the importer already treats absent as null (F-34-5).
-  - The discriminated `result` is the tenth union.
+  - `details` fields are **required strings, `""` for "not given"**, with every pattern widened to accept `""`. That costs no union and no optional slot, keeps all 16 fields, and compiled in 7.1 s cold on Sonnet 5.5 (15.3 s cold / 5.3 s warm on Sonnet 4.6). `normalizeExtractedBooking` already drops `''` from `details` (F-34-5), and the W1 mapping drops it too, so the returned and stored keys are exactly today's. The alternative that also compiled — two required groups of 8 optional fields, flattened by the server — took 13.7 s cold and leaves a grammar that doubles again with each added field; rejected. Dropping fields to fit was not considered: it loses data the importer stores.
+  - The discriminated `result` is the tenth union. A `$ref` counts **once per definition**, not per use (W0: 17 per-use positions on 4 definitions compiled; 17 inline unions were rejected with "limit: 16 parameters with unions"), so the schema uses 4 of 16 union slots and 0 of 24 optional slots.
 
-  Per-field confidence becomes an array `fieldConfidence: [{ field, level }]`, because an open-keyed map needs `additionalProperties` other than `false`, which is unsupported. The server folds it back into `confidence.fields` so the stored shape is unchanged. Any later field addition must re-count against these limits. A test asserts both counts. *Gate:* the W0 compile probe.
+  Per-field confidence becomes an array `fieldConfidence: [{ field, level }]`, because an open-keyed map needs `additionalProperties` other than `false`, which is unsupported. The server folds it back into `confidence.fields` so the stored shape is unchanged. **A later field must be added as another required `""`-able string, never as an optional property.** A test asserts the union count and that no object has an optional property. *Gate:* the W0 compile probe — passed with this revision.
 - **D-34-6 — One output contract per workload, sent identically to every model that has a row for it.**
   - **What the rollback row sends.** The Sonnet 4.6 and Haiku 4.5 rollback rows send the same schema and prompt as the live 5.5 rows. Both models support structured outputs (F-34-6). Settings stay keyed by model (D-30-1), and `requestSettings` gains a workload-supplied `format` that it merges into the same `output_config` object as the model's `effort`. Haiku 4.5's row therefore sends `output_config: { format }` with no `effort`.
   - **Rollback pins are re-captured, not kept.** The rollback row is measured under the new contract (W1, W2).
@@ -235,9 +236,11 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
 
 ## 4. The contracts
 
-### 4.1 Extraction schema (proposed; W0 proves it compiles on all four models)
+### 4.1 Extraction schema (revised at W0; compiles on Sonnet 5.5 and Sonnet 4.6)
 
 Built once as a frozen constant in `claude.js`. `BOOKING_FIELD_NAMES` is the list in `fieldConfidence.items.properties.field.enum`. The `description` strings are model-facing and may be tuned without recompiling (F-34-6). The structure may not change without re-counting D-34-5.
+
+**W0 revision.** The schema below is the one the probe accepted (`EXTRACTION_SCHEMA_W0` in `backend/scripts/modelEval/schemaProbe.mjs`, built from §4.1 as first written by the `details-required-empty` mutation). Two things changed from the approved draft: `details` lists all 16 keys under `required`, with a description saying `""` means "not given", and every `details` pattern accepts `""`; and `carrierCode` mirrors `lookups.js` (D-34-4). Everything else is as approved. §4.1 as first written — 16 optional `details` properties — was rejected on both Sonnet models after the 180 s compile limit, with either `carrierCode` pattern; removing every pattern, `fieldConfidence` or the `result` union did not help (D-34-5).
 
 ```json
 {
@@ -317,21 +320,27 @@ Built once as a frozen constant in `claude.js`. `BOOKING_FIELD_NAMES` is the lis
         "details": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Every key is required: write \"\" for anything the input does not give. Never guess a value to fill a key.",
+          "required": [
+            "originCity", "destinationCity", "originCountryCode", "destinationCountryCode", "city", "countryCode",
+            "carrierCode", "flightNumber", "airlineName", "trainNumber", "originStation", "destinationStation",
+            "seatClass", "address", "localName", "note"
+          ],
           "properties": {
             "originCity": { "type": "string", "description": "Canonical English city name." },
             "destinationCity": { "type": "string", "description": "Canonical English city name." },
-            "originCountryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
-            "destinationCountryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
+            "originCountryCode": { "type": "string", "pattern": "^([A-Z]{2})?$" },
+            "destinationCountryCode": { "type": "string", "pattern": "^([A-Z]{2})?$" },
             "city": { "type": "string", "description": "Canonical English city name (hotel and other bookings)." },
-            "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
+            "countryCode": { "type": "string", "pattern": "^([A-Z]{2})?$" },
             "carrierCode": {
               "type": "string",
-              "pattern": "^([A-Z0-9]{2}|[A-Z]{3})$",
+              "pattern": "^(([A-Z]{3}|[A-Z]{2}|[A-Z][0-9]|[0-9][A-Z]))?$",
               "description": "Airline code only: the 2-character IATA code (KE, U2) or the 3-letter ICAO code."
             },
             "flightNumber": {
               "type": "string",
-              "pattern": "^[0-9]{1,4}[A-Z]?$",
+              "pattern": "^([0-9]{1,4}[A-Z]?)?$",
               "description": "The flight number only, as printed, without the airline code: for KE012 write 012."
             },
             "airlineName": { "type": "string" },
@@ -382,16 +391,18 @@ Built once as a frozen constant in `claude.js`. `BOOKING_FIELD_NAMES` is the lis
 }
 ```
 
-- **Budget (D-34-5).** Unions: `nullableText` ×5 uses (`confirmationRef`, `bookingSource`, `origin`, `destination`, `terminalOrStation`), `localDatetime` ×2, `ianaZone` ×2, and `result` give 10 positions. A `$ref` to one definition may count once (4) or per use (10); both are under 16, and the W0 probe records which. Optional parameters: the 16 `details` properties, under 24. Headroom left for a later field: 6 unions, 8 optionals.
+- **Budget (D-34-5, measured at W0).** Unions: `nullableText` ×5 uses (`confirmationRef`, `bookingSource`, `origin`, `destination`, `terminalOrStation`), `localDatetime` ×2, `ianaZone` ×2, and `result` give 10 positions, but the API counts a `$ref`'d definition once, so the schema uses **4 of 16**. Optional properties: **0 of 24** — and the real ceiling is the compile time, which doubles per optional property of one object (D-34-5). A later field is another required `""`-able string.
+- **Input-token cost (W0).** The schema adds about **2,800 input tokens per request on Sonnet 5.5** (93 → 2,884 on the probe's one-line input; 73 → 2,463 on Sonnet 4.6), about +$0.008 per import at today's prices. §4.3 removes the prompt's "Output shape" block, which offsets part of it. W1 reports the net per-import cost against the W0 baseline.
 - **Server mapping** (`extractBookings`, after `classifyStop` and validation):
   - `isTravelRelated = result.kind !== 'not_travel'` (Q-34-1 default);
   - `bookings = result.kind === 'bookings' ? result.bookings : []`;
-  - each booking's `fieldConfidence` is folded into `confidence.fields` (`{ [field]: level }`), and `fieldConfidence` is removed.
+  - each booking's `fieldConfidence` is folded into `confidence.fields` (`{ [field]: level }`), and `fieldConfidence` is removed;
+  - each `details` key whose value is `""` is removed, so `details` carries exactly the keys today's prompt yields (the importer drops `''` as well, F-34-5).
 
   The returned and stored object has exactly today's keys.
 - **Rule 7 is now enforced by the grammar.** A bare `"UTC"` cannot match `ianaZone`. `normalizeTz` still validates real zones.
 
-### 4.2 Descriptor schema (proposed)
+### 4.2 Descriptor schema (revised at W0: no `photoQuery` pattern; compiles on Haiku 5.5 and Haiku 4.5)
 
 ```json
 {
@@ -401,7 +412,6 @@ Built once as a frozen constant in `claude.js`. `BOOKING_FIELD_NAMES` is the lis
   "properties": {
     "photoQuery": {
       "type": "string",
-      "pattern": "^[^ ]+( [^ ]+){0,7}$",
       "description": "A culturally specific English stock-photo search, at most 8 words, naming the actual place, cuisine or activity."
     },
     "sceneType": {
@@ -415,8 +425,8 @@ Built once as a frozen constant in `claude.js`. `BOOKING_FIELD_NAMES` is the lis
 
 - The `enum` is generated from `SCENE_TYPES`, never typed twice (Plan 10 D8). A test asserts equality.
 - `slice(0, 8)` (`claude.js:692`) is deleted. A query over 8 words is now a contract violation to be logged, not silently cut.
-- If W0 shows the `{0,7}` pattern is rejected, the fallback is: no pattern, an 8-word server check that returns `null` and warns.
-- **W3 variant only:** an added required `"broadQuery": { "type": "string", "pattern": "^[^ ]+( [^ ]+){0,3}$" }`, described as "a broader 2–4 word search that would still show this kind of place if the specific one finds nothing".
+- **W0: the `{0,7}` pattern is rejected, so the fallback is the contract.** Both Haiku models answer HTTP 400 "Unsupported regex feature in pattern field: Cannot apply a range quantifier to this regex." The same rule written without a range quantifier (seven optional `( [^ ]+)?` groups) is rejected as "Schema is too complex.", which is the D-34-5 doubling again. So `photoQuery` carries **no pattern**; the description keeps "at most 8 words", and the server checks the word count after parsing and returns `null` with a `console.warn` past 8 (D-34-2). The no-pattern schema compiled on both models: Haiku 5.5 1.1 s cold / 1.0 s warm, +388 input tokens; Haiku 4.5 2.0 s / 1.1 s, +292 input tokens.
+- **W3 variant only:** an added required `"broadQuery": { "type": "string" }`, described as "a broader 2–4 word search that would still show this kind of place if the specific one finds nothing", with the 4-word limit checked by the server for the same reason (no range quantifier on a group).
 
 ### 4.3 Prompt changes (the only prompt edits in W1/W2)
 
@@ -457,7 +467,7 @@ The "think first" line is adopted only if it removes a critical error or raises 
 - schema-valid 50/50;
 - `sceneType` in vocabulary before case-normalisation 50/50;
 - blind pairwise on 20 places at ≥ 50% for the new contract, counting ties as half;
-- `selectPhoto` live fallback count over 3 runs, with its mean ≤ the W0 mean plus 2 (the 14–20 noise band, F-34-11).
+- `selectPhoto` live fallback count over **3 descriptor runs, one `photoFallback.mjs` pass each**, with its mean ≤ the W0 mean plus 2 (W0: 7 / 7 / 5, mean 6.3). W0 found that passes of one run file are identical (7 / 7 / 7: Unsplash search is deterministic for a fixed query), so the noise is the model's run-to-run wording, and only separate runs measure it (F-34-11).
 
 **Photo query pair (W3).** Adopt the pair only if, over 3 runs of the 50 places through a harness copy of `selectPhoto`:
 - mean fallbacks are lower than D-31-1's by at least 3 of 50; **and**
@@ -496,7 +506,66 @@ Each wave starts with reading this plan. It implements only that wave on its own
 
 ### W0 — Baseline, fixtures, compile probe (no production change)
 
-**Status:** NOT STARTED.
+**Status:** 2026-10-19 — **COMPLETE** at `origin/main` `8aa4c56` (branch `plan34-w0`). Harness only: no file under `backend/src` or `frontend` changed, and the four request-body pins are untouched. Both schemas compile on all four models **after the revision below**, so acceptance is met by its second clause ("§4 is revised with the probe's evidence before W1"). Backend suite green: 45 files, 1,153 passed, 6 skipped (the live suite).
+
+**What landed.**
+- **Fixtures.** 10 new committed synthetic fixtures (33 in all): 5 flight-number forms (`KE 012`, `KE0012`, `BA 2490A`, `U2 8123`, and a `KE 5012` / `DL 7863` codeshare labelled any-of), 4 travel-without-booking (price alert, airline newsletter, visa reminder, "your trip starts in 3 days"), 1 utility bill. Every fixture now carries `expected.kind`. `non-travel-fare-promo` is relabelled `travel_no_booking` (`isTravelRelated: true`) per Q-34-1; its id is kept so earlier runs stay comparable by name.
+- **Scorer** (`lib/score/extraction.mjs`, ahead of W1's "score `kind`"; a W0 baseline needs it): a derived `kind` (`not_travel` if `isTravelRelated` is false, else `bookings` or `travel_no_booking`) and an invalid-state count; the "as labelled" flight-number match accepts both today's designator and the D-34-4 number-only form paired with `carrierCode`; an array label is any-of; and a count of flights the real `normalizeFlightDetails` would rewrite (D-34-4 needs it to reach 0).
+- **`schemaProbe.mjs`** (compile probe, complexity bisection, `--concurrent`) and **`photoFallback.mjs`** (live `selectPhoto` passes behind a search-only `fetch` guard, `excludeIds: []`). Both are in the README.
+
+**Compile probe** (2026-10-19, Sonnet/Haiku via the dev key; run files `data/model-eval/runs/schema-probe/2026-10-19T02-*.jsonl`).
+
+| Schema | Model | Result | First call / warm | Input-token overhead |
+|---|---|---|---|---|
+| §4.1 as written (16 optional `details` fields), either `carrierCode` pattern | Sonnet 5.5, Sonnet 4.6 | **rejected** after 180 s: "Schema is too complex." | — | — |
+| §4.1 with every pattern removed / no `fieldConfidence` / flat `result` | Sonnet 5.5 | **rejected**, same error | — | — |
+| §4.1 with 8 / 10 / 12 / 14 optional `details` fields | Sonnet 5.5 | 6.3 s / 18.0 s / 72.0 s / **rejected** | — | — |
+| two required groups of 8 optional fields | Sonnet 5.5 | accepted | 13.7 s | — |
+| **`EXTRACTION_SCHEMA_W0`** (16 required, `""` = not given) | Sonnet 5.5 | **accepted** | 7.1 s (first compile) / 3.5 s | +2,791 |
+| **`EXTRACTION_SCHEMA_W0`** | Sonnet 4.6 | **accepted** | 15.3 s / 5.3 s | +2,390 |
+| §4.2 with `{0,7}` pattern | Haiku 5.5, Haiku 4.5 | **rejected**: "Cannot apply a range quantifier to this regex." | — | — |
+| §4.2, pattern as 7 optional groups | Haiku 5.5, Haiku 4.5 | **rejected**: "Schema is too complex." | — | — |
+| **§4.2 without a pattern** | Haiku 5.5 / Haiku 4.5 | **accepted** | 1.1 s / 1.0 s · 2.0 s / 1.1 s | +388 · +292 |
+| 16 / 17 inline `["string","null"]` | Sonnet 5.5 | accepted / rejected: "limit: 16 parameters with unions" | — | — |
+| 8-optional base + 7 more `$ref` nullable uses (17 per use, 4 definitions) | Sonnet 5.5 | accepted: a `$ref` counts once per definition | — | — |
+
+Every accepted extraction call returned `carrierCode "KE"`, `flightNumber "012"` and all 16 `details` keys; every descriptor call returned an in-vocabulary `sceneType` and a 5–6-word query. "First call" includes generation; Sonnet 5.5's 3.5 s "cold" in the matrix row was a cached grammar (the same structure had compiled minutes earlier in the bisection), so its 7.1 s first compile is the bisection's number.
+
+**Same-day baselines on `main`** (prompt and code unchanged; harness, dev key).
+
+| Extraction, 33 fixtures | `control`: Sonnet 5.5 `medium`, 16,000 | `baseline-46`: Sonnet 4.6, 8,192 |
+|---|---|---|
+| `stop_reason` / parse / `max_tokens` / refusal | `end_turn` 33/33 · 0 / 0 / 0 | `end_turn` 33/33 · 0 / 0 / 0 |
+| Booking count · critical-field accuracy · critical errors | 33/33 · 281/281 · 0 | 33/33 · 281/281 · 0 |
+| High confidence on a wrong critical field | 0 | 0 |
+| `kind` correct (derived) | **30/33** — newsletter, visa reminder and trip countdown came back `not_travel` (old rule 6) | **31/33** — newsletter, visa reminder `not_travel` |
+| Invalid state (not travel, yet bookings) | 0 | 0 |
+| Flight numbers usable by `normalizeFlightQuery` | **6/21** | **1/21** |
+| Flight numbers the importer rewrites | 15/21 | 20/21 |
+| Responses with a thinking block | 1/33 (311 tokens) | 0/33 |
+| Wall time median / max | 4.5 / 12.0 s | 9.1 / 20.2 s |
+| Cost per successful extraction · run total | $0.0116 · $0.382 | $0.0139 · $0.457 |
+| Median cost: text · image · PDF | $0.0104 · $0.0182 · $0.0162 | $0.0137 · $0.0180 · $0.0218 |
+
+| Descriptor, 50 places | `control`: Haiku 5.5 `low`, 1,024 | `baseline-45`: Haiku 4.5, 256 |
+|---|---|---|
+| Null · `max_tokens` · refusals | 0 · 0 · 0 | 0 · 0 · 0 |
+| `sceneType` valid before coercion | 50/50 | **49/50** (`cjk-panda-base` = `wildlife_sanctuary`; the schema's `enum` makes this unproducible) |
+| Query over 8 words before truncation · words median / max | 0 · 7 / 8 | 0 · 6 / 8 |
+| Wall median / max · cost per call median · run total | 930 / 3,339 ms · $0.00006 · $0.0029 | 901 / 1,117 ms · $0.00040 · $0.0199 |
+| `selectPhoto` fallbacks, 3 runs × 1 pass | **7 / 7 / 5, mean 6.3** of 50 (D-31-1 retry recovered 7–8 per run) | not run (the gate compares control only) |
+
+**D-30-7.** None of the four scripts opens a database. The owner's dev database (`backend/data/trippy.db`, read-only) counted the same before and after every run: `discovery_places` 2,404, `discovery_destinations` 14, SUM(`generation_count`) 25, `discovery_generation_daily` 20, `discovery_verification_attempts` 3,538, `place_resolution_cache` 1,197, `import_artifacts` 14, `stops` 63, `bookings` 25. `photoFallback.mjs`'s guard allows only `GET /search/photos`, so no download was tracked.
+
+**Facts corrected or learned.**
+- **§4.1 as approved cannot compile** (D-34-5): the cost is optional properties, not patterns, unions or `fieldConfidence`. The revision keeps every field and the stored shape.
+- **Range quantifiers on a group are unsupported**, so no `pattern` can bound a word count (§4.2, and W3's `broadQuery`).
+- **F-34-12 was already fixed** (`94ee798`); `U2 8123` is a normal fixture, and the schema mirrors `CARRIER_CODE`.
+- **The schema costs input tokens:** about +2,800 per extraction call on Sonnet 5.5, +390 per descriptor call on Haiku 5.5. W1 reports the net after §4.3 removes the prompt's output-shape text.
+- **Unsplash search is deterministic for a fixed query** (7 / 7 / 7 over three passes of one run file), so the Plan 30 W2 spread of 14–20 was the model's wording; the §5.1 descriptor gate and W2's steps now use separate runs.
+- **The extraction corpus stays at the ceiling for facts** (281/281 on both models). W1's discriminating measures are `kind`, flight-number usability and importer rewrites, which today are 30/33, 6/21 and 15/21.
+
+**Spend.** Anthropic **≈ $0.99**: extraction $0.840, descriptors $0.029 (4 runs), probe $0.125 (of which $0 for every rejected compile). Unsplash: 350 searches (lowest `X-Ratelimit-Remaining` 669 of 1,000).
 
 **Files.**
 - `backend/scripts/modelEval/fixtures/extraction/*.json` (new fixtures);
@@ -559,8 +628,8 @@ Each wave starts with reading this plan. It implements only that wave on its own
 - live smoke `:135`.
 
 **Steps.**
-1. Run `descriptor.mjs --profile control` and `baseline-45` on the branch.
-2. Run three `selectPhoto` fallback passes.
+1. Run `descriptor.mjs --profile control` three times and `baseline-45` once on the branch.
+2. Run `photoFallback.mjs --profile control --run <file> --passes 1` on each of the three control runs (§5.1).
 3. Do the blind pairwise read (20 places, seeded shuffle, key opened after voting).
 4. Run the Plan 10 temp-DB end-to-end on five manual stops, and look at the photos.
 

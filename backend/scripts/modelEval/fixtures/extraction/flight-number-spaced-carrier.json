@@ -1,0 +1,59 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-06-13",
+    "endDate": "2027-06-20",
+    "destinations": [
+      {
+        "city": "Seoul",
+        "countryCode": "KR"
+      },
+      {
+        "city": "Tokyo",
+        "countryCode": "JP"
+      }
+    ]
+  },
+  "id": "flight-number-spaced-carrier",
+  "description": "Flight number printed with a space between carrier code and number (\"KE 012\"): the label states the full designator, the contract form splits it into carrierCode KE and number 012 (Plan 34 D-34-4).",
+  "tags": [
+    "flight",
+    "flight-number"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "KOREAN AIR - E-TICKET ITINERARY RECEIPT\nPassenger: TAN/AMEI MS\nBooking reference: 6XKQ2M\n\nMon 14 Jun 2027\nKE 012   Seoul Incheon (ICN) 10:00  ->  Tokyo Narita (NRT) 12:25\nCabin: Economy   Seat: 31C\n\nAll times are local to the airport. Check-in closes 60 minutes before departure."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-06-14T10:00",
+        "endDatetime": "2027-06-14T12:25",
+        "origin": [
+          "ICN",
+          "Incheon",
+          "Seoul"
+        ],
+        "destination": [
+          "NRT",
+          "Narita",
+          "Tokyo"
+        ],
+        "confirmationRef": "6XKQ2M",
+        "details": {
+          "originCity": "Seoul",
+          "destinationCity": "Tokyo",
+          "originCountryCode": "KR",
+          "destinationCountryCode": "JP",
+          "carrierCode": "KE",
+          "flightNumber": "KE012"
+        }
+      }
+    ]
+  }
+}

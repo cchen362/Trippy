@@ -1,0 +1,53 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-04-09",
+    "endDate": "2027-04-13",
+    "destinations": [
+      {
+        "city": "Lisbon",
+        "countryCode": "PT"
+      }
+    ]
+  },
+  "id": "flight-number-digit-carrier",
+  "description": "Carrier code that contains a digit (\"U2 8123\", easyJet): the carrier is U2 and the number 8123, not carrier \"U\" and number \"28123\".",
+  "tags": [
+    "flight",
+    "flight-number"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "easyJet - Your booking is confirmed\nBooking reference: K8M2QXW\n\nFri 09 Apr 2027\nU2 8123\nGeneva (GVA) 06:55  ->  Lisbon (LIS) 08:40\n\nPassengers: 1 adult. Hand baggage only. Please arrive at the airport at least 2 hours before departure."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-04-09T06:55",
+        "endDatetime": "2027-04-09T08:40",
+        "origin": [
+          "GVA",
+          "Geneva"
+        ],
+        "destination": [
+          "LIS",
+          "Lisbon"
+        ],
+        "confirmationRef": "K8M2QXW",
+        "details": {
+          "originCity": "Geneva",
+          "destinationCity": "Lisbon",
+          "originCountryCode": "CH",
+          "destinationCountryCode": "PT",
+          "carrierCode": "U2",
+          "flightNumber": "U28123"
+        }
+      }
+    ]
+  }
+}

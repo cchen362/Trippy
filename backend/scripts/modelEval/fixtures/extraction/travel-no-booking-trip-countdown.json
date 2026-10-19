@@ -1,0 +1,30 @@
+{
+  "contextText": null,
+  "tripContext": {
+    "startDate": "2027-09-22",
+    "endDate": "2027-09-27",
+    "destinations": [
+      {
+        "city": "Lisbon",
+        "countryCode": "PT"
+      }
+    ]
+  },
+  "id": "travel-no-booking-trip-countdown",
+  "description": "A travel-agency marketing email \"Your trip to Lisbon starts in 3 days\" with packing tips and an upsell but no hotel name, reference, flight number or time: it must not be turned into a booking.",
+  "tags": [
+    "travel-no-booking",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Your trip to Lisbon starts in 3 days!\n\nGet ready - the sun is waiting. Here is how to make the most of your trip:\n\n- Pack light layers: evenings by the river can be cool.\n- Wear comfortable shoes; Lisbon is hilly and the pavements are slippery.\n- Download an offline map before you go.\n\nWeather this week: sunny, highs around 26 C.\n\nAdd an airport transfer to your trip from EUR 18 and skip the taxi queue.\n\nHappy travels,\nThe SunTrail team - suntrail.example"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "travel_no_booking",
+    "bookings": []
+  }
+}

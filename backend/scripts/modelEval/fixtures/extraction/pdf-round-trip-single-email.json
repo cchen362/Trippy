@@ -28,6 +28,7 @@
   ],
   "expected": {
     "isTravelRelated": true,
+    "kind": "bookings",
     "bookings": [
       {
         "type": "flight",

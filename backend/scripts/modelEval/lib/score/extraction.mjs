@@ -11,9 +11,18 @@
 //   - details.localName matches by containment either way
 //   - "@NEXT:MM-DDTHH:MM" is the nearest occurrence of that month/day on or after the record's
 //     run date (prompt rule 3, no trip context)
+//   - details.flightNumber is labelled as the FULL designator as printed, spaces removed ("KE012",
+//     "U28123", "BA2490A"). The "as labelled" match accepts both the designator in flightNumber and
+//     the number-only form paired with details.carrierCode (Plan 34 D-34-4). A flight sold under two
+//     numbers (a codeshare) is labelled with an ARRAY, any of which is acceptable. details.carrierCode
+//     may be labelled too ("KE", "U2") where the carrier split is itself under test.
+//   - expected.kind is the three-way result kind: "bookings", "travel_no_booking" or "not_travel"
+//     (Plan 34 D-34-3 / Q-34-1). Today's output has no kind field, so it is derived from
+//     isTravelRelated + bookings; the W1 contract answers it directly and W0 records a baseline.
 
 import { rate, median, max, sum } from './common.mjs';
 import { normalizeFlightQuery } from '../../../../src/services/lookups.js';
+import { normalizeFlightDetails } from '../../../../src/services/importer.js';
 
 const norm = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v);
 const alnum = (v) => (typeof v === 'string' ? v.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') : v);
@@ -35,6 +44,13 @@ export function resolveNext(token, startedAt) {
 
 function datetime(v) {
   return typeof v === 'string' ? v.slice(0, 16) : v;
+}
+
+// Plan 34 D-34-3 / Q-34-1: the model will answer a three-way kind under the W1 contract; today's
+// output maps onto it, so W0 records a baseline. "Not travel yet bookings" is an invalid state.
+function derivedKind(out) {
+  if (out.isTravelRelated === false) return 'not_travel';
+  return out.bookings?.length ? 'bookings' : 'travel_no_booking';
 }
 
 function containsEitherWay(a, b) {
@@ -71,6 +87,12 @@ function fieldMatches(actual, path, expectedValue, startedAt) {
   }
   if (expectedValue === null) return got === null || got === undefined;
   if (got === null || got === undefined) return false;
+  if (path === 'details.flightNumber') {
+    // The label states the designator; D-34-4 makes number-only (with carrierCode) the contract
+    // form, so the "as labelled" figure must not penalise it. An array label is any-of.
+    const forms = [alnum(String(got)), alnum(`${actual?.details?.carrierCode ?? ''}${got}`)];
+    return [].concat(expectedValue).some((want) => forms.includes(alnum(String(want))));
+  }
   if (DETAIL_KEYS_BY_LENIENCY.ref.has(key)) return alnum(String(got)) === alnum(String(expectedValue));
   if (DETAIL_KEYS_BY_LENIENCY.contains.has(key)) return containsEitherWay(String(got), String(expectedValue));
   return norm(String(got)) === norm(String(expectedValue));
@@ -148,14 +170,15 @@ const CRITICAL_FIELDS = new Set([
 // W4: what Trippy itself does with an extracted flight. The booking card renders
 // `${carrierCode} ${flightNumber}` and the status lookup sends the pair to normalizeFlightQuery,
 // which accepts a number only (every stored flight is { carrierCode: 'SQ', flightNumber: '842' }).
-// A pair is usable when that real function accepts it and yields the labelled designator.
+// A pair is usable when that real function accepts it and yields the labelled designator (with an
+// array label, ANY of its designators: a codeshare is usable under either flight number).
 function resolvesToDesignator(actual, wantDesignator) {
   try {
     const { flightDesignator } = normalizeFlightQuery({
       carrierCode: actual?.details?.carrierCode ?? '',
       flightNumber: actual?.details?.flightNumber ?? '',
     });
-    return flightDesignator === alnum(String(wantDesignator)).toUpperCase();
+    return [].concat(wantDesignator).some((want) => flightDesignator === alnum(String(want)).toUpperCase());
   } catch (err) {
     if (err.status === 400) return false; // the app would refuse to look this flight up
     throw err;
@@ -179,6 +202,11 @@ function scoreRecord(record) {
     otherCorrect: 0,
     flightNumbers: 0,
     flightNumbersUsable: 0,
+    flightNumbersRewritten: 0,
+    expectedKind: expected?.kind ?? null,
+    gotKind: out ? derivedKind(out) : null,
+    kindCorrect: null,
+    invalidState: false,
     critical: [],
     highButWrong: [],
     otherHighButWrong: [],
@@ -186,6 +214,8 @@ function scoreRecord(record) {
   if (!out || !expected) return base;
 
   base.isTravelCorrect = out.isTravelRelated === expected.isTravelRelated;
+  base.kindCorrect = expected.kind ? base.gotKind === expected.kind : null;
+  base.invalidState = out.isTravelRelated === false && out.bookings?.length > 0;
   const actualList = out.bookings ?? [];
   base.countCorrect = actualList.length === expected.bookings.length;
 
@@ -212,6 +242,12 @@ function scoreRecord(record) {
       if (path === 'details.flightNumber') {
         base.flightNumbers += 1;
         if (resolvesToDesignator(act, want)) base.flightNumbersUsable += 1;
+        // Plan 34 D-34-4: under the contract the importer's normaliser must become a no-op.
+        const details = act.details ?? {};
+        const normalized = normalizeFlightDetails(details);
+        if (normalized.carrierCode !== details.carrierCode || normalized.flightNumber !== details.flightNumber) {
+          base.flightNumbersRewritten += 1;
+        }
       }
       if (ok) {
         if (isCritical) base.fieldsCorrect += 1;
@@ -316,6 +352,11 @@ export function score(records) {
     'max_tokens stops': rate(maxTokens, n),
     'refusals': rate(refusals, n),
     'isTravelRelated correct': rate(scored.filter((r) => r.isTravelCorrect).length, scored.length),
+    'result kind correct (derived from isTravelRelated + bookings)': rate(
+      scored.filter((r) => r.kindCorrect).length,
+      scored.filter((r) => r.kindCorrect !== null).length,
+    ),
+    'invalid state: not travel yet bookings': scored.filter((r) => r.invalidState).length,
     'booking count correct': rate(scored.filter((r) => r.countCorrect).length, scored.length),
     'critical-field accuracy': fieldsChecked ? `${fieldsCorrect}/${fieldsChecked} (${((100 * fieldsCorrect) / fieldsChecked).toFixed(1)}%)` : 'n/a',
     'critical errors': `${criticalTotal} across ${rows.filter((r) => r.critical.length).length}/${n} fixtures`,
@@ -323,6 +364,7 @@ export function score(records) {
     'other labelled fields (flight/train no., localName) as labelled': `${scored.reduce((s, r) => s + r.otherCorrect, 0)}/${scored.reduce((s, r) => s + r.otherChecked, 0)}`,
     'other fields: high confidence but differs from label': scored.reduce((s, r) => s + r.otherHighButWrong.length, 0),
     'flight numbers usable by Trippy (normalizeFlightQuery)': `${scored.reduce((s, r) => s + r.flightNumbersUsable, 0)}/${scored.reduce((s, r) => s + r.flightNumbers, 0)}`,
+    'flight numbers the importer rewrites (normalizeFlightDetails)': `${scored.reduce((s, r) => s + r.flightNumbersRewritten, 0)}/${scored.reduce((s, r) => s + r.flightNumbers, 0)}`,
     'fixtures with a critical error': rows.filter((r) => r.critical.length).map((r) => r.id).join(', ') || 'none',
     'responses with a thinking block': rate(records.filter((r) => thinkingBlockCount(r)).length, n),
     'est. thinking tokens median / max': thinking.ratio === null
@@ -350,6 +392,7 @@ export function score(records) {
     think: thinkingBlockCount(r.record),
     'est think tok': thinkingTokens[i],
     'in tok': r.record.usage.input_tokens,
+    'kind exp/got': `${r.expectedKind ?? '-'}/${r.gotKind ?? '-'}`,
     'bookings exp/got': `${r.expectedBookings ?? '-'}/${r.gotBookings ?? '-'}`,
     'field acc': r.fieldsChecked ? `${r.fieldsCorrect}/${r.fieldsChecked}` : '-',
     'critical errors': r.critical.join('; ') || '',

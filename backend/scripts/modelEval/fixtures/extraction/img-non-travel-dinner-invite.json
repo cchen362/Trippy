@@ -27,6 +27,7 @@
   ],
   "expected": {
     "isTravelRelated": false,
+    "kind": "not_travel",
     "bookings": []
   }
 }

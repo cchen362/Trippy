@@ -33,6 +33,7 @@
   ],
   "expected": {
     "isTravelRelated": true,
+    "kind": "bookings",
     "bookings": [
       {
         "type": "hotel",

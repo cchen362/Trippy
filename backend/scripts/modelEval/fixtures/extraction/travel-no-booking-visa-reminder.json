@@ -1,0 +1,20 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "travel-no-booking-visa-reminder",
+  "description": "A generic travel-authorisation reminder: travellers to a country need an electronic authorisation before departure. Travel-related guidance with no booking and no flight.",
+  "tags": [
+    "travel-no-booking"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Travel Authorisation Service - reminder\n\nIf you are planning to visit a country that requires an electronic travel authorisation, you must apply and be approved before you depart. Airlines may refuse boarding without one.\n\nFee: USD 21 per traveller, payable online. Most applications are decided within 72 hours, but we advise applying at least two weeks before departure.\n\nYou will need your passport details and a valid email address. Authorisations are linked to your passport and are normally valid for two years.\n\nThis is a general reminder. We do not hold any booking or application for you.\n\ntas.example"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "travel_no_booking",
+    "bookings": []
+  }
+}

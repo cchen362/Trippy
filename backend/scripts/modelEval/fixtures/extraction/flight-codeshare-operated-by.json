@@ -1,0 +1,47 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "flight-codeshare-operated-by",
+  "description": "Codeshare: the booking is sold as KE 5012 but operated by Delta as DL 7863. Either flight number is acceptable; the carrier code must belong to the number it is paired with.",
+  "tags": [
+    "flight",
+    "flight-number",
+    "hard"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Korean Air - Booking confirmation\nBooking reference: WQ3N8H\n\nMonday 09 August 2027\nKE 5012  operated by Delta Air Lines DL 7863\nAtlanta (ATL) 08:10  ->  Seattle (SEA) 10:35\nCabin: Main Cabin\n\nThis flight is operated by Delta Air Lines. Check in with the operating carrier. Times are local."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-08-09T08:10",
+        "endDatetime": "2027-08-09T10:35",
+        "origin": [
+          "ATL",
+          "Atlanta"
+        ],
+        "destination": [
+          "SEA",
+          "Seattle"
+        ],
+        "confirmationRef": "WQ3N8H",
+        "details": {
+          "originCity": "Atlanta",
+          "destinationCity": "Seattle",
+          "originCountryCode": "US",
+          "destinationCountryCode": "US",
+          "flightNumber": [
+            "KE5012",
+            "DL7863"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -2,9 +2,9 @@
   "contextText": null,
   "tripContext": null,
   "id": "non-travel-fare-promo",
-  "description": "A flight-deal marketing email with routes, prices and a sale end date but no booking: nothing extractable, so isTravelRelated false (rule 6).",
+  "description": "A fare-sale email about travel that holds no booking: routes, prices and a sale end date but nothing extractable, so it is travel-related with no bookings (Plan 34 Q-34-1; it was previously labelled isTravelRelated false from the old rule 6).",
   "tags": [
-    "non-travel",
+    "travel-no-booking",
     "hard"
   ],
   "files": [
@@ -14,7 +14,8 @@
     }
   ],
   "expected": {
-    "isTravelRelated": false,
+    "isTravelRelated": true,
+    "kind": "travel_no_booking",
     "bookings": []
   }
 }

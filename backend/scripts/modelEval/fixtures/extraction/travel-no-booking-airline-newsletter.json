@@ -1,0 +1,20 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "travel-no-booking-airline-newsletter",
+  "description": "An airline loyalty newsletter: miles balance, a new-route announcement with a launch date and a lounge reopening. Travel-related, but no booking.",
+  "tags": [
+    "travel-no-booking"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "SKYWARD CLUB - October newsletter\n\nHello Ms Tan,\n\nYour miles balance: 38,420 miles. Your Silver status is valid until 31 March 2028.\n\nNEW ROUTE: from 14 March 2028 Skyward flies daily from Singapore to Hanoi. Launch fares are on sale now.\n\nLOUNGE NEWS: the Changi Terminal 3 lounge reopens on 1 December after refurbishment, with a new noodle bar.\n\nEarn double miles on partner hotels until 30 November.\n\nSkyward Airlines - skyward.example"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "travel_no_booking",
+    "bookings": []
+  }
+}

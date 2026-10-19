@@ -1,0 +1,46 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "flight-number-suffix-letter",
+  "description": "Flight number with a trailing letter (\"BA 2490A\"): the number is 2490A and the letter belongs to it, not to the carrier code.",
+  "tags": [
+    "flight",
+    "flight-number"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "British Airways - Booking confirmation\nBooking reference: ZK4P9Q\n\nThursday 20 May 2027\nBA 2490A\nLondon Gatwick (LGW) 07:40  ->  Funchal, Madeira (FNC) 11:25\nTraveller: Ms A. Tan\n\nTimes shown are local. Online check-in opens 24 hours before departure."
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-05-20T07:40",
+        "endDatetime": "2027-05-20T11:25",
+        "origin": [
+          "LGW",
+          "Gatwick",
+          "London"
+        ],
+        "destination": [
+          "FNC",
+          "Funchal",
+          "Madeira"
+        ],
+        "confirmationRef": "ZK4P9Q",
+        "details": {
+          "originCity": "London",
+          "destinationCity": "Funchal",
+          "originCountryCode": "GB",
+          "destinationCountryCode": "PT",
+          "carrierCode": "BA",
+          "flightNumber": "BA2490A"
+        }
+      }
+    ]
+  }
+}
