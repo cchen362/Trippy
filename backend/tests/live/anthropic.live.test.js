@@ -19,7 +19,8 @@ import { deflateSync } from 'node:zlib';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../../src/config.js';
 import {
-  profileFor, requestSettings, classifyStop, extractBookings, generatePhotoDescriptor,
+  profileFor, requestSettings, classifyStop, extractBookings, generatePhotoDescriptor, validateAgainstSchema,
+  PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES,
 } from '../../src/services/claude.js';
 import {
   PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL,
@@ -128,16 +129,19 @@ describe.skipIf(process.env.LIVE_ANTHROPIC !== '1')('live Anthropic smoke (Plan 
     expect(usage.output_tokens).toBeGreaterThan(0);
   }, 120_000);
 
-  it('descriptor shape: non-streaming, descriptor profile', async () => {
+  it('descriptor shape: non-streaming, descriptor profile, schema-shaped answer (D-34-1)', async () => {
     const profile = profileFor('descriptor');
     const response = await client.messages.create({
-      ...requestSettings(profile),
-      system: 'Reply with the single word: ok',
-      messages: [{ role: 'user', content: 'Ready?' }],
+      ...requestSettings(profile, { format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT }),
+      system: PHOTO_DESCRIPTOR_SYSTEM,
+      messages: [{ role: 'user', content: 'Senso-ji, Tokyo, Japan, stop type: sight' }],
     });
 
     expectUsableResponse(response, profile);
-    expect(textOf(response).trim().length).toBeGreaterThan(0);
+    const textBlocks = response.content.filter((block) => block.type === 'text');
+    expect(textBlocks).toHaveLength(1);
+    const checked = validateAgainstSchema(JSON.parse(textBlocks[0].text), PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
+    expect(checked.ok).toBe(true);
   }, 60_000);
 
   it('descriptor through the real generatePhotoDescriptor returns a usable descriptor', async () => {
@@ -148,6 +152,8 @@ describe.skipIf(process.env.LIVE_ANTHROPIC !== '1')('live Anthropic smoke (Plan 
     expect(result).not.toBeNull();
     expect(typeof result.photoQuery).toBe('string');
     expect(result.photoQuery.trim().length).toBeGreaterThan(0);
+    expect(result.photoQuery.trim().split(/\s+/).length).toBeLessThanOrEqual(8);
+    expect(SCENE_TYPES).toContain(result.sceneType);
   }, 60_000);
 
   it('co-pilot shape: streamed, with the three co-pilot tools, copilot profile', async () => {

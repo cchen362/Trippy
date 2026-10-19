@@ -30,6 +30,7 @@ const {
   EXTRACTION_MODEL, PHOTO_DESCRIPTOR_MODEL, COPILOT_MODEL, DISCOVERY_MODEL,
   EXTRACTION_SYSTEM, EXTRACTION_OUTPUT_SCHEMA, EXTRACTION_OUTPUT_FORMAT,
   EXTRACTION_DETAIL_FIELDS, EXTRACTION_CONFIDENCE_FIELDS, validateAgainstSchema, toAppExtraction,
+  PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES,
 } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
@@ -1121,7 +1122,7 @@ describe('streamCopilotResponse — reportTurnMetrics (Plan 15 Wave 2)', () => {
   });
 });
 
-describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
+describe('generatePhotoDescriptor (Plan 10 Wave 3, Plan 34 W2 contract)', () => {
   beforeEach(() => {
     mockCreate.mockReset();
   });
@@ -1130,8 +1131,12 @@ describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
     mockCreate.mockResolvedValue({ content: [{ type: 'text', text }] });
   }
 
+  function warnings() {
+    return vi.spyOn(console, 'warn').mockImplementation(() => {});
+  }
+
   it('parses a well-formed descriptor', async () => {
-    respondWith('```json\n{"photoQuery": "steaming hotpot table Chengdu", "sceneType": "food_drink"}\n```');
+    respondWith('{"photoQuery": "steaming hotpot table Chengdu", "sceneType": "food_drink"}');
 
     const result = await generatePhotoDescriptor({ title: 'Hotpot Spot', city: 'Chengdu', country: 'China', type: 'food' });
 
@@ -1140,44 +1145,102 @@ describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
     expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: 'claude-haiku-5-5' });
   });
 
-  it('coerces an invalid sceneType to null while keeping a valid photoQuery', async () => {
-    respondWith('```json\n{"photoQuery": "night market skewers", "sceneType": "not_a_real_scene"}\n```');
+  it('returns the schema spelling of a differently-cased sceneType (D-34-7)', async () => {
+    respondWith('{"photoQuery": "night market skewers", "sceneType": "Food_Drink"}');
 
-    const result = await generatePhotoDescriptor({ title: 'Night Market', type: 'food' });
-
-    expect(result).toEqual({ photoQuery: 'night market skewers', sceneType: null });
+    expect(await generatePhotoDescriptor({ title: 'Night Market', type: 'food' })).toEqual({ photoQuery: 'night market skewers', sceneType: 'food_drink' });
   });
 
-  it('caps photoQuery at 8 words', async () => {
-    respondWith('```json\n{"photoQuery": "one two three four five six seven eight nine ten", "sceneType": "generic"}\n```');
+  it('returns null when sceneType is outside the vocabulary', async () => {
+    respondWith('{"photoQuery": "night market skewers", "sceneType": "wildlife_sanctuary"}');
+    const warnSpy = warnings();
 
-    const result = await generatePhotoDescriptor({ title: 'Long Query Place' });
-
-    expect(result.photoQuery.split(/\s+/)).toHaveLength(8);
+    expect(await generatePhotoDescriptor({ title: 'Night Market' })).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith('[photo] descriptor not usable', expect.objectContaining({ title: 'Night Market', reason: expect.stringContaining('sceneType') }));
+    warnSpy.mockRestore();
   });
 
-  it('returns null when the response has no fenced JSON block', async () => {
+  it('returns null when sceneType is missing', async () => {
+    respondWith('{"photoQuery": "night market skewers"}');
+    const warnSpy = warnings();
+
+    expect(await generatePhotoDescriptor({ title: 'A' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'A', reason: 'sceneType: is required' });
+    warnSpy.mockRestore();
+  });
+
+  it('returns null when photoQuery is missing', async () => {
+    respondWith('{"sceneType": "market"}');
+    const warnSpy = warnings();
+
+    expect(await generatePhotoDescriptor({ title: 'B' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'B', reason: 'photoQuery: is required' });
+    warnSpy.mockRestore();
+  });
+
+  it('returns null when there is an extra property', async () => {
+    respondWith('{"photoQuery": "night market skewers", "sceneType": "market", "notes": "x"}');
+    const warnSpy = warnings();
+
+    expect(await generatePhotoDescriptor({ title: 'C' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'C', reason: 'notes: is not an allowed property' });
+    warnSpy.mockRestore();
+  });
+
+  it('returns null when photoQuery is empty or whitespace', async () => {
+    const warnSpy = warnings();
+    for (const q of ['', '   ']) {
+      respondWith(JSON.stringify({ photoQuery: q, sceneType: 'market' }));
+      expect(await generatePhotoDescriptor({ title: 'D' })).toBeNull();
+      expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'D', reason: 'photoQuery is empty' });
+    }
+    warnSpy.mockRestore();
+  });
+
+  it('accepts exactly 8 words', async () => {
+    respondWith('{"photoQuery": "one two three four five six seven eight", "sceneType": "generic"}');
+
+    const result = await generatePhotoDescriptor({ title: 'Eight Word Place' });
+
+    expect(result).toEqual({ photoQuery: 'one two three four five six seven eight', sceneType: 'generic' });
+  });
+
+  it('returns null, never a cut-down query, for more than 8 words', async () => {
+    respondWith('{"photoQuery": "one two three four five six seven eight nine", "sceneType": "generic"}');
+    const warnSpy = warnings();
+
+    expect(await generatePhotoDescriptor({ title: 'Long Query Place' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'Long Query Place', reason: 'photoQuery has 9 words (limit 8)' });
+    warnSpy.mockRestore();
+  });
+
+  it('returns null when the text is not JSON', async () => {
     respondWith('Sorry, I cannot help with that.');
+    const warnSpy = warnings();
 
-    const result = await generatePhotoDescriptor({ title: 'Some Place' });
-
-    expect(result).toBeNull();
+    expect(await generatePhotoDescriptor({ title: 'Some Place' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'Some Place', reason: expect.stringMatching(/^not JSON \(/) });
+    warnSpy.mockRestore();
   });
 
-  it('returns null when the JSON is malformed', async () => {
-    respondWith('```json\n{"photoQuery": "broken\n```');
+  it('returns null for a fenced block: nothing is repaired', async () => {
+    respondWith('```json\n{"photoQuery": "night market skewers", "sceneType": "market"}\n```');
+    const warnSpy = warnings();
 
-    const result = await generatePhotoDescriptor({ title: 'Some Place' });
-
-    expect(result).toBeNull();
+    expect(await generatePhotoDescriptor({ title: 'Some Place' })).toBeNull();
+    warnSpy.mockRestore();
   });
 
-  it('returns null when photoQuery is missing or empty', async () => {
-    respondWith('```json\n{"sceneType": "market"}\n```');
+  it('returns null when there are two text blocks', async () => {
+    mockCreate.mockResolvedValue({ content: [
+      { type: 'text', text: '{"photoQuery": "a b", "sceneType": "market"}' },
+      { type: 'text', text: '{"photoQuery": "c d", "sceneType": "market"}' },
+    ] });
+    const warnSpy = warnings();
 
-    const result = await generatePhotoDescriptor({ title: 'Some Place' });
-
-    expect(result).toBeNull();
+    expect(await generatePhotoDescriptor({ title: 'Some Place' })).toBeNull();
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'Some Place', reason: 'expected exactly one text block, got 2' });
+    warnSpy.mockRestore();
   });
 
   it('returns null (never throws) when the API call fails', async () => {
@@ -1186,6 +1249,45 @@ describe('generatePhotoDescriptor (Plan 10 Wave 3)', () => {
     const result = await generatePhotoDescriptor({ title: 'Some Place' });
 
     expect(result).toBeNull();
+  });
+});
+
+describe('PHOTO_DESCRIPTOR_OUTPUT_SCHEMA (Plan 34 W2, D-34-1)', () => {
+  const schema = PHOTO_DESCRIPTOR_OUTPUT_SCHEMA;
+
+  it('builds the sceneType enum from SCENE_TYPES', () => {
+    expect(schema.properties.sceneType.enum).toEqual(SCENE_TYPES);
+  });
+
+  it('is deep-frozen without freezing SCENE_TYPES itself', () => {
+    expect(Object.isFrozen(schema)).toBe(true);
+    expect(Object.isFrozen(schema.properties)).toBe(true);
+    expect(Object.isFrozen(schema.properties.sceneType.enum)).toBe(true);
+    expect(Object.isFrozen(SCENE_TYPES)).toBe(false);
+    expect(SCENE_TYPES).toHaveLength(14);
+  });
+
+  it('has no optional property and rejects extras', () => {
+    expect(schema.additionalProperties).toBe(false);
+    expect([...schema.required].sort()).toEqual(Object.keys(schema.properties).sort());
+  });
+
+  it('puts no pattern on photoQuery (the 8-word limit is a server check)', () => {
+    expect(schema.properties.photoQuery).not.toHaveProperty('pattern');
+  });
+
+  it('is exposed as a json_schema format', () => {
+    expect(PHOTO_DESCRIPTOR_OUTPUT_FORMAT).toEqual({ type: 'json_schema', schema });
+  });
+});
+
+describe('photo descriptor prompt text (Plan 34 W2, D-34-1)', () => {
+  it('pins the prompt text', () => {
+    expect(createHash('sha256').update(PHOTO_DESCRIPTOR_SYSTEM).digest('hex')).toBe('65583c3780d33fd9358fd3c2904ac772401eb1b6ef82ea56112a996c27dbf8ec');
+  });
+
+  it('carries no output-format instruction', () => {
+    for (const gone of ['fence', '```', 'Output']) expect(PHOTO_DESCRIPTOR_SYSTEM).not.toContain(gone);
   });
 });
 
@@ -1200,6 +1302,16 @@ describe('coerceSceneType (Plan 10 Wave 3)', () => {
     expect(coerceSceneType(null)).toBeNull();
     expect(coerceSceneType(undefined)).toBeNull();
     expect(coerceSceneType('')).toBeNull();
+  });
+
+  it('returns the canonical member for a differently-cased string (D-34-7)', () => {
+    expect(coerceSceneType('MARKET')).toBe('market');
+    expect(coerceSceneType('Food_Drink')).toBe('food_drink');
+  });
+
+  it('returns null for a non-string', () => {
+    expect(coerceSceneType(42)).toBeNull();
+    expect(coerceSceneType(['market'])).toBeNull();
   });
 });
 
@@ -1293,7 +1405,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
   }
 
   async function runDescriptor(extra = {}) {
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"photoQuery":"a b","sceneType":"market"}\n```' }] });
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '{"photoQuery":"a b","sceneType":"market"}' }] });
     await generatePhotoDescriptor({ title: 'Hotpot Spot', resolvedName: 'Shu Daxia', city: 'Chengdu', country: 'China', type: 'food', ...extra });
     return mockCreate.mock.calls[0][0];
   }
@@ -1346,13 +1458,28 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
   it('generatePhotoDescriptor', async () => {
     const body = await runDescriptor();
     // Plan 30 W2: the one deliberate move off the W0 pin — Haiku 5.5 at effort 'low' (the sha256
-    // below was re-captured for this body; the other three pins are untouched).
+    // was re-captured for that body; the other three pins were untouched).
+    // Plan 34 W2: the second deliberate move off the W0 pin — the D-34-1 schema contract and the §4.3 prompt (structure asserted first, sha256 re-captured).
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
     expect(body.model).toBe('claude-haiku-5-5');
     expect(body.max_tokens).toBe(1024);
-    expect(body.output_config).toEqual({ effort: 'low' });
+    expect(body.output_config).toEqual({ effort: 'low', format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT });
+    expect(body.output_config.format.schema).toBe(PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
+    expect(body.system).toBe(PHOTO_DESCRIPTOR_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('dafd384a5df94aa2e0cad8cb52e39e02f1ae441725e25d63d8365e0324b978f4');
+    expect(sha256(body)).toBe('e314da70f549b5a2ae5d237b0299ca6df0d6e1b2c5e9b1da2424e144a2a359ca');
+  });
+
+  it('generatePhotoDescriptor rolled back to Haiku 4.5 sends the same contract with no effort (Plan 30 W2 rollback, D-34-6)', async () => {
+    const body = await runDescriptor({ profile: { model: 'claude-haiku-4-5-20251001', ...MODEL_PROFILES['claude-haiku-4-5-20251001'].descriptor } });
+    expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
+    expect(body.model).toBe('claude-haiku-4-5-20251001');
+    expect(body.max_tokens).toBe(256);
+    expect(body.output_config).toEqual({ format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT });
+    expect(body.output_config.format.schema).toBe(PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
+    expect(body.system).toBe(PHOTO_DESCRIPTOR_SYSTEM);
+    expect(body).not.toHaveProperty('thinking');
+    expect(sha256(body)).toBe('54f82721e040e93104c5f484a371b31e9c2be99a38fe531b2639afc7cf175393');
   });
 
   it('discoverDestination', async () => {
@@ -1420,7 +1547,12 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     });
 
     it('generatePhotoDescriptor sends the profile', async () => {
-      expectProfileFields(await runDescriptor({ profile }));
+      const body = await runDescriptor({ profile });
+      expect(body.model).toBe('claude-haiku-5-5');
+      expect(body.max_tokens).toBe(1024);
+      expect(body.thinking).toEqual({ type: 'disabled' });
+      // D-34-6: the descriptor's output format rides in the same output_config as the profile's effort.
+      expect(body.output_config).toEqual({ effort: 'low', format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT });
     });
 
     it('discoverDestination sends the profile', async () => {
@@ -1433,17 +1565,17 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
       expect(reportTurnMetrics.mock.calls[0][0].model).toBe('claude-haiku-5-5');
     });
 
-    it('omits thinking and output_config when the profile carries neither', async () => {
+    it('omits thinking and sends only the format when the profile carries neither thinking nor effort', async () => {
       const body = await runDescriptor({ profile: { model: 'claude-haiku-5-5', maxTokens: 512 } });
       expect(body.model).toBe('claude-haiku-5-5');
       expect(body.max_tokens).toBe(512);
       expect(body).not.toHaveProperty('thinking');
-      expect(body).not.toHaveProperty('output_config');
+      expect(body.output_config).toEqual({ format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT });
     });
 
-    it('sends effort alone as output_config without a thinking field', async () => {
+    it('sends effort beside the format in output_config without a thinking field', async () => {
       const body = await runDescriptor({ profile: { model: 'claude-haiku-5-5', maxTokens: 1024, effort: 'medium' } });
-      expect(body.output_config).toEqual({ effort: 'medium' });
+      expect(body.output_config).toEqual({ effort: 'medium', format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT });
       expect(body).not.toHaveProperty('thinking');
     });
   });
@@ -1458,7 +1590,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
 // a signature. It must be ignored by every parser and replayed untouched by the co-pilot loop.
 const THINKING_BLOCK = { type: 'thinking', thinking: '', signature: 'sig-abc' };
 const EXTRACT_OK_TEXT = JSON.stringify({ summary: 'x', language: 'en', result: { kind: 'travel_no_booking' } });
-const DESCRIPTOR_OK_TEXT = '```json\n{"photoQuery":"night market skewers","sceneType":"market"}\n```';
+const DESCRIPTOR_OK_TEXT = '{"photoQuery":"night market skewers","sceneType":"market"}';
 
 describe('MODEL_PROFILES / profileFor (D-30-1)', () => {
   it('returns each workload\'s live model and max_tokens, model first', () => {
@@ -2061,16 +2193,16 @@ describe('generatePhotoDescriptor — thinking blocks and stop reasons (D-30-3)'
     warnSpy.mockRestore();
   });
 
-  it('warns why when there is no JSON block, and when photoQuery is missing', async () => {
+  it('warns why when the text is not JSON, and when photoQuery is missing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'Sorry.' }], stop_reason: 'end_turn' });
     expect(await generatePhotoDescriptor({ title: 'A' })).toBeNull();
-    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor has no JSON block', { title: 'A', stopReason: 'end_turn' });
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'A', reason: expect.stringMatching(/^not JSON \(/) });
 
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"sceneType":"market"}\n```' }], stop_reason: 'end_turn' });
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: '{"sceneType":"market"}' }], stop_reason: 'end_turn' });
     expect(await generatePhotoDescriptor({ title: 'B' })).toBeNull();
-    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor is missing photoQuery', { title: 'B' });
+    expect(warnSpy).toHaveBeenLastCalledWith('[photo] descriptor not usable', { title: 'B', reason: 'photoQuery: is required' });
 
     warnSpy.mockRestore();
   });

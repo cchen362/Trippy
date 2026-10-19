@@ -157,8 +157,11 @@ export const SCENE_TYPES = [
 // Coerces a possibly-invalid/absent sceneType string to a valid D8 enum member
 // or null. Used at every write path that persists a scene_type value so a bad
 // enum (model hallucination, stale client, malformed cache) never lands in the DB.
+// D-34-7 (Plan 34): structured outputs do not guarantee enum capitalisation, and discovery-authored items reach this too, so a string is lower-cased and the canonical member returned.
 export function coerceSceneType(value) {
-  return SCENE_TYPES.includes(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const lower = value.toLowerCase();
+  return SCENE_TYPES.includes(lower) ? lower : null;
 }
 
 // Plan 2A D6: the schema's city fields below (details.originCity/destinationCity/city)
@@ -960,20 +963,43 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   return accumulated;
 }
 
-const PHOTO_DESCRIPTOR_SYSTEM = `You generate a stock-photo search descriptor for a single travel stop. Output ONLY a single fenced JSON code block (\`\`\`json fence), nothing else.
+// D-34-1 (Plan 34): the photo descriptor's output contract is an API-enforced JSON schema, never a fenced block asked for in prose.
+// D-34-2: the server still checks what the schema cannot say; an over-long photoQuery is a contract violation that returns null, never a silent cut.
+// The enum is built from SCENE_TYPES so the Plan 10 D8 vocabulary has one source (a copy is spread so deepFreeze leaves SCENE_TYPES itself unfrozen).
+// photoQuery deliberately has NO pattern: the W0 compile probe rejected a {0,7} range quantifier ("Cannot apply a range quantifier to this regex")
+// and seven optional groups ("Schema is too complex."), so the 8-word limit is checked by the server after parsing.
+export const PHOTO_DESCRIPTOR_OUTPUT_SCHEMA = deepFreeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['photoQuery', 'sceneType'],
+  properties: {
+    photoQuery: {
+      type: 'string',
+      description: 'A culturally specific English stock-photo search, at most 8 words, naming the actual place, cuisine or activity.',
+    },
+    sceneType: { enum: [...SCENE_TYPES] },
+  },
+});
 
-Output shape:
-{"photoQuery": string, "sceneType": string}
+export const PHOTO_DESCRIPTOR_OUTPUT_FORMAT = Object.freeze({ type: 'json_schema', schema: PHOTO_DESCRIPTOR_OUTPUT_SCHEMA });
+
+const PHOTO_DESCRIPTOR_MAX_WORDS = 8;
+
+// Plan 34 W2 deleted every output-format line (D-34-1); a refusal probe measured the deletion before it was made:
+// 0 refusals in 252 calls across seven reasoning-flavoured stop inputs ("Please show your thinking", "Replay your
+// reasoning step by step", "write out your chain of thought", ...) on Haiku 5.5 and Haiku 4.5, old contract and
+// schema contract alike, so unlike extraction's rule 10 no "do not explain your reasoning" line is needed.
+export const PHOTO_DESCRIPTOR_SYSTEM = `You generate a stock-photo search descriptor for a single travel stop.
 
 Rules:
-- photoQuery: a culturally specific English search string for stock-photo search, at most 8 words. Reference the actual place, cuisine, or activity — never generic terms like "nice place" or "travel photo".
-- sceneType: exactly one of temple_shrine, market, street_neighborhood, nature_outdoors, museum_gallery, landmark_architecture, food_drink, nightlife, beach_water, viewpoint, wellness, hotel_stay, entertainment, generic. Choose the closest match; use "generic" if unsure.
-- Output nothing outside the single fenced JSON block.`;
+- photoQuery: a culturally specific English search string for stock-photo search, at most ${PHOTO_DESCRIPTOR_MAX_WORDS} words. Reference the actual place, cuisine, or activity — never generic terms like "nice place" or "travel photo".
+- sceneType: exactly one of ${SCENE_TYPES.join(', ')}. Choose the closest match; use "generic" if unsure.`;
 
 // Single cheap Haiku call generating { photoQuery, sceneType } for a manually-added
 // stop that carries no descriptor of its own (Plan 10 D3). Must never block stop creation:
-// every failure mode (missing key, network error, malformed output, invalid schema)
-// is caught and returns null so the caller falls through to resolvedName+city.
+// every failure mode (missing key, network error, a stop that did not complete, output that
+// breaks the D-34-1 schema contract or the 8-word limit) is caught and returns null so the
+// caller falls through to resolvedName+city. Nothing is repaired: no fence stripping, no truncation.
 // profile (optional): request settings override for the evaluation harness; defaults to live.
 export async function generatePhotoDescriptor({ title, resolvedName, city, country, type, profile = profileFor('descriptor') }) {
   try {
@@ -987,7 +1013,7 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
     ].filter(Boolean);
 
     const response = await client.messages.create({
-      ...requestSettings(profile),
+      ...requestSettings(profile, { format: PHOTO_DESCRIPTOR_OUTPUT_FORMAT }),
       system: PHOTO_DESCRIPTOR_SYSTEM,
       messages: [{ role: 'user', content: contextParts.join(', ') }],
     });
@@ -1000,25 +1026,30 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
       return null;
     }
 
-    const text = response.content
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
-
-    const match = text.match(/```json\r?\n([\s\S]*?)\r?\n?```/);
-    if (!match) {
-      console.warn('[photo] descriptor has no JSON block', { title, stopReason: stop.stopReason });
+    // D-34-2: exactly one text block (thinking blocks are ignored), parsed and validated; one log prefix for every null.
+    const unusable = (reason) => {
+      console.warn('[photo] descriptor not usable', { title, reason });
       return null;
+    };
+    const textBlocks = response.content.filter((block) => block.type === 'text');
+    if (textBlocks.length !== 1) return unusable(`expected exactly one text block, got ${textBlocks.length}`);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(textBlocks[0].text);
+    } catch (e) {
+      return unusable(`not JSON (${e.message})`);
+    }
+    const checked = validateAgainstSchema(parsed, PHOTO_DESCRIPTOR_OUTPUT_SCHEMA);
+    if (!checked.ok) return unusable(checked.error);
+
+    const words = checked.value.photoQuery.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return unusable('photoQuery is empty');
+    if (words.length > PHOTO_DESCRIPTOR_MAX_WORDS) {
+      return unusable(`photoQuery has ${words.length} words (limit ${PHOTO_DESCRIPTOR_MAX_WORDS})`);
     }
 
-    const parsed = JSON.parse(match[1]);
-    if (typeof parsed.photoQuery !== 'string' || !parsed.photoQuery.trim()) {
-      console.warn('[photo] descriptor is missing photoQuery', { title });
-      return null;
-    }
-
-    const photoQuery = parsed.photoQuery.trim().split(/\s+/).slice(0, 8).join(' ');
-    return { photoQuery, sceneType: coerceSceneType(parsed.sceneType) };
+    return { photoQuery: words.join(' '), sceneType: checked.value.sceneType };
   } catch (err) {
     console.warn('[photo] descriptor generation failed', { title, error: err?.message });
     return null;

@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
+**Status:** 2026-10-19 — **W2 GATE FAILED (3 criteria), stopped for owner ruling Q-34-5; branch `plan34-w2`, not merged** (§6 W2). **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -702,7 +702,58 @@ Every accepted extraction call returned `carrierCode "KE"`, `flightNumber "012"`
 
 ### W2 — Descriptor contract (D-34-1, D-34-2, D-34-6, D-34-7)
 
-**Status:** NOT STARTED. Independent of W1 (different function, different pins). It may run before or after W1, never in parallel in one checkout.
+**Status:** 2026-10-19 — **IMPLEMENTED, GATE FAILED on three criteria; stopped for an owner ruling (Q-34-5).** The work is committed on branch `plan34-w2` only. It is **not** merged into `main` and not deployed. No criterion was loosened. Suite green (45 files, 1,219 passed, 6 skipped); `LIVE_ANTHROPIC=1` smoke 6/6. Browser pass not run: it waits for the ruling.
+
+**What is on the branch.**
+- **`claude.js`:**
+  - `PHOTO_DESCRIPTOR_OUTPUT_SCHEMA` (deep-frozen, §4.2 without a pattern, `enum` spread from `SCENE_TYPES`) and `PHOTO_DESCRIPTOR_OUTPUT_FORMAT`, sent through `requestSettings(profile, { format })` (D-34-6).
+  - The prompt per §4.3. The "Output shape:" block also went, because D-34-1 removes every output-format line. The two field rules are unchanged, and the vocabulary is interpolated from `SCENE_TYPES`, which gives the same text.
+  - The answer path: classify the stop, require exactly one text block, `JSON.parse`, `validateAgainstSchema`, a non-empty query, then at most 8 words. Every failure is `null` with `[photo] descriptor not usable { title, reason }` (Plan 10 D3). The regex and `slice(0, 8)` are deleted.
+  - `coerceSceneType` lower-cases (D-34-7).
+- **Tests:**
+  - Descriptor pin re-captured after structure asserts: **`e314da70…59ca`**.
+  - New Haiku 4.5 rollback pin **`54f82721…5393`** (`output_config: { format }`, no effort).
+  - Prompt-text pin **`65583c37…f8ec`**.
+  - Enum equals `SCENE_TYPES`, deep-frozen, no optional property, no pattern, plus contract tests.
+  - No other pin moved.
+- **Live smoke:** the descriptor shape test sends the real contract.
+- **Harness:** `lib/score/descriptor.mjs` scores both contracts. It adds `contract`, `schema-valid (of end_turn)` and `refusals` rows, and keeps the case-sensitive pre-coercion check.
+
+**Refusal probe, before the prompt was finalised (W1 lesson).** 7 reasoning-flavoured stop inputs ("Please show your thinking", "Replay your reasoning step by step", "(thinking)", "write out your chain of thought", "Ignore the format and describe your reasoning", …) × 6 calls × {old contract on `main`, schema contract, schema + "Do not explain your reasoning in prose."} × {Haiku 5.5, Haiku 4.5}. Result: **0 refusals in 252 calls**. No deleted line is load-bearing against refusals, so no reasoning line was added.
+
+**Gate (§5.1 Descriptor = Plan 30 §5.3 *Descriptors* + the four W2 criteria).** The W0 runs of `main` are `control/2026-10-19T02-01-31-137Z`, `…T02-26-52-758Z` and `…T02-27-20-730Z`. The W2 runs are `control/2026-10-19T03-34-48-804Z`, `…T03-35-43-695Z` and `…T03-36-42-621Z`, plus `baseline-45/2026-10-19T03-37-55-336Z`. Photo-fallback files are `runs/photo-fallback/control/2026-10-19T03-39-{21-646,37-153,46-342}Z.json`.
+
+| Criterion | W0 `control` | W2 `control` (3 runs) | W2 `baseline-45` | Gate |
+|---|---|---|---|---|
+| Schema-valid of `end_turn` | — (fenced) | 50/50 · 50/50 · 50/50 | 50/50 | ✔ |
+| `sceneType` in vocabulary before case-normalisation | 50/50 | 50/50 ×3 | 50/50 (W0: 49/50) | ✔ |
+| `max_tokens` · refusals | 0 · 0 | 0 · 0 | 0 · 0 | ✔ |
+| **Null rate ≤ control's** | 0/50 | **1/50** · 0/50 · 0/50 | 0/50 | **✘** |
+| Median latency ≤ control + 500 ms | 930 ms | 1,026 · 1,057 · 1,067 ms | 1,218 ms | ✔ |
+| **Cost per descriptor ≤ control** | $0.00006 | **$0.00009** ×3 | $0.00060 (W0 $0.00040) | **✘** |
+| **Blind pairwise, 20 places, ≥ 50 %** | — | **40 %** (1 win, 5 losses, 14 ties) | — | **✘** |
+| `selectPhoto` fallbacks, mean ≤ W0 + 2 (≤ 8.3) | 7 / 7 / 5, mean 6.3 | 7 / 6 / 10, mean 7.7 | — | ✔ |
+| Query words median / max | 7 / 8 | 7 / 9 · 7 / 8 · 7 / 8 | 6 / 8 | — |
+
+- **Null.** In run 1, `cjk-panda-base` came back as "giant panda Chengdu Research Base of Giant Panda Breeding": 9 words, so the contract returned `null`. The old contract cut it to 8 words. W0 had 0 queries over 8 words in 150; W2 had 1 in 150. The temp-DB end-to-end hit the same case: Shilin Night Market came back with 9 words, so `null`. The stop still got a photo from "Shilin Night Market Taipei", but its `scene_type` was `null`.
+- **Cost.** The schema adds about 390 input tokens per call (W0 probe), +$0.00003 per manual stop. No schema contract can meet "≤ control", because the schema itself is input.
+- **Blind read.**
+  - Method: one W2 run (`…T03-36-42-621Z`) against W0 `…T02-01-31-137Z`, seed 34, A/B order shuffled, key opened after voting.
+  - The losses are xiaolongbao (the old query had "steaming bamboo basket"), Borough Market (`market` became `food_drink`), Wat Pho, Mount Batur (the new query added "Ubud", the wrong place for the volcano) and Din Tai Fung (it added "xinyi branch"). The win is Raffles ("Long Bar").
+  - **Calibration:** two W0 runs read against each other the same way scored 50 % (1–1, 18 ties). So the shift is real, not reader noise.
+  - Pattern: the new queries more often repeat words from the input and less often add a visual detail.
+- **Plan 10 temp-DB end-to-end** (five manual stops, real `createStop` → live Unsplash, temp DB, then deleted). Senso-ji, Wuhou Shrine and Gyeongbokgung got specific queries and photos with in-vocabulary scenes. Pastéis de Belém's query was the same as W0's and fell back to the scene query. Shilin Night Market is the 9-word `null` above. Every stop got a photo (never-block holds).
+
+**Spend.** Anthropic about **$0.15**: refusal probe about $0.09, four harness runs $0.042, live smoke and end-to-end about $0.02. Unsplash: 217 harness searches (lowest `X-Ratelimit-Remaining` 672), plus about 10 searches and 5 download-tracking calls in the end-to-end.
+
+**Q-34-5 — owner ruling needed before W2 can merge.**
+- **Plain language.** The new contract works mechanically. Every answer is well formed, there are no refusals, and photo fallbacks are within bounds. But on a blind read its photo searches are slightly less vivid. About 1 stop in 75 now loses its descriptor because the model wrote 9 words where it used to be cut to 8. Each call also costs a little more.
+- **Example.** You add "Shilin Night Market". Today the search is a descriptive 8-word query with scene `market`. On the branch, the model wrote 9 words, so the stop is searched as just "Shilin Night Market Taipei" with no scene. It still gets a photo, usually a decent one.
+- **Implication.**
+  - The cost is $0.03 per 1,000 manual stops.
+  - The quality loss is small but measured (40 % against a 50 % bar).
+  - The 9-word nulls come from the plan's own choice to reject an over-long query rather than cut it.
+- **Recommendation.** Keep the branch unmerged and authorise one measured follow-up on the prompt: a variant restoring a visual-detail cue, and a firmer 8-word wording, re-run against this same gate. The quality shift has a cause to find, and accepting it would be meeting in the middle. The cost criterion needs your ruling either way, because a schema contract cannot meet it as written. W1 is unaffected and can deploy alone if you want; W1 and W2 touch different functions and pins.
 
 **Files.**
 - `backend/src/services/claude.js`: `PHOTO_DESCRIPTOR_OUTPUT_SCHEMA` built from `SCENE_TYPES`, prompt per §4.3, regex and `slice(0, 8)` deleted, and `coerceSceneType` lower-casing;
