@@ -16,6 +16,11 @@
 //     the number-only form paired with details.carrierCode (Plan 34 D-34-4). A flight sold under two
 //     numbers (a codeshare) is labelled with an ARRAY, any of which is acceptable. details.carrierCode
 //     may be labelled too ("KE", "U2") where the carrier split is itself under test.
+//   - an expected booking may carry `filePositions` (Plan 38: 0-based positions into the fixture's
+//     files). It is scored apart from every field above: exact set equality against the paired actual
+//     booking's `filePositions` (missing, not an array, or an unpaired expected booking = wrong), and
+//     reported as its own "file provenance" line. It never takes part in pairing and never enters the
+//     critical-field figures.
 //   - expected.kind is the three-way result kind: "bookings", "travel_no_booking" or "not_travel"
 //     (Plan 34 D-34-3 / Q-34-1). Under the W1 contract the model answers it as `result.kind` in its
 //     single JSON text block, and that answered value is scored. A run file recorded before W1 (the
@@ -115,9 +120,18 @@ function fieldMatches(actual, path, expectedValue, startedAt) {
   return norm(String(got)) === norm(String(expectedValue));
 }
 
+// Plan 38: exact set equality of 0-based file positions.
+export function filePositionsMatch(actual, expected) {
+  if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+  const got = new Set(actual);
+  const want = new Set(expected);
+  return got.size === want.size && [...want].every((n) => got.has(n));
+}
+
 function expectedFieldPaths(expected) {
   const paths = [];
   for (const [k, v] of Object.entries(expected)) {
+    if (k === 'filePositions') continue;
     if (k === 'details') for (const dk of Object.keys(v ?? {})) paths.push(`details.${dk}`);
     else paths.push(k);
   }
@@ -220,6 +234,9 @@ function scoreRecord(record) {
     flightNumbers: 0,
     flightNumbersUsable: 0,
     flightNumbersRewritten: 0,
+    provenanceChecked: 0,
+    provenanceCorrect: 0,
+    provenanceWrong: [],
     expectedKind: expected?.kind ?? null,
     gotKind: null,
     kindAnswered: false,
@@ -229,6 +246,7 @@ function scoreRecord(record) {
     highButWrong: [],
     otherHighButWrong: [],
   };
+  base.provenanceChecked = (expected?.bookings ?? []).filter((b) => b.filePositions).length;
   if (out && !expected) base.gotKind = answeredKind(record) ?? derivedKind(out);
   if (!out || !expected) return base;
 
@@ -247,6 +265,9 @@ function scoreRecord(record) {
     base.critical.push(`invented booking (${actualList[j]?.type ?? '?'} ${actualList[j]?.title ?? ''})`.trim());
   }
   for (const i of missed) {
+    if (expected.bookings[i].filePositions) {
+      base.provenanceWrong.push(`${expected.bookings[i].type}#${i + 1} missing`);
+    }
     base.critical.push(`missed booking (${expected.bookings[i].type} ${expected.bookings[i].startDatetime ?? ''})`.trim());
   }
 
@@ -254,6 +275,11 @@ function scoreRecord(record) {
     const exp = expected.bookings[i];
     const act = actualList[j];
     const label = `${exp.type}#${i + 1}`;
+
+    if (exp.filePositions) {
+      if (filePositionsMatch(act?.filePositions, exp.filePositions)) base.provenanceCorrect += 1;
+      else base.provenanceWrong.push(`${label} got ${JSON.stringify(act?.filePositions ?? null)}, want ${JSON.stringify(exp.filePositions)}`);
+    }
 
     for (const path of expectedFieldPaths(exp)) {
       const want = expectedValueAt(exp, path);
@@ -302,6 +328,7 @@ function scoreRecord(record) {
 // W4: the input kind a fixture exercises — rendered fixtures carry an "image" or "pdf" tag.
 function inputKind(record) {
   const tags = record.extra?.tags ?? [];
+  if (tags.includes('multi-file')) return 'multi-file';
   if (tags.includes('image')) return 'image';
   if (tags.includes('pdf')) return 'pdf';
   return 'text';
@@ -374,6 +401,8 @@ export function score(records) {
   const fieldsCorrect = scored.reduce((s, r) => s + r.fieldsCorrect, 0);
   const criticalTotal = rows.reduce((s, r) => s + r.critical.length, 0);
   const hbw = rows.reduce((s, r) => s + r.highButWrong.length, 0);
+  const provenanceChecked = rows.reduce((s, r) => s + r.provenanceChecked, 0);
+  const provenanceCorrect = rows.reduce((s, r) => s + r.provenanceCorrect, 0);
 
   const failures = records.filter((r) => !r.output);
   const maxTokens = records.filter((r) => r.stopReason === 'max_tokens').length;
@@ -409,6 +438,10 @@ export function score(records) {
     'other fields: high confidence but differs from label': scored.reduce((s, r) => s + r.otherHighButWrong.length, 0),
     'flight numbers usable by Trippy (normalizeFlightQuery)': `${scored.reduce((s, r) => s + r.flightNumbersUsable, 0)}/${scored.reduce((s, r) => s + r.flightNumbers, 0)}`,
     'flight numbers the importer rewrites (normalizeFlightDetails)': `${scored.reduce((s, r) => s + r.flightNumbersRewritten, 0)}/${scored.reduce((s, r) => s + r.flightNumbers, 0)}`,
+    ...(provenanceChecked ? {
+      'file provenance (filePositions) exact': `${provenanceCorrect}/${provenanceChecked}`,
+      'fixtures with wrong file provenance': rows.filter((r) => r.provenanceWrong.length).map((r) => r.id).join(', ') || 'none',
+    } : {}),
     'fixtures with a critical error': rows.filter((r) => r.critical.length).map((r) => r.id).join(', ') || 'none',
     'responses with a thinking block': rate(records.filter((r) => thinkingBlockCount(r)).length, n),
     'est. thinking tokens median / max': thinking.ratio === null
@@ -421,7 +454,7 @@ export function score(records) {
     'cost per successful extraction ($)': scored.length ? (sum(records.map((r) => r.costUsd)) / scored.length).toFixed(5) : 'n/a',
   };
 
-  for (const kind of ['text', 'image', 'pdf']) {
+  for (const kind of ['text', 'image', 'pdf', 'multi-file']) {
     const kindRows = rows.filter((r) => inputKind(r.record) === kind);
     if (!kindRows.length) continue;
     const kindRecords = kindRows.map((r) => r.record);
@@ -443,6 +476,7 @@ export function score(records) {
     'kind exp/got': `${r.expectedKind ?? '-'}/${r.gotKind ?? '-'}`,
     'bookings exp/got': `${r.expectedBookings ?? '-'}/${r.gotBookings ?? '-'}`,
     'field acc': r.fieldsChecked ? `${r.fieldsCorrect}/${r.fieldsChecked}` : '-',
+    'file prov': r.provenanceChecked ? `${r.provenanceCorrect}/${r.provenanceChecked}` : '-',
     'critical errors': r.critical.join('; ') || '',
     'wall ms': r.record.wallMs,
     'out tok': r.record.usage.output_tokens,
@@ -454,6 +488,9 @@ export function score(records) {
   ];
   if (hbw) {
     notes.push(`high-confidence-but-wrong critical fields: ${rows.flatMap((r) => r.highButWrong.map((f) => `${r.id}:${f}`)).join(', ')}`);
+  }
+  for (const r of rows) {
+    if (r.provenanceWrong.length) notes.push(`file provenance wrong in ${r.id}: ${r.provenanceWrong.join('; ')}`);
   }
   const otherHbw = rows.flatMap((r) => r.otherHighButWrong.map((f) => `${r.id}:${f}`));
   if (otherHbw.length) notes.push(`other fields high-confidence but differing from the label: ${otherHbw.join(', ')}`);

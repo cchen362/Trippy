@@ -1,0 +1,68 @@
+{
+  "id": "multi-pasted-text-plus-image",
+  "description": "Pasted flight confirmation text plus an unrelated hotel screenshot: each booking names its own input.",
+  "tags": [
+    "multi-file",
+    "rendered"
+  ],
+  "source": "flight-number-suffix-letter, hotel-dates-only-explicit-year",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "text",
+      "content": "British Airways - Booking confirmation\nBooking reference: ZK4P9Q\n\nThursday 20 May 2027\nBA 2490A\nLondon Gatwick (LGW) 07:40  ->  Funchal, Madeira (FNC) 11:25\nTraveller: Ms A. Tan\n\nTimes shown are local. Online check-in opens 24 hours before departure."
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-dates-only-explicit-year.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-05-20T07:40",
+        "endDatetime": "2027-05-20T11:25",
+        "origin": [
+          "LGW",
+          "Gatwick",
+          "London"
+        ],
+        "destination": [
+          "FNC",
+          "Funchal",
+          "Madeira"
+        ],
+        "confirmationRef": "ZK4P9Q",
+        "details": {
+          "originCity": "London",
+          "destinationCity": "Funchal",
+          "originCountryCode": "GB",
+          "destinationCountryCode": "PT",
+          "carrierCode": "BA",
+          "flightNumber": "BA2490A"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-10-08T15:00",
+        "endDatetime": "2027-10-11T11:00",
+        "confirmationRef": "HRX-4471902",
+        "details": {
+          "city": "Istanbul",
+          "countryCode": "TR"
+        },
+        "filePositions": [
+          1
+        ]
+      }
+    ]
+  }
+}

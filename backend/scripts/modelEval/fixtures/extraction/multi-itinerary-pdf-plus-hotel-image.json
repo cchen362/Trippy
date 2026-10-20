@@ -1,0 +1,109 @@
+{
+  "id": "multi-itinerary-pdf-plus-hotel-image",
+  "description": "One agency itinerary PDF holding a flight, a train and two hotels, uploaded with one unrelated hotel screenshot: the four itinerary bookings each name the PDF only, the screenshot hotel names the screenshot only.",
+  "tags": [
+    "multi-file",
+    "rendered"
+  ],
+  "source": "itinerary-flight-train-two-hotels, cjk-ryokan-japan",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "pdf",
+      "mediaType": "application/pdf",
+      "path": "files/pdf-itinerary-flight-train-two-hotels.pdf"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-cjk-ryokan-japan.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-11-05T07:20",
+        "endDatetime": "2027-11-05T09:40",
+        "origin": [
+          "ZRH",
+          "Zurich"
+        ],
+        "destination": [
+          "LIS",
+          "Lisbon"
+        ],
+        "confirmationRef": "QW7R3N",
+        "details": {
+          "originCity": "Zurich",
+          "destinationCity": "Lisbon",
+          "originCountryCode": "CH",
+          "destinationCountryCode": "PT",
+          "carrierCode": "TP",
+          "flightNumber": "TP1359"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-05T15:00",
+        "endDatetime": "2027-11-08T11:00",
+        "confirmationRef": "LX-90417",
+        "details": {
+          "city": "Lisbon",
+          "countryCode": "PT"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "train",
+        "startDatetime": "2027-11-08T12:30",
+        "endDatetime": "2027-11-08T15:10",
+        "confirmationRef": "4402917",
+        "details": {
+          "originCity": "Lisbon",
+          "destinationCity": "Porto",
+          "originCountryCode": "PT",
+          "destinationCountryCode": "PT"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-11T11:00",
+        "confirmationRef": "PT-62850",
+        "details": {
+          "city": "Porto",
+          "countryCode": "PT"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-10T10:00",
+        "confirmationRef": "KY-88213",
+        "details": {
+          "city": "Kyoto",
+          "countryCode": "JP",
+          "localName": "山水荘"
+        },
+        "filePositions": [
+          1
+        ]
+      }
+    ]
+  }
+}

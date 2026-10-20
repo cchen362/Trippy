@@ -1,0 +1,78 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "itinerary-flight-train-two-hotels",
+  "description": "One travel-agency itinerary holding four bookings (a flight, a hotel, a train, a second hotel), each with its own reference. Plan 38 renders it as a PDF for the multi-file provenance fixtures.",
+  "tags": [
+    "multi-booking",
+    "flight",
+    "train",
+    "hotel"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Meridian Travel - Your itinerary\nFile reference: MT-58213\n\nFLIGHT  Fri 05 Nov 2027\nTP 1359  Zurich (ZRH) 07:20 -> Lisbon (LIS) 09:40\nAirline reference: QW7R3N\n\nHOTEL  Hotel Alfama Mar, Rua dos Remedios 41, Lisbon\nCheck-in: Fri 05 Nov 2027 from 15:00\nCheck-out: Mon 08 Nov 2027 until 11:00\nHotel confirmation: LX-90417\n\nTRAIN  Mon 08 Nov 2027\nAlfa Pendular  Lisbon Santa Apolonia 12:30 -> Porto Campanha 15:10\nTrain reservation: 4402917, Coach 3, Seat 14\n\nHOTEL  Hotel Ribeira Douro, Cais da Estiva 17, Porto\nCheck-in: Mon 08 Nov 2027 from 15:00\nCheck-out: Thu 11 Nov 2027 until 11:00\nHotel confirmation: PT-62850"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-11-05T07:20",
+        "endDatetime": "2027-11-05T09:40",
+        "origin": [
+          "ZRH",
+          "Zurich"
+        ],
+        "destination": [
+          "LIS",
+          "Lisbon"
+        ],
+        "confirmationRef": "QW7R3N",
+        "details": {
+          "originCity": "Zurich",
+          "destinationCity": "Lisbon",
+          "originCountryCode": "CH",
+          "destinationCountryCode": "PT",
+          "carrierCode": "TP",
+          "flightNumber": "TP1359"
+        }
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-05T15:00",
+        "endDatetime": "2027-11-08T11:00",
+        "confirmationRef": "LX-90417",
+        "details": {
+          "city": "Lisbon",
+          "countryCode": "PT"
+        }
+      },
+      {
+        "type": "train",
+        "startDatetime": "2027-11-08T12:30",
+        "endDatetime": "2027-11-08T15:10",
+        "confirmationRef": "4402917",
+        "details": {
+          "originCity": "Lisbon",
+          "destinationCity": "Porto",
+          "originCountryCode": "PT",
+          "destinationCountryCode": "PT"
+        }
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-11T11:00",
+        "confirmationRef": "PT-62850",
+        "details": {
+          "city": "Porto",
+          "countryCode": "PT"
+        }
+      }
+    ]
+  }
+}

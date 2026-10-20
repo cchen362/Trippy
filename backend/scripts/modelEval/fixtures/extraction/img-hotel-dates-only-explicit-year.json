@@ -1,0 +1,45 @@
+{
+  "id": "img-hotel-dates-only-explicit-year",
+  "description": "image render of hotel-dates-only-explicit-year: Hotel with full dates and no times at all: defaults T15:00 / T11:00 and an assumption (rule 4); country code inferred for the hotel (rule 5a).",
+  "tags": [
+    "hotel",
+    "default-times",
+    "image",
+    "rendered"
+  ],
+  "source": "hotel-dates-only-explicit-year",
+  "tripContext": {
+    "startDate": "2027-10-08",
+    "endDate": "2027-10-14",
+    "destinations": [
+      {
+        "city": "Istanbul",
+        "countryCode": "TR"
+      }
+    ]
+  },
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-dates-only-explicit-year.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-10-08T15:00",
+        "endDatetime": "2027-10-11T11:00",
+        "confirmationRef": "HRX-4471902",
+        "details": {
+          "city": "Istanbul",
+          "countryCode": "TR"
+        }
+      }
+    ]
+  }
+}

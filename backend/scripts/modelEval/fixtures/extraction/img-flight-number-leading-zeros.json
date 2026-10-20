@@ -1,0 +1,50 @@
+{
+  "id": "img-flight-number-leading-zeros",
+  "description": "image render of flight-number-leading-zeros: Flight number printed as one token with leading zeros (\"KE0012\"): the designator is KE + 0012 as printed, so the number must not be re-padded or trimmed away.",
+  "tags": [
+    "flight",
+    "flight-number",
+    "image",
+    "rendered"
+  ],
+  "source": "flight-number-leading-zeros",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-flight-number-leading-zeros.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-03-02T09:15",
+        "endDatetime": "2027-03-02T15:05",
+        "origin": [
+          "ICN",
+          "Incheon",
+          "Seoul"
+        ],
+        "destination": [
+          "SIN",
+          "Changi",
+          "Singapore"
+        ],
+        "confirmationRef": "R7T4PL",
+        "details": {
+          "originCity": "Seoul",
+          "destinationCity": "Singapore",
+          "originCountryCode": "KR",
+          "destinationCountryCode": "SG",
+          "carrierCode": "KE",
+          "flightNumber": "KE0012"
+        }
+      }
+    ]
+  }
+}

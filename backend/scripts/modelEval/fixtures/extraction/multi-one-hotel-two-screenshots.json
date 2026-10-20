@@ -1,0 +1,43 @@
+{
+  "id": "multi-one-hotel-two-screenshots",
+  "description": "One hotel booking split across two page screenshots (name and dates on the first; confirmation number, address and room on the second): one booking naming both files.",
+  "tags": [
+    "multi-file",
+    "rendered"
+  ],
+  "source": "hotel-confirmation-split",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-confirmation-split-p1.png"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-confirmation-split-p2.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-09-14T15:00",
+        "endDatetime": "2027-09-17T11:00",
+        "confirmationRef": "7731845026",
+        "details": {
+          "city": "Porto",
+          "countryCode": "PT"
+        },
+        "filePositions": [
+          0,
+          1
+        ]
+      }
+    ]
+  }
+}

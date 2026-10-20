@@ -2,6 +2,12 @@
 //
 //   cd backend; node scripts/modelEval/renderExtractionFixtures.mjs [--chrome <path-to-chrome-headless-shell>] [--only id,id]
 //
+// Plan 38 W0 adds the multi-file composites (COMPOSITES): fixtures that bundle several rendered
+// files, with each expected booking carrying `filePositions` (0-based positions into `files`).
+// They are assembled from the source fixtures' `expected` after the renders, never hand-copied.
+// A render with `partOf` is one page of a booking split across screenshots and emits no fixture of
+// its own; assertParts checks each page as a subset of the source and the pages together as a cover.
+//
 // No image or PDF had ever been run through extractBookings(), so the image path and the 5.5
 // high-resolution image token cost were unmeasured. This turns eight of the committed text
 // confirmations into:
@@ -21,7 +27,7 @@
 // Chrome stamps its own creation date into each PDF's metadata, so PDF bytes are not byte-identical
 // between runs; the page content is.
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FIXTURES_DIR } from './lib/runner.mjs';
@@ -153,6 +159,8 @@ td .place{font-weight:600}
 td .tm{font-size:15pt;font-weight:700;display:block}
 .detail{margin-top:6px;font-size:11.5pt;font-weight:600}
 .facts td:first-child{width:34%;color:#5b6573}
+.facts tr.group td:first-child{color:#fff}
+.facts td.flight:first-child{color:#1d2430}
 `;
 
 function pdfPage({ lang = 'en', title, color, body }) {
@@ -334,6 +342,193 @@ ${kv('Cabin', 'Economy Plus')}
 <div class="detail">2. Klasse, Wagen 25, Platz 61 (Fenster)</div>`,
     }),
   },
+  // Plan 38 W0: renders that exist so the multi-file composites below have enough different files.
+  {
+    id: 'img-hotel-dates-only-explicit-year',
+    source: 'hotel-dates-only-explicit-year',
+    kind: 'image',
+    html: () => phonePage({
+      title: 'Your stay at Karakoy Residence is confirmed',
+      sender: 'Karakoy Residence', initial: 'K', avatarColor: '#0f6b5c',
+      subject: 'Your stay at Karakoy Residence is confirmed',
+      body: `${band('#0f6b5c', 'Karakoy Residence')}
+<div class="pad">
+${kv('Check-in', 'Friday, 8 October 2027')}
+${kv('Check-out', 'Monday, 11 October 2027')}
+${kv('Guests', '2 adults')}
+${kv('Reservation number', 'HRX-4471902')}
+${kv('Address', 'Kemankes Caddesi 33, Karakoy, Istanbul')}
+</div>`,
+    }),
+  },
+  {
+    id: 'img-flight-number-leading-zeros',
+    source: 'flight-number-leading-zeros',
+    kind: 'image',
+    html: () => phonePage({
+      title: 'Your trip is confirmed',
+      sender: 'Reservations', initial: 'R', avatarColor: '#3a5a40',
+      subject: 'Your trip is confirmed',
+      body: `${band('#3a5a40', 'Your trip is confirmed')}
+<div class="pad">
+${refRow('Reservation code', 'R7T4PL')}
+<div class="flightno">Flight KE0012</div>
+${kv('Route', 'Seoul Incheon (ICN) → Singapore Changi (SIN)')}
+${kv('Departs', 'Tue 02 Mar 2027 at 09:15')}
+${kv('Arrives', 'Tue 02 Mar 2027 at 15:05')}
+<div class="note" style="margin-top:12px">Baggage: 1 piece, 23 kg. Meals served on board.</div>
+</div>`,
+    }),
+  },
+  // One booking split across two screenshots (Plan 38 W0 fixture c). Neither half is a valid
+  // single-file fixture on its own, so `fixture: false`; the group is checked together (PART_GROUPS).
+  {
+    id: 'img-hotel-confirmation-split-p1',
+    source: 'hotel-confirmation-split',
+    kind: 'image',
+    partOf: 'hotel-confirmation-split',
+    fixture: false,
+    html: () => phonePage({
+      title: 'Your reservation is confirmed',
+      sender: 'Reservations', initial: 'R', avatarColor: '#7a3b2e',
+      subject: 'Your reservation is confirmed',
+      body: `${band('#7a3b2e', 'Hotel Casa do Rio Porto')}
+<div class="pad">
+${kv('Check-in', 'Tuesday, 14 September 2027, from 15:00')}
+${kv('Check-out', 'Friday, 17 September 2027, until 11:00')}
+</div>`,
+    }),
+  },
+  {
+    id: 'img-hotel-confirmation-split-p2',
+    source: 'hotel-confirmation-split',
+    kind: 'image',
+    partOf: 'hotel-confirmation-split',
+    fixture: false,
+    html: () => phonePage({
+      title: 'Your reservation is confirmed',
+      sender: 'Reservations', initial: 'R', avatarColor: '#7a3b2e',
+      subject: 'Your reservation is confirmed',
+      body: `<div class="pad">
+${refRow('Confirmation number', '7731845026')}
+${kv('Address', 'Rua das Flores 88, Porto')}
+${kv('Room', 'Deluxe Double, 1 room, 2 guests')}
+</div>`,
+    }),
+  },
+  {
+    id: 'pdf-itinerary-flight-train-two-hotels',
+    source: 'itinerary-flight-train-two-hotels',
+    kind: 'pdf',
+    html: () => pdfPage({
+      title: 'Meridian Travel - Your itinerary',
+      color: '#2f5d62',
+      body: `<div class="top"><span class="brand">Meridian Travel</span><span class="doc">Your itinerary</span></div>
+<div class="refbox"><div class="lbl">File reference</div><div class="ref">MT-58213</div></div>
+<table class="facts">
+<tr class="group"><td colspan="3">FLIGHT &nbsp; Fri 05 Nov 2027</td></tr>
+<tr><td class="flight">TP 1359</td><td><span class="place">Zurich (ZRH)</span><span class="tm">07:20</span></td><td><span class="place">Lisbon (LIS)</span><span class="tm">09:40</span></td></tr>
+<tr><td>Airline reference</td><td colspan="2"><b>QW7R3N</b></td></tr>
+<tr class="group"><td colspan="3">HOTEL &nbsp; Hotel Alfama Mar, Rua dos Remedios 41, Lisbon</td></tr>
+<tr><td>Check-in</td><td colspan="2">Fri 05 Nov 2027 from 15:00</td></tr>
+<tr><td>Check-out</td><td colspan="2">Mon 08 Nov 2027 until 11:00</td></tr>
+<tr><td>Hotel confirmation</td><td colspan="2"><b>LX-90417</b></td></tr>
+<tr class="group"><td colspan="3">TRAIN &nbsp; Mon 08 Nov 2027</td></tr>
+<tr><td class="flight">Alfa Pendular</td><td><span class="place">Lisbon Santa Apolonia</span><span class="tm">12:30</span></td><td><span class="place">Porto Campanha</span><span class="tm">15:10</span></td></tr>
+<tr><td>Train reservation</td><td colspan="2"><b>4402917, Coach 3, Seat 14</b></td></tr>
+<tr class="group"><td colspan="3">HOTEL &nbsp; Hotel Ribeira Douro, Cais da Estiva 17, Porto</td></tr>
+<tr><td>Check-in</td><td colspan="2">Mon 08 Nov 2027 from 15:00</td></tr>
+<tr><td>Check-out</td><td colspan="2">Thu 11 Nov 2027 until 11:00</td></tr>
+<tr><td>Hotel confirmation</td><td colspan="2"><b>PT-62850</b></td></tr>
+</table>`,
+    }),
+  },
+];
+
+// Renders that are parts of one source: id of the source -> the part renders (Plan 38 W0).
+const PART_GROUPS = new Map();
+for (const r of RENDERS) {
+  if (r.partOf) PART_GROUPS.set(r.partOf, [...(PART_GROUPS.get(r.partOf) ?? []), r]);
+}
+
+// ---------- composite multi-file fixtures (Plan 38 W0) -----------------------------------------
+//
+// Each composite is assembled from the source fixtures' own `expected`, so it cannot drift from
+// them: `bookings` lists, in the answer order, which source booking each expected entry is and
+// which of the composite's `files` it came from (0-based `filePositions`). `files` entries are a
+// rendered file (`render`, an id under files/) or a source text fixture pasted inline (`text`).
+// tripContext is null on every composite: all the sources print explicit full dates (with the year)
+// and state their own cities, so none of their expected values depends on a trip range. A source
+// whose own fixture carries a tripContext (the Istanbul hotel, the ryokan, the overnight flight, the
+// round trip) only echoes destinations the text already names.
+const COMPOSITES = [
+  {
+    id: 'multi-four-screenshots-two-hotels-two-flights',
+    description: 'Four phone screenshots (two hotels, two flights) in one import; the files are in an order unlike the date order of the bookings, so each booking must name its own file.',
+    files: [
+      { render: 'img-hotel-dates-only-explicit-year' },
+      { render: 'img-overnight-flight-lands-next-day' },
+      { render: 'img-cjk-ryokan-japan' },
+      { render: 'img-flight-number-leading-zeros' },
+    ],
+    bookings: [
+      { source: 'flight-number-leading-zeros', index: 0, filePositions: [3] },
+      { source: 'overnight-flight-lands-next-day', index: 0, filePositions: [1] },
+      { source: 'hotel-dates-only-explicit-year', index: 0, filePositions: [0] },
+      { source: 'cjk-ryokan-japan', index: 0, filePositions: [2] },
+    ],
+  },
+  {
+    id: 'multi-round-trip-pdf-plus-hotel-image',
+    description: 'A round-trip e-ticket PDF (two flights, one file) plus an unrelated hotel screenshot: both flights name the PDF only, the hotel the screenshot only.',
+    files: [
+      { render: 'pdf-round-trip-single-email' },
+      { render: 'img-hotel-dates-only-explicit-year' },
+    ],
+    bookings: [
+      { source: 'round-trip-single-email', index: 0, filePositions: [0] },
+      { source: 'round-trip-single-email', index: 1, filePositions: [0] },
+      { source: 'hotel-dates-only-explicit-year', index: 0, filePositions: [1] },
+    ],
+  },
+  {
+    id: 'multi-one-hotel-two-screenshots',
+    description: 'One hotel booking split across two page screenshots (name and dates on the first; confirmation number, address and room on the second): one booking naming both files.',
+    files: [
+      { render: 'img-hotel-confirmation-split-p1' },
+      { render: 'img-hotel-confirmation-split-p2' },
+    ],
+    bookings: [
+      { source: 'hotel-confirmation-split', index: 0, filePositions: [0, 1] },
+    ],
+  },
+  {
+    id: 'multi-pasted-text-plus-image',
+    description: 'Pasted flight confirmation text plus an unrelated hotel screenshot: each booking names its own input.',
+    files: [
+      { text: 'flight-number-suffix-letter' },
+      { render: 'img-hotel-dates-only-explicit-year' },
+    ],
+    bookings: [
+      { source: 'flight-number-suffix-letter', index: 0, filePositions: [0] },
+      { source: 'hotel-dates-only-explicit-year', index: 0, filePositions: [1] },
+    ],
+  },
+  {
+    id: 'multi-itinerary-pdf-plus-hotel-image',
+    description: 'One agency itinerary PDF holding a flight, a train and two hotels, uploaded with one unrelated hotel screenshot: the four itinerary bookings each name the PDF only, the screenshot hotel names the screenshot only.',
+    files: [
+      { render: 'pdf-itinerary-flight-train-two-hotels' },
+      { render: 'img-cjk-ryokan-japan' },
+    ],
+    bookings: [
+      { source: 'itinerary-flight-train-two-hotels', index: 0, filePositions: [0] },
+      { source: 'itinerary-flight-train-two-hotels', index: 1, filePositions: [0] },
+      { source: 'itinerary-flight-train-two-hotels', index: 2, filePositions: [0] },
+      { source: 'itinerary-flight-train-two-hotels', index: 3, filePositions: [0] },
+      { source: 'cjk-ryokan-japan', index: 0, filePositions: [1] },
+    ],
+  },
 ];
 
 // ---------- fidelity guard -------------------------------------------------------------------
@@ -354,14 +549,31 @@ function pageText(html) {
 const squash = (s) => s.replace(/[:：→]|->|\s-\s/g, ' ').replace(/\s+/g, '');
 const tokens = (s) => s.replace(/[:：→]|->|\s-\s/g, ' ').split(/\s+/).map((t) => t.replace(/^[,.;]+|[,.;]+$/g, '')).filter(Boolean);
 
-function assertFaithful(render, sourceText, html) {
-  const page = pageText(html);
-  const pageSquashed = squash(page);
+// Every digit-bearing token on one page must appear in the source (nothing invented).
+function assertSubset(id, sourceText, html) {
   const sourceSquashed = squash(sourceText);
-  const missing = tokens(sourceText).filter((t) => !pageSquashed.includes(squash(t)));
-  if (missing.length) throw new Error(`${render.id}: source facts missing from the page: ${missing.join(' | ')}`);
-  const added = tokens(page).filter((t) => /\d/.test(t) && !sourceSquashed.includes(squash(t)));
-  if (added.length) throw new Error(`${render.id}: digit-bearing text not in the source: ${added.join(' | ')}`);
+  const added = tokens(pageText(html)).filter((t) => /\d/.test(t) && !sourceSquashed.includes(squash(t)));
+  if (added.length) throw new Error(`${id}: digit-bearing text not in the source: ${added.join(' | ')}`);
+}
+
+// Every source token must appear somewhere across the given pages (nothing dropped).
+function assertCoverage(id, sourceText, htmls) {
+  const pagesSquashed = squash(htmls.map(pageText).join(' '));
+  const missing = tokens(sourceText).filter((t) => !pagesSquashed.includes(squash(t)));
+  if (missing.length) throw new Error(`${id}: source facts missing from the page(s): ${missing.join(' | ')}`);
+}
+
+function assertFaithful(render, sourceText, html) {
+  assertCoverage(render.id, sourceText, [html]);
+  assertSubset(render.id, sourceText, html);
+}
+
+// Plan 38 W0: a source rendered as several screenshots. Each part is checked as a subset of the
+// source (no invented digit-bearing text); together the parts must cover every source token.
+function assertParts(groupId, sourceText, parts) {
+  const htmls = parts.map((r) => r.html());
+  parts.forEach((r, i) => assertSubset(r.id, sourceText, htmls[i]));
+  assertCoverage(groupId, sourceText, htmls);
 }
 
 // ---------- main -----------------------------------------------------------------------------
@@ -393,6 +605,10 @@ function main() {
   const chrome = findChrome(args);
   console.log(`chrome: ${chrome}`);
   mkdirSync(FILES_DIR, { recursive: true });
+  for (const [groupId, parts] of PART_GROUPS) {
+    const source = JSON.parse(readFileSync(join(FIXTURE_DIR, `${groupId}.json`), 'utf8'));
+    assertParts(groupId, source.files.map((f) => f.content).join('\n'), parts);
+  }
   const work = mkdtempSync(join(tmpdir(), 'trippy-extraction-render-'));
 
   try {
@@ -402,7 +618,8 @@ function main() {
       const sourceText = source.files.map((f) => f.content).join('\n');
 
       const html = render.html();
-      assertFaithful(render, sourceText, html);
+      if (render.partOf) assertSubset(render.id, sourceText, html);
+      else assertFaithful(render, sourceText, html);
       const htmlPath = join(work, `${render.id}.html`);
       writeFileSync(htmlPath, html, 'utf8');
 
@@ -425,6 +642,7 @@ function main() {
         console.log(`${outPath}  ${statSync(outPath).size} bytes  ${pages} page(s)`);
       }
 
+      if (render.fixture === false) continue;
       const fixture = {
         id: render.id,
         description: `${render.kind} render of ${source.id}: ${source.description}`,
@@ -442,6 +660,59 @@ function main() {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+
+  for (const composite of COMPOSITES) {
+    if (args.only && !args.only.has(composite.id)) continue;
+    writeComposite(composite);
+  }
+}
+
+// ---------- composites -----------------------------------------------------------------------
+
+function loadSource(id) {
+  return JSON.parse(readFileSync(join(FIXTURE_DIR, `${id}.json`), 'utf8'));
+}
+
+function compositeFile(entry) {
+  if (entry.text) {
+    const source = loadSource(entry.text);
+    if (source.files.length !== 1 || source.files[0].kind !== 'text') throw new Error(`${entry.text}: not a one-file text fixture`);
+    return { kind: 'text', content: source.files[0].content };
+  }
+  const ext = ['png', 'pdf'].find((x) => existsSync(join(FILES_DIR, `${entry.render}.${x}`)));
+  if (!ext) throw new Error(`composite file files/${entry.render} does not exist; run the renderer first`);
+  const rel = `files/${entry.render}.${ext}`;
+  return ext === 'png'
+    ? { kind: 'image', mediaType: 'image/png', path: rel }
+    : { kind: 'pdf', mediaType: 'application/pdf', path: rel };
+}
+
+function writeComposite(composite) {
+  const files = composite.files.map(compositeFile);
+  const bookings = composite.bookings.map((b) => {
+    const expected = loadSource(b.source).expected.bookings[b.index];
+    if (!expected) throw new Error(`${composite.id}: ${b.source} has no booking ${b.index}`);
+    const sorted = [...new Set(b.filePositions)].sort((x, y) => x - y);
+    if (sorted.length !== b.filePositions.length || sorted.some((pos, i) => pos !== b.filePositions[i])) {
+      throw new Error(`${composite.id}: filePositions must be sorted and unique`);
+    }
+    if (sorted.some((pos) => !Number.isInteger(pos) || pos < 0 || pos >= files.length)) {
+      throw new Error(`${composite.id}: filePositions ${JSON.stringify(b.filePositions)} out of range for ${files.length} files`);
+    }
+    return { ...structuredClone(expected), filePositions: b.filePositions };
+  });
+  const fixture = {
+    id: composite.id,
+    description: composite.description,
+    tags: ['multi-file', 'rendered'],
+    source: [...new Set(composite.bookings.map((b) => b.source))].join(', '),
+    tripContext: null,
+    contextText: null,
+    files,
+    expected: { isTravelRelated: true, kind: 'bookings', bookings },
+  };
+  writeFileSync(join(FIXTURE_DIR, `${composite.id}.json`), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
+  console.log(`${composite.id}: ${files.length} files, ${bookings.length} bookings`);
 }
 
 main();

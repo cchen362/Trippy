@@ -1,0 +1,90 @@
+{
+  "id": "multi-round-trip-pdf-plus-hotel-image",
+  "description": "A round-trip e-ticket PDF (two flights, one file) plus an unrelated hotel screenshot: both flights name the PDF only, the hotel the screenshot only.",
+  "tags": [
+    "multi-file",
+    "rendered"
+  ],
+  "source": "round-trip-single-email, hotel-dates-only-explicit-year",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "pdf",
+      "mediaType": "application/pdf",
+      "path": "files/pdf-round-trip-single-email.pdf"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-dates-only-explicit-year.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-09-10T09:05",
+        "endDatetime": "2027-09-10T11:10",
+        "origin": [
+          "AMS",
+          "Amsterdam"
+        ],
+        "destination": [
+          "BCN",
+          "Barcelona"
+        ],
+        "confirmationRef": "PX2K6C",
+        "details": {
+          "originCity": "Amsterdam",
+          "destinationCity": "Barcelona",
+          "originCountryCode": "NL",
+          "destinationCountryCode": "ES",
+          "flightNumber": "KL1675"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "flight",
+        "startDatetime": "2027-09-14T18:30",
+        "endDatetime": "2027-09-14T20:45",
+        "origin": [
+          "BCN",
+          "Barcelona"
+        ],
+        "destination": [
+          "AMS",
+          "Amsterdam"
+        ],
+        "confirmationRef": "PX2K6C",
+        "details": {
+          "originCity": "Barcelona",
+          "destinationCity": "Amsterdam",
+          "originCountryCode": "ES",
+          "destinationCountryCode": "NL",
+          "flightNumber": "KL1676"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-10-08T15:00",
+        "endDatetime": "2027-10-11T11:00",
+        "confirmationRef": "HRX-4471902",
+        "details": {
+          "city": "Istanbul",
+          "countryCode": "TR"
+        },
+        "filePositions": [
+          1
+        ]
+      }
+    ]
+  }
+}

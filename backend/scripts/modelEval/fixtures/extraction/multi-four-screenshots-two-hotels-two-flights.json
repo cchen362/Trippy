@@ -1,0 +1,118 @@
+{
+  "id": "multi-four-screenshots-two-hotels-two-flights",
+  "description": "Four phone screenshots (two hotels, two flights) in one import; the files are in an order unlike the date order of the bookings, so each booking must name its own file.",
+  "tags": [
+    "multi-file",
+    "rendered"
+  ],
+  "source": "flight-number-leading-zeros, overnight-flight-lands-next-day, hotel-dates-only-explicit-year, cjk-ryokan-japan",
+  "tripContext": null,
+  "contextText": null,
+  "files": [
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-hotel-dates-only-explicit-year.png"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-overnight-flight-lands-next-day.png"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-cjk-ryokan-japan.png"
+    },
+    {
+      "kind": "image",
+      "mediaType": "image/png",
+      "path": "files/img-flight-number-leading-zeros.png"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "flight",
+        "startDatetime": "2027-03-02T09:15",
+        "endDatetime": "2027-03-02T15:05",
+        "origin": [
+          "ICN",
+          "Incheon",
+          "Seoul"
+        ],
+        "destination": [
+          "SIN",
+          "Changi",
+          "Singapore"
+        ],
+        "confirmationRef": "R7T4PL",
+        "details": {
+          "originCity": "Seoul",
+          "destinationCity": "Singapore",
+          "originCountryCode": "KR",
+          "destinationCountryCode": "SG",
+          "carrierCode": "KE",
+          "flightNumber": "KE0012"
+        },
+        "filePositions": [
+          3
+        ]
+      },
+      {
+        "type": "flight",
+        "startDatetime": "2027-03-12T23:55",
+        "endDatetime": "2027-03-13T06:20",
+        "origin": [
+          "SIN",
+          "Singapore"
+        ],
+        "destination": [
+          "LHR",
+          "London",
+          "Heathrow"
+        ],
+        "confirmationRef": "9RB4TX",
+        "details": {
+          "originCity": "Singapore",
+          "destinationCity": "London",
+          "originCountryCode": "SG",
+          "destinationCountryCode": "GB",
+          "flightNumber": "SQ322"
+        },
+        "filePositions": [
+          1
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-10-08T15:00",
+        "endDatetime": "2027-10-11T11:00",
+        "confirmationRef": "HRX-4471902",
+        "details": {
+          "city": "Istanbul",
+          "countryCode": "TR"
+        },
+        "filePositions": [
+          0
+        ]
+      },
+      {
+        "type": "hotel",
+        "startDatetime": "2027-11-08T15:00",
+        "endDatetime": "2027-11-10T10:00",
+        "confirmationRef": "KY-88213",
+        "details": {
+          "city": "Kyoto",
+          "countryCode": "JP",
+          "localName": "山水荘"
+        },
+        "filePositions": [
+          2
+        ]
+      }
+    ]
+  }
+}

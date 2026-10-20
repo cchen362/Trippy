@@ -1,0 +1,31 @@
+{
+  "contextText": null,
+  "tripContext": null,
+  "id": "hotel-confirmation-split",
+  "description": "One hotel confirmation with full dates and times. Plan 38 renders it as TWO phone screenshots (name and dates on the first, confirmation number, address and room on the second); alone the text is an ordinary hotel booking.",
+  "tags": [
+    "hotel"
+  ],
+  "files": [
+    {
+      "kind": "text",
+      "content": "Your reservation is confirmed\nHotel Casa do Rio Porto\nCheck-in: Tuesday, 14 September 2027, from 15:00\nCheck-out: Friday, 17 September 2027, until 11:00\nConfirmation number: 7731845026\nAddress: Rua das Flores 88, Porto\nRoom: Deluxe Double, 1 room, 2 guests"
+    }
+  ],
+  "expected": {
+    "isTravelRelated": true,
+    "kind": "bookings",
+    "bookings": [
+      {
+        "type": "hotel",
+        "startDatetime": "2027-09-14T15:00",
+        "endDatetime": "2027-09-17T11:00",
+        "confirmationRef": "7731845026",
+        "details": {
+          "city": "Porto",
+          "countryCode": "PT"
+        }
+      }
+    ]
+  }
+}

@@ -41,6 +41,7 @@ import {
   FACTS_OUTPUT_SCHEMA, FACTS_OUTPUT_SCHEMA_AS_PLANNED, FACTS_SYSTEM, buildFactsContextText, classifyFactsResponse,
 } from './lib/factsContract.mjs';
 import { READINESS_OUTPUT_SCHEMA, READINESS_SYSTEM, classifyReadinessResponse } from './lib/readinessPrototype.mjs';
+import { EXTRACTION_OUTPUT_SCHEMA as LIVE_EXTRACTION_SCHEMA } from '../../src/services/claude.js';
 
 const SONNET_55 = 'claude-sonnet-5-5';
 const SONNET_46 = 'claude-sonnet-4-6';
@@ -494,6 +495,42 @@ const PROBES = [
     system: EXTRACTION_SYSTEM, user: EXTRACTION_USER,
   })),
 ];
+
+// Plan 38 W0 (D-38-1): the LIVE extraction schema (claude.js, not the plan-shaped EXTRACTION_SCHEMA
+// above, which the API rejects) plus one required per-booking `sourceFiles` array of 1-based file
+// numbers. No maxItems (Plan 37 W0: the compile drops it) and no optional property (D-34-5).
+// extractionVariant takes the live schema over wholesale, then adds the property.
+function sourceFilesVariant(items) {
+  return extractionVariant((schema) => {
+    for (const key of Object.keys(schema)) delete schema[key];
+    Object.assign(schema, structuredClone(LIVE_EXTRACTION_SCHEMA));
+    const booking = schema.$defs.booking;
+    booking.properties.sourceFiles = {
+      type: 'array',
+      description: 'The 1-based numbers of the files this booking was read from: every file that shows a fact of it.',
+      items,
+      minItems: 1,
+    };
+    booking.required = [...booking.required, 'sourceFiles'];
+  });
+}
+const SOURCE_FILES_ENUM_SCHEMA = sourceFilesVariant({ enum: [1, 2, 3, 4] });
+const SOURCE_FILES_PATTERN_SCHEMA = sourceFilesVariant({ type: 'string', pattern: '^[1-4]$' });
+
+PROBES.push(
+  ...[['extraction-sourcefiles-sonnet-5-5', SONNET_55], ['extraction-sourcefiles-sonnet-4-6', SONNET_46]].map(([probeId, model]) => ({
+    probeId, kind: 'matrix', workload: 'extraction', model,
+    schemaName: 'EXTRACTION_SCHEMA_LIVE+sourceFiles(enum 1-4)', schema: SOURCE_FILES_ENUM_SCHEMA,
+    fallbacks: [],
+    system: EXTRACTION_SYSTEM, user: EXTRACTION_USER,
+  })),
+  {
+    probeId: 'extraction-sourcefiles-pattern-sonnet-5-5', kind: 'matrix', workload: 'extraction', model: SONNET_55,
+    schemaName: 'EXTRACTION_SCHEMA_LIVE+sourceFiles(string pattern ^[1-4]$)', schema: SOURCE_FILES_PATTERN_SCHEMA,
+    fallbacks: [],
+    system: EXTRACTION_SYSTEM, user: EXTRACTION_USER,
+  },
+);
 
 // --only <probeId,...>, --max-usd <n> (default 1), --concurrent
 function parseProbeArgs(argv = process.argv.slice(2)) {
