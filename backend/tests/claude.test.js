@@ -3503,19 +3503,19 @@ describe('document facts contract (Plan 37 W1, D-37-4)', () => {
 
   describe('byte-identity with the W0 harness', () => {
     it('pins the prompt, the schema and the format', () => {
-      expect(sha256Text(FACTS_SYSTEM)).toBe('d4b0e3d8b618d49f0eadb9bf326c5e8b56a931cd78d82f7449242aa942fbac55');
+      expect(sha256Text(FACTS_SYSTEM)).toBe('d0e78b1f870dfbe2188f6997d0f76e4efe14a3309473b4c572b31702d17623f5');
       expect(sha256Text(JSON.stringify(FACTS_OUTPUT_SCHEMA))).toBe('258c6d4ba56a2f53328864ee2af5f6f28341cea703358b6b269067e24d25ebee');
       expect(sha256Text(JSON.stringify(FACTS_OUTPUT_FORMAT))).toBe('d78aa60d344a333f07545496d9c0e2f4c84de669534368b9551e690376e8d898');
     });
 
     it('pins the whole request body for Haiku 5.5 at effort medium', () => {
       const body = buildFactsRequest({ model: 'claude-haiku-5-5', maxTokens: 8700, effort: 'medium' }, { context, document: textDocument });
-      expect(sha256Text(JSON.stringify(body))).toBe('1bbe53e3b3726e75deb7164501390177ae799447394e10aa04656a0acb862cfd');
+      expect(sha256Text(JSON.stringify(body))).toBe('64c3ebd24d7a31bd46b693a70a25c3f717e68d4f15c301ac0109056b389a0dae');
     });
 
     it('ends the prompt with the reasoning guard, and carries the contract version', () => {
-      expect(FACTS_SYSTEM.endsWith('\n10. Do not explain your reasoning in prose.')).toBe(true);
-      expect(FACTS_PROMPT_VERSION).toBe('37.1');
+      expect(FACTS_SYSTEM.endsWith('\n13. Do not explain your reasoning in prose.')).toBe(true);
+      expect(FACTS_PROMPT_VERSION).toBe('37.2');
     });
   });
 

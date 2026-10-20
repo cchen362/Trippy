@@ -1185,25 +1185,29 @@ export const FACTS_OUTPUT_SCHEMA = deepFreeze({
 export const FACTS_OUTPUT_FORMAT = Object.freeze({ type: 'json_schema', schema: FACTS_OUTPUT_SCHEMA });
 
 // Bump when the prompt or schema changes: a document is re-read only when its read key (content hash, model, this version) changes (D-37-1).
-export const FACTS_PROMPT_VERSION = '37.1';
+export const FACTS_PROMPT_VERSION = '37.2';
 
 // D-37-10 (Plan 37): a time keeps its document's zone or says it has none — rule 5 sets `tz` only when the document states a zone or the booking context supplies one, and `tzSource` records which, so the UI can say "zone not stated" instead of assuming.
-// The prompt is Plan 37 §4.2 verbatim; rule 10 is the same reasoning-request guard as extraction's last rule (Plan 34 W1).
+// D-37-14 (Plan 37 W2b): rules 10–12 keep the booking's own schedule and identity, the lines of its price, and a condition stripped of its circumstance out of the facts at the reader, because the display never filters fact content.
+// The prompt is Plan 37 §4.2 as amended by W2b (37.2); its last rule is the same reasoning-request guard as extraction's last rule (Plan 34 W1).
 export const FACTS_SYSTEM = `You are a travel-document reading engine. You receive one document that belongs to a traveller's booking (a confirmation email, an e-ticket, a hotel voucher, a pass, a tour voucher, a luggage-forwarding sheet, or a screenshot of one) and must list every condition in it as structured JSON.
 
-A condition is anything that could change what the traveller must do, bring, pay or expect, or when: deadlines (cancel by, change by, check-in opens, pay by, collect by), windows (check-in hours, reception hours, pickup time, entry slot, validity period), requirements (passport, printed voucher, the card used to pay, a QR code, an ID matching the name), instructions (meeting point, platform, terminal, how to reach, what to show), allowances (baggage, seats, guests, breakfast), contacts (phone, email, address in local script), restrictions (non-refundable, non-changeable, no late entry, age limits), cost conditions (deposit, city tax, resort fee, late fee).
+A condition is anything that could change what the traveller must do, bring, pay or expect, or when: deadlines (cancel by, change by, check-in opens, pay by, collect by), windows (check-in hours, reception hours, pickup time, entry slot, validity period), requirements (passport, printed voucher, the card used to pay, a QR code, an ID matching the name), instructions (meeting point, platform, terminal, how to reach, what to show), allowances (baggage, breakfast, what the fare or rate includes), contacts (phone, email, address in local script), restrictions (non-refundable, non-changeable, no late entry, age limits), cost conditions (deposit, city tax, resort fee, late fee).
 
 Rules:
 1. Read the whole document, every page. One fact per condition; a condition stated twice is one fact.
 2. NEVER invent a value. Quote the sentence or fragment exactly as printed, in its original language; never paraphrase, translate or shorten the quote. Put the English reading in "value".
 3. Skip boilerplate that names no specific time, amount, place or action (general terms, marketing, "subject to conditions" lines). Keep anything with a time, a date, an amount, a place, a name requirement or an action.
 4. "at" is the moment the condition refers to, local to the place, as a date or a date and time; "" when the condition has none. A date without a year takes the year from the booking context below; make no other inference.
-5. "tz" is the IANA zone only if the document states a zone or the booking context supplies one, and "tzSource" says which; otherwise "" and "none". Never guess a zone.
+5. "tz" is the IANA zone only if the document states a zone or the booking context supplies one, and "tzSource" says which; otherwise "" and "none". A zone the document names in words ("Japan time") is a zone the document states. Never guess a zone.
 6. "page" is the page number as printed, 1-based; "" for a single image or when pages are not distinguishable.
 7. "kind" is one of the eight kinds; choose the closest. "label" is up to five English words; "value" is one short English phrase.
 8. The booking context below (type, title, dates, zones, trip dates) is for disambiguation only; never produce a fact from the context itself.
 9. If the document holds no condition, return an empty "facts" array; never pad.
-10. Do not explain your reasoning in prose.`;
+10. The booking's own schedule and identity are not conditions, even though they carry times, dates and places: the vehicle's departure and arrival times and dates, the airports and stations, the flight or train number, the cabin or fare class, the seat, the booked room and number of guests, the booked dates of stay on their own, the guests' or passengers' names, the booking reference. What the traveller must do, or where they must go, stays a condition even when it is printed in the booking's schedule: a hotel's check-in and check-out hours ("Check-In: Monday, June 8, 2026 03:00 PM" is a check-in condition, with its date and hour), the boarding time, gate or check-in counter closing times, reception hours, the departure or arrival terminal, platform or meeting point ("Changi Terminal 3" is a terminal instruction), and the property's contacts.
+11. The booking's price is not a condition, even though it is an amount: its total and every line of a summary of charges that adds up to a stated total are part of what is paid, however a line is named; when lines are followed by a total equal to their sum, none of them is a condition. A "cost_condition" is a charge no stated total includes, or one an action or a deadline triggers: a deposit, a percentage added on top of a rate that no total includes, a charge to pay at the property on top of the total, a cancellation, no-show or late fee. Only when the document says the price is still to be paid at the property or by a date is it one fact, for the amount due.
+12. A condition that applies only in a circumstance (a carrier, a connection or onward flight, a passenger type, a residency, a late arrival) keeps that circumstance at the start of "value", e.g. "If you have an onward flight: collect and re-check your bags".
+13. Do not explain your reasoning in prose.`;
 
 const orNotGiven = (v) => (v ? v : 'not given');
 
