@@ -86,6 +86,10 @@ streamed call's `stop_details` is captured from the wire `message_delta` event e
   (Plan 34 Q-34-1) — and a flight's `details.flightNumber` label is the designator as printed
   (`"KE012"`, or an any-of array for a codeshare); the label conventions are in the header of
   `lib/score/extraction.mjs`.
+- `fixtures/facts/` — two synthetic documents for the Plan 37 facts reader: a two-page hotel PDF with a
+  real text layer and a Japanese pasted confirmation, each with its `bookingContext` and an `expected`
+  list for a human check; `renderFactsFixtures.mjs` renders the PDF (Chromium via `lib/chromium.mjs`,
+  shared with `renderExtractionFixtures.mjs`) and checks its pages with `pdfjs-dist`.
 - `backend/data/model-eval/private/` — **gitignored, never committed.** The owner's redacted real
   booking inputs (Plan 30 Q-30-4). Layout:
   `private/extraction/<id>/fixture.json` plus the files it names, where `fixture.json` has the
@@ -240,3 +244,59 @@ pass the cap). The same fetch guard applies (search only, no download tracking, 
 query or chain), `key.json` and a `verdicts.json` template to `data/model-eval/runs/photo-blind/<timestamp>/`; fill in
 each verdict as `right`, `generic` or `wrong`, then `--score <dir>` prints per chain (pooled across runs, each use
 counted) the recovered, right, generic and wrong counts and the wrong-place rate, and writes `score.json`.
+
+## Document facts and the readiness prototype (Plan 37 W0)
+
+```bash
+NODE_ENV=test node scripts/modelEval/facts.mjs --db data/model-eval/private/db/prod-<date>.db --census
+NODE_ENV=test node scripts/modelEval/facts.mjs --db <copy> --profile facts-haiku-55-medium --max-usd 8
+NODE_ENV=test node scripts/modelEval/facts.mjs --sheets --run <run.jsonl>,<run.jsonl>,<run.jsonl>
+NODE_ENV=test node scripts/modelEval/readiness.mjs --db <copy> --facts <facts run.jsonl> [--repeat 2] [--dry-run]
+NODE_ENV=test node scripts/modelEval/readiness.mjs --sheets --run <readiness run.jsonl>
+node scripts/modelEval/score.mjs facts --profile facts-haiku-55-medium,facts-sonnet-55-medium,facts-sonnet-46-medium
+node scripts/modelEval/score.mjs readiness --profile readiness-sonnet-55-high
+```
+
+Two measuring workloads with no live counterpart: `profileFor('facts')` throws (F-37-7), so neither has a
+`control` profile and neither script asserts one. The contract (schema, prompt, request builder, answer
+classifier, `findQuote`) is `lib/factsContract.mjs`, which W1 moves into `claude.js` byte-identical. The
+schema is §4.1 **without `maxItems`**: the API rejects that keyword on Haiku 5.5, Sonnet 5.5 and Sonnet 4.6
+("For 'array' type, property 'maxItems' is not supported", compile probe 2026-10-20), so a read is bounded
+by its `max_tokens` allowance. `FACTS_OUTPUT_SCHEMA_AS_PLANNED` keeps §4.1 as written for the probe only.
+
+- `facts.mjs` takes one source: `--fixtures` (committed synthetic, `fixtures/facts/`, rendered by
+  `renderFactsFixtures.mjs`), `--private` (`private/facts/<id>/fixture.json`, the extraction private shape
+  plus a `bookingContext`) or `--db <path>` (a production backup copy). Documents are enumerated by
+  `lib/factsCorpus.mjs`: import files of every kind, pasted text included (D-37-8), joined to bookings
+  through `details_json.importedFrom.artifactId`, and booking attachments; documents of one trip with
+  the same `content_hash` are read once (D-37-1). `--census` makes no API call and writes the grading
+  sample to `private/facts/sample.json`. A run writes one record per document with the parsed facts,
+  each quote's verification against the text layer (`lib/documentText.mjs`, `pdfjs-dist` legacy build;
+  images and PDFs without a text layer are unverifiable) and the outcome: `complete`, `refused`,
+  `truncated`, `invalid` (bad shape or an empty quote, D-37-2) or `error`. Nothing is retried
+  (`maxRetries: 0`) or repaired. `facts-sonnet-46-medium` runs on images only (B1).
+- `readiness.mjs` is a grading prototype, not the Phase 2 design (`lib/readinessPrototype.mjs`). Per
+  document-rich trip (`--min-docs`, default 8) and repeat, it sends the trip as the co-pilot serialises
+  it (`copilotTripContext`, imported), bookings without bookkeeping, days, the facts run's facts and
+  `runTripHealthChecks` findings, each under a short evidence id (B, D, F, H), and streams one answer
+  of `holds` / `conflict` / `question` items. A cited id that does not exist is recorded as
+  `unknownEvidence`, never repaired.
+- `--sheets` writes blind grading sheets under `private/facts/grading/` (facts: one per document per run;
+  readiness: one per trip per run and repeat), the model hidden behind a letter code and `key.json`
+  mapping codes to runs. No document bytes are written there. The scorers read the marked sheets back:
+  `lib/score/facts.mjs` prints G-37-1 (costly kinds wrong ≤ 3 %, missing ≤ 1 in 10) and, through the
+  `compare` hook in `score.mjs`, B2 (Haiku 5.5 within one point of Sonnet 5.5 on the costly score) and
+  B1 (Sonnet 5.5 against 4.6 on images); `lib/score/readiness.mjs` prints G-37-2 and G-37-3.
+  `FACTS_GRADING_DIR` / `READINESS_GRADING_DIR` point the scorers at another grading root.
+- The compile probe has five Plan 37 ids: `facts-haiku-5-5`, `facts-sonnet-5-5`, `facts-sonnet-4-6`,
+  `facts-plan-haiku-5-5` (§4.1 as written, to re-run the rejection) and `readiness-sonnet-5-5`. They carry
+  their own profile from `profiles.mjs`, since `MODEL_PROFILES` has no row for either workload.
+
+Owner documents (D-37-11): `--db` is opened `readonly` (`lib/sourceDb.mjs`) for the census, the
+enumeration and the bytes. `readiness.mjs` needs `getTripDetail`, which reads through `getDb()`, so it
+takes a backup-API copy of the copy into `data/model-eval/db/`, opens that with `initDb`, and removes it at
+the end. Every mode ends with the side-effect table: every table's row count and a digest for the
+source (must not change), the working copy (must not change), and the dev database (counted readonly;
+a change there means another process wrote to it, reported, not a failure). Run files keep parsed
+facts and hashes, never document bytes; the recorder redacts request and response text for any source
+but the committed fixtures. Everything lands under the gitignored `backend/data/model-eval/`.

@@ -242,7 +242,7 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 ### W0 — Measure (harness only, no production change)
 
-**Status:** NOT STARTED. Approved 2026-10-20 with the plan (defaults on Q-37-1 to Q-37-9); to run in a fresh session on Opus 5.5 at `high` from `2026-10-20-plan37-w0-handoff.md`. The owner supplies the production backup copy.
+**Status:** IN PROGRESS (branch `plan37-w0`). 2026-10-20: harness built and verified on the committed synthetic fixtures; step 2 (compile probe) done — **`maxItems` is rejected by the API on every model, so the contract drops it** (W0 results); steps 1 and 3–7 wait for the owner's production backup copy at `backend/data/model-eval/private/db/`. Approved 2026-10-20 with the plan (defaults on Q-37-1 to Q-37-9).
 
 **Files.** `backend/scripts/modelEval/facts.mjs`, `readiness.mjs`, `lib/factsContract.mjs` (schema, prompt, `findQuote`), `lib/readinessPrototype.mjs`, `lib/score/facts.mjs`, `lib/score/readiness.mjs`, `profiles.mjs` (the four facts and readiness profiles), `schemaProbe.mjs` (four probes), `lib/pricing.mjs` (unchanged unless prices moved; re-check), `README.md` under `modelEval`; `package.json` gains `pdfjs-dist` as a **devDependency** for the harness's `findQuote` (promoted to a dependency in W1). Nothing under `backend/src` or `frontend` changes.
 
@@ -259,7 +259,25 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 #### W0 results
 
-*(empty until run)*
+**The harness (2026-10-20).** Under `backend/scripts/modelEval/` (README section "Document facts and the readiness prototype"): `facts.mjs` (census, paid run, blind sheets), `readiness.mjs` (prototype run, sheets), `lib/factsContract.mjs` (schema, prompt, request builder, answer classifier, `findQuote`), `lib/factsCorpus.mjs` (document enumeration, D-37-1 dedupe by content), `lib/sourceDb.mjs` (read-only source, disposable copy, all-table side-effect counts), `lib/documentText.mjs` (`pdfjs-dist` text layer), `lib/readinessPrototype.mjs`, `lib/score/facts.mjs`, `lib/score/readiness.mjs`, a `compare` hook in `score.mjs`, five probes in `schemaProbe.mjs`, `renderFactsFixtures.mjs` and `fixtures/facts/` (a two-page text-layer hotel PDF and a Japanese pasted confirmation, synthetic), `lib/chromium.mjs` (Chromium finder shared with `renderExtractionFixtures.mjs`). §4.2's prompt and §4.1's schema were checked byte-for-byte against this plan's text before the first call. Backend suite green (47 files, 1,264 tests); nothing under `src/` or `frontend/` changed.
+
+**Step 2 — compile probe** (`schemaProbe.mjs`, run file `runs/schema-probe/2026-10-20T10-46-13-941Z.jsonl`, 15 requests, $0.0928):
+
+| Probe | §4.1 as written | §4.1 without `maxItems` | Cold / warm | Format overhead (input tokens) | Answer |
+|---|---|---|---|---|---|
+| facts, Haiku 5.5 `medium` | **rejected** (400) | accepted | 6.3 s / 4.7 s | 943 → 2,122 (+1,179) | 3 facts, valid |
+| facts, Sonnet 5.5 `medium` | **rejected** (400) | accepted | 4.1 s / 2.6 s | 943 → 2,122 (+1,179) | 3 facts, valid |
+| facts, Sonnet 4.6 `medium` + adaptive | **rejected** (400) | accepted | 22.3 s / 6.5 s | 712 → 1,694 (+982) | 3 facts, valid |
+| readiness, Sonnet 5.5 `high` | n/a | accepted | 5.8 s / 5.2 s | 1,059 → 1,533 (+474) | 1 conflict, valid |
+
+- **`maxItems` is not supported by structured outputs:** "output_config.format.schema: For 'array' type, property 'maxItems' is not supported", on all three models. §4.1 assumed it was. **The contract is §4.1 without `maxItems`** (`FACTS_OUTPUT_SCHEMA` in `lib/factsContract.mjs`); a read is bounded by its `max_tokens` allowance, whose cut-off is the named `truncated` outcome, and W0 step 3 measures the real facts-per-document maximum. Consequences for W1: `validateAgainstSchema` gains **no** `maxItems` keyword (W1 step 2 and D-37-4's "plus maxItems" drop), and there is no 40-fact cap in code unless step 3's numbers argue for one. §4.1 as written is kept as `FACTS_OUTPUT_SCHEMA_AS_PLANNED` and probe `facts-plan-haiku-5-5`, so the rejection can be re-run.
+- **The `at` pattern's nested optional group compiles** on all three models (§11's first open item is closed); the `date` / `time` split is not needed.
+
+**Harness smoke on the synthetic fixtures** (2 documents per profile; `runs/facts/<profile>/2026-10-20T10-49-*.jsonl`): Haiku 5.5 `medium` 18 facts, Sonnet 5.5 `medium` 19 facts; both `complete` with `end_turn`; every quote found in the text layer (37/37, the CJK full-width quote through NFKC); every model page that was stated matched the page the quote was found on (23/23); the marketing paragraph skipped by both; largest output 2,539 tokens (Haiku, thinking included); $0.0018 (Haiku) and $0.026 (Sonnet) for the two-page PDF. Seen, for grading rather than verdicts: Haiku credited "(Japan time)" to the booking (`tzSource: booking`) where Sonnet said `document`; both filled the check-in date from the booking's arrival day; Haiku dropped the 15:00 from the ryokan check-in's `at`. The grading sheets carry `at` and the zone with its source for that reason. Side-effect table unchanged on every run.
+
+**Found while building — for W1, not W0.** `pdfjs-dist` releases that run on Node 20 (5.6.83 up to, not including, 6.2.108) carry GHSA-hq66-cqwq-w95j (high: arbitrary JavaScript execution on opening a malicious PDF); the patched releases need Node ≥ 22.13. W0 uses `pdfjs-dist ~6.4.299` as a devDependency (this machine runs 22.14). Production's Dockerfile is `node:20-alpine`, and Node 20 left support in April 2026, so W1's promotion of `pdfjs-dist` to a dependency needs the image moved to Node 22 (rebuild plus the backend suite on 22), not a pin to a vulnerable release. F-37-25 and §11's third open item ("loads on `node:20-alpine`") change accordingly.
+
+*Steps 1 and 3–7 (census, facts runs, grading, readiness, gates) are pending the production backup copy.*
 
 ### W1 — Contract, storage and the read job (D-37-1 … D-37-4, D-37-7 … D-37-12; R-1, R-2)
 

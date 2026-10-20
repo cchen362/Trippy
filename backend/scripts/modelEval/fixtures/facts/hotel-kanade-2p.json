@@ -1,0 +1,91 @@
+{
+  "id": "hotel-kanade-2p",
+  "trip": "synthetic-kyoto",
+  "tripTitle": "Kyoto in November (synthetic)",
+  "description": "Two-page A4 hotel confirmation with a real text layer; page 2 holds reception hours, the late-arrival rule and breakfast, plus one marketing paragraph that must be skipped (prompt rule 3).",
+  "bookingContext": {
+    "bookings": [
+      {
+        "type": "hotel",
+        "title": "Hotel Kanade Kyoto",
+        "startDatetime": "2026-11-14T15:00",
+        "endDatetime": "2026-11-17T11:00",
+        "originTz": "Asia/Tokyo",
+        "destinationTz": "Asia/Tokyo"
+      }
+    ],
+    "trip": {
+      "startDate": "2026-11-13",
+      "endDate": "2026-11-23"
+    }
+  },
+  "files": [
+    {
+      "kind": "pdf",
+      "mediaType": "application/pdf",
+      "path": "files/hotel-kanade-2p.pdf"
+    }
+  ],
+  "expected": {
+    "facts": [
+      {
+        "kind": "window",
+        "what": "Check-in 15:00 to 23:00",
+        "page": 1
+      },
+      {
+        "kind": "deadline",
+        "what": "Check-out by 11:00",
+        "page": 1
+      },
+      {
+        "kind": "deadline",
+        "what": "Free cancellation until 2026-11-12 18:00 Japan time (Asia/Tokyo from the document)",
+        "page": 1
+      },
+      {
+        "kind": "restriction",
+        "what": "After that 100% of the first night charged",
+        "page": 1
+      },
+      {
+        "kind": "requirement",
+        "what": "Passport at check-in for non-residents",
+        "page": 1
+      },
+      {
+        "kind": "requirement",
+        "what": "The card used to book must be shown",
+        "page": 1
+      },
+      {
+        "kind": "cost_condition",
+        "what": "Accommodation tax 200 yen per person per night, payable at the hotel",
+        "page": 1
+      },
+      {
+        "kind": "window",
+        "what": "Reception open 07:00 to 23:00",
+        "page": 2
+      },
+      {
+        "kind": "requirement",
+        "what": "Arrival after 23:00 must be notified by phone +81 75 000 0000",
+        "page": 2
+      },
+      {
+        "kind": "allowance",
+        "what": "Breakfast 07:00 to 10:00 included for 2 guests",
+        "page": 2
+      },
+      {
+        "kind": "restriction",
+        "what": "No luggage storage after check-out",
+        "page": 2
+      }
+    ],
+    "skipped": [
+      "The closing marketing paragraph on page 2 names no time, amount or action (prompt rule 3)"
+    ]
+  }
+}

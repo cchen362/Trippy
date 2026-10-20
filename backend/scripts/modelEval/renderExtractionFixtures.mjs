@@ -21,53 +21,16 @@
 // Chrome stamps its own creation date into each PDF's metadata, so PDF bytes are not byte-identical
 // between runs; the page content is.
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { FIXTURES_DIR } from './lib/runner.mjs';
+import { findChrome, runChrome } from './lib/chromium.mjs';
 
 const FIXTURE_DIR = join(FIXTURES_DIR, 'extraction');
 const FILES_DIR = join(FIXTURE_DIR, 'files');
 const PNG_WIDTH = 1170;
 const PNG_HEIGHT = 2532;
-
-// ---------- chrome ---------------------------------------------------------------------------
-
-function findChrome(args) {
-  const explicit = args.chrome ?? process.env.CHROME_PATH;
-  if (explicit) {
-    if (!existsSync(explicit)) throw new Error(`Chrome not found at ${explicit}`);
-    return explicit;
-  }
-  const root = join(process.env.LOCALAPPDATA ?? '', 'ms-playwright');
-  if (existsSync(root)) {
-    const installs = readdirSync(root).filter((d) => d.startsWith('chromium_headless_shell-')).sort().reverse();
-    for (const d of installs) {
-      const exe = join(root, d, 'chrome-headless-shell-win64', 'chrome-headless-shell.exe');
-      if (existsSync(exe)) return exe;
-    }
-  }
-  throw new Error(
-    'Chromium headless shell not found. Pass --chrome <path> or set CHROME_PATH; Playwright installs it as ' +
-    '%LOCALAPPDATA%\\ms-playwright\\chromium_headless_shell-<n>\\chrome-headless-shell-win64\\chrome-headless-shell.exe ' +
-    '(npx playwright install chromium).',
-  );
-}
-
-function runChrome(chrome, profileDir, flags, htmlPath, outPath) {
-  rmSync(outPath, { force: true });
-  const result = spawnSync(
-    chrome,
-    ['--headless', '--disable-gpu', '--no-first-run', `--user-data-dir=${profileDir}`, ...flags, pathToFileURL(htmlPath).href],
-    { encoding: 'utf8', timeout: 60_000 },
-  );
-  if (result.error) throw result.error;
-  if (!existsSync(outPath) || statSync(outPath).size === 0) {
-    throw new Error(`chrome produced no ${outPath} (exit ${result.status})\n${result.stderr}`);
-  }
-}
 
 // ---------- html helpers ---------------------------------------------------------------------
 
