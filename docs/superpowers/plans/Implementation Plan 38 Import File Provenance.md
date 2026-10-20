@@ -1,6 +1,6 @@
 # Implementation Plan 38 — Import File Provenance
 
-**Status:** 2026-10-20 — **APPROVED (owner, 2026-10-20). W0 COMPLETE** (§5: the schema compiles on both models; five multi-file fixtures; $0.077). The paid quality run moved into W1 step 2 and gates the merge. Q-38-1 ruled: correct with the script, mapping confirmed. Q-38-2 ruled: no move-document control in this plan. Q-38-3 ruled: accept. The owner also asked that one confirmation holding several bookings (flights + hotel in one PDF, or a whole flight/train/hotel itinerary) shows under every booking it holds; D-38-1 already does this, and W0 fixture (e) measures it. No code changed yet. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
+**Status:** 2026-10-20 — **APPROVED (owner, 2026-10-20). W0 COMPLETE; W1 gate G-38-1 PASSED** (§5: the schema compiles on both models; `filePositions` 15/15 exact on every sweep; no regression; 0 refusals; total spend ≈ $2.63). **W1 code complete on the branch, not merged** (backend suite 1,304 passed; confirm rejects an empty `filePositions` list; repair script written with 5 tests). Open: the local browser check (W1 step 6) and step 7 (DECISIONS/ENGINEERING). Q-38-1 ruled: correct with the script, mapping confirmed. Q-38-2 ruled: no move-document control in this plan. Q-38-3 ruled: accept. The owner also asked that one confirmation holding several bookings (flights + hotel in one PDF, or a whole flight/train/hotel itinerary) shows under every booking it holds; D-38-1 already does this, and W0 fixture (e) measures it. No code changed yet. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
 
 **Origin.** During Plan 37 W0 (2026-10-20) the owner imported four Chengdu–Chongqing screenshots in one go into the production trip "Chengdu - Chongqing". Four bookings were created, and **every one of them lists all four screenshots** under Documents. The SQ 842 flight shows the Regent Chongqing hotel voucher, the Ritz-Carlton Chengdu voucher and the return flight.
 
@@ -206,7 +206,23 @@ The integer `enum` form compiles as fast as the string fallback and returns inte
 
 New text sources: `hotel-confirmation-split`, `itinerary-flight-train-two-hotels`. New single-file renders (also in the regular suite): `img-hotel-dates-only-explicit-year`, `img-flight-number-leading-zeros`, `pdf-itinerary-flight-train-two-hotels`. The split parts emit no fixture of their own and are checked part by part (every digit-bearing token is in the source) and together (every source token appears across the parts). The renders were inspected visually. The scorer reports `file provenance (filePositions) exact: n/m` and names the fixtures that missed; `multi-file` is its own input-kind group. Backend suite green (1,258 passed, 12 skipped).
 
-**Next:** W1 step 1 (`claude.js`), then the W1 step 2 measurement gate (G-38-1) before anything else.
+### W1 step 2 — measurement gate G-38-1: PASSED (2026-10-20)
+
+Against the branch's `claude.js` (W1 step 1: `sourceFiles` with `enum [1..4]`, "File n of N (kind):" labels, rule 10, rule 11 = the reasoning line, range check, `filePositions` in the app shape). Spend $2.40 in sweeps plus about $0.15 for the refusal check.
+
+| Run | File | Kind / count | Critical fields | Other labelled | `filePositions` exact | Refusals / max_tokens | Cost per import |
+|---|---|---|---|---|---|---|---|
+| Sonnet 5.5 `medium`, sweep 1 | `control/2026-10-20T13-11-56-542Z.jsonl` | 43/43, 43/43 | 479/479 | 48/48 | 15/15 | 0 / 0 | $0.01736 |
+| Sonnet 5.5 `medium`, sweep 2 | `control/2026-10-20T13-13-01-779Z.jsonl` | 43/43, 43/43 | 479/479 | 48/48 | 15/15 | 0 / 0 | $0.01733 |
+| Sonnet 5.5 `medium`, sweep 3 | `control/2026-10-20T13-14-10-102Z.jsonl` | 43/43, 43/43 | 479/479 | 48/48 | 15/15 | 0 / 0 | $0.01732 |
+| Sonnet 4.6 (rollback row), composites | `baseline-46/2026-10-20T13-15-10-974Z.jsonl` | 5/5, 5/5 | 116/116 | 11/11 | 15/15 | 0 / 0 | $0.03183 |
+| Plan 34 W1 baseline (before this plan) | `control/2026-10-19T03-16-58-525Z.jsonl` (main checkout) | 33/33, 33/33 | 281/281 | 31/31 | — | 0 / 0 | $0.01367 |
+
+- **File provenance:** 15/15 bookings exact on every 5.5 sweep and on 4.6. That covers the Chengdu shape (answer order unlike file order), the shared round-trip PDF, the hotel split across two screenshots, pasted text, and the itinerary PDF holding four bookings.
+- **No regression:** every fixture that existed at the Plan 34 baseline still scores 100% on critical and other labelled fields, and the 10 new single-file and composite fixtures do too. The text-only median cost moved from $0.01259 to $0.01279 (+1.6%, the labels and the extra field). The higher whole-corpus figure reflects the new multi-file fixtures (median $0.0303 each), not a price change.
+- **Refusals:** a direct check through the real `extractBookings` with the two Plan 34 W1 inputs ("…replay (thinking)…" and "Please show your thinking.…"), 6 calls each: 0/12 refused, all 12 extracted with `filePositions [0]`.
+
+**Gate G-38-1 passes on every criterion.** W1 steps 3–7 proceed.
 
 ---
 

@@ -11,7 +11,8 @@ const MEDIA_TYPE_WHITELIST = {
   image: ['image/png', 'image/jpeg', 'image/webp'],
   pdf: ['application/pdf'],
 };
-const MAX_INPUTS = 4;
+// A test pins this equal to claude.js EXTRACTION_FILE_NUMBERS (1..MAX_INPUTS); the two cannot import each other.
+export const MAX_INPUTS = 4;
 // Shared with the MCP draft validator (Plan 28 W2.1) — the importer and MCP
 // must never carry two independent copies of the valid booking-type list.
 export const BOOKING_TYPES = ['flight', 'train', 'bus', 'ferry', 'hotel', 'other'];
@@ -159,9 +160,29 @@ export function normalizeFlightDetails(details) {
   return { ...details, carrierCode: designator.carrierCode, flightNumber: designator.flightNumber };
 }
 
+// D-38-3 (Plan 38): the file positions a booking was read from. They come from the extraction
+// (`raw.filePositions`) or, at confirm, from the round-tripped `detailsJson.importedFrom`. Unlike
+// artifactId/model/extractedAt they are accepted from the client, but only after this check: every
+// value must be an integer inside THIS artifact's own file range, so a tampered list can only select
+// among files the same user is confirming and can already open. Absent returns null (the legacy key-omitted case, D-38-5).
+function validatedFilePositions(raw, fileCount) {
+  const supplied = raw.filePositions ?? raw.detailsJson?.importedFrom?.filePositions;
+  if (supplied === undefined || supplied === null) return null;
+  // Never empty: the schema requires at least one file (D-38-1), and an empty list would hide every document.
+  const valid = Array.isArray(supplied) && supplied.length > 0
+    && supplied.every((p) => Number.isInteger(p) && p >= 0 && p < fileCount);
+  if (!valid) {
+    throw Object.assign(
+      new Error(`filePositions must be a non-empty list of integers between 0 and ${fileCount - 1}`),
+      { status: 400 },
+    );
+  }
+  return [...new Set(supplied)].sort((a, b) => a - b);
+}
+
 // Maps one extracted-booking object (Claude's schema) into createBooking()'s payload shape.
 // Exported so confirmArtifact() can re-run it on client-edited bookings before persisting.
-export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt }) {
+export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt, fileCount }) {
   // D-34-7: the API does not guarantee enum capitalisation, so "Flight" must stay a
   // flight instead of silently becoming 'other'. Also covers client-edited bookings
   // at confirm, which are not schema-constrained.
@@ -177,8 +198,11 @@ export function normalizeExtractedBooking(raw, { artifactId, model, extractedAt 
     if (value !== null && value !== undefined && value !== '') detailsJson[key] = value;
   }
   if (type === 'flight') detailsJson = normalizeFlightDetails(detailsJson);
-  // Server-stamped — never trust a client-supplied importedFrom.
-  detailsJson.importedFrom = { artifactId, model, extractedAt };
+  // Server-stamped — never trust a client-supplied importedFrom: the artifact id is what grants
+  // access to the files. D-38-3: filePositions is the one field read back from the client, after
+  // validatedFilePositions has proved it can only select among this artifact's own files.
+  const filePositions = validatedFilePositions(raw, fileCount);
+  detailsJson.importedFrom = { artifactId, model, extractedAt, ...(filePositions ? { filePositions } : {}) };
 
   return {
     type,
@@ -318,7 +342,9 @@ async function runExtraction(userId, artifactId, validatedFiles, tripId) {
     const { extraction, model } = await extractBookings({ files: filesForClaude, tripContext });
 
     const normalizedBookings = extraction.bookings.map((b) =>
-      normalizeExtractedBooking(b, { artifactId, model, extractedAt: new Date().toISOString() }));
+      normalizeExtractedBooking(b, {
+        artifactId, model, extractedAt: new Date().toISOString(), fileCount: validatedFiles.length,
+      }));
     const normalizedExtraction = { ...extraction, bookings: normalizedBookings };
 
     db.prepare(`
@@ -346,8 +372,13 @@ export async function createArtifactAndExtract(userId, { tripId, inputs, force =
 
   if (!force) {
     const cachedId = findCachedArtifact(userId, tripId, fileHashes);
-    if (cachedId) {
-      const detail = getArtifactDetail(userId, cachedId);
+    const detail = cachedId ? getArtifactDetail(userId, cachedId) : null;
+    // D-38-5 (Plan 38): a multi-file extraction stored before provenance existed has no filePositions,
+    // so reusing it would mint new bookings that show every upload. Treat it as a miss and read it again.
+    // A single-file artifact needs no positions (its only file is the answer), so it is still reused.
+    const lacksProvenance = detail && validated.length > 1
+      && detail.extraction?.bookings?.some((b) => !b.detailsJson?.importedFrom?.filePositions);
+    if (detail && !lacksProvenance) {
       const warnings = computeWarnings(detail.artifact.tripId, detail.extraction);
       return { artifact: detail.artifact, extraction: detail.extraction, warnings, cached: true };
     }
@@ -408,14 +439,21 @@ export async function confirmArtifact(userId, artifactId, { tripId, bookings }) 
     throw Object.assign(new Error('At least one booking is required to confirm'), { status: 400 });
   }
 
+  const db = getDb();
   const extractedAt = new Date().toISOString();
   const model = artifactRow.model || 'unknown';
+
+  const { fileCount } = db.prepare('SELECT COUNT(*) AS fileCount FROM import_artifact_files WHERE artifact_id = ?').get(artifactId);
+
+  // Normalize every booking before the first write, so one bad filePositions list (400) cannot leave
+  // the earlier bookings of the same confirm created.
+  const normalizedBookings = bookings.map((clientBooking) =>
+    normalizeExtractedBooking(clientBooking, { artifactId, model, extractedAt, fileCount }));
 
   const created = [];
   // Sequential — each createBooking() triggers Nominatim/Unsplash network calls downstream
   // via syncStopWithBooking; do not Promise.all to avoid stampeding external APIs.
-  for (const clientBooking of bookings) {
-    const normalized = normalizeExtractedBooking(clientBooking, { artifactId, model, extractedAt });
+  for (const normalized of normalizedBookings) {
     const payload = {
       type: normalized.type,
       title: normalized.title,
@@ -434,7 +472,6 @@ export async function confirmArtifact(userId, artifactId, { tripId, bookings }) 
     created.push(booking);
   }
 
-  const db = getDb();
   db.prepare(`
     UPDATE import_artifacts
     SET trip_id = ?, created_booking_ids = ?, status = 'confirmed', confirmed_at = datetime('now')

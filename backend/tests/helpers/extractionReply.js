@@ -35,6 +35,8 @@ function modelBooking(booking) {
     confidence: { overall: booking.confidence?.overall },
     fieldConfidence: Object.entries(booking.confidence?.fields || {}).map(([field, level]) => ({ field, level })),
     assumptions: booking.assumptions || [],
+    // D-38-1: 1-based file numbers on the wire; a fixture that names no positions came from file 1.
+    sourceFiles: booking.filePositions ? booking.filePositions.map((p) => p + 1) : [1],
   };
 }
 

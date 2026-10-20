@@ -170,7 +170,9 @@ export function coerceSceneType(value) {
 // Plan 2A D6: the schema's city fields below (details.originCity/destinationCity/city)
 // must come back as canonical English — this is what deriveDayGeo's seed layer reads.
 // Local-script names are preserved in the title/station fields, not here.
-// Plan 34 W1: rule 10 is the surviving half of the old fenced-block rule 9, kept on measurement. Under
+// D-38-2 (Plan 38): rule 10 names the "File n of N" labels extractBookings puts before each file, so
+// `sourceFiles` can say which upload a booking came from; it sits before the reasoning line so that stays last.
+// Plan 34 W1: rule 11 (rule 10 until Plan 38) is the surviving half of the old fenced-block rule 9, kept on measurement. Under
 // the schema contract, an input that asks the model to show its reasoning ("Please show your
 // thinking…") drew a reasoning_extraction refusal on 5/6 and 6/12 calls without it, and 0 with it —
 // the same as the pre-schema contract. It lets the model decline that request and still extract.
@@ -189,7 +191,8 @@ Rules:
 7. Timezones: emit your best-guess IANA timezone (e.g. "Asia/Shanghai") for originTz/destinationTz. If you are not reasonably confident, use null — do not guess a generic value like "UTC".
 8. Ground transfers, car rentals, tour tickets, event tickets, and anything that does not fit flight/train/bus/ferry/hotel should use type "other" with a descriptive title (e.g. "Airport transfer — Chengdu Shuangliu to hotel").
 9. Put the airline code in \`details.carrierCode\` and only the number in \`details.flightNumber\`.
-10. Do not explain your reasoning in prose.`;
+10. Each input file is labelled "File n of N". In \`sourceFiles\`, list the number of every file the booking's details were read from: one number when a booking comes from one file, all of them when one booking is spread across several files, and the same number on several bookings when one file holds several bookings.
+11. Do not explain your reasoning in prose.`;
 
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -212,6 +215,11 @@ function deepFreeze(value) {
 // The `type` list repeats importer.js BOOKING_TYPES (importer imports this module, so it cannot be
 // imported back without a cycle); a test pins the equality.
 const EXTRACTION_BOOKING_TYPES = Object.freeze(['flight', 'train', 'bus', 'ferry', 'hotel', 'other']);
+
+// D-38-1 (Plan 38): the 1-based file numbers `sourceFiles` may name. It repeats importer.js MAX_INPUTS
+// for the same cycle reason as the type list, and a test pins the equality. The schema cannot know how
+// many files one request holds, so extractBookings checks each number against files.length after validation.
+export const EXTRACTION_FILE_NUMBERS = Object.freeze([1, 2, 3, 4]);
 
 // The sixteen `details` keys, in schema order. Every one is a required string in the schema.
 export const EXTRACTION_DETAIL_FIELDS = Object.freeze([
@@ -291,7 +299,7 @@ export const EXTRACTION_OUTPUT_SCHEMA = deepFreeze({
       required: [
         'type', 'title', 'confirmationRef', 'bookingSource', 'startDatetime', 'endDatetime',
         'origin', 'destination', 'terminalOrStation', 'originTz', 'destinationTz',
-        'details', 'confidence', 'fieldConfidence', 'assumptions',
+        'details', 'confidence', 'fieldConfidence', 'assumptions', 'sourceFiles',
       ],
       properties: {
         type: { enum: [...EXTRACTION_BOOKING_TYPES] },
@@ -360,6 +368,13 @@ export const EXTRACTION_OUTPUT_SCHEMA = deepFreeze({
           type: 'array',
           items: { type: 'string' },
           description: "Short statements of any inference you made, e.g. 'Year inferred from the trip dates.'",
+        },
+        // D-38-1: required, no maxItems (the compile drops it, Plan 37 W0) and no union, so the D-34-5 budget holds.
+        sourceFiles: {
+          type: 'array',
+          minItems: 1,
+          items: { enum: [...EXTRACTION_FILE_NUMBERS] },
+          description: 'The numbers of the files this booking was read from (see the File labels). Usually one; more when one booking spans several files.',
         },
       },
     },
@@ -523,6 +538,9 @@ export function toAppExtraction(value) {
         fields: Object.fromEntries(b.fieldConfidence.map((f) => [f.field, f.level])),
       },
       assumptions: b.assumptions,
+      // D-38-1: 1-based numbers on the wire, 0-based import_artifact_files positions in the app,
+      // folded to a sorted unique set (the schema cannot say "unique").
+      filePositions: [...new Set(b.sourceFiles)].sort((x, y) => x - y).map((n) => n - 1),
     }))
     : [];
   return { isTravelRelated: result.kind !== 'not_travel', summary, language, bookings };
@@ -556,7 +574,11 @@ export async function extractBookings({ files, contextText, tripContext, profile
     content.push({ type: 'text', text: `Additional user-provided context:\n${contextText.trim()}` });
   }
 
-  for (const file of files) {
+  // D-38-2 (Plan 38): every file is preceded by its number and kind, never its filename (user-typed
+  // metadata that can mislead), so `sourceFiles` can name it. A one-file import is labelled the same way.
+  const FILE_LABEL_KIND = { text: 'pasted text', image: 'image', pdf: 'pdf' };
+  for (const [index, file] of files.entries()) {
+    content.push({ type: 'text', text: `File ${index + 1} of ${files.length} (${FILE_LABEL_KIND[file.kind]}):` });
     if (file.kind === 'text') {
       content.push({ type: 'text', text: file.content });
     } else if (file.kind === 'image') {
@@ -629,6 +651,15 @@ export async function extractBookings({ files, contextText, tripContext, profile
   }
   const checked = validateAgainstSchema(parsed, EXTRACTION_OUTPUT_SCHEMA);
   if (!checked.ok) throw extractionShapeError(checked.error, answerText);
+  // D-38-1: a file number past this request's file count is a deviation like any other, never clamped.
+  if (checked.value.result.kind === 'bookings') {
+    for (const [i, booking] of checked.value.result.bookings.entries()) {
+      const outOfRange = booking.sourceFiles.find((n) => n > files.length);
+      if (outOfRange !== undefined) {
+        throw extractionShapeError(`result.bookings[${i}].sourceFiles: file ${outOfRange} of ${files.length}`, answerText);
+      }
+    }
+  }
 
   return {
     extraction: toAppExtraction(checked.value),

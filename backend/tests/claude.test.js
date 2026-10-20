@@ -28,7 +28,7 @@ const {
   MODEL_PROFILES, profileFor, requestSettings, classifyStop, COPILOT_PING_INTERVAL_MS,
   DISCOVERY_SELECTION_RULES, discoverySystemPrompt,
   EXTRACTION_MODEL, PHOTO_DESCRIPTOR_MODEL, COPILOT_MODEL, DISCOVERY_MODEL,
-  EXTRACTION_SYSTEM, EXTRACTION_OUTPUT_SCHEMA, EXTRACTION_OUTPUT_FORMAT,
+  EXTRACTION_SYSTEM, EXTRACTION_OUTPUT_SCHEMA, EXTRACTION_OUTPUT_FORMAT, EXTRACTION_FILE_NUMBERS,
   EXTRACTION_DETAIL_FIELDS, EXTRACTION_CONFIDENCE_FIELDS, validateAgainstSchema, toAppExtraction,
   PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES,
 } = await import('../src/services/claude.js');
@@ -1498,6 +1498,12 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
   it('extractBookings', async () => {
     const { body } = await runExtraction();
     // Plan 30 W4 moved this pin to Sonnet 5.5 at effort 'medium' with adaptive thinking left on.
+    // Plan 38 W1: deliberate move — file labels and the sourceFiles rule (D-38-1/D-38-2).
+    const labels = body.messages[0].content.filter((b) => b.type === 'text' && /^File \d+ of \d+ \(/.test(b.text));
+    expect(labels.map((b) => b.text)).toEqual(['File 1 of 1 (pasted text):']);
+    expect(body.system).toContain('10. Each input file is labelled');
+    expect(body.system).toContain('11. Do not explain your reasoning in prose.');
+    expect(body.output_config.format.schema.$defs.booking.required).toContain('sourceFiles');
     // Plan 34 W1: the fourth deliberate move off the W0 pin — the D-34-1 schema contract and the §4.3 prompt (structure asserted first, sha256 re-captured).
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
     expect(body.model).toBe('claude-sonnet-5-5');
@@ -1508,11 +1514,13 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     expect(body.output_config.format.schema).toBe(EXTRACTION_OUTPUT_SCHEMA);
     expect(body.system).toBe(EXTRACTION_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('f79b1f96f41ba333e47409eeb59d249c5e6abe1fdd40d65a071b31309611c420');
+    expect(sha256(body)).toBe('6ea11131db7649d3471d40f9793f9a842cae5ca2f1078b56d3dbbe54c1186218');
   });
 
   it('extractBookings rolled back to Sonnet 4.6 sends the same contract with no effort (Plan 30 W4 rollback, D-34-6)', async () => {
     const { body } = await runExtraction({ profile: { model: 'claude-sonnet-4-6', ...MODEL_PROFILES['claude-sonnet-4-6'].extraction } });
+    // Plan 38 W1: deliberate move — file labels and the sourceFiles rule (D-38-1/D-38-2).
+    expect(body.messages[0].content.some((b) => b.type === 'text' && b.text === 'File 1 of 1 (pasted text):')).toBe(true);
     // Plan 34 W1: the fourth deliberate move off the W0 pin — the D-34-1 schema contract and the §4.3 prompt (structure asserted first, sha256 re-captured).
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
     expect(body.model).toBe('claude-sonnet-4-6');
@@ -1521,7 +1529,7 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     expect(body.output_config.format.schema).toBe(EXTRACTION_OUTPUT_SCHEMA);
     expect(body.system).toBe(EXTRACTION_SYSTEM);
     expect(body).not.toHaveProperty('thinking');
-    expect(sha256(body)).toBe('fcdfddad740029b903a224b4a7af414280cb5ae875c1ca66445c09d703ca5c6e');
+    expect(sha256(body)).toBe('d81198fce12fd02728d6c66b03b9742e6aa07a82decef0e7d3b36f978b3256c8');
   });
 
   it('generatePhotoDescriptor', async () => {
@@ -1970,6 +1978,7 @@ const schemaBooking = (over = {}, detailOver = {}) => ({
   confidence: { overall: 'high' },
   fieldConfidence: [{ field: 'startDatetime', level: 'low' }],
   assumptions: ['Year inferred from the trip dates.'],
+  sourceFiles: [1],
   ...over,
 });
 const schemaAnswer = (result, extra = {}) => JSON.stringify({ summary: 'One flight.', language: 'en', result, ...extra });
@@ -1997,9 +2006,11 @@ describe('extractBookings — schema contract (Plan 34 D-34-1/D-34-2/D-34-3)', (
     const [booking] = extraction.bookings;
     expect(Object.keys(booking)).toEqual([
       'type', 'title', 'confirmationRef', 'bookingSource', 'startDatetime', 'endDatetime', 'origin', 'destination',
-      'terminalOrStation', 'originTz', 'destinationTz', 'details', 'confidence', 'assumptions',
+      'terminalOrStation', 'originTz', 'destinationTz', 'details', 'confidence', 'assumptions', 'filePositions',
     ]);
     expect(booking).not.toHaveProperty('fieldConfidence');
+    expect(booking).not.toHaveProperty('sourceFiles');
+    expect(booking.filePositions).toEqual([0]);
     expect(booking.confidence).toEqual({ overall: 'high', fields: { startDatetime: 'low' } });
     expect(booking.details).toEqual({ originCity: 'Seoul', destinationCity: 'New York', carrierCode: 'KE', flightNumber: '012' });
     expect(Object.values(booking.details)).not.toContain('');
@@ -2208,9 +2219,87 @@ describe('extraction output schema budget (D-34-5)', () => {
   });
 });
 
+describe('extraction file provenance (Plan 38 D-38-1/D-38-2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+  });
+
+  const usage = { input_tokens: 5, output_tokens: 7 };
+  const reply = (text) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn', usage });
+  const twoFiles = [
+    { kind: 'image', mediaType: 'image/png', content: 'AAAA', filename: 'tfurz_chengdu.png' },
+    { kind: 'pdf', mediaType: 'application/pdf', content: 'BBBB', filename: 'hotel.pdf' },
+  ];
+
+  it('names the file numbers 1..4, as a required array of at least one', () => {
+    expect(EXTRACTION_FILE_NUMBERS).toEqual([1, 2, 3, 4]);
+    const sourceFiles = EXTRACTION_OUTPUT_SCHEMA.$defs.booking.properties.sourceFiles;
+    expect(sourceFiles.type).toBe('array');
+    expect(sourceFiles.minItems).toBe(1);
+    expect(sourceFiles.items.enum).toEqual(EXTRACTION_FILE_NUMBERS);
+    expect(EXTRACTION_OUTPUT_SCHEMA.$defs.booking.required).toContain('sourceFiles');
+  });
+
+  it.each([[[1]], [[2, 4]], [[2, 1, 2]]])('validator accepts sourceFiles %j', (sourceFiles) => {
+    expect(validateAgainstSchema(JSON.parse(bookingsAnswer(schemaBooking({ sourceFiles }))), EXTRACTION_OUTPUT_SCHEMA).ok).toBe(true);
+  });
+
+  it.each([[[]], [[0]], [['1']], [[5]]])('validator rejects sourceFiles %j', (sourceFiles) => {
+    const result = validateAgainstSchema(JSON.parse(bookingsAnswer(schemaBooking({ sourceFiles }))), EXTRACTION_OUTPUT_SCHEMA);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/^result\.bookings\[0\]\.sourceFiles/);
+  });
+
+  it('toAppExtraction maps 1-based [2,1,2] to a sorted unique 0-based filePositions [0,1]', () => {
+    const mapped = toAppExtraction(JSON.parse(bookingsAnswer(schemaBooking({ sourceFiles: [2, 1, 2] }))));
+    expect(mapped.bookings[0].filePositions).toEqual([0, 1]);
+    expect(mapped.bookings[0]).not.toHaveProperty('sourceFiles');
+  });
+
+  it('extractBookings carries filePositions through for a two-file request', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer(schemaBooking({ sourceFiles: [2] }))));
+    const { extraction } = await extractBookings({ files: twoFiles });
+    expect(extraction.bookings[0].filePositions).toEqual([1]);
+  });
+
+  it('a file number past the file count of the request is a named 502, never clamped', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer(schemaBooking({ sourceFiles: [3] }))));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const err = await extractBookings({ files: twoFiles }).catch((e) => e);
+
+    expect(err.status).toBe(502);
+    expect(err.message).toBe('The booking reader returned an unexpected shape.');
+    expect(warnSpy).toHaveBeenCalledWith('[import] extraction unexpected shape: %s', expect.stringMatching(/sourceFiles: file 3 of 2/));
+    warnSpy.mockRestore();
+  });
+
+  it('puts a "File n of N (kind):" label before each file and never sends a filename', async () => {
+    mockCreate.mockResolvedValue(reply(bookingsAnswer()));
+    await extractBookings({ files: [...twoFiles, { kind: 'text', content: 'Flight KE012' }] });
+
+    const { content } = mockCreate.mock.calls[0][0].messages[0];
+    const labelAt = (n) => content.findIndex((b) => b.type === 'text' && b.text.startsWith(`File ${n} of 3`));
+    expect(content[labelAt(1)].text).toBe('File 1 of 3 (image):');
+    expect(content[labelAt(1) + 1].type).toBe('image');
+    expect(content[labelAt(2)].text).toBe('File 2 of 3 (pdf):');
+    expect(content[labelAt(2) + 1].type).toBe('document');
+    expect(content[labelAt(3)].text).toBe('File 3 of 3 (pasted text):');
+    expect(content[labelAt(3) + 1]).toEqual({ type: 'text', text: 'Flight KE012' });
+    expect(JSON.stringify(mockCreate.mock.calls[0][0])).not.toMatch(/tfurz_chengdu|hotel\.pdf/);
+  });
+});
+
 describe('extraction prompt text (Plan 34 §4.3)', () => {
+  // Plan 38 W1: deliberate move — file labels and the sourceFiles rule (D-38-1/D-38-2); rule 10 is new, the reasoning line is now 11.
   it('pins the prompt text', () => {
-    expect(createHash('sha256').update(EXTRACTION_SYSTEM).digest('hex')).toBe('84d2aec19bbb27f26d6dbdae804548478c2479838b615b14295a5bfa89452844');
+    expect(createHash('sha256').update(EXTRACTION_SYSTEM).digest('hex')).toBe('ebf4ab9676378903d2ec1ab5167aa7094dce48972c5b40553026f88389bf770c');
+  });
+
+  it('carries the file-label rule before the reasoning line (D-38-2)', () => {
+    expect(EXTRACTION_SYSTEM).toContain('10. Each input file is labelled "File n of N". In `sourceFiles`, list the number of every file the booking');
+    expect(EXTRACTION_SYSTEM.indexOf('\n10. Each input file')).toBeLessThan(EXTRACTION_SYSTEM.indexOf('\n11. Do not explain'));
   });
 
   it('carries the classification rule and the carrier/number rule, and no output-format instruction', () => {
@@ -2218,7 +2307,7 @@ describe('extraction prompt text (Plan 34 §4.3)', () => {
     expect(EXTRACTION_SYSTEM).toContain('9. Put the airline code in `details.carrierCode` and only the number in `details.flightNumber`.');
     // Kept on measurement (W1 browser pass): without it, inputs that ask to see the reasoning draw a
     // reasoning_extraction refusal under the schema; the old contract never did.
-    expect(EXTRACTION_SYSTEM.endsWith('\n10. Do not explain your reasoning in prose.')).toBe(true);
+    expect(EXTRACTION_SYSTEM.endsWith('\n11. Do not explain your reasoning in prose.')).toBe(true);
     for (const gone of ['fenced', '```', 'Output shape', 'isTravelRelated']) expect(EXTRACTION_SYSTEM).not.toContain(gone);
   });
 });

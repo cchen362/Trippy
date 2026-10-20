@@ -36,7 +36,9 @@ const {
   deleteArtifact,
   normalizeExtractedBooking,
   normalizeFlightDetails,
+  MAX_INPUTS,
 } = await import('../src/services/importer.js');
+const { EXTRACTION_FILE_NUMBERS } = await import('../src/services/claude.js');
 const { extractionReply, textReply } = await import('./helpers/extractionReply.js');
 
 const flightEmailText = readFileSync(join(__dirname, 'fixtures/flight-email.txt'), 'utf8');
@@ -611,5 +613,137 @@ describe('reextractArtifact and listArtifactsForTrip and deleteArtifact', () => 
     const deleted = deleteArtifact(owner.id, extracted.artifact.id);
     expect(deleted).toEqual({ ok: true });
     expect(() => getArtifactDetail(owner.id, extracted.artifact.id)).toThrow();
+  });
+});
+
+describe('import file provenance (Plan 38 D-38-1/D-38-3/D-38-5)', () => {
+  const norm = (raw, fileCount = 2) => normalizeExtractedBooking(raw, { artifactId: 'a1', model: 'm', extractedAt: 'now', fileCount });
+  const twoInputs = () => [
+    { kind: 'text', content: flightEmailText },
+    { kind: 'image', mediaType: 'image/png', content: trainTicketBase64, filename: 'ticket.png' },
+  ];
+
+  it('claude.js file numbers are exactly 1..MAX_INPUTS', () => {
+    expect(EXTRACTION_FILE_NUMBERS).toEqual(Array.from({ length: MAX_INPUTS }, (_, i) => i + 1));
+  });
+
+  it('stamps filePositions from the extraction onto importedFrom, in the stored extraction too', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
+      flightBooking({ filePositions: [0] }),
+      hotelBooking({ filePositions: [1, 0, 1] }),
+    ])));
+
+    const result = await createArtifactAndExtract(owner.id, { tripId: null, inputs: twoInputs() });
+
+    const stored = JSON.parse(getDb().prepare('SELECT extracted_json FROM import_artifacts').get().extracted_json);
+    for (const bookings of [result.extraction.bookings, stored.bookings]) {
+      expect(bookings[0].detailsJson.importedFrom.filePositions).toEqual([0]);
+      expect(bookings[1].detailsJson.importedFrom.filePositions).toEqual([0, 1]);
+      // The top-level extraction field is folded into importedFrom; it is not carried on the booking.
+      expect(bookings[0]).not.toHaveProperty('filePositions');
+    }
+  });
+
+  it('keeps valid positions that a client round-trips, folded to a sorted unique list', () => {
+    const result = norm({ ...flightBooking(), detailsJson: { destinationCity: 'Chengdu', importedFrom: { filePositions: [1, 0, 1] } } });
+    expect(result.detailsJson.importedFrom).toEqual({ artifactId: 'a1', model: 'm', extractedAt: 'now', filePositions: [0, 1] });
+  });
+
+  it('omits the key when no positions are given (a legacy booking)', () => {
+    const result = norm(flightBooking());
+    expect(result.detailsJson.importedFrom).toEqual({ artifactId: 'a1', model: 'm', extractedAt: 'now' });
+    expect(result.detailsJson.importedFrom).not.toHaveProperty('filePositions');
+  });
+
+  it.each([
+    ['out of range', [2]],
+    ['negative', [-1]],
+    ['a fraction', [0.5]],
+    ['a string', ['0']],
+    ['not an array', 0],
+    ['an object', { 0: 0 }],
+    ['empty (every import booking came from at least one file, D-38-1)', []],
+  ])('rejects round-tripped positions that are %s with a 400', (_name, filePositions) => {
+    let thrown;
+    try {
+      norm({ ...flightBooking(), detailsJson: { importedFrom: { filePositions } } });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown?.status).toBe(400);
+    expect(thrown.message).toMatch(/filePositions/);
+  });
+
+
+  it('confirm validates against the artifact file count, keeps good positions, and still overwrites a client artifactId', async () => {
+    const trip = makeTrip();
+    const nominatim = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+    onTestFinished(() => nominatim.mockRestore());
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking({ filePositions: [1] })])));
+    const extracted = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: twoInputs() });
+
+    const roundTripped = extracted.extraction.bookings.map((b) => ({
+      ...b,
+      detailsJson: { ...b.detailsJson, importedFrom: { ...b.detailsJson.importedFrom, artifactId: 'malicious' } },
+    }));
+    const result = await confirmArtifact(owner.id, extracted.artifact.id, { tripId: trip.trip.id, bookings: roundTripped });
+
+    expect(result.bookings[0].detailsJson.importedFrom.artifactId).toBe(extracted.artifact.id);
+    expect(result.bookings[0].detailsJson.importedFrom.filePositions).toEqual([1]);
+  });
+
+  it('confirm rejects a position outside the artifact with a 400 before creating any booking', async () => {
+    const trip = makeTrip();
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking(), hotelBooking()])));
+    const extracted = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: twoInputs() });
+    const bookings = extracted.extraction.bookings.map((b, i) => (i === 1
+      ? { ...b, detailsJson: { ...b.detailsJson, importedFrom: { filePositions: [2] } } }
+      : b));
+
+    await expect(confirmArtifact(owner.id, extracted.artifact.id, { tripId: trip.trip.id, bookings }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(getDb().prepare('SELECT COUNT(*) AS n FROM bookings').get().n).toBe(0);
+  });
+
+  const stripPositions = () => {
+    const db = getDb();
+    const row = db.prepare('SELECT id, extracted_json FROM import_artifacts').get();
+    const extraction = JSON.parse(row.extracted_json);
+    for (const b of extraction.bookings) delete b.detailsJson.importedFrom.filePositions;
+    db.prepare('UPDATE import_artifacts SET extracted_json = ? WHERE id = ?').run(JSON.stringify(extraction), row.id);
+  };
+
+  it('a cached multi-file extraction without positions is a miss and is read again (D-38-5)', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking({ filePositions: [0] })])));
+    await createArtifactAndExtract(owner.id, { tripId: null, inputs: twoInputs() });
+    stripPositions();
+
+    const again = await createArtifactAndExtract(owner.id, { tripId: null, inputs: twoInputs() });
+
+    expect(again.cached).toBe(false);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(again.extraction.bookings[0].detailsJson.importedFrom.filePositions).toEqual([0]);
+  });
+
+  it('a cached multi-file extraction that has positions is reused', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking({ filePositions: [0] })])));
+    await createArtifactAndExtract(owner.id, { tripId: null, inputs: twoInputs() });
+
+    const again = await createArtifactAndExtract(owner.id, { tripId: null, inputs: twoInputs() });
+
+    expect(again.cached).toBe(true);
+    expect(mockCreate).toHaveBeenCalledOnce();
+  });
+
+  it('a cached single-file extraction without positions is still reused', async () => {
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([flightBooking()])));
+    const inputs = [{ kind: 'text', content: flightEmailText }];
+    await createArtifactAndExtract(owner.id, { tripId: null, inputs });
+    stripPositions();
+
+    const again = await createArtifactAndExtract(owner.id, { tripId: null, inputs });
+
+    expect(again.cached).toBe(true);
+    expect(mockCreate).toHaveBeenCalledOnce();
   });
 });
