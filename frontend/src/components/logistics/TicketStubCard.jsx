@@ -23,6 +23,8 @@ export default function TicketStubCard({
   footerRight,
   costLine,
   conditions = [],
+  conditionsReading,
+  conditionsArrived = false,
   connector = false,
   hasDocuments = false,
   onClick,
@@ -97,7 +99,7 @@ export default function TicketStubCard({
           </div>
         )}
 
-        <CardConditions lines={conditions} variant="transit" />
+        <CardConditions lines={conditions} variant="transit" reading={conditionsReading} arrived={conditionsArrived} />
 
         {(footerLeft || footerRight || costLine) && (
           <div className="logistics-transit-footer">

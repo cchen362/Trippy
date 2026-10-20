@@ -1,7 +1,7 @@
 import { Paperclip } from 'lucide-react';
 import { formatShortDate, computeNights, costLineText } from './bookingCardUtils.js';
 import CardConditions from './CardConditions.jsx';
-import { cardConditionLines, conditionsAriaSuffix } from './cardConditions.js';
+import { cardConditionLines, conditionsAriaSuffix, readingAriaSuffix } from './cardConditions.js';
 
 function Row({ label, value, valueStyle, last }) {
   if (!value) return null;
@@ -17,7 +17,7 @@ function Row({ label, value, valueStyle, last }) {
   );
 }
 
-export default function HotelBookingCard({ booking, facts, onOpen }) {
+export default function HotelBookingCard({ booking, facts, reading, arrived, onOpen }) {
   const hotelTz = booking.originTz || null;
   const nights = computeNights(booking.startDatetime, booking.endDatetime);
   const checkInStr = formatShortDate(booking.startDatetime, hotelTz);
@@ -32,7 +32,7 @@ export default function HotelBookingCard({ booking, facts, onOpen }) {
     <button
       type="button"
       onClick={() => onOpen(booking)}
-      aria-label={`Hotel booking: ${booking.title}.${conditionsAriaSuffix(conditionLines)} Opens details.`}
+      aria-label={`Hotel booking: ${booking.title}.${conditionsAriaSuffix(conditionLines)}${readingAriaSuffix(reading)} Opens details.`}
       className="logistics-card w-full text-left focus-visible:ring-2 focus-visible:ring-[var(--gold-line)]"
     >
       <span className="logistics-keyline" aria-hidden="true" />
@@ -58,7 +58,7 @@ export default function HotelBookingCard({ booking, facts, onOpen }) {
         <Row label="CONFIRMATION" value={booking.confirmationRef} valueStyle={{ color: 'var(--gold)' }} />
         <Row label="COST" value={costLineText(booking.expenseSummary)} last />
       </div>
-      <CardConditions lines={conditionLines} />
+      <CardConditions lines={conditionLines} reading={reading} arrived={arrived} />
     </button>
   );
 }

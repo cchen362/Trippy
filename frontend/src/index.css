@@ -1189,6 +1189,38 @@ select {
   text-align: left;
 }
 
+/* D-37-15 (Plan 37): a document is being read. Cream-dim, never gold: the card and the sheet have each spent theirs. */
+.facts-reading-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--cream-dim);
+  animation: trippyPulse 1.6s ease-in-out infinite;
+}
+
+.facts-reading-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Conditions that arrive while the person watches fade up once; a normal page load never carries this class. */
+.facts-arrived {
+  animation: fadeUp 320ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .facts-reading-dot {
+    animation: none;
+  }
+
+  .facts-arrived {
+    animation: none;
+  }
+}
+
 /* Hotel / other: sits after the rows as the card's last element, so it clears the bottom-right affordance. */
 .logistics-conditions-dossier {
   padding: 12px 28px 14px 18px;

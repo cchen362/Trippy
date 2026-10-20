@@ -130,33 +130,61 @@ function FactList({ facts, withName, documents, onOpenSource }) {
   );
 }
 
-// D-37-14 (Plan 37): no display-side filter on fact content; reader 37.2 fixes schedule lines and cost lines inside a total at the source.
-export default function BookingConditions({ facts, documents = [], onOpenSource }) {
-  if (!facts || facts.length === 0) return null;
+// D-37-15 (Plan 37): the wait is shown, with an honest expectation; "slow" says when the conditions will appear.
+function ReadingRow({ reading, name, hasFacts }) {
+  const slow = reading === 'slow';
+  const line = slow
+    ? 'Still reading'
+    : name
+      ? `Reading ${name} for its conditions…`
+      : 'Reading the document for its conditions…';
+  return (
+    <div className={`facts-reading ${hasFacts ? 'mb-4' : ''}`}>
+      <p className="font-mono text-[10px] tracking-[0.22em] uppercase inline-flex items-baseline gap-2" style={{ color: 'var(--cream-mute)' }}>
+        {!slow && <span className="facts-reading-dot" aria-hidden="true" />}
+        {line}
+      </p>
+      <p className="font-body italic text-base" style={{ color: 'var(--cream-dim)' }}>
+        {slow
+          ? 'This one is taking longer. Its conditions will show the next time you open Logistics.'
+          : 'Usually under fifteen seconds.'}
+      </p>
+    </div>
+  );
+}
 
-  const primary = orderFacts(facts, PRIMARY_KINDS, (k) => PRIMARY_KINDS.includes(k));
-  const secondary = orderFacts(facts, SECONDARY_KINDS, (k) => !PRIMARY_KINDS.includes(k));
-  const withName = new Set(facts.map((f) => f.document?.key)).size > 1;
+// D-37-14 (Plan 37): no display-side filter on fact content; reader 37.2 fixes schedule lines and cost lines inside a total at the source.
+export default function BookingConditions({ facts, documents = [], onOpenSource, reading, readingName, arrived = false }) {
+  const hasFacts = Array.isArray(facts) && facts.length > 0;
+  if (!hasFacts && !reading) return null;
+
+  const primary = hasFacts ? orderFacts(facts, PRIMARY_KINDS, (k) => PRIMARY_KINDS.includes(k)) : [];
+  const secondary = hasFacts ? orderFacts(facts, SECONDARY_KINDS, (k) => !PRIMARY_KINDS.includes(k)) : [];
+  const withName = hasFacts && new Set(facts.map((f) => f.document?.key)).size > 1;
 
   return (
     <div className="mt-4">
       <p className="font-mono text-xs tracking-[0.22em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>Conditions</p>
-      {primary.length > 0 && (
-        <FactList facts={primary} withName={withName} documents={documents} onOpenSource={onOpenSource} />
-      )}
-      {secondary.length > 0 && (
-        <>
-          {primary.length > 0 && (
-            <p
-              className="font-mono text-[10px] tracking-[0.22em] uppercase mt-6 mb-4 pt-5 border-t"
-              style={{ color: 'var(--cream-mute)', borderColor: 'var(--ink-border)' }}
-            >
-              Also in the document
-            </p>
-          )}
-          <FactList facts={secondary} withName={withName} documents={documents} onOpenSource={onOpenSource} />
-        </>
-      )}
+      {/* aria-live is on the container so a screen reader hears the wait start and the list arrive. */}
+      <div aria-live="polite" className={arrived ? 'facts-arrived' : undefined}>
+        {reading && <ReadingRow reading={reading} name={readingName} hasFacts={hasFacts} />}
+        {primary.length > 0 && (
+          <FactList facts={primary} withName={withName} documents={documents} onOpenSource={onOpenSource} />
+        )}
+        {secondary.length > 0 && (
+          <>
+            {primary.length > 0 && (
+              <p
+                className="font-mono text-[10px] tracking-[0.22em] uppercase mt-6 mb-4 pt-5 border-t"
+                style={{ color: 'var(--cream-mute)', borderColor: 'var(--ink-border)' }}
+              >
+                Also in the document
+              </p>
+            )}
+            <FactList facts={secondary} withName={withName} documents={documents} onOpenSource={onOpenSource} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

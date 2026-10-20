@@ -1,13 +1,13 @@
 import { formatTime, formatShortDate, tzAbbr, costLineText } from './bookingCardUtils.js';
 import TicketStubCard from './TicketStubCard.jsx';
-import { cardConditionLines, conditionsAriaSuffix } from './cardConditions.js';
+import { cardConditionLines, conditionsAriaSuffix, readingAriaSuffix } from './cardConditions.js';
 
 function formatStationName(name) {
   if (!name) return '\u2014';
   return name.trim().toUpperCase();
 }
 
-export default function TrainBookingCard({ booking, facts, onOpen }) {
+export default function TrainBookingCard({ booking, facts, reading, arrived, onOpen }) {
   const dj = booking.detailsJson || {};
 
   const originStation = dj.originStation || booking.origin || '';
@@ -35,7 +35,7 @@ export default function TrainBookingCard({ booking, facts, onOpen }) {
   return (
     <TicketStubCard
       cardClassName="logistics-transit-card-wide"
-      ariaLabel={`Train booking: ${routeLabel}.${conditionsAriaSuffix(conditionLines)} Opens details.`}
+      ariaLabel={`Train booking: ${routeLabel}.${conditionsAriaSuffix(conditionLines)}${readingAriaSuffix(reading)} Opens details.`}
       eyebrow={eyebrow}
       leftCode={formatStationName(originStation)}
       leftCodeClassName="logistics-route-code-station"
@@ -54,6 +54,8 @@ export default function TrainBookingCard({ booking, facts, onOpen }) {
       footerRight={booking.confirmationRef || undefined}
       costLine={costLineText(booking.expenseSummary)}
       conditions={conditionLines}
+      conditionsReading={reading}
+      conditionsArrived={arrived}
       connector
       hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}

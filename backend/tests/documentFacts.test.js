@@ -21,6 +21,7 @@ import {
   listTripFacts,
   requeueUnreadDocuments,
   stopDocumentReads,
+  waitForTripReads,
 } from '../src/services/documentFacts.js';
 
 // Plan 37 W1: the document-read job (D-37-1, D-37-3), run against the real module. The suite-wide stub
@@ -654,6 +655,145 @@ describe('the switch (D-37-12)', () => {
     await documentReadsIdle();
     expect(readSpy).not.toHaveBeenCalled();
     expect(reads()).toEqual([]);
+  });
+});
+
+describe('waiting for a trip\'s reads (D-37-15)', () => {
+  // Holds the model call until release(); resolves startedSignal once the read is in flight.
+  function gateReads() {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let started;
+    const startedSignal = new Promise((resolve) => { started = resolve; });
+    readSpy.mockImplementation(async () => {
+      started();
+      await gate;
+      return completeResult([fact()]);
+    });
+    return { release, startedSignal };
+  }
+
+  // True while the promise has not settled (a settled one wins the race against the already-resolved sentinel).
+  const stillPending = async (promise) => {
+    const sentinel = Symbol('pending');
+    return (await Promise.race([promise, Promise.resolve(sentinel)])) === sentinel;
+  };
+
+  it('resolves at once when nothing of the trip is pending', async () => {
+    await expect(waitForTripReads(tripId, { timeoutMs: 1000 })).resolves.toEqual({ timedOut: false });
+    const booking = await makeBooking();
+    attach(booking.id);
+    await documentReadsIdle();
+    await expect(waitForTripReads(tripId, { timeoutMs: 1000 })).resolves.toEqual({ timedOut: false });
+  });
+
+  it('holds while the trip\'s read is in flight and resolves once it settles', async () => {
+    const { release, startedSignal } = gateReads();
+    const booking = await makeBooking();
+    attach(booking.id);
+    await startedSignal;
+
+    const waiting = waitForTripReads(tripId, { timeoutMs: 5000 });
+    expect(await stillPending(waiting)).toBe(true);
+    release();
+    await expect(waiting).resolves.toEqual({ timedOut: false });
+    expect(listTripFacts(tripId).readsPending).toBe(0);
+  });
+
+  it('holds across a queue: resolves only after the last document of the trip is read', async () => {
+    const { release, startedSignal } = gateReads();
+    const booking = await makeBooking();
+    attach(booking.id, { bytes: Buffer.from('%PDF-one') });
+    attach(booking.id, { bytes: Buffer.from('%PDF-two') });
+    await startedSignal;
+
+    const waiting = waitForTripReads(tripId, { timeoutMs: 5000 });
+    release();
+    await expect(waiting).resolves.toEqual({ timedOut: false });
+    expect(readSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps holding when another document of the trip is kicked while it waits', async () => {
+    const { release, startedSignal } = gateReads();
+    const booking = await makeBooking();
+    attach(booking.id, { bytes: Buffer.from('%PDF-one') });
+    await startedSignal;
+
+    const waiting = waitForTripReads(tripId, { timeoutMs: 5000 });
+    const second = attach(booking.id, { bytes: Buffer.from('%PDF-two') });
+    release();
+    await waiting;
+    expect(listTripFacts(tripId).readsPending).toBe(0);
+    expect(readSpy).toHaveBeenCalledTimes(2);
+    expect(reads().map((r) => r.attachment_id)).toContain(second.id);
+  });
+
+  it('ignores another trip\'s pending read', async () => {
+    const { release, startedSignal } = gateReads();
+    const otherTrip = createTrip(owner.id, {
+      title: 'Other', destinations: ['Osaka'], destinationCountries: ['JP'], startDate: '2026-12-01', endDate: '2026-12-03',
+      travellers: 'solo', interestTags: [], pace: 'moderate',
+    }).trip.id;
+    const other = await createBooking(owner.id, otherTrip, { type: 'hotel', title: 'Other hotel' });
+    attach(other.id);
+    await startedSignal;
+
+    await expect(waitForTripReads(tripId, { timeoutMs: 1000 })).resolves.toEqual({ timedOut: false });
+    release();
+  });
+
+  it('times out with timedOut true when the read outlasts timeoutMs, and leaves no waiter behind', async () => {
+    const { release, startedSignal } = gateReads();
+    const booking = await makeBooking();
+    attach(booking.id);
+    await startedSignal;
+
+    await expect(waitForTripReads(tripId, { timeoutMs: 20 })).resolves.toEqual({ timedOut: true });
+    // A waiter left registered would be re-checked here and settle again; the read still completing proves the job is unharmed.
+    release();
+    await documentReadsIdle();
+    expect(reads()).toHaveLength(1);
+  });
+
+  it('an abort resolves with aborted true and removes the waiter and its listener', async () => {
+    const { release, startedSignal } = gateReads();
+    const booking = await makeBooking();
+    attach(booking.id);
+    await startedSignal;
+
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    const waiting = waitForTripReads(tripId, { timeoutMs: 5000, signal: controller.signal });
+    expect(await stillPending(waiting)).toBe(true);
+    controller.abort();
+    await expect(waiting).resolves.toEqual({ timedOut: false, aborted: true });
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    release();
+  });
+
+  it('a signal already aborted resolves at once', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(waitForTripReads(tripId, { timeoutMs: 1000, signal: controller.signal })).resolves.toEqual({ timedOut: false, aborted: true });
+  });
+
+  it('stopping releases a held wait', async () => {
+    let started;
+    const startedSignal = new Promise((resolve) => { started = resolve; });
+    readSpy.mockImplementation(({ signal }) => new Promise((resolve) => {
+      started();
+      signal.addEventListener('abort', () => resolve({
+        outcome: 'error', stopReason: null, category: null, error: 'aborted', detail: 'aborted', value: null, usage: null, totalMs: 1, model: claudeService.FACTS_MODEL,
+      }));
+    }));
+    const booking = await makeBooking();
+    attach(booking.id);
+    await startedSignal;
+
+    const waiting = waitForTripReads(tripId, { timeoutMs: 5000 });
+    expect(await stillPending(waiting)).toBe(true);
+    await stopDocumentReads();
+    await expect(waiting).resolves.toEqual({ timedOut: false });
   });
 });
 

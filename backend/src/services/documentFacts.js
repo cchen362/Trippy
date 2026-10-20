@@ -93,6 +93,8 @@ let current = null; // { key, controller } while a read is in flight
 let drainPromise = null;
 let stopping = false;
 let idleWaiters = [];
+// Held waitForTripReads calls: { recheck, release }. drain's finally calls every recheck after a read settles.
+const tripWaiters = new Set();
 
 // D-37-3 (Plan 37): the one kick. Reads are channel-blind (a manual attachment, an MCP upload and an import confirm all come here), deferred (setImmediate, so a kick made inside a caller's transaction runs only after it commits, and a rolled-back one finds no source row), single-flight (the registry), serial (one read at a time, so a boot backfill never bursts the provider) and capped (documentReadsDailyBudget). It returns at once and never throws; nothing awaits a model call (R-2).
 export function kickDocumentReads(keys) {
@@ -127,6 +129,7 @@ async function drain() {
     } finally {
       current = null;
       registry.delete(key);
+      for (const waiter of [...tripWaiters]) waiter.recheck();
     }
   }
   // Cleared in the same synchronous stretch as the loop condition: a kick that lands after this
@@ -143,6 +146,44 @@ export function documentReadsIdle() {
   return new Promise((resolve) => { idleWaiters.push(resolve); });
 }
 
+// D-37-15 (Plan 37)
+// Holds until none of the trip's documents is queued or in flight, or timeoutMs passes, or signal aborts.
+// Resolves { timedOut } (plus aborted: true on an abort) and never rejects. After each settled read it works the trip's
+// documents out again, because a document can have been kicked while it waited. Its timer, its abort listener and its
+// place in tripWaiters are always released when it settles.
+export function waitForTripReads(tripId, { timeoutMs, signal } = {}) {
+  return new Promise((resolve) => {
+    let timer = null;
+    const waiter = { recheck: null, release: null };
+    const finish = (result) => {
+      clearTimeout(timer);
+      tripWaiters.delete(waiter);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = () => finish({ timedOut: false, aborted: true });
+    waiter.release = () => finish({ timedOut: false });
+    waiter.recheck = () => {
+      try {
+        if (!listTripDocuments(tripId).some((doc) => registry.has(doc.key))) finish({ timedOut: false });
+      } catch (err) {
+        // The caller reads the trip next and meets the same failure there, with a response to carry it.
+        console.error('[facts] wait for trip reads failed trip=%s: %s', tripId, err.message);
+        finish({ timedOut: false });
+      }
+    };
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    tripWaiters.add(waiter);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (Number.isFinite(timeoutMs)) timer = setTimeout(() => finish({ timedOut: true }), timeoutMs);
+    waiter.recheck();
+  });
+}
+
 // Marks the module stopping (no new kicks), drops the queue, aborts the read in flight and resolves
 // once it has settled. A read that settles after this began writes nothing: the database is about to
 // close, and the boot pass reads the document again at the next start (F-37-19).
@@ -151,6 +192,7 @@ export async function stopDocumentReads() {
   for (const key of queue) registry.delete(key);
   queue.length = 0;
   current?.controller.abort();
+  for (const waiter of [...tripWaiters]) waiter.release();
   if (drainPromise) await drainPromise;
   const waiters = idleWaiters;
   idleWaiters = [];
@@ -165,6 +207,7 @@ export function __resetDocumentFactsForTests() {
   drainPromise = null;
   stopping = false;
   idleWaiters = [];
+  for (const waiter of [...tripWaiters]) waiter.release();
   cap.day = null;
   cap.count = 0;
   cap.logged = false;

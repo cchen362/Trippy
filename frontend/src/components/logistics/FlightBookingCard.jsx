@@ -1,9 +1,9 @@
 import { iataFromOriginString, formatTime, formatShortDate, costLineText } from './bookingCardUtils.js';
 import { tzFromIata } from '../../utils/airports.js';
 import TicketStubCard from './TicketStubCard.jsx';
-import { cardConditionLines, conditionsAriaSuffix } from './cardConditions.js';
+import { cardConditionLines, conditionsAriaSuffix, readingAriaSuffix } from './cardConditions.js';
 
-export default function FlightBookingCard({ booking, facts, onOpen }) {
+export default function FlightBookingCard({ booking, facts, reading, arrived, onOpen }) {
   const dj = booking.detailsJson || {};
 
   const originIata =
@@ -48,7 +48,7 @@ export default function FlightBookingCard({ booking, facts, onOpen }) {
 
   return (
     <TicketStubCard
-      ariaLabel={`Flight booking: ${routeLabel}.${conditionsAriaSuffix(conditionLines)} Opens details.`}
+      ariaLabel={`Flight booking: ${routeLabel}.${conditionsAriaSuffix(conditionLines)}${readingAriaSuffix(reading)} Opens details.`}
       eyebrow={eyebrow}
       leftCode={originIata || '—'}
       rightCode={destIata || '—'}
@@ -63,6 +63,8 @@ export default function FlightBookingCard({ booking, facts, onOpen }) {
       footerRight={booking.confirmationRef || undefined}
       costLine={costLineText(booking.expenseSummary)}
       conditions={conditionLines}
+      conditionsReading={reading}
+      conditionsArrived={arrived}
       connector
       hasDocuments={booking.documents?.length > 0}
       onClick={() => onOpen(booking)}

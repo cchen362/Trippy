@@ -137,3 +137,43 @@ describe('dossier card layout', () => {
     expect(zone.querySelector('.logistics-data-row')).toBeNull();
   });
 });
+
+describe.each(cases)('%s card reading indicator (D-37-15)', (_name, renderCard, base) => {
+  it('leads the zone with a Reading row, then the usual lines', () => {
+    const { container } = render(renderCard({ facts, reading: 'reading' }));
+    const zone = container.querySelector('.logistics-conditions');
+    const labels = [...zone.querySelectorAll('.logistics-conditions-label')].map((n) => n.textContent);
+    const values = [...zone.querySelectorAll('.logistics-conditions-value')].map((n) => n.textContent);
+    expect(labels).toEqual(['Reading', 'Pay balance by', 'Check-in time']);
+    expect(values[0]).toBe('Finding its conditions…');
+    expect(zone.querySelector('.facts-reading-dot')).not.toBeNull();
+    expect(screen.getByRole('button')).toHaveAttribute(
+      'aria-label',
+      `${base} Pay balance by: 10 Feb. Check-in time: Check-in from 3:00 PM. Reading its document. Opens details.`,
+    );
+  });
+
+  it('renders the zone with no facts at all while reading', () => {
+    const { container } = render(renderCard({ reading: 'reading' }));
+    const zone = container.querySelector('.logistics-conditions');
+    expect(zone).not.toBeNull();
+    expect(zone.querySelectorAll('.logistics-conditions-label')).toHaveLength(1);
+  });
+
+  it('says Still reading with no dot once the wait ran long, and leaves the aria-label alone', () => {
+    const { container } = render(renderCard({ reading: 'slow' }));
+    const zone = container.querySelector('.logistics-conditions');
+    expect(zone.querySelector('.logistics-conditions-label').textContent).toBe('Still reading');
+    expect(zone.querySelector('.logistics-conditions-value').textContent).toBe('Conditions next visit');
+    expect(zone.querySelector('.facts-reading-dot')).toBeNull();
+    expect(screen.getByRole('button')).toHaveAttribute('aria-label', `${base} Opens details.`);
+  });
+
+  it('carries the one-time arrival class only when told it arrived', () => {
+    const plain = render(renderCard({ facts }));
+    expect(plain.container.querySelector('.facts-arrived')).toBeNull();
+    plain.unmount();
+    const arrived = render(renderCard({ facts, arrived: true }));
+    expect(arrived.container.querySelector('.logistics-conditions')).toHaveClass('facts-arrived');
+  });
+});

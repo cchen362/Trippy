@@ -79,6 +79,7 @@ export default function LogisticsTab() {
   const [viewerPage, setViewerPage] = useState(null);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState(null);
+  const [attachedNames, setAttachedNames] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [confirmDocUrl, setConfirmDocUrl] = useState(null);
@@ -206,8 +207,9 @@ export default function LogisticsTab() {
     try {
       const input = await fileToInput(file);
       await bookingsApi.addAttachment(liveSelected.id, input);
+      setAttachedNames((prev) => ({ ...prev, [liveSelected.id]: file.name }));
       await refresh();
-      documentFacts.refresh({ followUp: true });
+      documentFacts.awaitReads([liveSelected.id]);
     } catch (err) {
       setAttachError(err.message);
     } finally {
@@ -292,6 +294,8 @@ export default function LogisticsTab() {
                     key={booking.id}
                     booking={booking}
                     facts={documentFacts.factsByBooking[booking.id]}
+                    reading={documentFacts.readingStatus[booking.id]}
+                    arrived={documentFacts.arrivedIds.includes(booking.id)}
                     onOpen={setSelectedBooking}
                   />
                 );
@@ -381,9 +385,12 @@ export default function LogisticsTab() {
               </div>
             )}
 
-            {/* D-37-5 (Plan 37): Conditions sit between Documents and Costs and render only when the booking has facts. */}
+            {/* D-37-5 (Plan 37): Conditions sit between Documents and Costs and render when the booking has facts or a document is being read. */}
             <BookingConditions
               facts={documentFacts.factsByBooking[liveSelected.id]}
+              reading={documentFacts.readingStatus[liveSelected.id]}
+              readingName={attachedNames[liveSelected.id]}
+              arrived={documentFacts.arrivedIds.includes(liveSelected.id)}
               documents={liveSelected.documents || []}
               onOpenSource={(doc, page) => { setViewerDoc(doc); setViewerPage(page); }}
             />
@@ -570,9 +577,9 @@ export default function LogisticsTab() {
           onClose={() => setCaptureOpen(false)}
           tripId={trip.id}
           tripDates={{ startDate: trip.startDate, endDate: trip.endDate }}
-          onConfirmed={async () => {
+          onConfirmed={async (createdBookings) => {
             await refresh();
-            documentFacts.refresh({ followUp: true });
+            documentFacts.awaitReads((createdBookings || []).map((b) => b.id));
             setCaptureOpen(false);
           }}
           lookupHotels={lookupHotels}

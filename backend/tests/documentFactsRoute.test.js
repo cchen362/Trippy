@@ -77,7 +77,7 @@ afterAll(async () => {
   rmSync(tmpDir, { recursive: true });
 });
 
-const get = (token) => fetch(`${baseUrl}/api/trips/${tripId}/facts`, { headers: token ? { Cookie: `auth_token=${token}` } : {} });
+const get = (token, query = '') => fetch(`${baseUrl}/api/trips/${tripId}/facts${query}`, { headers: token ? { Cookie: `auth_token=${token}` } : {} });
 
 describe('GET /api/trips/:tripId/facts', () => {
   it('returns the trip facts to its owner', async () => {
@@ -91,6 +91,18 @@ describe('GET /api/trips/:tripId/facts', () => {
       kind: 'window', label: 'Check-in from', quote: 'Check-in from 15:00', page: 1, quoteVerified: true,
       document: { key: `attachment:${attachmentId}`, url: `/api/bookings/${bookingId}/attachments/${attachmentId}` },
     });
+  });
+
+  it('?wait=1 with nothing pending answers at once with the same body', async () => {
+    const plain = await (await get(tokens.owner)).json();
+    const held = await get(tokens.owner, '?wait=1');
+    expect(held.status).toBe(200);
+    expect(await held.json()).toEqual(plain);
+  });
+
+  it('?wait=1 keeps the access rules: a stranger gets a 404 and no session a 401', async () => {
+    expect((await get(tokens.stranger, '?wait=1')).status).toBe(404);
+    expect((await get(null, '?wait=1')).status).toBe(401);
   });
 
   it('returns them to a collaborator', async () => {

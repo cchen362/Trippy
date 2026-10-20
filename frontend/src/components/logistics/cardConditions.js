@@ -34,3 +34,8 @@ export function cardConditionLines(facts, today = localIso()) {
 export function conditionsAriaSuffix(lines) {
   return lines.map((l) => ` ${l.label}: ${l.value.replace(/[.\s]+$/, '')}.`).join('');
 }
+
+// Spoken while a document is being read, so the card's aria-label matches what it shows.
+export function readingAriaSuffix(reading) {
+  return reading === 'reading' ? ' Reading its document.' : '';
+}

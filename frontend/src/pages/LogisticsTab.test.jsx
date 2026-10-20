@@ -65,7 +65,12 @@ vi.mock('../components/logistics/FlightBookingCard.jsx', () => stubCard('flight'
 vi.mock('../components/logistics/TrainBookingCard.jsx', () => stubCard('train'));
 vi.mock('../components/logistics/OtherBookingCard.jsx', () => stubCard('other'));
 vi.mock('../components/logistics/AddBookingModal.jsx', () => ({ default: () => null }));
-vi.mock('../components/import/CaptureFlow.jsx', () => ({ default: () => null }));
+vi.mock('../components/import/CaptureFlow.jsx', () => ({
+  default: (props) => {
+    globalThis.__captureProps = props;
+    return null;
+  },
+}));
 vi.mock('../components/expenses/ExpenseSheet.jsx', () => ({ default: () => null }));
 
 const FACTS = {
@@ -187,28 +192,74 @@ describe('LogisticsTab — facts failing to load', () => {
   });
 });
 
-describe('LogisticsTab — follow-up fetch after an attach', () => {
-  it('fetches at once, then exactly once more after 10 seconds', async () => {
-    vi.useFakeTimers();
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+describe('LogisticsTab — the reading indicator after an attach (D-37-15)', () => {
+  it('shows the reading row with the file name, then the facts when the held reply lands', async () => {
     bookingsApi.addAttachment.mockResolvedValue({});
     mockContext.refresh.mockResolvedValue(undefined);
+    factsApi.list.mockResolvedValueOnce({ bookings: [], readsPending: 0 });
     renderTab();
-    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(factsApi.list).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(factsApi.list).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByText('hotel:Marina Hotel'));
+    fireEvent.click(screen.getByText('flight:SQ 12'));
+    const held = deferred();
+    factsApi.list.mockReturnValueOnce(held.promise);
     const input = document.querySelector('input[type="file"]');
-    const file = new File(['x'], 'x.pdf', { type: 'application/pdf' });
+    const file = new File(['x'], 'ticket.pdf', { type: 'application/pdf' });
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(bookingsApi.addAttachment).toHaveBeenCalledTimes(1);
-    expect(factsApi.list).toHaveBeenCalledTimes(2);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    await screen.findByText('Reading ticket.pdf for its conditions…');
+    expect(screen.getByText('Usually under fifteen seconds.')).toBeInTheDocument();
+    expect(factsApi.list).toHaveBeenLastCalledWith('trip-1', { wait: true });
+
+    await act(async () => {
+      held.resolve({ bookings: [{ bookingId: 'b-flight', facts: FACTS.bookings[0].facts }], readsPending: 0 });
+    });
+    expect(screen.queryByText(/Reading ticket\.pdf/)).toBeNull();
+    expect(screen.getByText('Free cancellation until')).toBeInTheDocument();
+    expect(document.querySelector('.facts-arrived')).not.toBeNull();
     expect(factsApi.list).toHaveBeenCalledTimes(2);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  });
+
+  it('says "Still reading" after two held requests and makes no third', async () => {
+    bookingsApi.addAttachment.mockResolvedValue({});
+    mockContext.refresh.mockResolvedValue(undefined);
+    factsApi.list.mockResolvedValue({ bookings: [], readsPending: 1 });
+    renderTab();
+    await waitFor(() => expect(factsApi.list).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText('flight:SQ 12'));
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(['x'], 'ticket.pdf', { type: 'application/pdf' });
+    await act(async () => { fireEvent.change(input, { target: { files: [file] } }); });
+
+    await screen.findByText('Still reading');
+    expect(screen.getByText(/taking longer/)).toBeInTheDocument();
     expect(factsApi.list).toHaveBeenCalledTimes(3);
-    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
-    expect(factsApi.list).toHaveBeenCalledTimes(3);
+    expect(factsApi.list).toHaveBeenNthCalledWith(2, 'trip-1', { wait: true });
+    expect(factsApi.list).toHaveBeenNthCalledWith(3, 'trip-1', { wait: true });
+  });
+
+  it('waits on the bookings an import confirm created, with no file name', async () => {
+    mockContext.refresh.mockResolvedValue(undefined);
+    factsApi.list.mockResolvedValueOnce({ bookings: [], readsPending: 0 });
+    renderTab();
+    await waitFor(() => expect(factsApi.list).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Import confirmations' }));
+
+    const held = deferred();
+    factsApi.list.mockReturnValueOnce(held.promise);
+    await act(async () => { await globalThis.__captureProps.onConfirmed([{ id: 'b-flight' }]); });
+    expect(factsApi.list).toHaveBeenLastCalledWith('trip-1', { wait: true });
+
+    fireEvent.click(screen.getByText('flight:SQ 12'));
+    await screen.findByText('Reading the document for its conditions…');
+    await act(async () => { held.resolve({ bookings: [], readsPending: 0 }); });
+    expect(screen.queryByText(/Reading the document/)).toBeNull();
   });
 });
