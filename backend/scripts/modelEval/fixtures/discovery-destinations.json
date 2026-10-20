@@ -68,6 +68,26 @@
       "firstOnly": true,
       "optIn": true,
       "note": "Plan 36 W2. Not in the dev catalogue, so it has no exclusion list: first generation only (firstOnly). Opt-in (optIn): generated only when named by --only, so the standard 12-generation corpus is unchanged. A small city next to Hoi An, in the same size band where Plan 36 measured a ~10k-token 'collapse' (most categories 4-7 items) on 4 of 16 generations. Run it with --repeat to measure a collapse rate."
+    },
+    {
+      "id": "luangprabang",
+      "cityKey": "luangprabang",
+      "countryCode": "LA",
+      "label": "Luang Prabang",
+      "role": "small town (Plan 36 W3)",
+      "firstOnly": true,
+      "optIn": true,
+      "note": "Plan 36 W3. A UNESCO small town; not in the dev catalogue, so first generation only and opt-in, like hoian. Production generated it on 2026-10-20 at 8 categories / 91 items (essentials 13)."
+    },
+    {
+      "id": "hue",
+      "cityKey": "hue",
+      "countryCode": "VN",
+      "label": "Hue",
+      "role": "small city (Plan 36 W3)",
+      "firstOnly": true,
+      "optIn": true,
+      "note": "Plan 36 W3. A small heritage city in the Hoi An / Da Nang band; not in the dev catalogue, so first generation only and opt-in, like hoian."
     }
   ]
 }

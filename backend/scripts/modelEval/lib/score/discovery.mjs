@@ -176,6 +176,12 @@ function analyse(record, exclusionSets) {
   // back thin (under 8 items). DISCOVERY_CATEGORIES lists essentials first, so index 0 is essentials.
   const collapsed = (record.usage?.output_tokens ?? Infinity) < COLLAPSE_OUTPUT_TOKENS
     && perCategoryCounts.filter((n) => n < THIN_CATEGORY_ITEMS).length > perCategoryCounts.length / 2;
+  // Plan 36 W3: the same counts with logistics-named items left out, so a profile that honestly drops
+  // logistics (D-36-4) is compared on the places a traveller would visit, not penalised for the drop.
+  const perCategoryCountsNoLogistics = DISCOVERY_CATEGORIES.map(
+    (category) => output.filter((c) => c.category === category)
+      .reduce((n, c) => n + c.items.filter((item) => !isLogistics(item.name)).length, 0),
+  );
   const colonSurvivors = outputItems.filter((item) => hasDepthZeroColon(item.name)).length;
   const firstCategoryMs = record.extra?.categoryTimes?.[0]?.t ?? null;
   const thinkingTokensEstimate = estimatedThinkingTokens(record);
@@ -189,6 +195,7 @@ function analyse(record, exclusionSets) {
     categoriesWithItems: perCategoryCounts.filter((n) => n > 0).length,
     perCategoryCounts,
     essentialsCount: perCategoryCounts[DISCOVERY_CATEGORIES.indexOf('essentials')],
+    perCategoryCountsNoLogistics,
     rawEssentialsCount: rawEssentials.length,
     collapsed,
     logistics,
@@ -240,6 +247,8 @@ function summarise(analyses, prefix = '') {
     [label('categories under 8 items (all generations)')]: pct(
       sum((a) => a.perCategoryCounts.filter((c) => c < THIN_CATEGORY_ITEMS).length), n * DISCOVERY_CATEGORIES.length,
     ),
+    [label('items per category excluding logistics: median of medians')]: median(analyses.map((a) => median(a.perCategoryCountsNoLogistics))),
+    [label('essentials excluding logistics: median / min')]: `${median(analyses.map((a) => a.perCategoryCountsNoLogistics[0]))} / ${Math.min(...analyses.map((a) => a.perCategoryCountsNoLogistics[0]))}`,
     [label('logistics entries (raw, any category)')]: pct(sum((a) => a.logistics), rawItems),
     [label('logistics in essentials (raw)')]: pct(sum((a) => a.logisticsEssentials), sum((a) => a.rawEssentialsCount)),
     [label('thinking blocks (total)')]: sum((a) => a.thinkingBlocks),
