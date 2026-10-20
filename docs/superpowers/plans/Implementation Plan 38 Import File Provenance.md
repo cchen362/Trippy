@@ -1,6 +1,6 @@
 # Implementation Plan 38 — Import File Provenance
 
-**Status:** 2026-10-20 — **WRITTEN, awaiting owner approval and Q-38-1 … Q-38-3.** No code changed. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
+**Status:** 2026-10-20 — **APPROVED (owner, 2026-10-20).** Q-38-1 ruled: correct with the script, mapping confirmed. Q-38-2 ruled: no move-document control in this plan. Q-38-3 ruled: accept. The owner also asked that one confirmation holding several bookings (flights + hotel in one PDF, or a whole flight/train/hotel itinerary) shows under every booking it holds; D-38-1 already does this, and W0 fixture (e) measures it. No code changed yet. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
 
 **Origin.** During Plan 37 W0 (2026-10-20) the owner imported four Chengdu–Chongqing screenshots in one go into the production trip "Chengdu - Chongqing". Four bookings were created, and **every one of them lists all four screenshots** under Documents. The SQ 842 flight shows the Regent Chongqing hotel voucher, the Ritz-Carlton Chengdu voucher and the return flight.
 
@@ -112,13 +112,14 @@ The confirm API contract is unchanged.
 ### W0 — Measure before changing the contract (harness only, cap $3)
 
 1. **Compile probe.** Add one `matrix` probe to `schemaProbe.mjs` built with `extractionVariant` (the live schema plus `sourceFiles`) for Sonnet 5.5 and Sonnet 4.6, cold and warm, plus the string-pattern fallback. Record compile time against the current schema's last recorded figure. **Sequencing:** `schemaProbe.mjs` also changed on `plan37-w0`. This step runs after that branch merges to `main`, or it is written as a pure append so the merge is trivial. It never edits Plan 37's probes.
-2. **Fixtures.** Four new synthetic multi-file fixtures, built from the existing rendered images and `renderExtractionFixtures.mjs`, with `expected.bookings[].sourceFiles` added:
+2. **Fixtures.** Five new synthetic multi-file fixtures, built from the existing rendered images and `renderExtractionFixtures.mjs`, with `expected.bookings[].sourceFiles` added:
    - (a) the Chengdu shape: four files, four bookings, answer order unlike file order;
    - (b) one file with outbound and return plus one hotel file;
+   - (e) one itinerary PDF holding a flight, a train and two hotels, uploaded with one unrelated hotel screenshot: the four itinerary bookings each name the PDF, and the screenshot's hotel names only the screenshot (owner request, 2026-10-20);
    - (c) one booking split across two page screenshots;
    - (d) pasted text plus one screenshot, each a different booking.
    The scorer gains a `sourceFiles` exact-match field.
-3. **Runs.** Every existing extraction fixture plus the four new ones on the live profile (Sonnet 5.5 `medium`), three repeats. The four new ones on Sonnet 4.6 (the rollback row), one repeat. The Plan 34 refusal fixture, six repeats.
+3. **Runs.** Every existing extraction fixture plus the five new ones on the live profile (Sonnet 5.5 `medium`), three repeats. The five new ones on Sonnet 4.6 (the rollback row), one repeat. The Plan 34 refusal fixture, six repeats.
 4. **Gate G-38-1 (all must hold):**
    - `sourceFiles` exact on every multi-file fixture on every repeat (5.5);
    - no existing fixture loses a field it scored before (compared with the Plan 34 W1 baseline run);
