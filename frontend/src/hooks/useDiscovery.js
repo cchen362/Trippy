@@ -6,7 +6,7 @@ import { normalizeName } from '../utils/placeNames.js';
 // W1.5: `notice` carries a decline the server chose to surface honestly
 // (e.g. 'catalogue_full', 'generation_limit') rather than a genuine failure —
 // see the `type: 'error'` handling below for how the two are told apart.
-const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loading: false, error: null, notice: null, cached: false };
+const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loading: false, error: null, notice: null, cached: false, progress: null, startedAt: null };
 
 // Decline codes the server sends as `type: 'error', code: ..., message: ...`
 // that are an honest "not doing this right now" rather than a failure — the
@@ -17,6 +17,13 @@ const EMPTY_ENTRY = { partialResults: {}, completedCategories: new Set(), loadin
 // not a failure — so it routes here too, carrying `destination` and
 // `suggestedCountryCode` alongside the usual code/message.
 const DECLINE_CODES = new Set(['catalogue_full', 'generation_limit', 'country_required']);
+
+// D-35-2 (Plan 35 W2): status/keep-alive chunks carrying a phase become the entry's progress.
+// A bare { type: 'thinking' } (no phase) says nothing about progress and leaves it untouched.
+function progressFromChunk(chunk) {
+  if ((chunk.type !== 'status' && chunk.type !== 'thinking') || !chunk.phase) return null;
+  return { phase: chunk.phase, categoriesDone: chunk.categoriesDone ?? 0, writing: chunk.writing ?? null, first: chunk.first === true };
+}
 
 export function useDiscovery(tripId) {
   // cacheRef is the source of truth: { [normalizedDestination]: DiscoveryEntry }
@@ -47,7 +54,7 @@ export function useDiscovery(tripId) {
     const controller = new AbortController();
     abortRefs.current[key] = controller;
 
-    cacheRef.current[key] = { ...EMPTY_ENTRY, loading: true };
+    cacheRef.current[key] = { ...EMPTY_ENTRY, loading: true, startedAt: Date.now() };
     forceRender();
 
     try {
@@ -60,25 +67,31 @@ export function useDiscovery(tripId) {
             completedCategories: new Set([...entry.completedCategories, chunk.category]),
           };
           forceRender();
+        } else if (chunk.type === 'status' || chunk.type === 'thinking') {
+          const progress = progressFromChunk(chunk);
+          if (progress) {
+            cacheRef.current[key] = { ...cacheRef.current[key], progress };
+            forceRender();
+          }
         } else if (chunk.type === 'done') {
-          cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false };
+          cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false, progress: null, startedAt: null };
         } else if (chunk.type === 'error') {
           // W1.5: a decline (e.g. 'catalogue_full') is the server honestly
           // saying "not doing this right now" — it must not read as a
           // failure. Route it to `notice`, leaving `error` for the case with
           // no known code, which is a genuine failure.
           cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
-            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
-            : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
+            ? { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
+            : { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }
       }, controller.signal);
 
-      cacheRef.current[key] = { ...cacheRef.current[key], loading: false };
+      cacheRef.current[key] = { ...cacheRef.current[key], loading: false, progress: null, startedAt: null };
       forceRender();
     } catch (err) {
       if (err.name !== 'AbortError') {
-        cacheRef.current[key] = { ...cacheRef.current[key], loading: false, error: err };
+        cacheRef.current[key] = { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, error: err };
         forceRender();
       }
     } finally {
@@ -99,7 +112,7 @@ export function useDiscovery(tripId) {
     const controller = new AbortController();
     abortRefs.current[key] = controller;
 
-    cacheRef.current[key] = { ...(current ?? EMPTY_ENTRY), loading: true, error: null, notice: null };
+    cacheRef.current[key] = { ...(current ?? EMPTY_ENTRY), loading: true, error: null, notice: null, progress: null, startedAt: Date.now() };
     forceRender();
 
     try {
@@ -122,25 +135,31 @@ export function useDiscovery(tripId) {
             completedCategories: new Set([...entry.completedCategories, chunk.category]),
           };
           forceRender();
+        } else if (chunk.type === 'status' || chunk.type === 'thinking') {
+          const progress = progressFromChunk(chunk);
+          if (progress) {
+            cacheRef.current[key] = { ...cacheRef.current[key], progress };
+            forceRender();
+          }
         } else if (chunk.type === 'done') {
-          cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false };
+          cacheRef.current[key] = { ...cacheRef.current[key], cached: chunk.cached ?? false, progress: null, startedAt: null };
         } else if (chunk.type === 'error') {
           // See discover()'s identical handling above — a decline must not
           // clear the grid or read as a failure; this is what keeps the
           // "Show more" button from getting stuck mid-loading on a decline
           // (loading:false is set here either way).
           cacheRef.current[key] = DECLINE_CODES.has(chunk.code)
-            ? { ...cacheRef.current[key], loading: false, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
-            : { ...cacheRef.current[key], loading: false, error: new Error(chunk.message || 'Discovery failed') };
+            ? { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, notice: { code: chunk.code, message: chunk.message, destination: chunk.destination, suggestedCountryCode: chunk.suggestedCountryCode } }
+            : { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, error: new Error(chunk.message || 'Discovery failed') };
           forceRender();
         }
       }, controller.signal, true);
 
-      cacheRef.current[key] = { ...cacheRef.current[key], loading: false };
+      cacheRef.current[key] = { ...cacheRef.current[key], loading: false, progress: null, startedAt: null };
       forceRender();
     } catch (err) {
       if (err.name !== 'AbortError') {
-        cacheRef.current[key] = { ...cacheRef.current[key], loading: false, error: err };
+        cacheRef.current[key] = { ...cacheRef.current[key], loading: false, progress: null, startedAt: null, error: err };
         forceRender();
       }
     } finally {

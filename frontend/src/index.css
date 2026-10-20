@@ -635,6 +635,79 @@ select {
   padding: 16px 16px 28px;
 }
 
+/* D-35-2 (Plan 35 W2): curation manifest shown while a cold category is still generating. */
+.discovery-manifest {
+  max-width: 560px;
+  margin: 0 auto;
+  padding-top: 4px;
+}
+
+.discovery-manifest-sentence {
+  min-height: 57px;
+  margin: 0 0 8px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 19px;
+  line-height: 1.5;
+  color: var(--cream-dim);
+  text-wrap: pretty;
+}
+
+.discovery-manifest-status {
+  margin-bottom: 10px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cream-mute);
+}
+
+.discovery-manifest-rows {
+  background: var(--ink-mid);
+  border: 1px solid var(--ink-border);
+  border-radius: 4px;
+}
+
+.discovery-manifest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--ink-border);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--cream-mute);
+}
+
+.discovery-manifest-row:first-child { border-top: 0; }
+
+.discovery-manifest-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.discovery-manifest-row--landed {
+  color: var(--cream);
+  cursor: pointer;
+}
+
+.discovery-manifest-row--writing { color: var(--cream-dim); }
+
+.discovery-manifest-row--landed:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: -2px;
+}
+
 .discovery-register-show-more {
   width: 100%;
   min-height: 44px;

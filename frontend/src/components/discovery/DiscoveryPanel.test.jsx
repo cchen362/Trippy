@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within, act } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import DiscoveryPanel from './DiscoveryPanel.jsx';
 import { discoveryApi } from '../../services/discoveryApi.js';
@@ -43,11 +43,11 @@ const DAYS = [
 // state, regardless of which destination/country it's called with — this
 // lets each test drive DiscoveryPanel's rendering directly without needing
 // to fake the SSE stream underneath useDiscovery.
-function makeDiscovery({ partialResults = {}, completedCategories = new Set(), loading = false, error = null, notice = null } = {}) {
+function makeDiscovery({ partialResults = {}, completedCategories = new Set(), loading = false, error = null, notice = null, progress = null, startedAt = null } = {}) {
   return {
     discover: vi.fn(),
     showMore: vi.fn(),
-    getDestination: vi.fn(() => ({ partialResults, completedCategories, loading, error, notice, cached: false })),
+    getDestination: vi.fn(() => ({ partialResults, completedCategories, loading, error, notice, cached: false, progress, startedAt })),
     isAnyLoading: false,
   };
 }
@@ -986,5 +986,162 @@ describe('DiscoveryPanel — inline country confirmation (Plan 26 W4.5, F-26-26)
     expect(screen.getByText(/we don't know which country suzhou is in/i)).toBeInTheDocument();
 
     consoleError.mockRestore();
+  });
+});
+
+describe('DiscoveryPanel — curation manifest (D-35-2, Plan 35 W2)', () => {
+  const ORDER = ['Essentials', 'Culture', 'Food', 'Nature', 'Nightlife', 'Hidden Gems', 'Architecture', 'Wellness'];
+
+  function renderPanel(state, trip = TRIP) {
+    return render(
+      <DiscoveryPanel
+        trip={trip}
+        days={DAYS}
+        activeDay={DAYS[0]}
+        onAddStop={vi.fn()}
+        onClose={vi.fn()}
+        discovery={makeDiscovery(state)}
+      />,
+    );
+  }
+
+  const item = (id, name) => ({ id, name, category: 'x', description: 'd', whyThis: 'w' });
+  const rowsOf = (container) => Array.from(container.querySelectorAll('.discovery-manifest-row'));
+
+  it('renders the first-look sentence, status, and eight rows in prompt order while generating', () => {
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      progress: { phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true },
+    });
+    expect(screen.getByText('First look at Testville. Trippy is curating eight categories; Essentials lands first.')).toBeInTheDocument();
+    expect(screen.getByText('Curating · 0 of 8')).toBeInTheDocument();
+    const rows = rowsOf(container);
+    expect(rows.map((r) => r.querySelector('.discovery-manifest-label').textContent)).toEqual(ORDER);
+    expect(rows[0].querySelector('.trip-live-dot')).not.toBeNull();
+    expect(rows[0]).toHaveTextContent('writing');
+    expect(container.querySelectorAll('.discovery-manifest .trip-live-dot')).toHaveLength(1);
+  });
+
+  it('renders the same sentence in the joined phase', () => {
+    renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      progress: { phase: 'joined', categoriesDone: 0, writing: 'essentials', first: true },
+    });
+    expect(screen.getByText(/^First look at Testville\./)).toBeInTheDocument();
+  });
+
+  it('advances: landed rows become buttons with counts, writing and queued follow', () => {
+    // The active tab (Essentials) is still cold, so the manifest is up while Food has already landed.
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      partialResults: { food: [item(1, 'A'), item(2, 'B'), item(3, 'C')] },
+      completedCategories: new Set(['food']),
+      progress: { phase: 'generating', categoriesDone: 1, writing: 'essentials', first: true },
+    });
+    expect(screen.getByText('Curating · 1 of 8')).toBeInTheDocument();
+    const rows = rowsOf(container);
+    expect(rows[0]).toHaveTextContent('writing');
+    expect(rows[0].tagName).toBe('DIV');
+    expect(rows[2].tagName).toBe('BUTTON');
+    expect(rows[2]).toHaveTextContent('3 places');
+    expect(rows[3]).not.toHaveTextContent('writing');
+    expect(rows[3].tagName).toBe('DIV');
+  });
+
+  it('marks earlier undelivered categories as passed and singularises one place', () => {
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      partialResults: { food: [item(1, 'A')] },
+      completedCategories: new Set(['food']),
+      progress: { phase: 'generating', categoriesDone: 1, writing: 'nature', first: false },
+    });
+    const rows = rowsOf(container);
+    expect(rows[0]).toHaveTextContent('—');
+    expect(rows[1]).toHaveTextContent('—');
+    expect(rows[2]).toHaveTextContent('1 place');
+    expect(rows[2]).not.toHaveTextContent('1 places');
+    expect(rows[3]).toHaveTextContent('writing');
+    expect(rows[4]).not.toHaveTextContent('—');
+  });
+
+  it('tapping a landed row switches to that tab', () => {
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      partialResults: { food: [item(7, 'Noodle House')] },
+      completedCategories: new Set(['food']),
+      progress: { phase: 'generating', categoriesDone: 1, writing: 'essentials', first: true },
+    });
+    expect(container.querySelector('.discovery-manifest')).not.toBeNull();
+    fireEvent.click(rowsOf(container)[2]);
+    expect(screen.getByText('Noodle House')).toBeInTheDocument();
+    expect(container.querySelector('.discovery-manifest')).toBeNull();
+  });
+
+  it('a landed More-only category selects the More tab', () => {
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      partialResults: { culture: [item(9, 'Old Temple')] },
+      completedCategories: new Set(['culture']),
+      progress: { phase: 'generating', categoriesDone: 1, writing: 'essentials', first: true },
+    });
+    fireEvent.click(rowsOf(container)[1]);
+    expect(screen.getByText('Old Temple')).toBeInTheDocument();
+    expect(container.querySelector('.discovery-manifest')).toBeNull();
+  });
+
+  describe('slow line', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('switches to the still-curating line after 60 s with nothing delivered', () => {
+      renderPanel({
+        loading: true,
+        startedAt: Date.now(),
+        progress: { phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true },
+      });
+      expect(screen.queryByText('Still curating. Larger cities take longer.')).toBeNull();
+      act(() => { vi.advanceTimersByTime(60000); });
+      expect(screen.getByText('Still curating. Larger cities take longer.')).toBeInTheDocument();
+    });
+
+    it('does not switch once a category has landed', () => {
+      renderPanel({
+        loading: true,
+        startedAt: Date.now(),
+        progress: { phase: 'generating', categoriesDone: 1, writing: 'culture', first: true },
+      });
+      act(() => { vi.advanceTimersByTime(61000); });
+      expect(screen.queryByText('Still curating. Larger cities take longer.')).toBeNull();
+    });
+  });
+
+  it('shows no first-look sentence on a refresh but keeps rows and status', () => {
+    const { container } = renderPanel({
+      loading: true,
+      startedAt: Date.now(),
+      progress: { phase: 'generating', categoriesDone: 0, writing: 'essentials', first: false },
+    });
+    expect(screen.queryByText(/First look at/)).toBeNull();
+    expect(screen.getByText('Curating · 0 of 8')).toBeInTheDocument();
+    expect(rowsOf(container)).toHaveLength(8);
+  });
+
+  it('is not shown when not loading, or when the active tab is already loaded', () => {
+    const first = renderPanel({ loading: false });
+    expect(first.container.querySelector('.discovery-manifest')).toBeNull();
+    cleanup();
+    const second = renderPanel({
+      loading: true,
+      partialResults: { essentials: [item(1, 'A')] },
+      completedCategories: new Set(['essentials']),
+      progress: { phase: 'generating', categoriesDone: 1, writing: 'culture', first: false },
+    });
+    expect(second.container.querySelector('.discovery-manifest')).toBeNull();
   });
 });

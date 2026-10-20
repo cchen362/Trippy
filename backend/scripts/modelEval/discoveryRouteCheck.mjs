@@ -102,7 +102,11 @@ async function main() {
 
     console.log('\nSSE timeline (s  event):');
     for (const e of events) {
-      const detail = e.type === 'category' ? ` ${e.category} items=${e.items.length}` : (e.type === 'error' ? ` ${e.message}` : '');
+      // D-35-2: status and thinking events carry what the generation is doing.
+      const progress = e.type === 'status' || e.type === 'thinking'
+        ? ` phase=${e.phase} categoriesDone=${e.categoriesDone} writing=${e.writing} first=${e.first}`
+        : '';
+      const detail = e.type === 'category' ? ` ${e.category} items=${e.items.length}` : (e.type === 'error' ? ` ${e.message}` : progress);
       console.log(`  ${(e.t / 1000).toFixed(1).padStart(6)}  ${e.type}${detail}`);
     }
     const categories = events.filter((e) => e.type === 'category');

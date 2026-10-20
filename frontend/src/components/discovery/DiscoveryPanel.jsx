@@ -157,22 +157,76 @@ function SuggestionGrid({
   );
 }
 
-function TabSkeleton() {
+// D-35-2 (Plan 35 W2): a cold wait is always explained, never a bare skeleton.
+// Mirrors DISCOVERY_CATEGORIES in backend/src/services/claude.js (prompt order).
+const DISCOVERY_ORDER = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
+const SLOW_CURATION_MS = 60000;
+
+// D-35-2 (Plan 35 W2): the curation manifest, eight fixed rows that fill in as categories land.
+function CurationManifest({ city, progress, startedAt, completedCategories, partialResults, tabs, onSelect }) {
+  const [, tick] = useState(0);
+  const categoriesDone = progress?.categoriesDone ?? 0;
+  const elapsed = startedAt ? Date.now() - startedAt : 0;
+  const slow = startedAt != null && elapsed >= SLOW_CURATION_MS && categoriesDone === 0;
+
+  useEffect(() => {
+    if (!startedAt || categoriesDone > 0 || slow) return undefined;
+    const timer = setTimeout(() => tick((n) => n + 1), Math.max(0, SLOW_CURATION_MS - (Date.now() - startedAt)));
+    return () => clearTimeout(timer);
+  }, [startedAt, categoriesDone, slow]);
+
+  let sentence = '';
+  if (slow) sentence = 'Still curating. Larger cities take longer.';
+  else if (progress?.first) sentence = `First look at ${city}. Trippy is curating eight categories; Essentials lands first.`;
+
+  const writingIndex = progress?.writing ? DISCOVERY_ORDER.indexOf(progress.writing) : -1;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '8px' }}>
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          style={{
-            background: '#1a1410',
-            borderRadius: 4,
-            height: 120,
-            border: '1px solid rgba(201,160,80,0.08)',
-            animation: 'pulse 1.6s ease-in-out infinite',
-            opacity: 1 - i * 0.2,
-          }}
-        />
-      ))}
+    <div className="discovery-manifest">
+      <p className="discovery-manifest-sentence">{sentence}</p>
+      <div className="discovery-manifest-status" aria-live="polite">
+        {`Curating · ${categoriesDone} of 8`}
+      </div>
+      <div className="discovery-manifest-rows">
+        {DISCOVERY_ORDER.map((cat, index) => {
+          const count = partialResults[cat]?.length ?? 0;
+          const landed = completedCategories.has(cat) && count > 0;
+          const writing = !landed && cat === progress?.writing;
+          const passed = !landed && !writing && (
+            completedCategories.has(cat) || (progress != null && (writingIndex === -1 || index < writingIndex))
+          );
+          if (landed) {
+            return (
+              <button
+                key={cat}
+                type="button"
+                className="discovery-manifest-row discovery-manifest-row--landed"
+                onClick={() => onSelect(tabs.includes(cat) ? cat : MORE_TAB_KEY)}
+              >
+                <span className="discovery-manifest-label">{CATEGORY_LABELS[cat]}</span>
+                <span className="discovery-manifest-state">{count === 1 ? '1 place' : `${count} places`}</span>
+              </button>
+            );
+          }
+          return (
+            <div
+              key={cat}
+              className={`discovery-manifest-row ${writing ? 'discovery-manifest-row--writing' : passed ? 'discovery-manifest-row--passed' : 'discovery-manifest-row--queued'}`}
+            >
+              <span className="discovery-manifest-label">{CATEGORY_LABELS[cat]}</span>
+              <span className="discovery-manifest-state">
+                {writing && (
+                  <>
+                    <span className="trip-live-dot" style={{ background: 'var(--gold)' }} aria-hidden="true" />
+                    writing
+                  </>
+                )}
+                {passed && '—'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -317,7 +371,7 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
   const pendingChangeFocusRef = useRef(false);
 
   const { discover, showMore, getDestination } = discovery;
-  const { partialResults: rawPartialResults, completedCategories, loading, error, notice } = getDestination(committedDestination, committedCountry);
+  const { partialResults: rawPartialResults, completedCategories, loading, error, notice, progress, startedAt } = getDestination(committedDestination, committedCountry);
 
   // Reported places are filtered out at render time rather than mutated into
   // the shared useDiscovery cache — the cache is keyed per-destination and
@@ -1024,7 +1078,18 @@ export default function DiscoveryPanel({ trip, days, activeDay, onAddStop, onClo
           </div>
         )}
 
-        {!error && !isSearching && !categoryLoaded && loading && <TabSkeleton />}
+        {/* D-35-2 (Plan 35 W2): the curation manifest replaces the old skeleton while the active tab is cold. */}
+        {!error && !isSearching && !categoryLoaded && loading && (
+          <CurationManifest
+            city={committedDestination.trim() || defaultDestination}
+            progress={progress}
+            startedAt={startedAt}
+            completedCategories={completedCategories}
+            partialResults={partialResults}
+            tabs={tabs}
+            onSelect={handleCategorySelect}
+          />
+        )}
 
         {!error && !isSearching && categoryLoaded && activeItems.length === 0 && (
           <p style={{

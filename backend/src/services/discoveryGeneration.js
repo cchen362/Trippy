@@ -6,7 +6,7 @@
 // core of that sequence — build exclusions, call discoverDestination, then
 // flatten/insert/cap/enqueue/bump-counters — so there is exactly one place the
 // sequence is implemented; the route calls this too.
-import { discoverDestination } from './claude.js';
+import { discoverDestination, DISCOVERY_CATEGORIES } from './claude.js';
 import { enqueueForVerification } from './discoveryVerify.js';
 import {
   listExclusionNames,
@@ -22,19 +22,40 @@ import {
 // provider budgets in config.js make).
 const runningGenerations = new Map();
 
+// D-35-2 (Plan 35 W2): what a running generation is doing, as the SSE status/thinking events report it.
+// `deliveredCategories` is the delivery-ordered list of categories handed over so far; `writing` is the
+// category the model is expected to be on next, taken from the LAST delivered one in the prompt's fixed
+// order (not from the count), so it stays right if the model skips a category. `first` is true for a
+// true first generation and false for a merge (stale refresh / show more).
+export function generationProgress(deliveredCategories, first) {
+  const distinct = new Set(deliveredCategories);
+  const last = deliveredCategories.length ? deliveredCategories[deliveredCategories.length - 1] : null;
+  const writing = last === null
+    ? DISCOVERY_CATEGORIES[0]
+    : (DISCOVERY_CATEGORIES[DISCOVERY_CATEGORIES.indexOf(last) + 1] ?? null);
+  return { categoriesDone: distinct.size, writing, first: Boolean(first) };
+}
+
 // Returns null when nothing is generating for this destination, otherwise
-// `{ settled, subscribe }`. `settled` NEVER rejects: it resolves `{ ok: true }` when the
+// `{ settled, subscribe, progress }`. `settled` NEVER rejects: it resolves `{ ok: true }` when the
 // generation finishes, or `{ ok: false, error }` when it throws, so a joiner can await it
 // without a try/catch of its own. `subscribe(listener)` registers a per-category listener
 // called with `{ category, inserted }` right after that category is persisted, and returns
-// an unsubscribe function.
+// an unsubscribe function. `progress()` returns the generationProgress of what has been
+// delivered so far.
 //
 // Callers must check this and, on null, start their own generation with no await between
 // the check and the runCatalogueGeneration call: that gap being synchronous is what makes
 // the check-then-start atomic on a single thread.
 export function getRunningGeneration(destinationId) {
   const entry = runningGenerations.get(destinationId);
-  return entry ? { settled: entry.settled, subscribe: entry.subscribe } : null;
+  return entry
+    ? {
+      settled: entry.settled,
+      subscribe: entry.subscribe,
+      progress: () => generationProgress(entry.delivered, entry.first),
+    }
+    : null;
 }
 
 // Test-only escape hatch: vitest's module registry is shared across test files unless
@@ -58,7 +79,7 @@ export function __resetRunningGenerationsForTests() {
 // don't have to pass one. This is a DIFFERENT contract than the pre-W1
 // version, which forwarded discoverDestination's own onCategory straight
 // through with raw, never-persisted Claude items (no id/provenance/batch).
-async function generate(db, { destinationRow, claudeDestination, useExclusions, onCategory }, notifyListeners) {
+async function generate(db, { destinationRow, claudeDestination, useExclusions, onCategory }, notifyListeners, recordDelivered) {
   const exclusionTitles = useExclusions
     ? listExclusionNames(db, destinationRow.id, 400)
     : [];
@@ -123,6 +144,9 @@ async function generate(db, { destinationRow, claudeDestination, useExclusions, 
     enqueueForVerification(db, destinationRow.id, inserted.map((row) => row.id));
 
     allInserted.push(...inserted);
+    // Recorded before either callback fires, so the leader and every joiner already see
+    // the new count (D-35-2).
+    recordDelivered(categoryObj.category);
     if (onCategory) onCategory({ category: categoryObj.category, inserted });
     notifyListeners({ category: categoryObj.category, inserted });
   };
@@ -155,8 +179,11 @@ export async function runCatalogueGeneration(db, options) {
   const listeners = new Set();
   let settle;
   const settled = new Promise((resolve) => { settle = resolve; });
+  const delivered = [];
   runningGenerations.set(destinationId, {
     settled,
+    delivered,
+    first: !options.useExclusions,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -182,7 +209,7 @@ export async function runCatalogueGeneration(db, options) {
   };
 
   try {
-    const result = await generate(db, options, notifyListeners);
+    const result = await generate(db, options, notifyListeners, (category) => delivered.push(category));
     settle({ ok: true });
     return result;
   } catch (error) {

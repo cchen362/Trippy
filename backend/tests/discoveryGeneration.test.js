@@ -31,6 +31,7 @@ vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
   normalizeName,
   coerceSceneType,
+  DISCOVERY_CATEGORIES: ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'],
 }));
 
 // --- Mock config to avoid env var validation ---
@@ -72,6 +73,7 @@ import { __resetDiscoveryVerifyForTests, waitForVerificationDrain } from '../src
 import {
   runCatalogueGeneration,
   getRunningGeneration,
+  generationProgress,
   __resetRunningGenerationsForTests,
 } from '../src/services/discoveryGeneration.js';
 
@@ -595,5 +597,77 @@ describe('running-generation registry (D-33-1)', () => {
     expect((await running.settled).ok).toBe(false);
     expect((await runOutcome).message).toBe('leader boom');
     expect(getRunningGeneration(destinationRow.id)).toBeNull();
+  });
+});
+
+describe('generationProgress (D-35-2)', () => {
+  const ALL = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
+
+  it('nothing delivered: zero done, essentials next', () => {
+    expect(generationProgress([], true)).toEqual({ categoriesDone: 0, writing: 'essentials', first: true });
+  });
+
+  it('follows the prompt order from the last delivered category', () => {
+    expect(generationProgress(['essentials'], true)).toMatchObject({ categoriesDone: 1, writing: 'culture' });
+  });
+
+  it('a skipped category does not shift what is being written', () => {
+    expect(generationProgress(['essentials', 'food'], true)).toMatchObject({ categoriesDone: 2, writing: 'nature' });
+  });
+
+  it('writing is null once the last category is delivered', () => {
+    expect(generationProgress(ALL, true)).toMatchObject({ categoriesDone: 8, writing: null });
+  });
+
+  it('a duplicate delivery counts once', () => {
+    expect(generationProgress(['essentials', 'culture', 'culture'], true)).toMatchObject({ categoriesDone: 2, writing: 'food' });
+  });
+
+  it('passes the first flag through', () => {
+    expect(generationProgress([], false).first).toBe(false);
+  });
+});
+
+describe('running-generation progress (D-35-2)', () => {
+  it('progress() advances as categories are delivered, and first is true for a first generation', async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const readings = [];
+    const destinationRow = makeDestination({ cityKey: 'progressfirst' });
+    mockDiscoverDestination.mockImplementation(async (dest, exclusions, cb) => {
+      await gate;
+      cb({ category: 'essentials', items: [{ name: 'Kyoto Station', description: 'The hub.' }] });
+      cb({ category: 'food', items: [{ name: 'Ramen Alley', description: 'A narrow alley of ramen counters.' }] });
+      return [];
+    });
+    const run = runCatalogueGeneration(getDb(), {
+      destinationRow,
+      claudeDestination: 'x',
+      useExclusions: false,
+      onCategory: () => readings.push(getRunningGeneration(destinationRow.id).progress()),
+    });
+    expect(getRunningGeneration(destinationRow.id).progress()).toEqual({ categoriesDone: 0, writing: 'essentials', first: true });
+    release();
+    await run;
+
+    // The count is already advanced when the leader's own onCategory runs.
+    expect(readings).toEqual([
+      { categoriesDone: 1, writing: 'culture', first: true },
+      { categoriesDone: 2, writing: 'nature', first: true },
+    ]);
+  });
+
+  it('first is false for a merge generation (useExclusions)', async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const destinationRow = makeDestination({ cityKey: 'progressmerge' });
+    mockDiscoverDestination.mockImplementation(async () => {
+      await gate;
+      return [];
+    });
+    const run = runCatalogueGeneration(getDb(), { destinationRow, claudeDestination: 'x', useExclusions: true });
+    expect(getRunningGeneration(destinationRow.id).progress()).toEqual({ categoriesDone: 0, writing: 'essentials', first: false });
+    release();
+    await run;
   });
 });

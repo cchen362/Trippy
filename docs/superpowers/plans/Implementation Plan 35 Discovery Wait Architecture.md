@@ -294,7 +294,7 @@ The probe and the compile probe stay in the harness, so a future model can be me
 
 ### W2 — Readable wait state (D-35-2)
 
-**Status:** NOT STARTED. Independent of W0/W1; may run in parallel with W1 on different files.
+**Status:** COMPLETE 2026-10-20 on branch `claude/magical-leavitt-781091` (over `c97b361`), not deployed. Record in "W2 results" at the end of this wave.
 
 **Files.** `backend/src/routes/discovery.js` (both keep-alives and a status event), `backend/tests/discovery.test.js`; `frontend/src/hooks/useDiscovery.js`, `useDiscovery.test.js`; `frontend/src/components/discovery/DiscoveryPanel.jsx`, `DiscoveryPanel.test.jsx`; `frontend/src/index.css` only if a class is needed beyond the existing `.trip-live-dot`.
 
@@ -306,6 +306,56 @@ The probe and the compile probe stay in the harness, so a future model can be me
 5. Playwright pass per §5 W2, on a dev-DB copy with Plan 33's held-request technique; screenshots at 375 px and 1280 px kept in the wave record.
 
 **Acceptance.** §5 W2 verification; frontend suite and build green; backend suite green.
+
+#### W2 results (2026-10-20)
+
+**What shipped.**
+- **Progress has one source: the D-33-1 registry entry.** `services/discoveryGeneration.js` records each delivered category before the leader's `onCategory` and the joiners' listeners fire. `getRunningGeneration(id)` gains `progress()`, which returns `generationProgress(delivered, first)`. So the generate path and the join path cannot disagree.
+- **The event contract** is `{ phase, categoriesDone, writing, first }`, on a `status` event and on the 8 s `thinking` keep-alive, on both paths. The fresh path is untouched: it sends no status and no ping.
+  - `phase` is `'generating'` or `'joined'`.
+  - `writing` is the category after the *last delivered* one in `DISCOVERY_CATEGORIES` order, or `null` after wellness. It does not index by count, so a category the model skips does not leave the pulse a row behind.
+  - `first` is `!useExclusions`: true on a true miss, false on a stale refresh or "show more".
+- **Hook** (`frontend/src/hooks/useDiscovery.js`; the plan's file list says `hooks/`, which is where it lives). Each entry keeps `progress` and `startedAt`, and both are cleared on `done`, on both error branches and on every exit path.
+- **Panel.** `TabSkeleton` (literal colours) is deleted. `CurationManifest` renders under the same condition: eight fixed 44 px rows in prompt order, using the Q-35-4 copy and `.discovery-manifest*` classes in `index.css` (tokens only).
+  - A landed row is a button that calls `handleCategorySelect`. A category that is reachable only under "More" selects the More tab.
+  - The row being written carries `.trip-live-dot` on `var(--gold)`, the manifest's only gold element.
+  - A delivered row with nothing to show reads `—`; queued rows are `--cream-mute`.
+  - The "Still curating" line replaces the sentence at 60 s while `categoriesDone` is 0.
+- `discoveryRouteCheck.mjs` prints the new fields. It was not run, because it spends a real generation; W3's route check is the place for it.
+- `D-35-2` markers sit beside the registry helper, both route keep-alives, the hook parser, and the manifest component and its render site.
+
+**Deviations from the steps above, all additive.**
+1. A `status` event also goes out **after every delivered category**, not only before the first ping. Without it, the counts would trail a landed category by up to 8 s.
+2. `first` was added so that "First look at {city}." is never shown on a refresh. On a stale refresh with one empty tab, the manifest shows the status line and rows with no sentence. That adds no new copy.
+3. `discoveryGeneration.js` is touched (registry progress) as well as the route.
+4. The route's generate path looks up the registry entry on first use and then holds it. The registry deletes the entry when the generation settles, so a late write must never dereference a missing entry.
+
+**Tests.**
+- Backend: **1232 passed, 6 skipped** (45 files, 1 skipped). Of those, 13 are new:
+  - 6 `generationProgress` cases and 2 `progress()` cases;
+  - 5 route cases: status 0/essentials/first:true before any category, then advancing; stale refresh `first:false`, with a status even for an empty category; a joiner's status after the saved chunks; pings carrying progress on both paths (fake `setInterval`); the fresh path emitting none.
+- Frontend: **371 passed** (44 files), with 4 new hook tests and 9 new manifest tests. `npm run build` is green.
+
+**Browser verification (built-in pane, dev-DB copy, no generation spent).**
+- **Setup.** The worktree's backend ran on a copy of the dev database, with `ANTHROPIC_API_KEY` blanked in its untracked `.env`, so no generation could be paid for even by accident. The login was a 1-day `auth_sessions` row, deleted afterwards.
+- **Held requests (Plan 33's technique, driven from the page).** `window.fetch` was replaced only for `/discover`, with a `ReadableStream` the session wrote SSE events into by hand. The items were real Shanghai rows, read once from a fresh catalogue.
+- **Backend log for the whole pass:** one `[discover] served fresh destination=9` line (that read) and **zero** `[discover] destination=` generation lines. The page was opened through an SPA click, so the Day 1 pre-warm was held too.
+- **Checked:**
+  - **First look:** the sentence and `CURATING · 0 OF 8` appear on the first status. At 375 × 812 the manifest ends at 594 px, above the fold.
+  - **Counts advance as categories land.** With the traveller on Food, Essentials 12 and Culture 11 show as cream buttons, and Food is writing.
+  - **A real click on the Essentials row** switches to Essentials and renders its 12 cards.
+  - **The joined phase** is the same frame (keep-alive with `phase: 'joined'`).
+  - **The end of the stream** gives way to cards, with every tab showing its count.
+  - **A typed search (Ipoh) at 1280 px** shows the first-look frame, and at 60 s the "Still curating" line (82 s elapsed, `categoriesDone` 0).
+  - **Computed styles resolve to the tokens:** rows `--ink-mid`, hairlines `--ink-border`, landed `--cream`, queued `--cream-mute`, and the dot `--gold`, the only element in the manifest computing to gold. Rows are 44 px each. Fonts are Cormorant (sentence) and DM Mono (rows).
+  - **No console errors** from the panel. The only entries were the login's 401/429, from before it opened.
+- **Screenshots:** `docs/assets/plan35-w2/` holds `375-1-first-look.jpg`, `375-2-two-landed.jpg`, `1280-1-three-landed-joined.jpg`, `1280-2-first-look.jpg` and `1280-3-still-curating.jpg`.
+
+**Not verified here.**
+- **Reduced motion was not emulated.** The pane cannot set `prefers-reduced-motion`. The existing reduced-motion block that stops `.trip-live-dot` was confirmed present in the loaded CSSOM, and the manifest adds no animation of its own.
+- **The pane cannot show the pulse.** It runs the tab hidden, so the dot shows a frozen frame.
+- **The real route was not exercised end to end in a browser**, because that would spend a generation. It is covered by the route tests, and W3's `discoveryRouteCheck.mjs` run (or the owner's production click-script) is the first live look.
+- **The 1280 px sentence wrapped its last word** ("lands / first.") inside the 560 px column (frame 1280-1). `text-wrap: pretty` was added to `.discovery-manifest-sentence` after the pass. It was not re-screenshotted.
 
 ### W3 — Switch Haiku 5.5 discovery to staged, thinking on (D-34-10 reopened) and deploy
 

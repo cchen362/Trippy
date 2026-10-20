@@ -1620,6 +1620,129 @@ describe('POST /trips/:tripId/discover — single-flight generation (Plan 33)', 
     expect(sorted(finalNamesByCategory(joiner.events))).toEqual(sorted(activeNamesByCategory(dest.id)));
     expect(joiner.events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: false });
   });
+
+  // D-35-2 (Plan 35 W2): the stream says what a running generation is doing.
+  const progressOf = (e) => ({
+    phase: e.phase, categoriesDone: e.categoriesDone, writing: e.writing, first: e.first,
+  });
+  const statusEvents = (events) => events.filter((e) => e.type === 'status').map(progressOf);
+
+  it('a true first generation announces itself before any category, then advances status per category', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    expect(leader.events[0]).toEqual({
+      type: 'status', phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true,
+    });
+    expect(leader.events.some((e) => e.type === 'category')).toBe(false);
+
+    await gen.land(0);
+    await gen.land(1);
+    await gen.land(2);
+    const { error } = await leader.done;
+    expect(error).toBeUndefined();
+
+    expect(statusEvents(leader.events)).toEqual([
+      { phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true },
+      { phase: 'generating', categoriesDone: 1, writing: 'food', first: true },
+      { phase: 'generating', categoriesDone: 2, writing: 'nature', first: true },
+      { phase: 'generating', categoriesDone: 3, writing: 'nightlife', first: true },
+    ]);
+    // Each status follows the chunk of the category that advanced it.
+    const order = leader.events.map((e) => (e.type === 'status' ? `status:${e.categoriesDone}` : e.type));
+    expect(order).toEqual([
+      'status:0', 'category', 'status:1', 'category', 'status:2', 'category', 'status:3', 'done',
+    ]);
+  });
+
+  it('a stale refresh reports first:false and still writes status for a category that adds no chunk', async () => {
+    const expired = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'bangkok', countryCode: 'TH', displayName: 'Bangkok', lastGeneratedAt: expired });
+    seedPlace(dest.id, { category: 'culture', name: 'Wat Arun' });
+    // An empty category: the merge writes no chunk for it, yet categoriesDone must advance.
+    const gen = controlledGeneration([{ category: 'food', items: [] }]);
+
+    const run = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    await gen.land(0);
+    await run.done;
+
+    expect(statusEvents(run.events)).toEqual([
+      { phase: 'generating', categoriesDone: 0, writing: 'essentials', first: false },
+      { phase: 'generating', categoriesDone: 1, writing: 'nature', first: false },
+    ]);
+  });
+
+  it('a joiner gets status after the already-saved chunks, then advancing with each later category', async () => {
+    const gen = controlledGeneration();
+
+    const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await gen.started;
+    await gen.land(0);
+
+    const joiner = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+    await waitForJoins(1);
+    const joinerOrder = joiner.events.map((e) => (e.type === 'status' ? `status:${e.categoriesDone}` : e.type));
+    expect(joinerOrder).toEqual(['category', 'status:1']);
+    expect(progressOf(joiner.events[1])).toEqual({
+      phase: 'joined', categoriesDone: 1, writing: 'food', first: true,
+    });
+
+    await gen.land(1);
+    await gen.land(2);
+    await Promise.all([leader.done, joiner.done]);
+
+    expect(statusEvents(joiner.events).map((s) => [s.phase, s.categoriesDone, s.writing])).toEqual([
+      ['joined', 1, 'food'],
+      ['joined', 2, 'nature'],
+      ['joined', 3, 'nightlife'],
+    ]);
+  });
+
+  describe('keep-alive pings carry progress', () => {
+    beforeEach(() => {
+      // Only the interval is faked; the gates and vi.waitFor keep running on real timers.
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('the generating request and a joiner each ping with phase, categoriesDone, writing and first', async () => {
+      const gen = controlledGeneration();
+
+      const leader = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+      await gen.started;
+      await gen.land(0);
+      const joiner = startDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+      await waitForJoins(1);
+
+      vi.advanceTimersByTime(8000);
+      const pingOf = (events) => events.filter((e) => e.type === 'thinking').map(progressOf);
+      expect(pingOf(leader.events)).toEqual([
+        { phase: 'generating', categoriesDone: 1, writing: 'food', first: true },
+      ]);
+      expect(pingOf(joiner.events)).toEqual([
+        { phase: 'joined', categoriesDone: 1, writing: 'food', first: true },
+      ]);
+
+      await gen.land(1);
+      await gen.land(2);
+      await Promise.all([leader.done, joiner.done]);
+    });
+  });
+
+  it('the fresh path emits no status event', async () => {
+    const dest = seedDestination({ cityKey: 'bangkok', countryCode: 'TH', displayName: 'Bangkok', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Wat Arun' });
+
+    const { events } = await callDiscover({ destination: 'Bangkok', countryCode: 'TH' });
+
+    expect(events.filter((e) => e.type === 'status' || e.type === 'thinking')).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: 'done', cached: true });
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

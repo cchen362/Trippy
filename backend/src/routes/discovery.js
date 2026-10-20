@@ -281,7 +281,9 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         type: 'category', category: chunk.category, items: chunk.items, ...appendFlag,
       });
 
-      const joinPing = setInterval(() => write({ type: 'thinking' }), 8000);
+      // D-35-2 (Plan 35 W2): every status and keep-alive event carries the registry's progress, so a cold wait is always explained.
+      const writeProgress = (type) => write({ type, phase: 'joined', ...runningGeneration.progress() });
+      const joinPing = setInterval(() => writeProgress('thinking'), 8000);
       // D-33-2: subscribe FIRST, then stream everything already saved, so no category
       // can land unseen between the two (both run in this one synchronous stretch). Each
       // later category then streams its full active set, so the joiner ends with the
@@ -289,9 +291,11 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       const unsubscribe = runningGeneration.subscribe(({ category }) => {
         const chunk = activeCategoryChunk(db, destinationRow.id, category, prefs);
         if (chunk) writeChunk(chunk);
+        writeProgress('status');
       });
       try {
         for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) writeChunk(cat);
+        writeProgress('status');
 
         const outcome = await runningGeneration.settled;
         if (outcome.ok) {
@@ -398,10 +402,64 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     }
 
     // Cache miss (or append/refresh) — keep connection alive with pings while Claude generates
-    const ping = setInterval(() => write({ type: 'thinking' }), 8000);
+    let ping = null;
+
+    // Writes the category chunk for one delivered category, if there is anything to show.
+    // Extracted so the caller can write its status event after every delivery, chunk or not.
+    const writeCategoryChunk = (category, inserted) => {
+      if (isStaleRefresh) {
+        // The client replaces the whole category on every chunk, so
+        // stream the MERGED set (stored + this generation's new rows for
+        // this category), re-read from the DB, rather than the delta
+        // alone — a delta-only chunk would shrink the visible grid to
+        // just what's new while the DB holds the full breadth.
+        const merged = activeCategoryChunk(db, destinationRow.id, category, prefs);
+        if (merged) write({ type: 'category', category: merged.category, items: merged.items });
+        return;
+      }
+
+      // True cache-miss and append both stream only the rows just
+      // inserted for this category — but enforceCategoryCap (already run
+      // for this category by the time this fires) may have archived one
+      // of them as category surplus, so recheck status rather than
+      // trusting insertPlaces's return snapshot.
+      // ORDER BY id is load-bearing, not decoration: rankPlaces is a stable
+      // sort, so score ties fall back to the input order and that order is
+      // meant to be generation order (services/discoveryRank.js) — leaving
+      // it to whatever order `IN (...)` happens to return would make tie
+      // ordering an implementation detail of SQLite.
+      const insertedIds = inserted.map((row) => row.id);
+      const stillActive = insertedIds.length
+        ? db.prepare(`
+            SELECT * FROM discovery_places
+            WHERE status = 'active' AND id IN (${insertedIds.map(() => '?').join(',')})
+            ORDER BY id
+          `).all(...insertedIds)
+        : [];
+      if (stillActive.length === 0) return;
+      const [ranked] = groupPlaceRowsByCategory(stillActive, prefs);
+      if (!ranked) return;
+      write({
+        type: 'category',
+        category: ranked.category,
+        items: ranked.items,
+        ...(isAppend ? { append: true } : {}),
+      });
+    };
 
     try {
-      await runCatalogueGeneration(db, {
+      // D-35-2 (Plan 35 W2): status and keep-alive events carry the registry's progress, so a cold wait is always explained.
+      // The entry is looked up on first use (a stub may call onCategory before
+      // runCatalogueGeneration returns) and then held, because the registry drops it when the
+      // generation settles and a late write must never dereference a missing entry.
+      let running = null;
+      const writeProgress = (type) => {
+        running ??= getRunningGeneration(destinationRow.id);
+        write({ type, phase: 'generating', ...running.progress() });
+      };
+      // Started without await: runCatalogueGeneration registers its D-33-1 entry synchronously,
+      // before its first await, so the registry already answers progress() right after this call.
+      const generation = runCatalogueGeneration(db, {
         destinationRow,
         claudeDestination,
         useExclusions: isMerge,
@@ -412,46 +470,13 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
         // safe to stream live on every path, restoring progressive reveal on
         // the merge paths Plan 7 §1.4 had traded away.
         onCategory: ({ category, inserted }) => {
-          if (isStaleRefresh) {
-            // The client replaces the whole category on every chunk, so
-            // stream the MERGED set (stored + this generation's new rows for
-            // this category), re-read from the DB, rather than the delta
-            // alone — a delta-only chunk would shrink the visible grid to
-            // just what's new while the DB holds the full breadth.
-            const merged = activeCategoryChunk(db, destinationRow.id, category, prefs);
-            if (merged) write({ type: 'category', category: merged.category, items: merged.items });
-            return;
-          }
-
-          // True cache-miss and append both stream only the rows just
-          // inserted for this category — but enforceCategoryCap (already run
-          // for this category by the time this fires) may have archived one
-          // of them as category surplus, so recheck status rather than
-          // trusting insertPlaces's return snapshot.
-          // ORDER BY id is load-bearing, not decoration: rankPlaces is a stable
-          // sort, so score ties fall back to the input order and that order is
-          // meant to be generation order (services/discoveryRank.js) — leaving
-          // it to whatever order `IN (...)` happens to return would make tie
-          // ordering an implementation detail of SQLite.
-          const insertedIds = inserted.map((row) => row.id);
-          const stillActive = insertedIds.length
-            ? db.prepare(`
-                SELECT * FROM discovery_places
-                WHERE status = 'active' AND id IN (${insertedIds.map(() => '?').join(',')})
-                ORDER BY id
-              `).all(...insertedIds)
-            : [];
-          if (stillActive.length === 0) return;
-          const [ranked] = groupPlaceRowsByCategory(stillActive, prefs);
-          if (!ranked) return;
-          write({
-            type: 'category',
-            category: ranked.category,
-            items: ranked.items,
-            ...(isAppend ? { append: true } : {}),
-          });
+          writeCategoryChunk(category, inserted);
+          writeProgress('status');
         },
       });
+      writeProgress('status');
+      ping = setInterval(() => writeProgress('thinking'), 8000);
+      await generation;
 
       clearInterval(ping);
       // Every path already streamed its final per-category state live from

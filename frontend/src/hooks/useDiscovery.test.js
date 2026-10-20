@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { StrictMode, useEffect } from 'react';
-import { act, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { useDiscovery } from './useDiscovery.js';
 import { discoveryApi } from '../services/discoveryApi.js';
 
@@ -48,6 +48,8 @@ describe('useDiscovery — reset()', () => {
       error: null,
       notice: null,
       cached: false,
+      progress: null,
+      startedAt: null,
     });
   });
 });
@@ -217,5 +219,65 @@ describe('useDiscovery — unmount (Plan 33 M2)', () => {
     const { unmount } = renderHook(() => useDiscovery('trip-1'));
     expect(() => unmount()).not.toThrow();
     expect(discoveryApi.discover).not.toHaveBeenCalled();
+  });
+});
+
+describe('useDiscovery — progress (D-35-2, Plan 35 W2)', () => {
+  function start() {
+    let emit;
+    let finish;
+    discoveryApi.discover.mockImplementation((tripId, destination, countryCode, interestTags, onChunk) => {
+      emit = onChunk;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    const hook = renderHook(() => useDiscovery('trip-1'));
+    act(() => { hook.result.current.discover('Testville', 'TV'); });
+    return { ...hook, emit: (c) => act(() => emit(c)), finish: async () => { await act(async () => finish()); } };
+  }
+
+  it('sets startedAt while loading and stores progress from status and thinking', () => {
+    const { result, emit } = start();
+    const entry = () => result.current.getDestination('Testville', 'TV');
+    expect(entry().startedAt).toEqual(expect.any(Number));
+    expect(entry().progress).toBeNull();
+    emit({ type: 'status', phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true });
+    expect(entry().progress).toEqual({ phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true });
+    emit({ type: 'thinking', phase: 'joined', categoriesDone: 2, writing: 'food', first: false });
+    expect(entry().progress).toEqual({ phase: 'joined', categoriesDone: 2, writing: 'food', first: false });
+  });
+
+  it('ignores a bare thinking chunk', () => {
+    const { result, emit } = start();
+    emit({ type: 'status', phase: 'generating', categoriesDone: 1, writing: 'culture', first: true });
+    emit({ type: 'thinking' });
+    expect(result.current.getDestination('Testville', 'TV').progress).toMatchObject({ categoriesDone: 1 });
+  });
+
+  it('clears progress and startedAt on done', async () => {
+    const { result, emit, finish } = start();
+    emit({ type: 'status', phase: 'generating', categoriesDone: 1, writing: 'culture', first: true });
+    emit({ type: 'done', cached: false });
+    await finish();
+    const entry = result.current.getDestination('Testville', 'TV');
+    expect(entry.loading).toBe(false);
+    expect(entry.progress).toBeNull();
+    expect(entry.startedAt).toBeNull();
+  });
+
+  it('clears progress and startedAt on a failure and on a decline', () => {
+    const failed = start();
+    failed.emit({ type: 'status', phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true });
+    failed.emit({ type: 'error', message: 'boom' });
+    let entry = failed.result.current.getDestination('Testville', 'TV');
+    expect(entry.progress).toBeNull();
+    expect(entry.startedAt).toBeNull();
+    cleanup();
+
+    const declined = start();
+    declined.emit({ type: 'status', phase: 'generating', categoriesDone: 0, writing: 'essentials', first: true });
+    declined.emit({ type: 'error', code: 'generation_limit', message: 'later' });
+    entry = declined.result.current.getDestination('Testville', 'TV');
+    expect(entry.progress).toBeNull();
+    expect(entry.startedAt).toBeNull();
   });
 });
