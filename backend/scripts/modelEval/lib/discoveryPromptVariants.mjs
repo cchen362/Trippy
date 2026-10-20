@@ -21,6 +21,20 @@ export const ORIGINAL_LINES = DISCOVERY_SELECTION_RULES['claude-haiku-4-5-202510
 // Variant A's quality line, shared by 'floor-ranked' and 'exact-count' so the two cannot drift.
 const FLOOR_RANKED_QUALITY = '- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.';
 
+// Plan 36 W2 (D-36-4): one line per category, shared by the W2 and W3 variants so the two cannot drift.
+const DEFINED_CATEGORIES = [
+  'What each category holds:',
+  "- essentials: the city's must-see places — the unmissable sights and experiences a first-time visitor would regret skipping, with honest notes on crowds and timing.",
+  '- culture: museums, galleries, temples, shrines, historic sites, performances and living craft traditions.',
+  '- food: restaurants, street-food stalls, food markets, cafés and specific dishes worth seeking out.',
+  '- nature: parks, gardens, beaches, rivers, lakes, hills and viewpoints in or within a day trip of the city.',
+  '- nightlife: bars, night markets, live music, clubs and experiences that come alive after dark.',
+  '- hidden_gems: specific, lesser-known places locals love and most visitors miss.',
+  '- architecture: buildings, bridges, streets and quarters worth seeing for their design or history.',
+  '- wellness: spas, massage, baths, yoga and quiet places to rest and recharge.',
+  'Every item is a place to visit or an experience to have. Practical travel logistics belong in no category: no airports, stations or terminals used for transport, ride-hailing or taxi apps, ATMs or banks, hospitals, clinics or pharmacies, visa or immigration offices, SIM-card counters, or tourist information desks.',
+].join('\n');
+
 // Each variant maps an original line to its replacement; a line it does not name is kept.
 export const PROMPT_VARIANTS = Object.freeze({
   // The frozen first-pass prompt: both original lines, on any model.
@@ -52,18 +66,14 @@ export const PROMPT_VARIANTS = Object.freeze({
   'defined-categories': Object.freeze({
     quality: FLOOR_RANKED_QUALITY,
     volume: '- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places.',
-    categories: [
-      'What each category holds:',
-      "- essentials: the city's must-see places — the unmissable sights and experiences a first-time visitor would regret skipping, with honest notes on crowds and timing.",
-      '- culture: museums, galleries, temples, shrines, historic sites, performances and living craft traditions.',
-      '- food: restaurants, street-food stalls, food markets, cafés and specific dishes worth seeking out.',
-      '- nature: parks, gardens, beaches, rivers, lakes, hills and viewpoints in or within a day trip of the city.',
-      '- nightlife: bars, night markets, live music, clubs and experiences that come alive after dark.',
-      '- hidden_gems: specific, lesser-known places locals love and most visitors miss.',
-      '- architecture: buildings, bridges, streets and quarters worth seeing for their design or history.',
-      '- wellness: spas, massage, baths, yoga and quiet places to rest and recharge.',
-      'Every item is a place to visit or an experience to have. Practical travel logistics belong in no category: no airports, stations or terminals used for transport, ride-hailing or taxi apps, ATMs or banks, hospitals, clinics or pharmacies, visa or immigration offices, SIM-card counters, or tourist information desks.',
-    ].join('\n'),
+    categories: DEFINED_CATEGORIES,
+  }),
+  // Plan 36 W3 (Q-36-1 option (a)): the W2 definitions with a firm count line in place of the range
+  // and floor, to test whether a fixed number holds small towns at full volume without padding.
+  'defined-count': Object.freeze({
+    quality: FLOOR_RANKED_QUALITY,
+    volume: '- Return 10 places in every category. Return fewer only when the destination genuinely cannot support 10 places that meet these rules; never pad with mediocre places.',
+    categories: DEFINED_CATEGORIES,
   }),
 });
 
