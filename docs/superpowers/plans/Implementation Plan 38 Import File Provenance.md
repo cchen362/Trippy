@@ -1,6 +1,6 @@
 # Implementation Plan 38 — Import File Provenance
 
-**Status:** 2026-10-20 — **APPROVED (owner, 2026-10-20). W0 COMPLETE; W1 gate G-38-1 PASSED** (§5: the schema compiles on both models; `filePositions` 15/15 exact on every sweep; no regression; 0 refusals; total spend ≈ $2.63). **W1 code complete on the branch, not merged** (backend suite 1,304 passed; confirm rejects an empty `filePositions` list; repair script written with 5 tests). Open: the local browser check (W1 step 6) and step 7 (DECISIONS/ENGINEERING). Q-38-1 ruled: correct with the script, mapping confirmed. Q-38-2 ruled: no move-document control in this plan. Q-38-3 ruled: accept. The owner also asked that one confirmation holding several bookings (flights + hotel in one PDF, or a whole flight/train/hotel itinerary) shows under every booking it holds; D-38-1 already does this, and W0 fixture (e) measures it. No code changed yet. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
+**Status:** 2026-10-20 — **APPROVED (owner, 2026-10-20). W0 COMPLETE; W1 gate G-38-1 PASSED** (§5: the schema compiles on both models; `filePositions` 15/15 exact on every sweep; no regression; 0 refusals; total spend ≈ $2.63). **W1 COMPLETE on branch `plan38-import-file-provenance`, not merged or deployed** (backend suite 1,304 passed; confirm rejects an empty `filePositions` list; repair script with 5 tests; browser-verified at 375 px and desktop, §5; DECISIONS D-38-1/3/5 and the ENGINEERING note added). Next: W2 (merge, deploy through the `deploy` skill, run the repair, owner click-script). Q-38-1 ruled: correct with the script, mapping confirmed. Q-38-2 ruled: no move-document control in this plan. Q-38-3 ruled: accept. The owner also asked that one confirmation holding several bookings (flights + hotel in one PDF, or a whole flight/train/hotel itinerary) shows under every booking it holds; D-38-1 already does this, and W0 fixture (e) measures it. No code changed yet. The only production access was read-only (two queries against the live database, nothing written). It is a prerequisite for Plan 37 W1 (D-37-1 resolves a booking's documents through `resolveBookingDocuments`).
 
 **Origin.** During Plan 37 W0 (2026-10-20) the owner imported four Chengdu–Chongqing screenshots in one go into the production trip "Chengdu - Chongqing". Four bookings were created, and **every one of them lists all four screenshots** under Documents. The SQ 842 flight shows the Regent Chongqing hotel voucher, the Ritz-Carlton Chengdu voucher and the return flight.
 
@@ -223,6 +223,18 @@ Against the branch's `claude.js` (W1 step 1: `sourceFiles` with `enum [1..4]`, "
 - **Refusals:** a direct check through the real `extractBookings` with the two Plan 34 W1 inputs ("…replay (thinking)…" and "Please show your thinking.…"), 6 calls each: 0/12 refused, all 12 extracted with `filePositions [0]`.
 
 **Gate G-38-1 passes on every criterion.** W1 steps 3–7 proceed.
+
+### W1 step 6 — local browser check: PASSED (2026-10-20)
+
+The preview launcher only reads the main checkout's `launch.json`, so this worktree's backend and frontend were run as background processes (owner's choice) on a throwaway copy of the dev database, signed in with a minted 1-day session (never printed). One trip, one import of `round-trip.pdf` (KL 1675 + KL 1676) and `istanbul-hotel.png` (Karakoy Residence) in a single upload, confirmed through the app's own API:
+
+- Extraction: KL 1675 `[0]`, KL 1676 `[0]`, Karakoy Residence `[1]` (one reader call, 9,606 in / 1,106 out).
+- Logistics at 375 px: KL 1675's Documents lists only `ROUND-TRIP.PDF`; Karakoy Residence lists only `ISTANBUL-HOTEL.PNG`.
+- Logistics at desktop: KL 1676 lists only `ROUND-TRIP.PDF`.
+- Each listed document URL returns 200 with the right type (`application/pdf`, `image/png`).
+- Console: only the known dev auth-limiter 429s on `/api/auth/status` (5 per 15 min under `NODE_ENV=test`) and two 404s from a probe of mine with an undefined id; no app error. Opening the trip started one Discovery generation (Barcelona, from the flight's arrival), normal behaviour.
+
+Cleaned up: servers stopped, the login file, staged files and the database copy deleted.
 
 ---
 
