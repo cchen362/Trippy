@@ -30,6 +30,7 @@ vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
   normalizeName,
   coerceSceneType,
+  DISCOVERY_CATEGORIES: ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'],
 }));
 
 vi.mock('../src/config.js', () => ({
@@ -82,9 +83,10 @@ let tmpDir;
 let userId;
 let park;
 
+// All eight categories: a generation that fills the catalogue leaves it fresh (D-36-1).
 const FAKE_CATEGORIES = [
-  { category: 'culture', items: [{ name: 'Longshan Temple', description: 'A temple.' }] },
-];
+  'essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness',
+].map((category) => ({ category, items: [{ name: `Fake ${category} place`, description: 'A place.' }] }));
 
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'trippy-discovery-prewarm-test-'));
@@ -137,18 +139,23 @@ function sqlTimestamp(daysAgo) {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function seedDestination({ cityKey, countryCode, displayName, lastGeneratedAt, places = 1 }) {
+// `places` culture places, plus (when `complete`, the default) one place in every other category
+// so the catalogue counts as complete under D-36-1; `complete: false` leaves culture alone.
+function seedDestination({ cityKey, countryCode, displayName, lastGeneratedAt, places = 1, complete = true }) {
   const db = getDb();
   const row = getOrCreateDestination(db, { cityKey, countryCode, displayName });
   db.prepare('UPDATE discovery_destinations SET last_generated_at = ?, generation_count = 1 WHERE id = ?')
     .run(lastGeneratedAt, row.id);
-  for (let n = 1; n <= places; n += 1) {
-    const name = `${displayName} Place ${n}`;
-    db.prepare(`
-      INSERT INTO discovery_places (
-        destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at
-      ) VALUES (?, 'culture', ?, ?, 'd', 'unverified', 'active', 0, ?)
-    `).run(row.id, name, normalizeName(name), new Date().toISOString());
+  const insert = (category, name) => db.prepare(`
+    INSERT INTO discovery_places (
+      destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at
+    ) VALUES (?, ?, ?, ?, 'd', 'unverified', 'active', 0, ?)
+  `).run(row.id, category, name, normalizeName(name), new Date().toISOString());
+  for (let n = 1; n <= places; n += 1) insert('culture', `${displayName} Place ${n}`);
+  if (complete) {
+    for (const { category } of FAKE_CATEGORIES) {
+      if (category !== 'culture') insert(category, `${displayName} ${category} filler`);
+    }
   }
   return row;
 }
@@ -216,6 +223,18 @@ describe('trip-scope pre-warm (Plan 35 W4, D-35-3)', () => {
     await tick();
 
     expect(mockDiscoverDestination).not.toHaveBeenCalled();
+  });
+
+  it('kicks a recently generated destination that is missing categories, as a merge with its stored names as exclusions (D-36-1)', async () => {
+    seedDestination({ cityKey: 'taipei', countryCode: 'TW', displayName: 'Taipei', lastGeneratedAt: sqlTimestamp(0), places: 2, complete: false });
+    makeTrip([{ city: 'Taipei', countryCode: 'TW' }]);
+    await tick();
+
+    expect(mockDiscoverDestination).toHaveBeenCalledTimes(1);
+    const exclusions = mockDiscoverDestination.mock.calls[0][1];
+    expect(exclusions.join(' | ')).toContain('Taipei Place 1');
+    const merged = (console.log.mock.calls.find((c) => typeof c[0] === 'string' && c[0].startsWith('[discoveryPrewarm] kick')));
+    expect(merged.at(-1)).toBe(true);
   });
 
   it('does not kick a destination that is already generating', async () => {

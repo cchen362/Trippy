@@ -29,6 +29,7 @@ vi.mock('../src/services/claude.js', () => ({
   discoverDestination: mockDiscoverDestination,
   normalizeName,
   coerceSceneType,
+  DISCOVERY_CATEGORIES: ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'],
 }));
 
 // --- Mock config to avoid env var validation ---
@@ -168,6 +169,20 @@ function seedPlace(destinationId, {
   return db.prepare('SELECT * FROM discovery_places WHERE destination_id = ? AND name = ?').get(destinationId, name);
 }
 
+// D-36-1 (Plan 36 W1): a catalogue is fresh only when all eight categories hold an active place,
+// so a test that wants the fresh state tops the seeded places up with one filler per missing
+// category. Fillers are named so no query or category filter in this file can match them.
+const ALL_CATEGORIES = ['essentials', 'culture', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness'];
+function completeCatalogue(destinationId) {
+  const present = new Set(
+    getDb().prepare(`SELECT DISTINCT category FROM discovery_places WHERE destination_id = ? AND status = 'active'`)
+      .all(destinationId).map((row) => row.category),
+  );
+  for (const category of ALL_CATEGORIES) {
+    if (!present.has(category)) seedPlace(destinationId, { category, name: `Zzfiller ${category}` });
+  }
+}
+
 function insertDay(city, { date = '2026-06-02', id } = {}) {
   const db = getDb();
   const dayId = id || `day-${city}-${date}`;
@@ -183,12 +198,27 @@ describe('searchDiscoveryCatalogue', () => {
   it('returns fresh state with places for an in-scope, freshly generated destination', async () => {
     const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Yu Garden' });
+    completeCatalogue(dest.id);
 
-    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai', category: 'culture' });
 
     expect(result.catalogueState).toBe('fresh');
     expect(result.places).toHaveLength(1);
     expect(result.places[0].name).toBe('Yu Garden');
+  });
+
+  it('returns generating state and kicks a merge for a recently generated destination missing a category (D-36-1)', async () => {
+    const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Yu Garden' });
+    seedPlace(dest.id, { category: 'food', name: 'Din Tai Fung' });
+
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+
+    expect(result.catalogueState).toBe('generating');
+    expect(result.places.map((p) => p.name).sort()).toEqual(['Din Tai Fung', 'Yu Garden']);
+    expect(mockRunCatalogueGeneration).toHaveBeenCalledOnce();
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].useExclusions).toBe(true);
+    expect(mockRunCatalogueGeneration.mock.calls[0][1].destinationRow.id).toBe(dest.id);
   });
 
   it('returns generating state (places still returned) when last_generated_at is 8+ days old, and fires a background generation with useExclusions=true', async () => {
@@ -317,6 +347,7 @@ describe('searchDiscoveryCatalogue', () => {
   it('fresh search fires no generation and leaves the daily counter unchanged', async () => {
     const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Yu Garden' });
+    completeCatalogue(dest.id);
 
     const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
 
@@ -332,8 +363,9 @@ describe('searchDiscoveryCatalogue', () => {
     insertDay('Kaohsiung City');
     const dest = seedDestination({ cityKey: 'kaohsiungcity', countryCode: '', displayName: 'Kaohsiung City', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Pier-2 Art Center' });
+    completeCatalogue(dest.id);
 
-    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Kaohsiung' });
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Kaohsiung', category: 'culture' });
 
     expect(result.catalogueState).toBe('fresh');
     expect(result.places.map((p) => p.name)).toEqual(['Pier-2 Art Center']);
@@ -345,8 +377,9 @@ describe('searchDiscoveryCatalogue', () => {
     insertDay('Chengdu');
     const dest = seedDestination({ cityKey: 'chengdu', countryCode: 'CN', displayName: 'Chengdu', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'food', name: 'Kuanzhai Alley' });
+    completeCatalogue(dest.id);
 
-    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Chengdu' });
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Chengdu', category: 'food' });
 
     expect(result.catalogueState).toBe('fresh');
     expect(result.places.map((p) => p.name)).toEqual(['Kuanzhai Alley']);
@@ -380,6 +413,7 @@ describe('searchDiscoveryCatalogue', () => {
       seedPlace(dest.id, { category: 'food', name: 'Din Tai Fung', description: 'Famous soup dumplings for dinner.' });
       seedPlace(dest.id, { category: 'food', name: 'Xintiandi Bar', localName: '新天地', aliases: ['Rooftop Lounge'], description: 'A lively night spot.' });
       seedPlace(dest.id, { category: 'culture', name: 'Shanghai Museum', description: 'Bronze and ceramics collection.' });
+      completeCatalogue(dest.id);
       return dest;
     }
 
@@ -408,6 +442,7 @@ describe('searchDiscoveryCatalogue', () => {
       const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
       seedPlace(dest.id, { category: 'food', name: 'Lane House Kitchen', description: 'Shikumen-lane Shanghainese restaurant.', whyGo: 'A proper sit-down dinner without the tourist queue.' });
       seedPlace(dest.id, { category: 'food', name: 'Morning Bun Stand', description: 'Shengjianbao street stall.', whyGo: 'Breakfast the local way.' });
+      completeCatalogue(dest.id);
 
       const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai', query: 'dinner' });
       expect(result.places.map((p) => p.name)).toEqual(['Lane House Kitchen']);
@@ -431,8 +466,9 @@ describe('searchDiscoveryCatalogue', () => {
     for (let i = 0; i < 10; i += 1) {
       seedPlace(dest.id, { category: 'culture', name: `Spot ${i}` });
     }
+    completeCatalogue(dest.id);
 
-    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai', category: 'culture' });
 
     expect(result.catalogueState).toBe('fresh');
     expect(result.places).toHaveLength(8);
@@ -441,8 +477,9 @@ describe('searchDiscoveryCatalogue', () => {
   it('returns the exact compact shape with no lat/lng fields', async () => {
     const dest = seedDestination({ cityKey: 'shanghai', countryCode: 'CN', displayName: 'Shanghai', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Yu Garden' });
+    completeCatalogue(dest.id);
 
-    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai' });
+    const result = await searchDiscoveryCatalogue(await detail(), { destination: 'Shanghai', category: 'culture' });
 
     const place = result.places[0];
     expect(Object.keys(place).sort()).toEqual(

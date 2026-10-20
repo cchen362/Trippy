@@ -91,7 +91,7 @@ export async function searchDiscoveryCatalogue(tripDetail, input) {
   let dailyGenerationCount = 0;
   if (destinationRow) {
     activeRows = listActivePlaces(db, destinationRow.id);
-    cacheIsFresh = isCatalogueFresh(destinationRow, activeRows.length);
+    cacheIsFresh = isCatalogueFresh(destinationRow, activeRows);
     dailyGenerationCount = getDailyGenerationCount(db, destinationRow.id);
   }
 

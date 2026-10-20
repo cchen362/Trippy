@@ -15,7 +15,9 @@ import {
   incrementDailyGenerationCount,
   CATEGORY_ACTIVE_CAP,
   countActivePlacesByCategory,
+  isCatalogueFresh,
 } from '../src/db/discoveryCatalogue.js';
+import { DISCOVERY_CATEGORIES } from '../src/services/claude.js';
 
 let tmpDir;
 
@@ -354,6 +356,41 @@ describe('listActivePlaces', () => {
 // ---------------------------------------------------------------------------
 // Migration 016 — idempotence and backfill parity
 // ---------------------------------------------------------------------------
+
+// D-36-1 (Plan 36 W1): fresh = recent AND every category present, judged from the active rows.
+describe('isCatalogueFresh (D-36-1)', () => {
+  const NOW = Date.parse('2026-10-20T12:00:00Z');
+  const recent = { last_generated_at: '2026-10-20 10:00:00' };
+  const stale = { last_generated_at: '2026-10-10 10:00:00' };
+  const allCategoryRows = DISCOVERY_CATEGORIES.map((category) => ({ category }));
+
+  it('is fresh when recent and every category has an active place', () => {
+    expect(isCatalogueFresh(recent, allCategoryRows, NOW)).toBe(true);
+  });
+
+  it('is not fresh when recent but one category is missing', () => {
+    const missingNightlife = allCategoryRows.filter((row) => row.category !== 'nightlife');
+    expect(isCatalogueFresh(recent, missingNightlife, NOW)).toBe(false);
+  });
+
+  it('counts a category once however many places it holds, and still needs all of them', () => {
+    const fourCategoriesManyPlaces = ['essentials', 'culture', 'food', 'nature']
+      .flatMap((category) => [{ category }, { category }, { category }]);
+    expect(isCatalogueFresh(recent, fourCategoriesManyPlaces, NOW)).toBe(false);
+  });
+
+  it('is not fresh when complete but older than the TTL', () => {
+    expect(isCatalogueFresh(stale, allCategoryRows, NOW)).toBe(false);
+  });
+
+  it('is not fresh with no active rows, however recent', () => {
+    expect(isCatalogueFresh(recent, [], NOW)).toBe(false);
+  });
+
+  it('is not fresh with no destination row', () => {
+    expect(isCatalogueFresh(undefined, allCategoryRows, NOW)).toBe(false);
+  });
+});
 
 describe('016 migration — idempotence and backfill parity', () => {
   it('running migrations twice does not error or duplicate discovery_destinations/discovery_places rows', async () => {

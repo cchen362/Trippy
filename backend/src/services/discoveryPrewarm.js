@@ -89,8 +89,9 @@ export function prewarmTripScopes(db, scopes, { tripId } = {}) {
     const destinationRow = findDestination(db, cityKey, countryCode);
     let activeCount = 0;
     if (destinationRow) {
-      activeCount = listActivePlaces(db, destinationRow.id).length;
-      if (isCatalogueFresh(destinationRow, activeCount)) continue;
+      const activeRows = listActivePlaces(db, destinationRow.id);
+      activeCount = activeRows.length;
+      if (isCatalogueFresh(destinationRow, activeRows)) continue;
       if (getRunningGeneration(destinationRow.id)) continue;
       if (getDailyGenerationCount(db, destinationRow.id) >= MAX_GENERATIONS_PER_DESTINATION_PER_DAY) continue;
     }

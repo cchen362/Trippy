@@ -93,6 +93,7 @@ function nowSql() {
 }
 
 // A destination generated just now (fresh), holding the given places at the given provenance.
+// D-36-1: fresh also needs every category present, so one filler place tops up each other category.
 function seedFreshDestination(cityKey, displayName, places) {
   const db = getDb();
   db.prepare(`
@@ -105,6 +106,13 @@ function seedFreshDestination(cityKey, displayName, places) {
       INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
       VALUES (?, 'culture', ?, ?, 'd', ?, 'active', 0, ?)
     `).run(dest.id, name, normalizeName(name), provenance, new Date().toISOString());
+  }
+  for (const category of ['essentials', 'food', 'nature', 'nightlife', 'hidden_gems', 'architecture', 'wellness']) {
+    const name = `${displayName} ${category} filler`;
+    db.prepare(`
+      INSERT INTO discovery_places (destination_id, category, name, normalized_name, description, provenance, status, batch, generated_at)
+      VALUES (?, ?, ?, ?, 'd', 'unverified', 'active', 0, ?)
+    `).run(dest.id, category, name, normalizeName(name), new Date().toISOString());
   }
   return dest;
 }

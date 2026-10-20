@@ -242,7 +242,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
 
     const activeRows = listActivePlaces(db, destinationRow.id);
     const hasActivePlaces = activeRows.length > 0;
-    const cacheIsFresh = isCatalogueFresh(destinationRow, activeRows.length);
+    const cacheIsFresh = isCatalogueFresh(destinationRow, activeRows);
 
     if (!more && hasActivePlaces && cacheIsFresh) {
       // Plan 35 W0: one line per fresh open, so the container log gives cold opens against all
@@ -325,6 +325,18 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
     // count is tracked separately and checked before any generation is attempted.
     const dailyGenerationCount = getDailyGenerationCount(db, destinationRow.id);
     if (dailyGenerationCount >= MAX_GENERATIONS_PER_DESTINATION_PER_DAY) {
+      // D-36-2 (Plan 36 W1): a not-fresh destination at the cap (stale or incomplete) serves what it has; "show more" keeps the decline.
+      if (!more && hasActivePlaces) {
+        console.error(
+          '[discover] generation_limit destination=%s dailyCount=%d serving stored',
+          destinationRow.id, dailyGenerationCount,
+        );
+        for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
+          write({ type: 'category', category: cat.category, items: cat.items });
+        }
+        write({ type: 'done', cached: true });
+        return res.end();
+      }
       console.error(
         '[discover] generation_limit destination=%s dailyCount=%d',
         destinationRow.id, dailyGenerationCount,

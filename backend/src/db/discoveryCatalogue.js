@@ -11,7 +11,7 @@
 // Nothing trip-specific (trip id, user id, trip preferences) is ever
 // written to either table — this catalogue is destination-scoped only.
 
-import { normalizeName, coerceSceneType } from '../services/claude.js';
+import { normalizeName, coerceSceneType, DISCOVERY_CATEGORIES } from '../services/claude.js';
 import { score } from '../services/discoveryRank.js';
 
 // Gets the destination row for (cityKey, countryCode), creating it if it
@@ -64,11 +64,14 @@ export function cacheTimestampToEpochMs(value) {
 }
 
 // The one freshness rule every reader applies (the /discover route, the co-pilot's
-// catalogue search, the trip-scope pre-warm): a destination is fresh only when it holds
-// active places AND its last generation is within CACHE_TTL_MS. A row with no active
-// places is never fresh, however recently it was generated.
-export function isCatalogueFresh(destinationRow, activePlaceCount, now = Date.now()) {
-  if (!destinationRow || activePlaceCount <= 0) return false;
+// catalogue search, the trip-scope pre-warm): a destination is fresh only when its active
+// places cover every one of DISCOVERY_CATEGORIES AND its last generation is within
+// CACHE_TTL_MS. D-36-1 (Plan 36 W1): a short catalogue is shown but not fresh, so the next open's stale-refresh merge completes it; this replaces the old 4-category minimum.
+// A row with no active places is never fresh, however recently it was generated.
+export function isCatalogueFresh(destinationRow, activeRows, now = Date.now()) {
+  if (!destinationRow || activeRows.length === 0) return false;
+  const categoriesPresent = new Set(activeRows.map((row) => row.category));
+  if (!DISCOVERY_CATEGORIES.every((category) => categoriesPresent.has(category))) return false;
   const lastGeneratedAtMs = cacheTimestampToEpochMs(destinationRow.last_generated_at);
   return lastGeneratedAtMs !== null && (now - lastGeneratedAtMs) < CACHE_TTL_MS;
 }

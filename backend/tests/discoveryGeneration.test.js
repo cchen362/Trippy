@@ -68,7 +68,7 @@ vi.mock('../src/services/placeResolver.js', () => ({
 
 import { initDb, getDb } from '../src/db/database.js';
 import { runMigrations } from '../src/db/migrations.js';
-import { getOrCreateDestination, getDailyGenerationCount } from '../src/db/discoveryCatalogue.js';
+import { getOrCreateDestination, getDailyGenerationCount, isCatalogueFresh, listActivePlaces } from '../src/db/discoveryCatalogue.js';
 import { __resetDiscoveryVerifyForTests, waitForVerificationDrain } from '../src/services/discoveryVerify.js';
 import {
   runCatalogueGeneration,
@@ -350,17 +350,16 @@ describe('runCatalogueGeneration', () => {
 
   // W1.4 acceptance requirement: prove the mid-generation-throw trade-off is
   // safe. claude.js's discoverDestination() can throw AFTER some categories
-  // have already reached onCategory (insufficient total yield across the
-  // whole generation) — with per-category persistence, those categories are
-  // already written to the DB when the throw propagates, unlike the pre-W1
-  // behaviour where nothing was inserted until the whole generation
-  // succeeded. That's fine as long as the catalogue is never marked "fresh"
-  // by a throw — the actual harm the MIN_CATEGORIES_WITH_ITEMS guard exists
-  // to prevent (a truncated generation trusted as a fresh 7-day catalogue).
+  // have already reached onCategory (a truncated or refused generation, D-30-3)
+  // — with per-category persistence, those categories are already written to
+  // the DB when the throw propagates, unlike the pre-W1 behaviour where
+  // nothing was inserted until the whole generation succeeded. That's fine as
+  // long as the catalogue is never marked "fresh" by a throw: freshness and
+  // the daily count move only when discoverDestination() resolves.
   it('persists categories completed before a mid-generation throw, without marking the catalogue fresh', async () => {
     mockDiscoverDestination.mockImplementation(async (dest, exclusions, cb) => {
       cb(FAKE_CATEGORIES[0]); // 'culture' completes and is persisted...
-      throw new Error('[discover] insufficient yield for destination=partialcity: 1 of 2 parsed categories had items (1 items total), 0 lines dropped as unparseable');
+      throw new Error('[discover] generation truncated for destination=partialcity: stop_reason=max_tokens, 1 categories with items (1 items), 0 lines dropped as unparseable');
     });
 
     const db = getDb();
@@ -370,7 +369,7 @@ describe('runCatalogueGeneration', () => {
       destinationRow,
       claudeDestination: 'partialcity, Japan (JP)',
       useExclusions: false,
-    })).rejects.toThrow(/insufficient yield/);
+    })).rejects.toThrow(/generation truncated/);
 
     const rows = db.prepare('SELECT * FROM discovery_places WHERE destination_id = ?').all(destinationRow.id);
     expect(rows).toHaveLength(1);
@@ -381,6 +380,30 @@ describe('runCatalogueGeneration', () => {
     expect(updated.last_generated_at).toBeNull();
     expect(updated.generation_count).toBe(0);
     expect(getDailyGenerationCount(db, destinationRow.id)).toBe(0);
+  });
+
+  // D-36-1: the old 4-category write-time minimum is gone. A generation that returns with a
+  // usable item is stamped and counted like any other; completeness is judged at read time.
+  it('stamps and counts a short but successful generation, which stays non-fresh because categories are missing', async () => {
+    mockDiscoverDestination.mockImplementation(async (dest, exclusions, cb) => {
+      cb(FAKE_CATEGORIES[0]);
+      return [FAKE_CATEGORIES[0]];
+    });
+
+    const db = getDb();
+    const destinationRow = makeDestination({ cityKey: 'shortcity' });
+
+    await runCatalogueGeneration(db, {
+      destinationRow,
+      claudeDestination: 'shortcity, Japan (JP)',
+      useExclusions: false,
+    });
+
+    const updated = db.prepare('SELECT * FROM discovery_destinations WHERE id = ?').get(destinationRow.id);
+    expect(updated.last_generated_at).not.toBeNull();
+    expect(updated.generation_count).toBe(1);
+    expect(getDailyGenerationCount(db, destinationRow.id)).toBe(1);
+    expect(isCatalogueFresh(updated, listActivePlaces(db, destinationRow.id))).toBe(false);
   });
 
   it('defaults onCategory to a no-op when omitted, without throwing', async () => {

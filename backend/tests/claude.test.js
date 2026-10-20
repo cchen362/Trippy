@@ -85,10 +85,10 @@ function ndjsonChunks(categories) {
   return categories.map((cat) => JSON.stringify(cat) + '\n');
 }
 
-// Four categories with at least one item each — the minimum yield
-// discoverDestination now requires (see MIN_CATEGORIES_WITH_ITEMS in
-// src/services/claude.js). Tests that aren't specifically exercising the
-// minimum-yield guard use this fixture so they don't trip it incidentally.
+// Four categories with at least one item each — a short but usable generation
+// (D-36-1: discoverDestination returns anything with a usable item and completeness is
+// judged at read time). Tests that aren't specifically exercising completeness use this
+// fixture as a small, valid stream.
 const FOUR_HEALTHY_CATEGORIES = [
   { category: 'essentials', items: [{ name: 'Ngurah Rai Airport' }] },
   { category: 'culture', items: [{ name: 'Kinkakuji', lat: 35.0, lng: 135.7 }] },
@@ -313,8 +313,7 @@ describe('discoverDestination — NDJSON streaming', () => {
     const cats = [
       { category: 'essentials', items: [{ name: 'Michelin Bib Gourmand: Ay-Chung Flour-Shaping' }] },
       // 'culture' here duplicates the essentials item (post-sanitization) AND carries a second,
-      // distinct item so it still counts toward MIN_CATEGORIES_WITH_ITEMS after the duplicate
-      // is dropped.
+      // distinct item so the category still holds an item after the duplicate is dropped.
       { category: 'culture', items: [{ name: 'Award Winner: Ay-Chung Flour-Shaping' }, { name: 'Longshan Temple' }] },
       ...FOUR_HEALTHY_CATEGORIES.slice(2),
     ];
@@ -417,37 +416,101 @@ describe('discoverDestination — NDJSON streaming', () => {
     });
   });
 
-  describe('minimum-yield guard', () => {
-    it('throws when fewer than 4 categories have at least one item', async () => {
-      // Mirrors the production incident: a single populated category (plus
-      // some empty/dropped ones) must not be treated as a usable generation.
+  // D-36-1: a short generation is returned, an empty one is an error, and completeness is
+  // reported on the end line (D-36-3) rather than decided here.
+  describe('completeness (D-36-1, D-36-3)', () => {
+    function endLine(logSpy) {
+      return logSpy.mock.calls.find((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] end'));
+    }
+
+    it('returns a generation with only 3 categories of items, without throwing, and reports complete=false', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const cats = [
+        { category: 'essentials', items: [{ name: 'Ngurah Rai Airport' }] },
+        { category: 'culture', items: [{ name: 'Uluwatu Temple' }] },
+        { category: 'wellness', items: [{ name: 'Karsa Spa' }] },
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      const result = await discoverDestination('bali', []);
+
+      expect(result.map((c) => c.category)).toEqual(['essentials', 'culture', 'wellness']);
+      expect(endLine(logSpy)[0]).toContain('complete=%s');
+      // complete, deduped, unnamed follow categories/items/dropped
+      expect(endLine(logSpy).slice(-3)).toEqual([false, 0, 0]);
+      logSpy.mockRestore();
+    });
+
+    it('does not count a category with an empty items array toward completeness', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const cats = [
         { category: 'essentials', items: [] },
         { category: 'wellness', items: [{ name: 'Karsa Spa' }] },
       ];
       mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
 
-      await expect(discoverDestination('bali', [])).rejects.toThrow(/insufficient yield/);
+      const result = await discoverDestination('bali', []);
+
+      expect(result).toHaveLength(2);
+      expect(endLine(logSpy).slice(-3)).toEqual([false, 0, 0]);
+      logSpy.mockRestore();
     });
 
-    it('throws with a message reporting categories/items parsed and lines dropped', async () => {
-      const chunks = ['garbage line\n', ...ndjsonChunks([{ category: 'wellness', items: [{ name: 'Karsa Spa' }] }])];
+    it('throws an empty-generation error when no category has a usable item', async () => {
+      const cats = [
+        { category: 'essentials', items: [] },
+        { category: 'culture', items: [{ description: 'a nameless item' }] },
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      await expect(discoverDestination('bali', [])).rejects.toThrow(/empty generation for destination=bali/);
+    });
+
+    it('reports categories/items parsed and lines dropped in the empty-generation message', async () => {
+      const chunks = ['garbage line\n', ...ndjsonChunks([{ category: 'wellness', items: [] }])];
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockStream.mockReturnValue(makeMockStream(chunks));
 
       await expect(discoverDestination('bali', [])).rejects.toThrow(
-        /1 of 1 parsed categories had items \(1 items total\), 1 lines dropped as unparseable/,
+        /0 of 1 parsed categories had items \(0 items total\), 1 lines dropped as unparseable/,
       );
 
       errorSpy.mockRestore();
     });
 
-    it('succeeds when exactly 4 categories have items (the boundary)', async () => {
-      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(FOUR_HEALTHY_CATEGORIES)));
+    it('counts a cross-category repeat as deduped and a nameless item as unnamed on the end line', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const cats = [
+        { category: 'essentials', items: [{ name: 'Tanah Lot' }] },
+        { category: 'culture', items: [{ name: 'Tanah Lot' }, { name: 'Uluwatu Temple' }, { description: 'no name given' }] },
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
 
       const result = await discoverDestination('bali', []);
 
-      expect(result).toHaveLength(4);
+      expect(result.find((c) => c.category === 'culture').items.map((i) => i.name)).toEqual(['Uluwatu Temple']);
+      expect(endLine(logSpy).slice(-3)).toEqual([false, 1, 1]);
+      logSpy.mockRestore();
+    });
+
+    it('reports complete=true when all 8 categories have items', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const cats = [
+        { category: 'essentials', items: [{ name: 'Ngurah Rai Airport' }] },
+        { category: 'culture', items: [{ name: 'Uluwatu Temple' }] },
+        { category: 'food', items: [{ name: 'Warung Babi Guling' }] },
+        { category: 'nature', items: [{ name: 'Tegallalang Rice Terrace' }] },
+        { category: 'nightlife', items: [{ name: 'Potato Head Beach Club' }] },
+        { category: 'hidden_gems', items: [{ name: 'Sidemen Valley' }] },
+        { category: 'architecture', items: [{ name: 'Pura Ulun Danu Bratan' }] },
+        { category: 'wellness', items: [{ name: 'Karsa Spa' }] },
+      ];
+      mockStream.mockReturnValue(makeMockStream(ndjsonChunks(cats)));
+
+      await discoverDestination('bali', []);
+
+      expect(endLine(logSpy).slice(-3)).toEqual([true, 0, 0]);
+      logSpy.mockRestore();
     });
   });
 });
@@ -2236,8 +2299,8 @@ describe('discoverDestination — end-of-generation line and stop reasons (D-30-
     expect(result).toHaveLength(4);
     const line = endLine(logSpy);
     expect(line).toBeDefined();
-    // destination, stop_reason, category, output_tokens, categories, items, dropped
-    expect(line.slice(1)).toEqual(['kyoto', 'end_turn', null, 4321, 4, 4, 0]);
+    // destination, stop_reason, category, output_tokens, categories, items, dropped, complete, deduped, unnamed
+    expect(line.slice(1)).toEqual(['kyoto', 'end_turn', null, 4321, 4, 4, 0, false, 0, 0]);
     expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] ok'))).toBe(true);
     logSpy.mockRestore();
   });
@@ -2253,7 +2316,7 @@ describe('discoverDestination — end-of-generation line and stop reasons (D-30-
       /generation refused for destination=kyoto: stop_reason=refusal category=cyber, 0 categories with items/,
     );
 
-    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'refusal', 'cyber', 0, 0, 0, 0]);
+    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'refusal', 'cyber', 0, 0, 0, 0, false, 0, 0]);
     expect(logSpy.mock.calls.some((c) => typeof c[0] === 'string' && c[0].startsWith('[discover] ok'))).toBe(false);
     logSpy.mockRestore();
   });
@@ -2274,7 +2337,7 @@ describe('discoverDestination — end-of-generation line and stop reasons (D-30-
 
     await expect(discoverDestination('kyoto', [])).rejects.toThrow(/generation truncated.*model_context_window_exceeded/);
 
-    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'model_context_window_exceeded', null, 20, 4, 4, 0]);
+    expect(endLine(logSpy).slice(1)).toEqual(['kyoto', 'model_context_window_exceeded', null, 20, 4, 4, 0, false, 0, 0]);
     logSpy.mockRestore();
   });
 

@@ -729,12 +729,6 @@ ${volume}
 // A model without discovery selection rules must fail at boot, not on its first generation.
 discoverySystemPrompt(DISCOVERY_MODEL);
 
-// Minimum distinct categories (each with at least one item) a generation must
-// yield to be considered usable. Below this, the catalogue committed would be
-// too thin/skewed to trust (see production incident: a truncated/malformed
-// generation stored 10 items in a single category as a fresh 7-day catalogue).
-const MIN_CATEGORIES_WITH_ITEMS = 4;
-
 // Lines that are pure JSON-array/markdown-fence scaffolding rather than a
 // category object — seen when the model wraps its NDJSON output in a
 // pretty-printed JSON array despite being told not to.
@@ -854,6 +848,8 @@ export async function discoverDestination(destination, existingStopTitles = [], 
   const seen = new Set();
   let buffer = '';
   let droppedLineCount = 0;
+  let unnamedCount = 0;
+  let dedupedCount = 0;
 
   const processLine = (line) => {
     const trimmed = line.trim();
@@ -892,8 +888,9 @@ export async function discoverDestination(destination, existingStopTitles = [], 
     // prefix's real name is also caught, not just one matching the raw unstripped string. Build
     // a new item object rather than mutating the caller's parsed one — always a clone, since
     // sanitizeGeneratedAliases returns a fresh array on every call anyway.
-    const deduped = obj.items
-      .filter((item) => !!item?.name)
+    const named = obj.items.filter((item) => !!item?.name);
+    unnamedCount += obj.items.length - named.length;
+    const kept = named
       .map((item) => {
         const sanitizedName = stripEditorialNamePrefix(item.name);
         const sanitizedAliases = sanitizeGeneratedAliases(item.aliases, sanitizedName);
@@ -901,12 +898,15 @@ export async function discoverDestination(destination, existingStopTitles = [], 
       })
       .filter((item) => {
         const n = normalizeName(item.name);
-        if (seen.has(n)) return false;
+        if (seen.has(n)) {
+          dedupedCount += 1;
+          return false;
+        }
         seen.add(n);
         return true;
       });
 
-    const categoryObj = { category: canonicalCategory, items: deduped };
+    const categoryObj = { category: canonicalCategory, items: kept };
     accumulated.push(categoryObj);
     if (onCategory) onCategory(categoryObj);
   };
@@ -923,8 +923,8 @@ export async function discoverDestination(destination, existingStopTitles = [], 
     message = await stream.finalMessage();
   } catch (err) {
     console.error(
-      '[discover] end destination=%s stop_reason=error categories=%d dropped=%d error=%s',
-      destination, accumulated.length, droppedLineCount, err?.message,
+      '[discover] end destination=%s stop_reason=error categories=%d dropped=%d deduped=%d unnamed=%d error=%s',
+      destination, accumulated.length, droppedLineCount, dedupedCount, unnamedCount, err?.message,
     );
     throw err;
   }
@@ -936,16 +936,20 @@ export async function discoverDestination(destination, existingStopTitles = [], 
 
   // D-30-3: one line per generation, on success and failure alike — a cut-off or refused
   // generation must be visible in the logs, not inferred from a thin catalogue later.
+  // D-36-3 (Plan 36 W1): the Plan 30 standing log check reads complete=false directly, and deduped/unnamed make silent drops visible.
   const stop = classifyStop(message);
+  const complete = DISCOVERY_CATEGORIES.every(
+    (name) => accumulated.some((c) => c.category === name && c.items.length > 0),
+  );
   console.log(
-    '[discover] end destination=%s stop_reason=%s category=%s output_tokens=%d categories=%d items=%d dropped=%d',
+    '[discover] end destination=%s stop_reason=%s category=%s output_tokens=%d categories=%d items=%d dropped=%d complete=%s deduped=%d unnamed=%d',
     destination, stop.stopReason, stop.category, message?.usage?.output_tokens ?? 0,
-    categoriesWithItems, totalItems, droppedLineCount,
+    categoriesWithItems, totalItems, droppedLineCount, complete, dedupedCount, unnamedCount,
   );
 
   // A truncated or refused generation is a failed generation: throwing here, before
   // runCatalogueGeneration bumps freshness, leaves the catalogue stale exactly as the
-  // minimum-yield guard below does (categories that completed stay inserted — additive).
+  // empty-generation throw below does (categories that completed stay inserted — additive).
   if (stop.outcome !== 'complete') {
     throw new Error(
       `[discover] generation ${stop.outcome} for destination=${destination}: stop_reason=${stop.stopReason}` +
@@ -954,9 +958,12 @@ export async function discoverDestination(destination, existingStopTitles = [], 
     );
   }
 
-  if (categoriesWithItems < MIN_CATEGORIES_WITH_ITEMS) {
+  // D-36-1 (Plan 36 W1): zero usable items is no catalogue, not a short one, so it is an error.
+  // Anything with at least one usable item is returned; whether it is complete is judged at
+  // read time by isCatalogueFresh, and a short catalogue is completed by the next stale refresh.
+  if (categoriesWithItems === 0) {
     throw new Error(
-      `[discover] insufficient yield for destination=${destination}: ` +
+      `[discover] empty generation for destination=${destination}: ` +
       `${categoriesWithItems} of ${accumulated.length} parsed categories had items ` +
       `(${totalItems} items total), ${droppedLineCount} lines dropped as unparseable`,
     );

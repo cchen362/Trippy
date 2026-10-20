@@ -107,16 +107,15 @@ async function generate(db, { destinationRow, claudeDestination, useExclusions, 
   //
   // Trade-off this creates, which is intentionally NOT rolled back: claude.js
   // discoverDestination() can still throw AFTER some categories have already
-  // been passed to onCategory, if the generation as a whole yields fewer than
-  // MIN_CATEGORIES_WITH_ITEMS usable categories (the guard added after the
-  // production incident where a truncated generation was stored as a fresh
-  // 7-day catalogue). With this change, the categories that DID complete
-  // before the throw are already persisted — before W1 nothing was inserted
-  // until the whole generation succeeded. This is safe because:
+  // been passed to onCategory, if the generation is truncated, refused or yields
+  // no usable item at all (D-30-3, D-36-1). With this change, the categories that
+  // DID complete before the throw are already persisted — before W1 nothing was
+  // inserted until the whole generation succeeded. This is safe because:
   //   - last_generated_at / generation_count are only bumped below, AFTER
   //     discoverDestination() resolves without throwing — a throw never
-  //     marks the catalogue "freshly generated", so the actual harm the
-  //     MIN_CATEGORIES guard exists to prevent still cannot happen.
+  //     marks the catalogue "freshly generated". A short but successful
+  //     generation IS stamped and counted; read-time completeness (D-36-1,
+  //     isCatalogueFresh) keeps it non-fresh, so it cannot stand for a week.
   //   - the partial rows are additive and deduped by insertPlaces exactly
   //     like a normal generation's rows — they don't corrupt anything, and
   //     the next stale refresh (last_generated_at stayed at its old value)

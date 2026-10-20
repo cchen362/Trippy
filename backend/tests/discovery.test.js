@@ -222,6 +222,22 @@ function nowSql() {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
 
+// D-36-1 (Plan 36 W1): a catalogue is fresh only when all eight categories hold an active
+// place, so a test that wants a fresh destination tops the seeded places up with one filler
+// place per missing category. `skip` leaves categories empty on purpose.
+function completeCatalogue(destinationId, skip = []) {
+  const db = getDb();
+  const present = new Set(
+    db.prepare(`SELECT DISTINCT category FROM discovery_places WHERE destination_id = ? AND status = 'active'`)
+      .all(destinationId).map((row) => row.category),
+  );
+  for (const category of DISCOVERY_CATEGORIES) {
+    if (!present.has(category) && !skip.includes(category)) {
+      seedPlace(destinationId, { category, name: `Zzfiller ${category}` });
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -256,6 +272,7 @@ describe('POST /trips/:tripId/discover — cache hit', () => {
   it('streams stored active places and done:{cached:true} when within TTL', async () => {
     const dest = seedDestination({ cityKey: 'kyoto', displayName: 'Kyoto', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Kinkakuji' });
+    completeCatalogue(dest.id);
 
     const { events, error } = await callDiscover({ destination: 'Kyoto' });
 
@@ -263,11 +280,52 @@ describe('POST /trips/:tripId/discover — cache hit', () => {
     expect(mockDiscoverDestination).not.toHaveBeenCalled();
     const doneEvent = events.find((e) => e.type === 'done');
     expect(doneEvent?.cached).toBe(true);
-    const categoryEvent = events.find((e) => e.type === 'category');
-    expect(categoryEvent?.category).toBe('culture');
+    const categoryEvent = events.find((e) => e.type === 'category' && e.category === 'culture');
     expect(categoryEvent?.items[0].name).toBe('Kinkakuji');
     expect(categoryEvent?.items[0].lat).toBeNull();
     expect(categoryEvent?.items[0].lng).toBeNull();
+  });
+
+  // D-36-1 (Plan 36 W1): "recent" alone is not fresh. A catalogue missing a category is
+  // streamed at once but refreshed as a merge, so the missing categories fill in.
+  it('treats a recently generated destination with places in only 4 of 8 categories as stale: stored breadth first, then a merge with exclusions', async () => {
+    const dest = seedDestination({ cityKey: 'hanoi', countryCode: 'VN', displayName: 'Hanoi', lastGeneratedAt: nowSql(), generationCount: 1 });
+    for (const category of ['essentials', 'culture', 'food', 'nature']) {
+      seedPlace(dest.id, { category, name: `Hanoi ${category} spot` });
+    }
+
+    const missing = [
+      { category: 'nightlife', items: [{ name: 'Ta Hien Street', description: 'A beer street.', lat: null, lng: null }] },
+      { category: 'hidden_gems', items: [{ name: 'Long Bien Bridge Walk', description: 'A rail bridge walk.', lat: null, lng: null }] },
+      { category: 'architecture', items: [{ name: 'Opera House', description: 'A French colonial theatre.', lat: null, lng: null }] },
+      { category: 'wellness', items: [{ name: 'Quan Su Spa', description: 'A day spa.', lat: null, lng: null }] },
+    ];
+    mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
+      missing.forEach((cat) => onCategory(cat));
+      return missing;
+    });
+
+    const { events, error } = await callDiscover({ destination: 'Hanoi', countryCode: 'VN' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).toHaveBeenCalledOnce();
+    const exclusionList = mockDiscoverDestination.mock.calls[0][1];
+    expect(exclusionList.length).toBeGreaterThan(0);
+    expect(exclusionList).toEqual(expect.arrayContaining(['Hanoi culture spot', 'Hanoi food spot']));
+
+    const categoryEvents = events.filter((e) => e.type === 'category');
+    // Stored breadth is streamed before the first generated category lands.
+    expect(categoryEvents.slice(0, 4).map((e) => e.category).sort()).toEqual(['culture', 'essentials', 'food', 'nature']);
+    const lastVersionOf = (name) => categoryEvents.filter((e) => e.category === name).at(-1);
+    expect(lastVersionOf('nightlife').items.map((i) => i.name)).toEqual(['Ta Hien Street']);
+    expect(lastVersionOf('food').items.map((i) => i.name)).toEqual(['Hanoi food spot']);
+    expect(events.find((e) => e.type === 'done')?.cached).toBe(false);
+
+    // The merge completes the catalogue, so the next open is served fresh.
+    mockDiscoverDestination.mockClear();
+    const reopen = await callDiscover({ destination: 'Hanoi', countryCode: 'VN' });
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    expect(reopen.events.find((e) => e.type === 'done')?.cached).toBe(true);
   });
 });
 
@@ -380,6 +438,7 @@ describe('POST /trips/:tripId/discover — expired cache', () => {
       const recentTime = new Date(Date.now() - 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
       const dest = seedDestination({ cityKey: 'sapporo', displayName: 'Sapporo', lastGeneratedAt: recentTime });
       seedPlace(dest.id, { category: 'culture', name: 'Recent' });
+      completeCatalogue(dest.id);
 
       const { events, error } = await callDiscover({ destination: 'Sapporo' });
 
@@ -526,6 +585,7 @@ describe('destination key normalization', () => {
   it('matches an existing destination regardless of input case', async () => {
     const dest = seedDestination({ cityKey: 'osaka', displayName: 'Osaka', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'food', name: 'Dotonbori Street Food' });
+    completeCatalogue(dest.id);
 
     const { events, error } = await callDiscover({ destination: 'OSAKA' });
 
@@ -885,6 +945,7 @@ describe('POST /trips/:tripId/discover — no-country decision table (Plan 26 W4
   it('case 1: serves normally, without declining or calling the geocoder, when an empty-country row for that key already exists', async () => {
     const dest = seedDestination({ cityKey: 'novaria', countryCode: '', displayName: 'Novaria', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'The Old Spire' });
+    completeCatalogue(dest.id);
 
     const { events, error } = await callDiscover({ destination: 'Novaria' });
 
@@ -894,13 +955,14 @@ describe('POST /trips/:tripId/discover — no-country decision table (Plan 26 W4
     expect(mockDiscoverDestination).not.toHaveBeenCalled(); // cache hit against the existing '' row
     const doneEvent = events.find((e) => e.type === 'done');
     expect(doneEvent?.cached).toBe(true);
-    const categoryEvent = events.find((e) => e.type === 'category');
+    const categoryEvent = events.find((e) => e.type === 'category' && e.category === 'culture');
     expect(categoryEvent?.items[0].name).toBe('The Old Spire');
   });
 
   it('case 2: exactly one country-coded row already exists — adopts it SILENTLY, no decline, geocoder never called (the no-nag guarantee)', async () => {
     const dest = seedDestination({ cityKey: 'kualalumpur', countryCode: 'MY', displayName: 'Kuala Lumpur', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Thean Hou Temple' });
+    completeCatalogue(dest.id);
 
     const { events, error } = await callDiscover({ destination: 'Kuala Lumpur' });
 
@@ -1116,9 +1178,8 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
     expect(doneEvent).toBeUndefined();
   });
 
-  // Production incident (verified root cause): a generation that threw after
-  // parsing too few usable categories (the new minimum-yield guard in
-  // claude.js) must never be treated as a successful generation by the route
+  // Production incident (verified root cause): a generation that threw (a truncated, refused
+  // or empty generation in claude.js) must never be treated as a successful generation by the route
   // — last_generated_at and the daily generation counter must stay exactly as
   // they were before the attempt, and the request must serve the stored
   // catalogue rather than committing the thin/failed result as fresh.
@@ -1130,9 +1191,9 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
       `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 1)`,
     ).run(dest.id);
 
-    // Mirrors the real discoverDestination throwing on insufficient yield.
+    // Mirrors the real discoverDestination throwing on an empty generation.
     mockDiscoverDestination.mockImplementation(async () => {
-      throw new Error('[discover] insufficient yield for destination=bali: 1 of 1 parsed categories had items (10 items total), 7 lines dropped as unparseable');
+      throw new Error('[discover] empty generation for destination=bali: 0 of 1 parsed categories had items (0 items total), 7 lines dropped as unparseable');
     });
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1169,7 +1230,9 @@ describe('POST /trips/:tripId/discover — generation failure', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /trips/:tripId/discover — generation limit', () => {
-  it('blocks a 4th generation for the same destination on the same UTC day with an SSE generation_limit error', async () => {
+  // D-36-2 (Plan 36 W1): a plain open of a not-fresh destination at the cap serves what it
+  // has, instead of an error with nothing on screen.
+  it('serves the stored catalogue, with done cached:true and no generation, on a plain open of a stale destination at the daily cap', async () => {
     const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
     const dest = seedDestination({ cityKey: 'limitcity', displayName: 'Limitcity', lastGeneratedAt: staleTime });
     seedPlace(dest.id, { category: 'culture', name: 'Existing Spot' });
@@ -1179,14 +1242,71 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { events, error } = await callDiscover({ destination: 'Limitcity' });
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    const categoryEvents = events.filter((e) => e.type === 'category');
+    expect(categoryEvents.map((e) => e.category)).toEqual(['culture']);
+    expect(categoryEvents[0].items.map((i) => i.name)).toEqual(['Existing Spot']);
+    expect(events.at(-1)).toEqual({ type: 'done', cached: true });
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[discover] generation_limit destination=%s dailyCount=%d serving stored',
+      dest.id, 3,
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('serves the stored catalogue at the cap for a recent but incomplete destination too (D-36-2 covers "not fresh", not just "stale")', async () => {
+    const dest = seedDestination({ cityKey: 'limitcity3', displayName: 'Limitcity3', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Existing Spot' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Limitcity3' });
     errorSpy.mockRestore();
 
     expect(error).toBeUndefined();
     expect(mockDiscoverDestination).not.toHaveBeenCalled();
-    const errorEvent = events.find((e) => e.type === 'error');
-    expect(errorEvent?.code).toBe('generation_limit');
-    const doneEvent = events.find((e) => e.type === 'done');
-    expect(doneEvent).toBeUndefined();
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(events.at(-1)).toEqual({ type: 'done', cached: true });
+  });
+
+  it('still declines "show more" at the daily cap with an SSE generation_limit error, even with stored places', async () => {
+    const dest = seedDestination({ cityKey: 'limitcity4', displayName: 'Limitcity4', lastGeneratedAt: nowSql() });
+    seedPlace(dest.id, { category: 'culture', name: 'Existing Spot' });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Limitcity4', more: true });
+    errorSpy.mockRestore();
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'error')?.code).toBe('generation_limit');
+    expect(events.find((e) => e.type === 'category')).toBeUndefined();
+    expect(events.find((e) => e.type === 'done')).toBeUndefined();
+  });
+
+  it('still returns the generation_limit error at the cap when the destination holds no places', async () => {
+    const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const dest = seedDestination({ cityKey: 'limitcity5', displayName: 'Limitcity5', lastGeneratedAt: staleTime });
+    getDb().prepare(
+      `INSERT INTO discovery_generation_daily (destination_id, utc_date, count) VALUES (?, strftime('%Y-%m-%d','now'), 3)`,
+    ).run(dest.id);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { events, error } = await callDiscover({ destination: 'Limitcity5' });
+    errorSpy.mockRestore();
+
+    expect(error).toBeUndefined();
+    expect(mockDiscoverDestination).not.toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'error')?.code).toBe('generation_limit');
+    expect(events.find((e) => e.type === 'done')).toBeUndefined();
   });
 
   it('allows generation on a new UTC day even though the destination has 3+ generations from a previous day', async () => {
@@ -1214,7 +1334,7 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
     expect(dailyRow.count).toBe(1);
   });
 
-  it('increments the daily counter on each successful generation and blocks the 4th attempt within one test-driven day', async () => {
+  it('increments the daily counter on each successful generation and does not generate a 4th time within one test-driven day', async () => {
     mockDiscoverDestination.mockImplementation(async (d, existingTitles, onCategory) => {
       const cats = [{ category: 'culture', items: [{ name: `Spot ${Math.random()}`, description: 'd' }] }];
       cats.forEach((cat) => onCategory(cat));
@@ -1243,11 +1363,18 @@ describe('POST /trips/:tripId/discover — generation limit', () => {
     forceStale();
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { events } = await callDiscover({ destination: 'Repeatcity', countryCode: 'US' }); // 4th — blocked
+    const { events } = await callDiscover({ destination: 'Repeatcity', countryCode: 'US' }); // 4th — no generation
     errorSpy.mockRestore();
 
+    // D-36-2: the 4th plain open serves the stored catalogue instead of generating or erroring.
     expect(mockDiscoverDestination).toHaveBeenCalledTimes(3);
-    expect(events.find((e) => e.type === 'error')?.code).toBe('generation_limit');
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(events.filter((e) => e.type === 'category').length).toBeGreaterThan(0);
+    expect(events.at(-1)).toEqual({ type: 'done', cached: true });
+    const dailyRow = getDb().prepare(
+      `SELECT count FROM discovery_generation_daily WHERE destination_id = ? AND utc_date = strftime('%Y-%m-%d','now')`,
+    ).get(dest.id);
+    expect(dailyRow.count).toBe(3);
   });
 });
 
@@ -1573,7 +1700,9 @@ describe('POST /trips/:tripId/discover — single-flight generation (Plan 33)', 
     await gen.land(2);
     await leader.done;
 
-    // Cache is now fresh: served from cache, never joined, never generated.
+    // The three-category fake generation is short (D-36-1), so top the catalogue up to complete;
+    // the cache is then fresh: served from cache, never joined, never generated.
+    completeCatalogue(getDb().prepare('SELECT id FROM discovery_destinations WHERE city_key = ?').get('bangkok').id);
     const { events } = await callDiscover({ destination: 'Bangkok', countryCode: 'TH' });
     expect(events.find((e) => e.type === 'done')).toEqual({ type: 'done', cached: true });
     expect(joinedCount()).toBe(0);
@@ -1736,6 +1865,7 @@ describe('POST /trips/:tripId/discover — single-flight generation (Plan 33)', 
   it('the fresh path emits no status event', async () => {
     const dest = seedDestination({ cityKey: 'bangkok', countryCode: 'TH', displayName: 'Bangkok', lastGeneratedAt: nowSql() });
     seedPlace(dest.id, { category: 'culture', name: 'Wat Arun' });
+    completeCatalogue(dest.id);
 
     const { events } = await callDiscover({ destination: 'Bangkok', countryCode: 'TH' });
 
@@ -1976,7 +2106,8 @@ describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
   }
 
   it('same global rows, different category order, different item order, different fit lines', async () => {
-    // Categories chosen so alphabetical DB order (culture, essentials, food,
+    // All eight categories are seeded (D-36-1: fewer would not be a fresh catalogue). The
+    // alphabetical DB order (architecture, culture, essentials, food, hidden_gems, nature,
     // nightlife, wellness) is NOT already "nightlife last" — otherwise the
     // family-demotes-nightlife rule would be a no-op and prove nothing.
     const dest = seedDestination({ cityKey: 'scenario1city', displayName: 'Scenario1City', lastGeneratedAt: nowSql() });
@@ -1985,6 +2116,9 @@ describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
     seedPlace(dest.id, { category: 'culture', name: 'Culture Spot' });
     seedPlace(dest.id, { category: 'nightlife', name: 'Night Owl' });
     seedPlace(dest.id, { category: 'wellness', name: 'Spa Retreat' });
+    seedPlace(dest.id, { category: 'nature', name: 'Garden Walk' });
+    seedPlace(dest.id, { category: 'hidden_gems', name: 'Back Alley' });
+    seedPlace(dest.id, { category: 'architecture', name: 'Old Hall' });
     // Two food items with different durations — pace-fit is the only thing
     // that differentiates them (same category, same provenance, same batch).
     seedPlace(dest.id, { category: 'food', name: 'Quick Bite', estimatedDuration: '1 hour' });
@@ -2022,11 +2156,11 @@ describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
     // Profile A: solo, fast pace, interested in food & drink -> 'food' is
     // interest-mapped and moves up right after essentials; nightlife has no
     // reason to move since travellers isn't 'family'.
-    expect(categoryOrderA).toEqual(['essentials', 'food', 'culture', 'nightlife', 'wellness']);
+    expect(categoryOrderA).toEqual(['essentials', 'food', 'architecture', 'culture', 'hidden_gems', 'nature', 'nightlife', 'wellness']);
     // Profile B: family, relaxed pace, no declared interests -> categories
     // stay in their natural (alphabetical) order EXCEPT nightlife, which is
     // demoted all the way to the end because travellers === 'family'.
-    expect(categoryOrderB).toEqual(['essentials', 'culture', 'food', 'wellness', 'nightlife']);
+    expect(categoryOrderB).toEqual(['essentials', 'architecture', 'culture', 'food', 'hidden_gems', 'nature', 'wellness', 'nightlife']);
     expect(categoryOrderA).not.toEqual(categoryOrderB);
 
     // Item order within 'food' (present in both) must differ: A's fast pace
@@ -2046,7 +2180,9 @@ describe('Wave 3 — scenario 1: same catalogue, different trip prefs', () => {
     const allNamesA = categoryEventsA.flatMap((e) => e.items.map((i) => i.name)).sort();
     const allNamesB = categoryEventsB.flatMap((e) => e.items.map((i) => i.name)).sort();
     expect(new Set(allNamesA)).toEqual(new Set(allNamesB));
-    expect(allNamesA).toEqual(['Culture Spot', 'Essential Spot', 'Long Feast', 'Night Owl', 'Quick Bite', 'Spa Retreat']);
+    expect(allNamesA).toEqual([
+      'Back Alley', 'Culture Spot', 'Essential Spot', 'Garden Walk', 'Long Feast', 'Night Owl', 'Old Hall', 'Quick Bite', 'Spa Retreat',
+    ]);
   });
 
   it('never claims an interest the trip did not declare (fitLine honesty gate)', async () => {
