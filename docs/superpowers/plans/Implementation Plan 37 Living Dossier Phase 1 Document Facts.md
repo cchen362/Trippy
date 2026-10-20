@@ -277,7 +277,19 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 **Found while building — for W1, not W0.** `pdfjs-dist` releases that run on Node 20 (5.6.83 up to, not including, 6.2.108) carry GHSA-hq66-cqwq-w95j (high: arbitrary JavaScript execution on opening a malicious PDF); the patched releases need Node ≥ 22.13. W0 uses `pdfjs-dist ~6.4.299` as a devDependency (this machine runs 22.14). Production's Dockerfile is `node:20-alpine`, and Node 20 left support in April 2026, so W1's promotion of `pdfjs-dist` to a dependency needs the image moved to Node 22 (rebuild plus the backend suite on 22), not a pin to a vulnerable release. F-37-25 and §11's third open item ("loads on `node:20-alpine`") change accordingly.
 
-*Steps 1 and 3–7 (census, facts runs, grading, readiness, gates) are pending the production backup copy.*
+**Step 1 — corpus and census (2026-10-20).** Production backup taken by the agent at the owner's instruction with the host ritual (`sqlite3 .backup` as chee into `~/Trippy/backups/trippy-pre-plan37w0-20261020-105743.db`, `PRAGMA integrity_check` ok, production only read), copied to `backend/data/model-eval/private/db/prod-2026-10-20.db` (sha256 `e80b4fc4…a19334`, identical on both ends; gitignored). `facts.mjs --db … --census`, no API call:
+
+| | Production copy |
+|---|---|
+| Trips / bookings | 8 / 17 |
+| Trips with a document | 2 (`Penang - Deploy B`, `Shanghai - Hangzhou (W4 Test)`), both test trips |
+| Documents (unique content) | 2: one image (import), one 2-page PDF with a text layer (manual attachment) |
+| Import files backing no booking | 3 (artifact status confirmed 1, extracted 2) |
+| Document-rich trips (≥ 8 documents) | **0** |
+
+**Verdict: the production corpus cannot carry W0** (§5's threshold is three document-rich trips). Per Q-37-1's default, W0 pauses for the owner's confirmations from the last two years, and the census is re-run on them. One constraint shapes how they arrive: the readiness prototype needs a real trip (`getTripDetail`: days, bookings, health findings), so loose files under `private/facts/<id>/` can feed the facts runs (G-37-1, B1, B2) but not G-37-2 or G-37-3; confirmations imported into Trippy trips feed both. The census also exposed that pdfjs needs its data directories on Node: `lib/documentText.mjs` now passes `cMapUrl` (without it a CJK PDF on a predefined CMap decodes to the wrong characters and no quote could verify), `standardFontDataUrl` and `wasmUrl`. W1's `documentText.js` must do the same.
+
+*Steps 3–7 (facts runs, grading, readiness, gates) are pending the owner's private fixtures.*
 
 ### W1 — Contract, storage and the read job (D-37-1 … D-37-4, D-37-7 … D-37-12; R-1, R-2)
 

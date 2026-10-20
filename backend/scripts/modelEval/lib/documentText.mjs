@@ -5,13 +5,27 @@
 // one to src/services/documentText.js). A scanned PDF yields pages with no text and an image yields
 // null; the callers record both as "no text layer", never as a pass.
 
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
 import { normaliseForMatch } from './factsContract.mjs';
+
+// pdfjs reads its data files with fs.readFile(<dir> + <name>) on Node, so each option is the package's
+// own directory with a trailing slash. Without cMapUrl a CJK PDF that uses a predefined CMap (UniJIS,
+// UniGB, ...) decodes to the wrong characters and its quotes could never verify; without
+// standardFontDataUrl a PDF on the 14 standard fonts warns and loses their glyph data.
+const PDFJS_DIR = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json')).replace(/\\/g, '/');
+const PDFJS_DATA = Object.freeze({
+  cMapUrl: `${PDFJS_DIR}/cmaps/`,
+  cMapPacked: true,
+  standardFontDataUrl: `${PDFJS_DIR}/standard_fonts/`,
+  wasmUrl: `${PDFJS_DIR}/wasm/`,
+});
 
 // pdfjs-dist's legacy build runs on Node without a canvas. In v6 the loading task owns the document's
 // resources, so it is the task, not the document, that is destroyed.
 export async function extractPdfPages(bytes) {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false });
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, ...PDFJS_DATA });
   try {
     const doc = await task.promise;
     const pages = [];
