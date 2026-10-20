@@ -1,6 +1,6 @@
 # Implementation Plan 36 — Discovery Catalogue Completeness
 
-**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE** on branch `claude/hungry-hugle-78d2ea` (§6): backend suite green and browser-verified on a dev-DB copy. Not merged, not deployed. W2 starts only after W1 is merged, because both waves edit `backend/src/services/claude.js`. No migration in either wave.
+**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE and DEPLOYED 2026-10-20 at `a44f437`** (§6). It was merged by the orchestrator, the backend suite passed on main (1,263), and it was browser-verified on a dev-DB copy. It is backend only (no frontend bundle change, no migration). Pre-deploy backup `trippy-2026-10-20-022253.db`; health OK; the new freshness rule was confirmed in the container. **Owner production pass open:** Hanoi heals on its next open. W2 (prompt wave) is in progress on `claude/hungry-hugle-78d2ea`. No migration in either wave.
 
 **Origin.** Plan 35's production pass (2026-10-20, deploy `d5e9e3a`). Hanoi's pre-warm generation ended `end_turn` with 4 of 8 categories (37 items), passed the 4-category minimum, and was stored as a fresh 7-day catalogue. A separate investigation session established the facts below. It changed no code, did no production write, and spent $0.207 on 24 live Haiku 5.5 generations.
 
