@@ -73,6 +73,8 @@ export const MODEL_PROFILES = Object.freeze({
       // because at effort 'low' adaptive thinking planned the whole list before the first line
       // (first category 36 s against 12 s) and settled on the prompt's floor instead of its
       // target. A cut-off is still classified (D-30-3) and leaves the catalogue stale.
+      // D-34-10 (Plan 34 W4): thinking on with an exact-count line beat this on quality but put
+      // the first category at 44 s; kept off, deferred to a design that removes the wait.
       maxTokens: 48000,
       thinking: Object.freeze({ type: 'disabled' }),
       effort: 'low',

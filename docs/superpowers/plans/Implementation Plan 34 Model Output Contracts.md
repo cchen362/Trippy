@@ -1,6 +1,6 @@
 # Implementation Plan 34 — Model Output Contracts
 
-**Status:** 2026-10-19 — **W3 COMPLETE (harness only): D-34-9 measured, gate failed, D-31-1 kept** (§6 W3; nothing to deploy). Next: W4. Earlier: **W1 + W2 DEPLOYED** to production at `6827267` (with the backend unit-suite network guard). The deploy carried two runtime files, `claude.js` and `importer.js`; there was no migration and no frontend change. A pre-deploy online backup passed `integrity_check` and is at `~/backups/predeploy-plan34.db`. Startup was clean, and `/api/health` answered ok on the host and through `trippy.zyroi.com`. The owner's production pass (§8) is still open: one real screenshot import, one fare-promo paste, one manual stop. Next: W3 and W4. Earlier: **W2 COMPLETE** (descriptor under the API-enforced schema; gate passed after owner rulings Q-34-5 and Q-34-6). **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
+**Status:** 2026-10-20 — **W4 MEASURED (harness only): thinking-on passed every criterion except time to first category (44.2 s vs 10.7 s); the owner kept thinking off and deferred Q-34-4 to a separate Discovery wait-architecture plan** (§6 W4; nothing to deploy). Next: W6 close-out (W5 waits for a deprecation notice). Earlier: **W3 COMPLETE (harness only): D-34-9 measured, gate failed, D-31-1 kept** (§6 W3; nothing to deploy). Earlier: **W1 + W2 DEPLOYED** to production at `6827267` (with the backend unit-suite network guard). The deploy carried two runtime files, `claude.js` and `importer.js`; there was no migration and no frontend change. A pre-deploy online backup passed `integrity_check` and is at `~/backups/predeploy-plan34.db`. Startup was clean, and `/api/health` answered ok on the host and through `trippy.zyroi.com`. The owner's production pass (§8) is still open: one real screenshot import, one fare-promo paste, one manual stop. Next: W3 and W4. Earlier: **W2 COMPLETE** (descriptor under the API-enforced schema; gate passed after owner rulings Q-34-5 and Q-34-6). **W1 COMPLETE** (extraction under the API-enforced schema; gate passed on every criterion; merged to `main`, not deployed: it deploys with W2, §7). One measured deviation: the extraction prompt keeps rule 10, "Do not explain your reasoning in prose." (§6 W1). Next: W2. Earlier: **W0 COMPLETE** (fixtures, same-day baselines, compile probe; harness only). The probe rejected §4.1 as written ("Schema is too complex.") and the §4.2 `photoQuery` pattern, so §4.1, §4.2, D-34-4 and D-34-5 are revised below with the probe's evidence, as W0's acceptance requires; W1 builds on the revised §4.1. Next: W1 or W2. Earlier status, kept for history: **APPROVED by the owner 2026-10-19; no wave started.** Q-34-1 was answered (the default); the defaults of Q-34-2, Q-34-3 (as revised: effort `high` before any retry) and Q-34-4 apply unless the owner rules otherwise when a measurement raises one. Nothing in this plan may begin before **Plan 30 Deploy B** is live and the owner has passed its production check (Plan 30 §7). Every decision below is **provisional** until its gate passes. Each owner question Q-34-n carries a default, which a wave follows unless the owner rules otherwise. Q-34-1, the only question that blocked a wave, was answered by the owner on 2026-10-19 (the default). Waves are implemented later via `/implement-milestone`. Each wave updates its own status line and lands on its own branch; a PR is optional since the owner removed the PR rule on 2026-10-19 (DECISIONS.md, "`main` branch ruleset").
 
 **Origin.** Plan 30 moved Trippy's four Anthropic workloads to the 5.5 models and froze every prompt so that model was the only variable. That freeze was right for a migration. It left two shortfalls that the owner accepted at the Plan 30 W4 gate, and they are contract defects, not model defects:
 
@@ -196,7 +196,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
   - storing the broad query would need a catalogue column.
 
   W3 measures the pair and decides by its gate. *Gate:* W3. **Settled at W3 (2026-10-19): keep D-31-1.** The best chain cut fallbacks by 1.67 of 50, against the 3 the gate requires (§6 W3). Marker `D-34-9` sits beside D-31-1's in `selectPhoto`.
-- **D-34-10 — Discovery runs with adaptive thinking if, and only if, thinking-on matches the shipped thinking-off profile on volume, quality and first-category time.** If it matches, prefer it: the provider's guidance is to lower effort rather than turn thinking off (Plan 30 F-30-4), and one fewer disabled capability is one fewer field a later model can reject. If it matches on everything but time to first category, the owner rules (Q-34-4). *Gate:* W4. Re-captures only the discovery pins.
+- **D-34-10 — Discovery runs with adaptive thinking if, and only if, thinking-on matches the shipped thinking-off profile on volume, quality and first-category time.** If it matches, prefer it: the provider's guidance is to lower effort rather than turn thinking off (Plan 30 F-30-4), and one fewer disabled capability is one fewer field a later model can reject. If it matches on everything but time to first category, the owner rules (Q-34-4). *Gate:* W4. Re-captures only the discovery pins. **Measured at W4 (2026-10-20): it matched on everything but time to first category (44.2 s against 10.7 s). The owner kept thinking off and deferred Q-34-4 to a Discovery wait-architecture plan, so the shipped profile and pins are unchanged.** Marker `D-34-10` sits beside the Haiku 5.5 discovery profile.
 - **D-34-11 — A retiring model's rows leave the code on the deprecation notice, not on a date guess.**
   - When Anthropic announces retirement of `claude-haiku-4-5-20251001` or `claude-sonnet-4-6`, W5 removes that model's `MODEL_PROFILES` row, its `DISCOVERY_SELECTION_RULES` entry (Haiku 4.5), its rollback pins and tests, and its harness `baseline-*` profiles (the run files stay on disk).
   - Sonnet 4.6's rows go only after the co-pilot no longer runs on it (Plan 30 W5).
@@ -231,6 +231,7 @@ Code facts cite `origin/main` at `ce841cf`. Provider facts come from the pages n
   - **Example.** You open Discovery for Tainan. Today, Essentials appears after about 12 s; with thinking on it might take about 30 s, with the same eight categories after that.
   - **Implication.** Keeping thinking off keeps the faster first impression but relies on a setting the provider steers away from. Turning it on removes that reliance and costs the wait.
   - **Recommendation (default): keep thinking off unless the first category is within Plan 30 §5.3's bound** (control + 5 s). The traveller feels the wait; they do not feel the setting.
+  - **Asked at W4, 2026-10-20. Owner ruling: keep thinking off for now; deferred, not closed.** Thinking on was better on every quality measure, so the owner asked for the wait itself to be designed away (a separate Discovery wait-architecture plan) rather than accepted or refused (§6 W4).
 
 ---
 
@@ -947,7 +948,93 @@ Unsplash: about 840 harness searches over two hourly windows (lowest `X-Ratelimi
 
 ### W4 — Discovery with thinking on, measured (D-34-10)
 
-**Status:** NOT STARTED. Independent of W1–W3.
+**Status:** 2026-10-20 — **MEASURED, harness only. The gate failed on one criterion only, time to first category (Q-34-4).** The owner ruled that thinking stays off for now, and that Q-34-4 is **deferred, not closed**. It goes to a separate plan on the Discovery wait architecture, so the question is not "do not re-run": a design that removes the wait may let thinking on ship. No runtime behaviour changed. `claude.js` gains one `D-34-10` comment beside the Haiku 5.5 discovery profile. No pin moved, and there is nothing to deploy.
+
+**What landed (harness).**
+- `lib/discoveryPromptVariants.mjs`: variant `exact-count`. Its quality line is variant A's, shared through one const with `floor-ranked` so the two cannot drift. Its volume line is the §6 text below. It names **both** keys, because an unnamed key falls back to Haiku 4.5's original line.
+- `profiles.mjs`: `v-exact12-adaptive-low` = `{ model: HAIKU_55, maxTokens: 48000, effort: 'low', promptVariant: 'exact-count' }`, with no `thinking` field, so thinking is adaptive.
+- `lib/score/discovery.mjs`: thinking tokens now come from the API's exact `usage.output_tokens_details.thinking_tokens` whenever every call carries it, with Plan 30 W3's per-character estimate kept as the fallback and printed beside it. Re-scoring Plan 30's `v-floor-ranked-low` run gives exact 5,442 / 11,583 (median / max) against the estimate's 5,295 / 11,687, so Plan 30's "about 35 % of output is planning" stands.
+
+**Measurement** (2026-10-19, Haiku 5.5, dev key, the same 6 destinations × first/exclusions, `--concurrency 3`; both sweeps were run side by side so they met the same API conditions).
+- Control (shipped: thinking disabled, `low`, variant A): `runs/discovery/control/2026-10-19T06-01-48-115Z.jsonl`.
+- Candidate: `runs/discovery/v-exact12-adaptive-low/2026-10-19T06-01-51-175Z.jsonl`.
+- Spot check: `runs/discovery-spotcheck/2026-10-19T06-15-20-561Z.json`.
+
+| Metric (n = 12 each) | Control, same day | Exact-12, thinking on |
+|---|---|---|
+| `stop_reason` | `end_turn` 12/12 | `end_turn` 12/12 |
+| Categories with items, worst / median | 8 / 8 | 8 / 8 |
+| Items per category, median of medians / worst min | 11 / 3 | **11.25** / 3 |
+| Categories at 11–12 items (of 96) | 51 | **80** |
+| Total items median / min | 88 / 64 | 91 / 79 |
+| Dropped unparseable lines | 0/96 | 0/96 |
+| Editorial prefix · dash clause (raw) | 0.0 % · 0.0 % | 0.0 % · 0.0 % |
+| Alias identical to name (raw) | 5.7 % (59/1,034) | **1.2 %** (13/1,094) |
+| Description-in-brackets (heuristic, raw) | 0.5 % | 0.1 % |
+| Exclusions variant: raw items repeating an excluded name | 30.2 % (150/497) | **0.0 %** (0/553) |
+| **Time to first category, median / max** | **10.7 / 18.6 s** | **44.2 / 78.8 s** (fastest run 32.6 s) |
+| Total time, median / max | 75 / 101 s | 116 / 149 s |
+| Output tokens, median / max | 18,066 / 25,307 | 27,760 / 35,467 |
+| Thinking tokens, exact, median / max (share of output) | 0 | 6,253 / 14,105 (27 %) |
+| Cost per generation, median | $0.0093 | $0.0142 |
+| Cost per usable item, median | $0.00011 | $0.00016 |
+| Spot check, verified share (seed 30, 10 per destination) | 7/60 (12 %) | **9/60 (15 %)** |
+
+- **Where the time goes.** Time to first category tracks the run's thinking tokens: the model plans the whole catalogue in one block before its first line, because the request carries no tools, and so thinking cannot interleave. The fastest thinking-on run (32.6 s) is slower than the slowest control run (18.6 s).
+- **Exact count.** The exact-count line did what it says: 80 of 96 categories landed at 11–12 items, against 51 for control. Plan 30's "at least 8" line had read as the target under thinking (median 7.5). That reading did not recur.
+- **Allowance.** The largest output, 35,467, is 1.35× under the 48,000 allowance, so a switch would need about 72,000 to meet D-30-6's 2× rule. There was no `max_tokens` stop.
+- **Spot check.** Both profiles shared one process's 50 Google escalations, which ran out partway through, as in Plan 30. Last-lookup reasons: control 7 ok / 1 no_result / 52 weak_match; candidate 9 ok / 51 weak_match.
+
+**Wellness row read (Q-27-6 padding evidence; it settles nothing).**
+- **Method.** 253 wellness items, the service output of both runs, were shuffled with seed 34. The sheet showed only the destination, name and description. The orchestrator gave every verdict before opening the key:
+  - **S**: a real, named venue or landmark.
+  - **A**: an activity anchored to a real named place ("Daan Park Tai Chi Circle").
+  - **G**: generic or padding. This covers an unnamed category ("Taipei Foot Reflexology Parlours"), a likely invented venue ("Bangsar Hot Springs Spa"), or a misattribution ("Chi Spa at Four Seasons").
+
+| Wellness | n | S | A | G (generic) |
+|---|---|---|---|---|
+| Control, all | 122 | 15 (12 %) | 19 | **88 (72 %)** |
+| Candidate, all | 131 | 30 (23 %) | 22 | **79 (60 %)** |
+| Control, first generation | 66 | 9 | 7 | 50 (76 %) |
+| Candidate, first generation | 66 | 20 | 16 | 30 (45 %) |
+| Control, show more | 56 | 6 | 12 | 38 (68 %) |
+| Candidate, show more | 65 | 10 | 6 | 49 (75 %) |
+
+- **Reading.** Thinking on pads wellness less on a first generation, but no less on "show more". Most wellness rows are padding under both profiles. Q-27-6 stays the owner's open question.
+
+**Gate (§5.1 Discovery thinking-on).**
+1. `end_turn` 12/12 and 8/8 categories 12/12: ✔.
+2. Items per category median ≥ control − 1 (≥ 10): ✔ (11.25).
+3. Dropped lines 0: ✔.
+4. Name-quality measures each ≤ control's: ✔ on every measure.
+5. Exclusion repeats ≤ control's: ✔ (0 % against 30.2 %).
+6. First category ≤ control + 5 s (≤ 15.7 s): **✘ (44.2 s).** This is the Q-34-4 case.
+7. Cost per usable item: reported, $0.00016 against $0.00011 (+45 %).
+8. Verified share ≥ control's: ✔ (15 % against 12 %).
+9. Thinking tokens exact: ✔ (12/12 records carry the API count).
+
+**Owner ruling on Q-34-4 (2026-10-20).** Thinking stays off for now, and the decision is deferred, not closed.
+- **The owner's reasoning.** Thinking on is better on every quality measure, so the right question is whether the wait itself can be designed away. It is not whether to accept the wait.
+- **What the orchestrator found.**
+  - A traveller waits only on a destination with no catalogue yet. A fresh catalogue (under 7 days) is served from the database. A stale one streams its old rows first, and "show more" keeps the grid on screen (`routes/discovery.js:243-256`, `:385-395`; `useDiscovery.js:102`).
+  - The trip page pre-warms only Day 1's city (`TripPage.jsx:69-94`).
+  - The wait shows three skeleton cards with no copy (`DiscoveryPanel.jsx:1027`). The 8 s `{type:'thinking'}` ping is ignored by the client (`useDiscovery.js:55-74`).
+  - Nothing measures how often production meets a cold generation.
+- **Where it goes.** The candidates are: pre-warm every trip city; tool-based staged emission, so thinking interleaves per category; parallel per-category requests; and a readable wait state. They are scoped in a separate plan (Discovery wait architecture), which carries this measurement as its evidence.
+
+**D-30-7.** The copy and the owner DB counts were unchanged on both sweeps and on the spot check.
+
+**Checks.** `cd backend; npm test`: 45 files, **1,219 passed**, 6 skipped; every discovery body and prompt pin is unchanged. `node --check` passed on every changed script. The scorer's re-score of Plan 30 runs left every non-thinking row unchanged.
+
+**Spend.** Anthropic **$0.284**: control $0.115, candidate $0.169. The spot check made no model call: 479 of 1,000 Nominatim requests and 50 of 50 Google escalations, against process-local budgets.
+
+**Files.**
+- `backend/scripts/modelEval/lib/discoveryPromptVariants.mjs`, `profiles.mjs`, `lib/score/discovery.mjs` and `README.md`;
+- `backend/src/services/claude.js` (a comment only);
+- `docs/DECISIONS.md`;
+- this plan.
+
+**The original plan for this wave, kept for history:**
 
 **Files.**
 - `backend/scripts/modelEval/profiles.mjs`: a new `v-exact12-adaptive-low` profile `{ model: HAIKU_55, maxTokens: 48000, effort: 'low', promptVariant: 'exact-count' }` (no `thinking` field, so adaptive);

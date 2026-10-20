@@ -31,7 +31,10 @@ items once the projected spend for the whole list passes it, and exits with code
 Discovery profiles may carry a harness-only `promptVariant` (Plan 30 W3 second pass): `discovery.mjs` then
 rewrites the two volume/selection lines of the system prompt on the wire, from
 `lib/discoveryPromptVariants.mjs`, after the recorder is installed so the run file stores the prompt
-actually sent. `claude.js` is never changed to measure a variant.
+actually sent. `claude.js` is never changed to measure a variant. A variant must name **both** lines when
+the model's live lines differ from Haiku 4.5's original: an unnamed line falls back to the original, not the live
+one (Plan 34 W4's `exact-count` names both). The discovery scorer reports thinking tokens from the API's exact
+`output_tokens_details.thinking_tokens` when every call carries it, with the Plan 30 W3 estimate printed beside it.
 
 Extraction profiles may carry `promptVariant` too (Plan 34 W1): `extraction.mjs` installs it from
 `lib/extractionPromptVariants.mjs` after the recorder, wrapping `Messages.prototype.create`, and throws unless the
