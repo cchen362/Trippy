@@ -1,31 +1,30 @@
 import { FileText } from 'lucide-react';
 import { tzAbbr } from './bookingCardUtils.js';
-import { formatAtAsWritten } from './factFormat.js';
+import { compareAtAsWritten, formatAtAsWritten } from './factFormat.js';
 
-// D-37-13 (Plan 37): deadlines, windows, requirements and restrictions first; instructions, allowances, contacts and cost lines under "Also in the document".
+// D-37-13 (Plan 37): the primary kinds come first, in time order (undated last); instructions, allowances, contacts and cost lines stay grouped by kind under "Also in the document".
 const PRIMARY_KINDS = ['deadline', 'window', 'requirement', 'restriction'];
 const SECONDARY_KINDS = ['instruction', 'allowance', 'contact', 'cost_condition'];
 
-// Orders by kind, then `at` ascending (empty last), then original order. A kind neither list
-// names sorts after the known secondary ones rather than disappearing.
+// A kind neither list names sorts after the known ones rather than disappearing.
 function kindRank(kinds, kind) {
   const i = kinds.indexOf(kind);
   return i === -1 ? kinds.length : i;
 }
 
-function orderFacts(facts, kinds, keep) {
+// Primary facts order by `at`, then kind, then original order; secondary facts stay grouped by
+// kind, then `at`, then original order.
+function orderFacts(facts, kinds, keep, timeFirst) {
+  const compareAt = (a, b) => compareAtAsWritten(a.fact.at, b.fact.at);
+  const compareKind = (a, b) => kindRank(kinds, a.fact.kind) - kindRank(kinds, b.fact.kind);
+  const steps = timeFirst ? [compareAt, compareKind] : [compareKind, compareAt];
   return facts
     .map((fact, index) => ({ fact, index }))
     .filter(({ fact }) => keep(fact.kind))
     .sort((a, b) => {
-      const byKind = kindRank(kinds, a.fact.kind) - kindRank(kinds, b.fact.kind);
-      if (byKind !== 0) return byKind;
-      const atA = a.fact.at || '';
-      const atB = b.fact.at || '';
-      if (atA !== atB) {
-        if (!atA) return 1;
-        if (!atB) return -1;
-        return atA < atB ? -1 : 1;
+      for (const step of steps) {
+        const d = step(a, b);
+        if (d !== 0) return d;
       }
       return a.index - b.index;
     })
@@ -158,8 +157,8 @@ export default function BookingConditions({ facts, documents = [], onOpenSource,
   const hasFacts = Array.isArray(facts) && facts.length > 0;
   if (!hasFacts && !reading) return null;
 
-  const primary = hasFacts ? orderFacts(facts, PRIMARY_KINDS, (k) => PRIMARY_KINDS.includes(k)) : [];
-  const secondary = hasFacts ? orderFacts(facts, SECONDARY_KINDS, (k) => !PRIMARY_KINDS.includes(k)) : [];
+  const primary = hasFacts ? orderFacts(facts, PRIMARY_KINDS, (k) => PRIMARY_KINDS.includes(k), true) : [];
+  const secondary = hasFacts ? orderFacts(facts, SECONDARY_KINDS, (k) => !PRIMARY_KINDS.includes(k), false) : [];
   const withName = hasFacts && new Set(facts.map((f) => f.document?.key)).size > 1;
 
   return (

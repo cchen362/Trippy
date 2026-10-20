@@ -71,6 +71,32 @@ describe('cardConditionLines', () => {
     expect(lines.map((l) => l.key)).toEqual(['d', 'w']);
   });
 
+  it('lists a hotel check-in window before the later check-out deadline', () => {
+    const lines = cardConditionLines([
+      fact('out', 'deadline', '2026-11-11T12:00'),
+      fact('in', 'window', '2026-11-09T16:00'),
+    ], TODAY);
+    expect(lines.map((l) => l.key)).toEqual(['in', 'out']);
+  });
+
+  it('keeps the deadline first when it is earlier than the window, and on a tie', () => {
+    expect(cardConditionLines([
+      fact('w', 'window', '2026-11-12T15:00'),
+      fact('d', 'deadline', '2026-11-10'),
+    ], TODAY).map((l) => l.key)).toEqual(['d', 'w']);
+    expect(cardConditionLines([
+      fact('w', 'window', '2026-11-10'),
+      fact('d', 'deadline', '2026-11-10'),
+    ], TODAY).map((l) => l.key)).toEqual(['d', 'w']);
+  });
+
+  it('puts a window with no date after a dated deadline', () => {
+    expect(cardConditionLines([
+      fact('w', 'window', null),
+      fact('d', 'deadline', '2026-11-10'),
+    ], TODAY).map((l) => l.key)).toEqual(['d', 'w']);
+  });
+
   it('never returns other kinds', () => {
     const others = ['requirement', 'instruction', 'allowance', 'contact', 'restriction', 'cost_condition']
       .map((k, i) => fact(`o${i}`, k, '2026-11-01'));
