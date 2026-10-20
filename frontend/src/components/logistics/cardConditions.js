@@ -1,13 +1,13 @@
-import { localIso } from '../../utils/date.js';
+import { compareDeadlines, deviceZone, isDeadlineAhead } from './deadlineTime.js';
 import { formatAtAsWritten } from './factFormat.js';
 
-export function cardConditionLines(facts, today = localIso()) {
-  // D-37-5 (Plan 37): a card shows at most the next deadline and the first window, no gold; the full list lives in the detail sheet.
+export function cardConditionLines(facts, now = new Date(), deviceTz = deviceZone()) {
+  // D-37-5 (Plan 37): a card shows at most the next deadline (the same ahead-test and order as Due) and the first window, no gold; the full list lives in the detail sheet.
   if (!Array.isArray(facts) || facts.length === 0) return [];
 
   const deadlines = facts
-    .filter((f) => f.kind === 'deadline' && f.at && f.at.slice(0, 10) >= today)
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    .filter((f) => f.kind === 'deadline' && f.at && isDeadlineAhead(f, now, deviceTz))
+    .sort((a, b) => compareDeadlines(a, b, deviceTz));
 
   const windows = facts
     .filter((f) => f.kind === 'window')

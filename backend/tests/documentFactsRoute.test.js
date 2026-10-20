@@ -124,3 +124,93 @@ describe('GET /api/trips/:tripId/facts', () => {
     expect(text).not.toContain('quoteVerified');
   });
 });
+
+// D-37-10 (Plan 37): a zone-less fact is served with its booking's zone, derived at read time.
+describe('GET /api/trips/:tripId/facts: the booking zone', () => {
+  let zoneTripId;
+  const ids = {};
+  const fetchFacts = async () => (await fetch(`${baseUrl}/api/trips/${zoneTripId}/facts`, { headers: { Cookie: `auth_token=${tokens.owner}` } })).json();
+  const factsOf = (body, bookingId) => body.bookings.find((b) => b.bookingId === bookingId).facts;
+
+  beforeAll(async () => {
+    const db = getDb();
+    const ownerId = db.prepare("SELECT id FROM users WHERE username = 'facts-owner'").get().id;
+    zoneTripId = createTrip(ownerId, {
+      title: 'Zone trip', destinations: ['Kuala Lumpur'], destinationCountries: ['MY'],
+      startDate: '2099-04-01', endDate: '2099-04-05', travellers: 'solo', interestTags: [], pace: 'moderate',
+    }).trip.id;
+
+    const makeBooking = async (title, type, columns, details = {}) => {
+      const id = (await createBooking(ownerId, zoneTripId, { type, title })).id;
+      db.prepare('UPDATE bookings SET origin_tz = ?, destination_tz = ?, start_datetime = ?, details_json = ? WHERE id = ?')
+        .run(columns.origin ?? null, columns.destination ?? null, columns.start ?? null, JSON.stringify(details), id);
+      return id;
+    };
+    // One PDF backs both flights, which sit in different zones.
+    const artifactId = db.prepare("INSERT INTO import_artifacts (user_id, status) VALUES (?, 'extracted') RETURNING id").get(ownerId).id;
+    const fileId = db.prepare(`
+      INSERT INTO import_artifact_files (artifact_id, position, kind, media_type, filename, size_bytes, content_hash, content)
+      VALUES (?, 0, 'pdf', 'application/pdf', 'two.pdf', 1, 'hz', ?) RETURNING id
+    `).get(artifactId, Buffer.from('x')).id;
+    const imported = { importedFrom: { artifactId, model: 'm', extractedAt: 'now', filePositions: [0] } };
+    ids.tokyo = await makeBooking('Out', 'flight', { origin: 'Asia/Tokyo', destination: 'Europe/London' }, imported);
+    ids.london = await makeBooking('Back', 'flight', { origin: 'Europe/London' }, imported);
+    ids.dayCountry = await makeBooking('Day hotel', 'hotel', { start: '2099-04-02T14:00' });
+    ids.none = await makeBooking('Nowhere', 'other', { start: '2098-01-01T10:00' });
+
+    const readId = db.prepare(`
+      INSERT INTO document_fact_reads (trip_id, booking_id, artifact_file_id, content_hash, model, prompt_version, status, fact_count, verified_count)
+      VALUES (?, ?, ?, 'hz', 'claude-haiku-5-5', '37.1', 'complete', 2, 2) RETURNING id
+    `).get(zoneTripId, ids.tokyo, fileId).id;
+    const insertFact = db.prepare(`
+      INSERT INTO document_facts (read_id, trip_id, booking_id, artifact_file_id, kind, label, value, quote, page, verified_page, quote_verified, value_at, value_tz, tz_source, confidence, position)
+      VALUES (?, ?, ?, ?, 'deadline', ?, 'x', ?, 1, 1, 1, ?, ?, ?, 'high', ?)
+    `);
+    insertFact.run(readId, zoneTripId, ids.tokyo, fileId, 'Written zone', 'q1', '2099-04-02T10:00', 'Asia/Seoul', 'document', 0);
+    insertFact.run(readId, zoneTripId, ids.tokyo, fileId, 'No zone', 'q2', '2099-04-02T11:00', null, 'none', 1);
+    insertFact.run(readId, zoneTripId, ids.tokyo, fileId, 'Bad zone', 'q3', '2099-04-02T12:00', 'Asia/Nowhere', 'document', 2);
+
+    // The two single-booking cases each own an attachment with one zone-less fact.
+    for (const key of ['dayCountry', 'none']) {
+      const attachment = db.prepare(`
+        INSERT INTO booking_attachments (booking_id, media_type, filename, size_bytes, content, content_hash, source)
+        VALUES (?, 'application/pdf', ?, 1, ?, ?, 'manual') RETURNING id
+      `).get(ids[key], `${key}.pdf`, Buffer.from('x'), `h-${key}`).id;
+      const read = db.prepare(`
+        INSERT INTO document_fact_reads (trip_id, booking_id, attachment_id, content_hash, model, prompt_version, status, fact_count, verified_count)
+        VALUES (?, ?, ?, ?, 'claude-haiku-5-5', '37.1', 'complete', 1, 1) RETURNING id
+      `).get(zoneTripId, ids[key], attachment, `h-${key}`).id;
+      db.prepare(`
+        INSERT INTO document_facts (read_id, trip_id, booking_id, attachment_id, kind, label, value, quote, page, verified_page, quote_verified, value_at, tz_source, confidence, position)
+        VALUES (?, ?, ?, ?, 'deadline', 'No zone', 'x', 'q', 1, 1, 1, '2099-04-02T09:00', 'none', 'high', 0)
+      `).run(read, zoneTripId, ids[key], attachment);
+    }
+  });
+
+  it('keeps a stored document zone and derives the rest from the booking', async () => {
+    const [written, derived] = factsOf(await fetchFacts(), ids.tokyo);
+    expect(written).toMatchObject({ tz: 'Asia/Seoul', tzSource: 'document' });
+    expect(derived).toMatchObject({ tz: 'Asia/Tokyo', tzSource: 'booking' });
+  });
+
+  it("gives one document backing two bookings each booking's own zone", async () => {
+    const body = await fetchFacts();
+    expect(factsOf(body, ids.london).find((f) => f.label === 'No zone')).toMatchObject({ tz: 'Europe/London', tzSource: 'booking' });
+    expect(factsOf(body, ids.london).find((f) => f.label === 'Written zone')).toMatchObject({ tz: 'Asia/Seoul', tzSource: 'document' });
+    expect(factsOf(body, ids.tokyo).find((f) => f.label === 'No zone').tz).toBe('Asia/Tokyo');
+  });
+
+  it('treats a stored zone the platform rejects as absent', async () => {
+    const body = await fetchFacts();
+    expect(factsOf(body, ids.tokyo).find((f) => f.label === 'Bad zone')).toMatchObject({ tz: 'Asia/Tokyo', tzSource: 'booking' });
+    expect(factsOf(body, ids.london).find((f) => f.label === 'Bad zone')).toMatchObject({ tz: 'Europe/London', tzSource: 'booking' });
+  });
+
+  it('falls back to the zone of the country of the day the booking starts on', async () => {
+    expect(factsOf(await fetchFacts(), ids.dayCountry)[0]).toMatchObject({ tz: 'Asia/Kuala_Lumpur', tzSource: 'booking' });
+  });
+
+  it('leaves a booking with no zone evidence at none', async () => {
+    expect(factsOf(await fetchFacts(), ids.none)[0]).toMatchObject({ tz: null, tzSource: 'none' });
+  });
+});

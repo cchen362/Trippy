@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
 import { listTripFacts, waitForTripReads } from '../services/documentFacts.js';
-import { createTrip, deleteTrip, getTripDetail, listTripsForUser, updateTrip } from '../services/trips.js';
+import { createTrip, deleteTrip, getTripDetail, listBookingsForTrip, listDaysForTrip, listTripsForUser, updateTrip } from '../services/trips.js';
 
 const router = Router();
 
@@ -51,7 +51,9 @@ router.get('/:tripId/facts', requireTripAccess, async (req, res, next) => {
       const { aborted } = await waitForTripReads(req.params.tripId, { timeoutMs: FACTS_WAIT_MS, signal: controller.signal });
       if (aborted) return;
     }
-    res.json(listTripFacts(req.params.tripId));
+    // The settled day geography (D-26-2) gives a zone-less fact its booking's country; documentFacts.js cannot import trips.js.
+    const days = listDaysForTrip(req.params.tripId, req.user.id, listBookingsForTrip(req.params.tripId));
+    res.json(listTripFacts(req.params.tripId, { days }));
   } catch (error) {
     next(error);
   }

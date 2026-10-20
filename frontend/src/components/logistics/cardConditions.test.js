@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cardConditionLines, conditionsAriaSuffix } from './cardConditions.js';
 
-const TODAY = '2026-10-20';
+const TODAY = new Date(2026, 9, 20, 12, 0);
 const fact = (id, kind, at) => ({ id, kind, at, label: `L-${id}`, value: `V-${id}` });
 
 describe('cardConditionLines', () => {
@@ -35,6 +35,15 @@ describe('cardConditionLines', () => {
   it('counts a deadline due today as upcoming, even if its time has passed', () => {
     const lines = cardConditionLines([fact('today', 'deadline', '2026-10-20T00:30')], TODAY);
     expect(lines.map((l) => l.key)).toEqual(['today']);
+  });
+
+  it('skips a timed deadline already passed in its known zone', () => {
+    const now = new Date('2026-10-20T12:00:00Z');
+    const lines = cardConditionLines([
+      { ...fact('gone', 'deadline', '2026-10-20T09:00'), tz: 'UTC' },
+      { ...fact('next', 'deadline', '2026-10-20T20:00'), tz: 'UTC' },
+    ], now, 'Asia/Singapore');
+    expect(lines.map((l) => l.key)).toEqual(['next']);
   });
 
   it('picks the first window by date, empty at last, regardless of today', () => {

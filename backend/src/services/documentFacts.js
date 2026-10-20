@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { FACTS_MODEL, FACTS_PROMPT_VERSION, readDocumentFacts } from './claude.js';
 import { documentTextPages, findQuote, hasTextLayer } from './documentText.js';
 import { artifactFileKey, attachmentKey, importFileRowsOf } from './documents.js';
+import { bookingZone, isKnownZone } from './factZone.js';
 
 const ARTIFACT_PREFIX = 'artifactFile:';
 const ATTACHMENT_PREFIX = 'attachment:';
@@ -434,7 +435,12 @@ export function requeueUnreadDocuments() {
 // any model or prompt version, so facts do not vanish while a re-read is pending (D-37-1), and each
 // fact shows under every booking that owns its document (D-38-3). Bookings with no facts are omitted.
 // `readsPending` counts this trip's documents queued or in flight right now.
-export function listTripFacts(tripId) {
+//
+// A fact whose document names no zone is served with its booking's zone (tzSource 'booking', D-37-10),
+// derived here and never stored; each booking gets its own copy of the fact because one document can back
+// bookings in different zones. `days` is the trip's days ({ date, resolvedCountry }, listDaysForTrip), the
+// caller's to load because this module cannot import trips.js; without it the day-country step is skipped.
+export function listTripFacts(tripId, { days = [] } = {}) {
   const db = getDb();
   const latestRead = {
     artifact_file_id: db.prepare(`
@@ -447,6 +453,22 @@ export function listTripFacts(tripId) {
     `),
   };
   const factsOf = db.prepare('SELECT * FROM document_facts WHERE read_id = ? ORDER BY position');
+
+  const bookingRows = new Map(db.prepare(
+    'SELECT id, type, origin_tz, destination_tz, details_json, start_datetime FROM bookings WHERE trip_id = ?',
+  ).all(tripId).map((row) => [row.id, row]));
+  const dayCountry = new Map(days.map((d) => [d.date, d.resolvedCountry]));
+  const zoneMemo = new Map();
+  const zoneOf = (bookingId, at) => {
+    const key = `${bookingId}|${at ?? ''}`;
+    if (!zoneMemo.has(key)) {
+      const booking = bookingRows.get(bookingId);
+      zoneMemo.set(key, booking
+        ? bookingZone(booking, { at, dayCountry: dayCountry.get(booking.start_datetime?.slice(0, 10)) ?? null })
+        : null);
+    }
+    return zoneMemo.get(key);
+  };
 
   const byBooking = new Map();
   let readsPending = 0;
@@ -476,7 +498,12 @@ export function listTripFacts(tripId) {
     if (facts.length === 0) continue;
     for (const bookingId of doc.bookingIds) {
       if (!byBooking.has(bookingId)) byBooking.set(bookingId, []);
-      byBooking.get(bookingId).push(...facts);
+      byBooking.get(bookingId).push(...facts.map((fact) => {
+        // A stored zone is only the shape-checked name the reader returned; one the platform rejects is absent.
+        if (isKnownZone(fact.tz)) return { ...fact };
+        const zone = zoneOf(bookingId, fact.at);
+        return zone ? { ...fact, tz: zone, tzSource: 'booking' } : { ...fact, tz: null, tzSource: 'none' };
+      }));
     }
   }
 
