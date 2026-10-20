@@ -1,6 +1,6 @@
 # Implementation Plan 37 — The Living Dossier, Phase 1: document facts, Conditions, Due
 
-**Status:** 2026-10-20 — **WRITTEN at `8ffc1b5` (`origin/main`), awaiting owner approval.** Origin: the [living-dossier assessment](../reviews/2026-10-20-model-55-exploration-assessment.md) and the owner's rulings of the same day (R-1, R-2, R-3, O-1 to O-5, recorded in `docs/DECISIONS.md`, "Living dossier direction"). W0 is the experiment the owner approved under O-4; its design here is provisional until this plan is approved, and every decision below is provisional until its named gate. Each owner question carries a default. Waves are implemented later via `/implement-milestone`, each on its own branch. The assessment pencilled this in as Plan 36; that number was taken the same day by Discovery catalogue completeness, so the assessment and DECISIONS now say Plan 37.
+**Status:** 2026-10-20 — **APPROVED by the owner 2026-10-20** with the default on every question (Q-37-1 to Q-37-9); the owner takes the production backup copy for W0's corpus; W0 runs in a fresh session on Opus 5.5 at `high` (§9) from the handoff note `2026-10-20-plan37-w0-handoff.md` beside this plan. Written at `8ffc1b5` (`origin/main`). Origin: the [living-dossier assessment](../reviews/2026-10-20-model-55-exploration-assessment.md) and the owner's rulings of the same day (R-1, R-2, R-3, O-1 to O-5, recorded in `docs/DECISIONS.md`, "Living dossier direction"). W0 is the experiment the owner approved under O-4; every decision below is provisional until its named gate. Each owner question carries a default. Waves are implemented later via `/implement-milestone`, each on its own branch. The assessment pencilled this in as Plan 36; that number was taken the same day by Discovery catalogue completeness, so the assessment and DECISIONS now say Plan 37.
 
 **Origin.** The assessment chose "the living dossier" as the flagship: Trippy reads every document on a trip in full, not just the booking line, and keeps three things current: an inbox, Conditions and Due on each booking, and a readiness ledger. The owner ruled that bounded background compute is allowed without notifications or polling (R-1), that documents arriving through MCP are read like every other document (R-2), that a booking-change proposal kind is Phase 3 scope (R-3), that intake must be platform-neutral (O-1), that inbound email is acceptable and staged last (O-2), that Conditions and Due alone are worth shipping if the ledger disappoints (O-3, reviewed as it goes), that the experiment is approved (O-4), and that ideas come later (O-5). This plan is Phase 1: the experiment, then facts, Conditions and Due on the documents Trippy already holds.
 
@@ -242,7 +242,7 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 ### W0 — Measure (harness only, no production change)
 
-**Status:** NOT STARTED. Approved in principle by O-4 (2026-10-20); its steps and gates are provisional until this plan is approved.
+**Status:** NOT STARTED. Approved 2026-10-20 with the plan (defaults on Q-37-1 to Q-37-9); to run in a fresh session on Opus 5.5 at `high` from `2026-10-20-plan37-w0-handoff.md`. The owner supplies the production backup copy.
 
 **Files.** `backend/scripts/modelEval/facts.mjs`, `readiness.mjs`, `lib/factsContract.mjs` (schema, prompt, `findQuote`), `lib/readinessPrototype.mjs`, `lib/score/facts.mjs`, `lib/score/readiness.mjs`, `profiles.mjs` (the four facts and readiness profiles), `schemaProbe.mjs` (four probes), `lib/pricing.mjs` (unchanged unless prices moved; re-check), `README.md` under `modelEval`; `package.json` gains `pdfjs-dist` as a **devDependency** for the harness's `findQuote` (promoted to a dependency in W1). Nothing under `backend/src` or `frontend` changes.
 
@@ -349,7 +349,7 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 ## 10. Owner questions
 
-Each follows the plain-language shape: what it is, one example, the implication, the recommendation. A default applies unless the owner rules otherwise.
+Each follows the plain-language shape: what it is, one example, the implication, the recommendation. A default applies unless the owner rules otherwise. **Ruled 2026-10-20: the owner approved the plan with the default on every question below.**
 
 **Q-37-1 — Where do W0's documents come from?**
 - **Plain language.** The experiment needs real confirmations. This machine has no production export (F-37-30); the dev database holds 14 imports.
