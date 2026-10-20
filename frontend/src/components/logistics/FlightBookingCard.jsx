@@ -17,13 +17,13 @@ export default function FlightBookingCard({ booking, facts, onOpen }) {
   const flightNumber = dj.flightNumber || '';
   const airlineName = dj.airlineName || '';
 
-  const eyebrow = airlineName
-    ? `${airlineName.toUpperCase()} · ${carrierCode}${flightNumber}`
-    : booking.title;
-
+  // The flight number lives between the airport codes, as on a boarding pass; the eyebrow
+  // names the airline only, so the number is never printed twice.
   const centerGlyph = carrierCode && flightNumber
     ? `${carrierCode} ${flightNumber}`
     : booking.title;
+
+  const eyebrow = airlineName ? airlineName.toUpperCase() : 'Flight';
 
   const originTz = booking.originTz || tzFromIata(originIata) || null;
   const destTz   = booking.destinationTz || tzFromIata(destIata) || null;

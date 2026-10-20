@@ -17,9 +17,11 @@ export default function TrainBookingCard({ booking, facts, onOpen }) {
   const destCity = dj.destinationCity || booking.destination || '';
   const seatClass = dj.seatClass || '';
 
+  // The train number lives between the stations; the eyebrow names the route only, so the
+  // number is never printed twice.
   const eyebrow = originCity && destCity
-    ? `${originCity.toUpperCase()} \u2192 ${destCity.toUpperCase()}${trainNumber ? ` \u00b7 ${trainNumber}` : ''}`
-    : booking.title;
+    ? `${originCity.toUpperCase()} \u2192 ${destCity.toUpperCase()}`
+    : (trainNumber ? 'Train' : booking.title);
 
   const originTz = booking.originTz || null;
   const destTz   = booking.destinationTz || null;
