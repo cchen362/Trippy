@@ -14,9 +14,8 @@ import {
   getDailyGenerationCount,
   listCountryCodedRows,
   countActivePlacesByCategory,
-  CACHE_TTL_MS,
   CATEGORY_ACTIVE_CAP,
-  cacheTimestampToEpochMs,
+  isCatalogueFresh,
   MAX_GENERATIONS_PER_DESTINATION_PER_DAY,
 } from '../db/discoveryCatalogue.js';
 import { rankPlaces, orderCategories, buildFitLine } from '../services/discoveryRank.js';
@@ -243,10 +242,7 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
 
     const activeRows = listActivePlaces(db, destinationRow.id);
     const hasActivePlaces = activeRows.length > 0;
-    const lastGeneratedAtMs = cacheTimestampToEpochMs(destinationRow.last_generated_at);
-    const cacheIsFresh = hasActivePlaces && lastGeneratedAtMs !== null
-      ? (Date.now() - lastGeneratedAtMs) < CACHE_TTL_MS
-      : false;
+    const cacheIsFresh = isCatalogueFresh(destinationRow, activeRows.length);
 
     if (!more && hasActivePlaces && cacheIsFresh) {
       // Plan 35 W0: one line per fresh open, so the container log gives cold opens against all
