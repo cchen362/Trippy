@@ -35,6 +35,7 @@ import { createToken } from '../src/services/integrationTokens.js';
 import { addAttachment, listAttachments } from '../src/services/attachments.js';
 import { createMcpRouter } from '../src/routes/mcp.js';
 import { errorHandler } from '../src/middleware/errorHandler.js';
+import { kickDocumentReads } from '../src/services/documentFacts.js';
 import { issueUploadTicket, uploadUrlFor, getUploadTicket } from '../src/services/mcp/uploads.js';
 
 const FRONTEND_URL = 'http://localhost:5174';
@@ -182,6 +183,26 @@ describe('happy path', () => {
     const updatedTicket = getUploadTicket(ticket.id);
     expect(updatedTicket.status).toBe('used');
     expect(updatedTicket.attachmentId).toBe(json.attachmentId);
+  });
+
+  it('queues the new document for a background read and never waits on it (D-37-3, R-2)', async () => {
+    const { bookingId } = await makeBooking();
+    const { ticket, body } = issue(bookingId);
+    // tests/setup/noDocumentFacts.js makes the kick a spy: a read that ran inline would need a model call, which the network guard forbids.
+    vi.mocked(kickDocumentReads).mockClear();
+
+    const res = await putBody(ticket.id, body, 'image/png');
+    expect(res.status).toBe(201);
+    const { attachmentId } = await res.json();
+
+    expect(kickDocumentReads).toHaveBeenCalledTimes(1);
+    expect(kickDocumentReads).toHaveBeenCalledWith([`attachment:${attachmentId}`]);
+
+    // A replay of the same ticket writes no second row, so it queues no second read.
+    vi.mocked(kickDocumentReads).mockClear();
+    const replay = await putBody(ticket.id, body, 'image/png');
+    expect(replay.status).toBe(200);
+    expect(kickDocumentReads).not.toHaveBeenCalled();
   });
 
   it('replaying the same bytes to the same ticket returns the same attachment, alreadyAttached true', async () => {

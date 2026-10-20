@@ -26,6 +26,7 @@ import stopRoutes from './routes/stops.js';
 import tripRoutes from './routes/trips.js';
 import { createMcpRouter } from './routes/mcp.js';
 import { installShutdownHandlers } from './shutdown.js';
+import { requeueUnreadDocuments, stopDocumentReads } from './services/documentFacts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -93,6 +94,9 @@ async function start() {
     if (adminUser) seedIfEmpty(adminUser.id);
   }
 
+  // D-37-3 (Plan 37): the boot pass queues every document with no complete read; the kick returns at once, so it never delays listen.
+  if (config.documentFactsEnabled) requeueUnreadDocuments();
+
   const server = app.listen(config.port, () => {
     console.log(`Trippy backend running on :${config.port} [${config.nodeEnv}]`);
   });
@@ -102,6 +106,8 @@ async function start() {
   installShutdownHandlers({
     server,
     closeDb: async () => {
+      // F-37-19: a read in flight is aborted and settled before the database closes, never left to meet a closed handle.
+      await stopDocumentReads();
       if (app.locals.mcpHandler) await app.locals.mcpHandler.close();
       getDb().close();
     },

@@ -1,6 +1,8 @@
 import { createHash } from 'crypto';
 import { getDb } from '../db/database.js';
 import { assertBookingAccess } from './trips.js';
+import { kickDocumentReads } from './documentFacts.js';
+import { attachmentKey } from './documents.js';
 
 export const SIZE_CAPS = { image: 5 * 1024 * 1024, pdf: 10 * 1024 * 1024 };
 export const MEDIA_TYPE_WHITELIST = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
@@ -82,6 +84,9 @@ export function writeAttachment(bookingId, { mediaType, filename, contentBuffer,
     VALUES (?, ?, ?, ?, ?, ?, ?)
     RETURNING id, booking_id, media_type, filename, size_bytes, content_hash, source, created_at
   `).get(bookingId, mediaType, filename || null, sizeBytes, contentBuffer, contentHash, source);
+
+  // D-37-3 (Plan 37): the one kick for manual and MCP uploads alike — reads are channel-blind and deferred, so an MCP request never waits on or pays for a model call (R-2), and a kick made inside the MCP caller's transaction runs only after it commits.
+  kickDocumentReads([attachmentKey(row.id)]);
 
   return mapAttachmentMetadata(row);
 }

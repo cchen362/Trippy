@@ -90,4 +90,9 @@ export const config = {
   // what a client actually dialed.
   mcpEnabled: process.env.MCP_ENABLED === '1',
   mcpPublicUrl: process.env.MCP_PUBLIC_URL || '',
+  // D-37-12 (Plan 37): one switch stops document-fact reads (the kicks and the boot pass), read at startup like MCP_ENABLED; rollback is one revert plus a redeploy, migration 038 stays.
+  // Default on: the only cost is one small model call per stored document (Haiku 5.5, about a third of a cent).
+  documentFactsEnabled: process.env.DOCUMENT_FACTS_ENABLED !== '0',
+  // D-37-3 (Plan 37): daily cap on document reads, counted in memory per UTC day like the discovery budgets above (reset on a new day, lost on restart). A document the cap stops is recorded `skipped` with no model call and is picked up by the next boot pass.
+  documentReadsDailyBudget: parseInt(process.env.DOCUMENT_READS_DAILY_BUDGET || '300', 10),
 };

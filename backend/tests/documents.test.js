@@ -8,7 +8,7 @@ import * as authService from '../src/services/auth.js';
 import { createTrip } from '../src/services/trips.js';
 import { createBooking } from '../src/services/bookings.js';
 import { addAttachment } from '../src/services/attachments.js';
-import { importFilesOf, resolveBookingDocuments } from '../src/services/documents.js';
+import { importFileRowsOf, importFilesOf, resolveBookingDocuments } from '../src/services/documents.js';
 
 let tmpDir;
 let owner;
@@ -80,7 +80,9 @@ describe('resolveBookingDocuments — import documents (D-38-3, D-38-5)', () => 
   it('lists only the files the booking names', () => {
     const artifactId = makeArtifact();
     const docs = importDocs(resolveBookingDocuments(bookingId, imported(artifactId, [3])));
+    const fileId = getDb().prepare('SELECT id FROM import_artifact_files WHERE artifact_id = ? AND position = 3').get(artifactId).id;
     expect(docs).toEqual([{
+      key: `artifactFile:${fileId}`,
       source: 'import',
       url: `/api/import/artifacts/${artifactId}/files/3`,
       mediaType: 'image/jpeg',
@@ -133,6 +135,26 @@ describe('resolveBookingDocuments — import documents (D-38-3, D-38-5)', () => 
   });
 });
 
+describe('importFileRowsOf (D-38-3, D-37-8)', () => {
+  it('returns every file of every kind for a legacy booking, pasted text included', () => {
+    const artifactId = makeArtifact();
+    const rows = importFileRowsOf(imported(artifactId));
+    expect(rows.map((r) => [r.position, r.kind])).toEqual([[0, 'image'], [1, 'pdf'], [2, 'text'], [3, 'image']]);
+    expect(rows[0]).toMatchObject({ artifact_id: artifactId, media_type: 'image/png', filename: 'a.png' });
+    expect(rows[0].id).toBeTruthy();
+    expect(rows[0].content_hash).toBe(`hash-${artifactId}-0`);
+  });
+
+  it('honours positions, an empty list, kinds and a booking that was not imported', () => {
+    const artifactId = makeArtifact();
+    expect(importFileRowsOf(imported(artifactId, [2, 1])).map((r) => r.position)).toEqual([1, 2]);
+    expect(importFileRowsOf(imported(artifactId, []))).toEqual([]);
+    expect(importFileRowsOf(imported(artifactId), { kinds: ['pdf'] }).map((r) => r.position)).toEqual([1]);
+    expect(importFileRowsOf(imported(artifactId), { kinds: [] })).toEqual([]);
+    expect(importFileRowsOf({})).toEqual([]);
+  });
+});
+
 describe('resolveBookingDocuments — manual attachments', () => {
   it('are listed after the import documents and are unaffected by positions', async () => {
     const artifactId = makeArtifact();
@@ -144,6 +166,7 @@ describe('resolveBookingDocuments — manual attachments', () => {
       const docs = resolveBookingDocuments(bookingId, imported(artifactId, positions));
       const manual = docs.filter((d) => d.source === 'attachment');
       expect(manual.map((d) => d.filename)).toEqual(['manual.png']);
+      expect(manual[0].key).toMatch(/^attachment:[0-9a-f]{32}$/);
       expect(docs.at(-1).source).toBe('attachment');
     }
   });

@@ -83,6 +83,7 @@ function mapStop(row) {
   };
 }
 
+// D-37-7 (Plan 37): facts are private trip data — never in the public share, MCP get_trip, or the co-pilot context.
 function buildPublicTripDetail(tripId) {
   const db = getDb();
   const tripRow = db.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);

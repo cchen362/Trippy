@@ -4,6 +4,8 @@ import { extractBookings } from './claude.js';
 import { createBooking } from './bookings.js';
 import { assertTripAccess, listBookingsForTrip, listDaysForTrip } from './trips.js';
 import { parseFlightDesignator } from './lookups.js';
+import { artifactFileKey, importFileRowsOf } from './documents.js';
+import { kickDocumentReads } from './documentFacts.js';
 
 const SIZE_CAPS = { text: 100 * 1024, image: 5 * 1024 * 1024, pdf: 10 * 1024 * 1024 };
 const MEDIA_TYPE_WHITELIST = {
@@ -477,6 +479,13 @@ export async function confirmArtifact(userId, artifactId, { tripId, bookings }) 
     SET trip_id = ?, created_booking_ids = ?, status = 'confirmed', confirmed_at = datetime('now')
     WHERE id = ?
   `).run(tripId, JSON.stringify(created.map((b) => b.id)), artifactId);
+
+  // D-37-3 (Plan 37): the documents of the bookings just created are read in the background, every file of every kind each booking owns (a pasted confirmation included, D-37-8). Outside any transaction.
+  const fileKeys = new Set();
+  for (const booking of created) {
+    for (const file of importFileRowsOf(booking.detailsJson)) fileKeys.add(artifactFileKey(file.id));
+  }
+  kickDocumentReads([...fileKeys]);
 
   return { bookings: created };
 }

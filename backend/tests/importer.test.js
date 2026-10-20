@@ -39,6 +39,7 @@ const {
   MAX_INPUTS,
 } = await import('../src/services/importer.js');
 const { EXTRACTION_FILE_NUMBERS } = await import('../src/services/claude.js');
+const { kickDocumentReads } = await import('../src/services/documentFacts.js');
 const { extractionReply, textReply } = await import('./helpers/extractionReply.js');
 
 const flightEmailText = readFileSync(join(__dirname, 'fixtures/flight-email.txt'), 'utf8');
@@ -690,6 +691,25 @@ describe('import file provenance (Plan 38 D-38-1/D-38-3/D-38-5)', () => {
 
     expect(result.bookings[0].detailsJson.importedFrom.artifactId).toBe(extracted.artifact.id);
     expect(result.bookings[0].detailsJson.importedFrom.filePositions).toEqual([1]);
+  });
+
+  it('confirm queues the files each created booking owns for a background read, once each (D-37-3)', async () => {
+    const trip = makeTrip();
+    const nominatim = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => [] });
+    onTestFinished(() => nominatim.mockRestore());
+    mockCreate.mockResolvedValue(extractionReply(extractionWithBookings([
+      flightBooking({ filePositions: [1] }),
+      hotelBooking({ filePositions: [0, 1] }),
+    ])));
+    const extracted = await createArtifactAndExtract(owner.id, { tripId: trip.trip.id, inputs: twoInputs() });
+    // tests/setup/noDocumentFacts.js makes the kick a spy; nothing has been queued by extraction itself.
+    expect(kickDocumentReads).not.toHaveBeenCalled();
+
+    await confirmArtifact(owner.id, extracted.artifact.id, { tripId: trip.trip.id, bookings: extracted.extraction.bookings });
+
+    const fileIds = getDb().prepare('SELECT id FROM import_artifact_files WHERE artifact_id = ?').all(extracted.artifact.id).map((f) => `artifactFile:${f.id}`);
+    expect(kickDocumentReads).toHaveBeenCalledTimes(1);
+    expect(kickDocumentReads.mock.calls[0][0].toSorted()).toEqual(fileIds.toSorted());
   });
 
   it('confirm rejects a position outside the artifact with a 400 before creating any booking', async () => {

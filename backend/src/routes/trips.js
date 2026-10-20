@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requireTripAccess } from '../middleware/tripAccess.js';
+import { listTripFacts } from '../services/documentFacts.js';
 import { createTrip, deleteTrip, getTripDetail, listTripsForUser, updateTrip } from '../services/trips.js';
 
 const router = Router();
@@ -31,6 +32,15 @@ router.post('/', (req, res, next) => {
 router.get('/:tripId/detail', requireTripAccess, (req, res, next) => {
   try {
     res.json(getTripDetail(req.params.tripId, req.user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Plan 37: the conditions a trip's documents state (D-37-1). Private trip data, deliberately not part of /detail (D-37-7).
+router.get('/:tripId/facts', requireTripAccess, (req, res, next) => {
+  try {
+    res.json(listTripFacts(req.params.tripId));
   } catch (error) {
     next(error);
   }

@@ -12,6 +12,30 @@ export function importFilesOf(detailsJson) {
   return { artifactId: from.artifactId, positions };
 }
 
+// D-37-8 (Plan 37): a pasted confirmation is a source too — text files are read for facts (their quotes verify by definition) though Documents never lists them (Q-38-3).
+// The files an import booking owns, as rows, through importFilesOf (D-38-3, D-38-5): positions null = a
+// pre-Plan-38 booking that owns every file of its artifact, an empty list = none. `kinds` narrows to
+// the given file kinds (documents lists image and pdf; document facts read all three). Documents and
+// facts both enumerate through here so they can never disagree about which files a booking owns.
+export function importFileRowsOf(detailsJson, { kinds = ['text', 'image', 'pdf'] } = {}) {
+  const imported = importFilesOf(detailsJson);
+  if (!imported || kinds.length === 0) return [];
+  const { artifactId, positions } = imported;
+  // An empty list names no file, so it yields no rows (and no `IN ()` SQL).
+  if (positions && positions.length === 0) return [];
+  return getDb().prepare(`
+    SELECT id, artifact_id, position, kind, media_type, filename, content_hash
+    FROM import_artifact_files
+    WHERE artifact_id = ? AND kind IN (${kinds.map(() => '?').join(', ')})
+      ${positions ? `AND position IN (${positions.map(() => '?').join(', ')})` : ''}
+    ORDER BY position ASC
+  `).all(artifactId, ...kinds, ...(positions ?? []));
+}
+
+// The `documents[]` key a fact pairs on: which stored file a document is.
+export const artifactFileKey = (id) => `artifactFile:${id}`;
+export const attachmentKey = (id) => `attachment:${id}`;
+
 // Resolves the `documents[]` field for a booking row from its two possible sources:
 // the import artifact it was extracted from (if any) and any manually attached files.
 // Shared by bookings.js (single/list booking reads) and trips.js (trip detail reads) —
@@ -20,25 +44,14 @@ export function resolveBookingDocuments(bookingId, detailsJson) {
   const db = getDb();
   const docs = [];
 
-  const imported = importFilesOf(detailsJson);
-  if (imported) {
-    const { artifactId, positions } = imported;
-    // An empty list names no file, so it yields no import document (and no `IN ()` SQL).
-    const files = positions && positions.length === 0 ? [] : db.prepare(`
-      SELECT position, media_type, filename
-      FROM import_artifact_files
-      WHERE artifact_id = ? AND kind IN ('image', 'pdf')
-        ${positions ? `AND position IN (${positions.map(() => '?').join(', ')})` : ''}
-      ORDER BY position ASC
-    `).all(artifactId, ...(positions ?? []));
-    for (const f of files) {
-      docs.push({
-        source: 'import',
-        url: `/api/import/artifacts/${artifactId}/files/${f.position}`,
-        mediaType: f.media_type,
-        filename: f.filename,
-      });
-    }
+  for (const f of importFileRowsOf(detailsJson, { kinds: ['image', 'pdf'] })) {
+    docs.push({
+      key: artifactFileKey(f.id),
+      source: 'import',
+      url: `/api/import/artifacts/${f.artifact_id}/files/${f.position}`,
+      mediaType: f.media_type,
+      filename: f.filename,
+    });
   }
 
   const attachments = db.prepare(`
@@ -47,6 +60,7 @@ export function resolveBookingDocuments(bookingId, detailsJson) {
   `).all(bookingId);
   for (const a of attachments) {
     docs.push({
+      key: attachmentKey(a.id),
       source: 'attachment',
       url: `/api/bookings/${bookingId}/attachments/${a.id}`,
       mediaType: a.media_type,
