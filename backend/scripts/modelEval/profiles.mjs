@@ -63,6 +63,8 @@ export const PROFILES = {
     'v-defined-medium': { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'medium', promptVariant: 'defined-categories' },
     // Plan 36 W3 (Q-36-1 option (a)): the W2 definitions with a firm "10 places in every category" line, at the live settings.
     'v-count-low': { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low', promptVariant: 'defined-count' },
+    // Plan 36 W4 (owner ruling after W3): the same with a batch of 12, at the live settings.
+    'v-count12-low': { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low', promptVariant: 'defined-count-12' },
     // The shared-prompt question: the same variants on the control model (Haiku 4.5, 64,000).
     '45-floor-ranked': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor-ranked' },
     '45-floor': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor' },

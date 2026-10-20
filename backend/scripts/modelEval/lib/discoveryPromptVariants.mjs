@@ -75,6 +75,13 @@ export const PROMPT_VARIANTS = Object.freeze({
     volume: '- Return 10 places in every category. Return fewer only when the destination genuinely cannot support 10 places that meet these rules; never pad with mediocre places.',
     categories: DEFINED_CATEGORIES,
   }),
+  // Plan 36 W4: W3 with the batch at 12. The number is a per-batch size, not a catalogue cap: "Find
+  // more places" appends batches up to CATEGORY_ACTIVE_CAP (45) per tab.
+  'defined-count-12': Object.freeze({
+    quality: FLOOR_RANKED_QUALITY,
+    volume: '- Return 12 places in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with mediocre places.',
+    categories: DEFINED_CATEGORIES,
+  }),
 });
 
 // The category-order line every discovery prompt carries exactly once; a variant's `categories`
