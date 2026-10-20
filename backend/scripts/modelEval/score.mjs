@@ -26,7 +26,8 @@ for (let i = 1; i < argv.length; i += 1) {
   else throw new Error(`unexpected argument ${argv[i]}`);
 }
 
-const { score } = await import(`./lib/score/${workload}.mjs`);
+const mod = await import(`./lib/score/${workload}.mjs`);
+const { score } = mod;
 
 const columns = [];
 for (const name of runPath ? [null] : profileNames) {
@@ -53,6 +54,13 @@ console.log(`\n| metric | ${columns.map((c) => c.name).join(' | ')} |`);
 console.log(`|---|${columns.map(() => '---').join('|')}|`);
 for (const m of metricNames) {
   console.log(`| ${m} | ${columns.map((c) => c.metrics[m] ?? '—').join(' | ')} |`);
+}
+if (typeof mod.compare === 'function') {
+  const lines = mod.compare(columns);
+  if (lines.length) {
+    console.log('\n### comparison\n');
+    for (const line of lines) console.log(line);
+  }
 }
 for (const c of columns) {
   for (const note of c.notes) console.log(`\n> ${c.name}: ${note}`);

@@ -19,7 +19,11 @@
 // extraction-plan-sonnet-5-5, extraction-plan-sonnet-4-6 (§4.1 as written), descriptor-haiku-5-5,
 // descriptor-haiku-4-5, union-inline-17, union-inline-16, complexity-<variant> (COMPLEXITY_VARIANTS), and
 // emit-category-haiku-5-5 (Plan 35 W0: EMIT_CATEGORY_INPUT_SCHEMA as a strict tool on the staged
-// discovery prompt — noformat is the same request without the tool, cold/warm force the tool call).
+// discovery prompt — noformat is the same request without the tool, cold/warm force the tool call),
+// and the Plan 37 W0 probes: facts-haiku-5-5, facts-sonnet-5-5, facts-sonnet-4-6 (FACTS_OUTPUT_SCHEMA,
+// lib/factsContract.mjs), facts-plan-haiku-5-5 (§4.1 as written, rejected for `maxItems`) and readiness-sonnet-5-5
+// (READINESS_OUTPUT_SCHEMA, lib/readinessPrototype.mjs). Those workloads have no row in MODEL_PROFILES
+// (and must not), so each of these probes carries its own `profile` from profiles.mjs.
 //
 // D-30-7: no database is imported or opened. The only external call is the Anthropic Messages API,
 // and the only file written is data/model-eval/runs/schema-probe/<timestamp>.jsonl.
@@ -32,6 +36,11 @@ import { MODEL_PROFILES, SCENE_TYPES, requestSettings } from '../../src/services
 import { EMIT_CATEGORY_INPUT_SCHEMA, EMIT_CATEGORY_TOOL, checkCategoryInput, stagedDiscoverySystemPrompt } from './lib/emitCategoryTool.mjs';
 import { costUsd } from './lib/pricing.mjs';
 import { RUNS_DIR } from './lib/runner.mjs';
+import { PROFILES, toServiceProfile } from './profiles.mjs';
+import {
+  FACTS_OUTPUT_SCHEMA, FACTS_OUTPUT_SCHEMA_AS_PLANNED, FACTS_SYSTEM, buildFactsContextText, classifyFactsResponse,
+} from './lib/factsContract.mjs';
+import { READINESS_OUTPUT_SCHEMA, READINESS_SYSTEM, classifyReadinessResponse } from './lib/readinessPrototype.mjs';
 
 const SONNET_55 = 'claude-sonnet-5-5';
 const SONNET_46 = 'claude-sonnet-4-6';
@@ -347,6 +356,53 @@ const DESCRIPTOR_USER = 'Kiyomizu-dera, Kyoto, Japan, stop type: experience';
 const BUDGET_SYSTEM = 'Fill the response schema.';
 const BUDGET_USER = 'Reply with nulls.';
 
+// Plan 37 W0. The facts user turn is the real shape (§4.2): a booking-context text block, then a
+// short pasted-text document carrying one deadline, one window and one requirement.
+const FACTS_USER = [
+  {
+    type: 'text',
+    text: buildFactsContextText({
+      bookings: [{
+        type: 'hotel', title: 'Hotel Gion Nanba', startDatetime: '2026-11-15T15:00', endDatetime: '2026-11-17T11:00',
+        originTz: null, destinationTz: 'Asia/Tokyo',
+      }],
+      trip: { startDate: '2026-11-14', endDate: '2026-11-18' },
+    }),
+  },
+  { type: 'text', text: 'Free cancellation until 14 November 2026, 18:00. Check-in from 15:00. Passport required at check-in.' },
+];
+
+// A tiny stand-in for the readiness input (lib/readinessPrototype.mjs buildReadinessInput): the flight
+// lands after the hotel's reception closes, so a correct answer is one conflict citing B1, B2 and F1.
+const READINESS_USER = [{
+  type: 'text',
+  text: [
+    'Trip (as the co-pilot sees it):',
+    '{"trip":{"title":"Kyoto weekend","startDate":"2026-11-14","endDate":"2026-11-16"}}',
+    '',
+    'Bookings:',
+    '[',
+    '  {"ref":"B1","type":"flight","title":"KE 723","start":"2026-11-14T20:40","end":"2026-11-14T22:50","destinationTz":"Asia/Tokyo"},',
+    '  {"ref":"B2","type":"hotel","title":"Hotel Gion Nanba","start":"2026-11-14T15:00","end":"2026-11-16T11:00"}',
+    ']',
+    '',
+    'Days:',
+    '[{"ref":"D1","date":"2026-11-14","city":"Kyoto"},{"ref":"D2","date":"2026-11-15","city":"Kyoto"}]',
+    '',
+    'Document facts:',
+    '[{"ref":"F1","bookings":["B2"],"kind":"window","label":"Reception hours","value":"Reception closes at 22:00","quote":"Reception is open until 22:00.","document":"Hotel confirmation","quoteVerified":true}]',
+    '',
+    'Health findings:',
+    '[]',
+  ].join('\n'),
+}];
+const READINESS_PROBE_EVIDENCE = Object.fromEntries(['B1', 'B2', 'D1', 'D2', 'F1'].map((id) => [id, {}]));
+
+// The readiness probe sends the real request fields but lowers max_tokens to 16,000 for the probe
+// only: it is a non-streaming create (the readiness run itself streams at 64,000), and the schema
+// compile is what is measured.
+const readinessProbeProfile = { ...toServiceProfile(PROFILES.readiness['readiness-sonnet-55-high']), maxTokens: 16000 };
+
 // `matrix` and `tool` probes run noformat -> cold -> warm; `budget` probes run cold only (the outcome
 // is accepted-or-rejected, which the first request already settles). A `tool` probe sends its schema
 // as a strict tool with a forced tool choice instead of as output_config.format.
@@ -392,6 +448,35 @@ const PROBES = [
     fallbacks: [],
     system: stagedDiscoverySystemPrompt(HAIKU_55),
     user: 'Curate the best of Ipoh, Malaysia (MY). Include neighbourhood gems alongside the genuinely unmissable. Be specific, be honest about crowds and tourist traps.',
+  },
+  // Plan 37 W0 (§5): FACTS_OUTPUT_SCHEMA and READINESS_OUTPUT_SCHEMA on the models that will carry them.
+  // §4.1 as written (with `maxItems: 40`) was rejected on all three facts models on 2026-10-20 ("For
+  // 'array' type, property 'maxItems' is not supported"); facts-plan-haiku-5-5 keeps that rejection
+  // re-runnable at the cheapest model, and the facts probes send the schema the API accepts.
+  {
+    probeId: 'facts-plan-haiku-5-5', kind: 'matrix', workload: 'facts', model: HAIKU_55,
+    profile: toServiceProfile(PROFILES.facts['facts-haiku-55-medium']),
+    schemaName: 'FACTS_OUTPUT_SCHEMA_AS_PLANNED', schema: FACTS_OUTPUT_SCHEMA_AS_PLANNED,
+    fallbacks: [{ name: 'FACTS_OUTPUT_SCHEMA', schema: FACTS_OUTPUT_SCHEMA }],
+    system: FACTS_SYSTEM, user: FACTS_USER,
+  },
+  ...[
+    ['facts-haiku-5-5', HAIKU_55, 'facts-haiku-55-medium'],
+    ['facts-sonnet-5-5', SONNET_55, 'facts-sonnet-55-medium'],
+    ['facts-sonnet-4-6', SONNET_46, 'facts-sonnet-46-medium'],
+  ].map(([probeId, model, profileName]) => ({
+    probeId, kind: 'matrix', workload: 'facts', model,
+    profile: toServiceProfile(PROFILES.facts[profileName]),
+    schemaName: 'FACTS_OUTPUT_SCHEMA', schema: FACTS_OUTPUT_SCHEMA,
+    fallbacks: [],
+    system: FACTS_SYSTEM, user: FACTS_USER,
+  })),
+  {
+    probeId: 'readiness-sonnet-5-5', kind: 'matrix', workload: 'readiness', model: SONNET_55,
+    profile: readinessProbeProfile,
+    schemaName: 'READINESS_OUTPUT_SCHEMA', schema: READINESS_OUTPUT_SCHEMA,
+    fallbacks: [],
+    system: READINESS_SYSTEM, user: READINESS_USER,
   },
   {
     probeId: 'union-inline-17', kind: 'budget', workload: 'extraction', model: SONNET_55,
@@ -443,10 +528,12 @@ function openProbeFile() {
 
 // The real profile's request fields, with the format merged into output_config beside any effort
 // (Plan 34 D-34-6: Haiku 4.5 and Sonnet 4.6 send output_config: { format } with no effort).
-function buildBody({ kind, model, workload, schema, system, user }) {
-  const profile = MODEL_PROFILES[model]?.[workload];
+// A probe may carry its own `profile` (Plan 37: facts and readiness have no MODEL_PROFILES row); every
+// other probe reads the live row, exactly as before. `user` is a string or a content-block array.
+function buildBody({ kind, model, workload, schema, system, user, profile: ownProfile }) {
+  const profile = ownProfile ?? MODEL_PROFILES[model]?.[workload];
   if (!profile) throw new Error(`no ${workload} profile for ${model} in MODEL_PROFILES`);
-  const settings = requestSettings({ model, ...profile });
+  const settings = requestSettings(ownProfile ?? { model, ...profile });
   if (kind === 'tool') {
     // The real discovery profile (thinking disabled, which a forced tool choice requires), with
     // max_tokens cut to 8,000: the probe forces one category, so a single call cannot run long, and the
@@ -470,8 +557,29 @@ function buildBody({ kind, model, workload, schema, system, user }) {
   };
 }
 
-function shapeCheckFor(workload, parsed, kind) {
+function shapeCheckFor(workload, parsed, kind, response) {
   if (!parsed || typeof parsed !== 'object') return null;
+  if (workload === 'facts') {
+    // The harness classifier on the response itself: the schema and the empty-quote rule.
+    const verdict = classifyFactsResponse(response);
+    const facts = Array.isArray(parsed.facts) ? parsed.facts : [];
+    return {
+      factCount: facts.length,
+      kinds: facts.map((f) => f?.kind ?? null),
+      atValues: facts.map((f) => f?.at ?? null),
+      pages: facts.map((f) => f?.page ?? null),
+      validation: { outcome: verdict.outcome, error: verdict.error },
+    };
+  }
+  if (workload === 'readiness') {
+    const verdict = classifyReadinessResponse(response, READINESS_PROBE_EVIDENCE);
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    return {
+      itemCount: items.length,
+      kinds: items.map((i) => i?.kind ?? null),
+      validation: { outcome: verdict.outcome, error: verdict.error, unknownEvidence: verdict.unknownEvidence },
+    };
+  }
   if (kind === 'tool') {
     return {
       category: parsed.category ?? null,
@@ -577,7 +685,7 @@ async function sendOne(client, probe, { attempt, schemaName, schema }) {
     parsed,
     parseError,
     blockTypes: blocks.map((b) => b.type),
-    shapeCheck: schema && parsed ? shapeCheckFor(probe.workload, parsed, probe.kind) : null,
+    shapeCheck: schema && parsed ? shapeCheckFor(probe.workload, parsed, probe.kind, response) : null,
     request: body,
   };
 }
