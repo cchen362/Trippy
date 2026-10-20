@@ -37,6 +37,8 @@ export const PROFILES = {
     // 'v-floor-ranked-disabled-low' with its measured allowance. 'baseline-45' is the W0 control
     // under its old name, runnable for a re-measure, never asserted against the live profile. The
     // run files under runs/discovery/control/ dated 2026-10-18T12-* are that W0 Haiku 4.5 control.
+    // Plan 36 W4 (D-36-6) changed only the prompt, not these settings: control run files dated after
+    // 2026-10-20T09 measure the 'defined-count-12' prompt, earlier ones the 'floor-ranked' prompt.
     control: { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low' },
     'baseline-45': { model: HAIKU_45, maxTokens: 64000 },
     // The W3 first-pass candidates measured the frozen prompt; promptVariant 'original' keeps them
