@@ -1,6 +1,6 @@
 # Implementation Plan 35 — Discovery Wait Architecture
 
-**Status:** 2026-10-20 — **WRITTEN, awaiting owner approval. No wave started.** Written at `4cffede` (`origin/main`, the Plan 34 W4 commit) as the plan that Plan 34 §6 W4 and `D-34-10` defer Q-34-4 to. Every decision below is **provisional** until its gate passes. Each owner question Q-35-n carries a default. Waves are implemented later via `/implement-milestone`; each lands on its own branch.
+**Status:** 2026-10-20 — **WRITTEN; Q-35-1, Q-35-2 and Q-35-4 ruled by the owner (§10); Q-35-3 pending the owner's confirmation of the revised default (§10). No wave started.** Written at `4cffede` (`origin/main`, the Plan 34 W4 commit) as the plan that Plan 34 §6 W4 and `D-34-10` defer Q-34-4 to. Every decision below is **provisional** until its gate passes. Each owner question Q-35-n carries a default. Waves are implemented later via `/implement-milestone`; each lands on its own branch.
 
 **Origin.** Plan 34 W4 measured Discovery on Haiku 5.5 with adaptive thinking on and an exact-count volume line. It was better on every quality measure the gate has: "show more" repeating an excluded place 0 % against 30 %, alias identical to name 1.2 % against 5.7 %, verified 15 % against 12 %, wellness padding 60 % against 72 %. It failed one criterion: the first category reached the traveller after **44.2 s** (range 32.6–78.8 s) instead of **10.7 s**, because the model plans the whole catalogue in one thinking block before it writes a line. The owner ruled that thinking stays off *for now*, and asked whether the loading architecture itself had been examined for a way to keep thinking on without the wait. It had not. This plan examines it.
 
@@ -30,7 +30,7 @@
 3. **Parallel per-category requests.** Eight requests at once. The first category arrives when the fastest finishes. Cross-category deduplication is lost, and the single-flight registry has to learn that eight requests are one generation.
 4. **A readable wait state.** The placeholders say what is happening and how far along it is. The wait is unchanged, but it is no longer a blank.
 
-**Recommendation.** Do **2 and 4 together**, with **W0's probe and production measure first**, and treat **1** as an owner question that W0's measure answers. Option 2 is the only candidate that attacks the cause: it changes the request shape so that the model's planning is spread across categories instead of done before the first one. Option 4 is owed regardless, because today's 11 s is already a wordless blank. Option 1 is cheap to build but spends generations and verification budget on cities nobody may open, and it cannot help the two cold cases that matter most, a trip created a moment ago and a city typed into Discovery's search. Option 3 trades away the one-generation model Plan 33 just installed, for a first-category time that is not clearly better than option 2's.
+**Recommendation.** Do **2 and 4 together**, with **W0's probe first**, and do **1** as well, scoped to a trip's stored scopes (owner's steer of 2026-10-20, Q-35-3). Option 2 is the only candidate that attacks the cause: it changes the request shape so that the model's planning is spread across categories instead of done before the first one. Option 4 is owed regardless, because today's 11 s is already a wordless blank. Option 1 makes a multi-city trip consistent (Day 1 warm and Day 4 cold is the inconsistency the owner named) at a cost of cents; its one real consequence, verification budget spent on the creation day, is handled in the same wave (F-35-12). It cannot help the two cold cases that remain, a trip opened the moment it is created on a later day's city and a city typed into Discovery's search; those are what 2 and 4 are for. Option 3 trades away the one-generation model Plan 33 just installed, for a first-category time that is not clearly better than option 2's.
 
 **The honest risk.** The gate is tight. Today's 10.7 s is about 1 s to the first byte plus about 10 s of writing 11–12 items. Plan 34 §5.1 allows 5 s more. At the rate the W4 run produced thinking, 5 s is about 900 thinking tokens. Option 2 passes only if the model's thinking before its *first* `emit_category` call stays under that, and nothing in the W4 data says whether it will: the W4 run never had a tool boundary to stop at. W0's probe measures exactly this before any product code is written. If the probe fails, the fallback is **not** "thinking on with a nicer spinner". That would be accepting a measured regression because the rest passed, which the owner's "No meeting in the middle" rule forbids. The fallback is to keep thinking off, ship W2, and record why.
 
@@ -63,6 +63,8 @@ Code facts cite `origin/main` at `4cffede`. Measurements are Plan 34 §6 W4's, r
 
 **F-35-10 — No production measure of cold-generation frequency exists, but the tables can answer part of it.** `discovery_generation_daily (destination_id, utc_date, count)` (migration 017) persists every finished generation per UTC day, and `discovery_destinations.generation_count` is a lifetime counter (migration 016). Together they give, read-only, how many *first* generations happened per week and on which destinations. What they cannot say is whether a traveller was looking: the route logs `[discover] destination=…` only when a generation starts (`claude.js:832`) and logs nothing on the fresh path, so the ratio of cold opens to all opens is unmeasurable today. Trippy keeps no HTTP request log (Plan 33, "What is not recoverable").
 
+**F-35-12 — A place the verifier could not reach on the day is re-queued only by the next generation, never by an open.** Verification is fire-and-forget per category (`discoveryGeneration.js:123`) at `'background'` priority, about **4.14 provider requests per place** (Plan 26 F-26-24) against 1,000 a day and 50 Google escalations. When the budget runs out the remaining rows are marked `provenance = 'pending'` and left (`discoveryVerify.js:91`). `enqueueForVerification` folds a destination's pending rows back into the queue (`:619–629`), but it is called **only** from the generation pipeline. A fresh-cache open (`routes/discovery.js:250`) calls nothing, so a pending row waits for that city's next "show more" or its 7-day stale refresh. Three 90-place generations in one day are about 1,100 requests, so pre-warming a three-city trip would leave the tail of the third city `pending`, with no "Verified" label (D-27-1) and no verified rank term, until that city generates again. This is the one real consequence of option 1, and it is a defect in the re-queue trigger, not in pre-warming: the module header's own intent is "a pending row gets retried the next time anyone browses that destination".
+
 **F-35-11 — Decision markers checked** with the ENGINEERING.md grep over `routes/discovery.js`, `services/claude.js`, `services/discoveryGeneration.js`, `services/copilotGrounding.js`, `hooks/useDiscovery.js`, `pages/TripPage.jsx`, `components/discovery/DiscoveryPanel.jsx`: D-33-1/2/3, D-30-1, D-30-3, D-30-6, D-30-8/9 (co-pilot), D-34-1/2/5/6/7/9/10/12, Plan 12 G3/G4, Plan 7 decisions 3 and 4, Plan 21 D3/D4, Plan 26 W4.8. The ones this plan touches are listed in §2; none is reversed silently.
 
 ---
@@ -88,7 +90,7 @@ Code facts cite `origin/main` at `4cffede`. Measurements are Plan 34 §6 W4's, r
 
 - **D-35-1 — Discovery's first category never waits on a whole-catalogue plan.** On a thinking-capable model the generation is staged: the model delivers each category through a tool call, so adaptive thinking interleaves per category and the first category waits only on the first category's thinking. *Gate:* W0 probe (go / no-go), then W1 (§5). Marker `D-35-1` on the staged loop in `claude.js`.
 - **D-35-2 — A cold wait is always explained.** While Discovery has nothing to show for a destination, the panel says what is happening (first look at this city, curating eight categories), which category is being written, and how many have landed. The keep-alive carries those counts; the client never infers them from timing alone. *Gate:* W2 browser verification at 375 px and desktop. Marker `D-35-2` in `DiscoveryPanel.jsx` beside the wait state and in `routes/discovery.js` beside the keep-alive.
-- **D-35-3 — Pre-warm scope is an owner ruling, not a default.** Day 1 stays pre-warmed from the client as today. Whether the server pre-warms a trip's other scopes at creation and scope save is Q-35-3, decided from W0's production measure. If adopted, it goes through `kickBackgroundGeneration`'s registry path, never a second mechanism. Marker `D-35-3` at the kick site if adopted; a DECISIONS.md row either way.
+- **D-35-3 — Every stored scope of a trip is warmed when the trip is created or its scopes change.** Day 1 stays pre-warmed from the client as today; the server kicks the trip's other stored scopes (those with a country code) through `kickBackgroundGeneration`'s registry path, never a second mechanism, and a destination served fresh re-queues its `pending` rows (F-35-12). Owner leaning yes on 2026-10-20 (Q-35-3); the revised default awaits confirmation. Marker `D-35-3` at the kick site and beside the fresh-path re-queue; a DECISIONS.md row.
 - **D-35-4 — Amends D-34-1 for discovery.** On Haiku 5.5 each category is delivered as the input of a `strict` tool, so its shape is API-enforced and the NDJSON line parser is not on that path. The parser remains the Haiku 4.5 rollback path and is removed only with that row (Plan 34 W5). *Gate:* W1. Marker beside the tool schema constant; DECISIONS.md amends the D-34-1 row.
 - **D-35-5 — Thinking on ships only through this plan's gate.** If W1 fails the first-category criterion, thinking stays off (D-34-10 stands), W2 ships on its own, and the failure is recorded so the question is not re-run without a new design. "Thinking on, explained by better copy" is explicitly **not** an outcome of this plan.
 
@@ -104,13 +106,13 @@ Each row answers: what the traveller gets, what it costs (money, latency, comple
 
 **What the traveller gets.** Fewer cold opens on *existing* trips. **Nothing** on the two cases that matter most: a trip created seconds ago and opened straight away (the Plan 33 Bangkok case; a pre-warm at creation buys a few seconds' head start on a 44 s wait), and a city typed into Discovery's search box (`committedDestination`), which no pre-warm can anticipate.
 
-**Cost.** Build: small (a service hook on `createTrip` and the scope-save path in `services/trips.js`, reusing the kick; no client change). Run: one generation per pre-warmed scope, about $0.014 on thinking-on, and, more important, **90-odd places per scope into the verification queue** against a shared 1,000-request daily resolver budget and 50 Google escalations (`config.js:62, :69`). A four-city trip would push about 360 places through verification that nobody may look at, and the "Verified" label (D-27-1) on the city the traveller *does* open would be starved. It also spends one of the three daily generations per destination (Plan 7 decision 4) on a city that may never be opened that day.
+**Cost.** Build: small (a service hook on `createTrip` and the scope-save path in `services/trips.js`, reusing the kick; no client change). Run: one generation per pre-warmed scope, about $0.014 on thinking-on (cents), one of the three daily generations per destination (Plan 7 decision 4; it matters only if the same city is "show more"d twice on the day it was created, and not at all when the shared catalogue is already fresh), and **about 370 verification requests per scope** (F-35-12) against 1,000 a day. Three new cities in one day exceed the day's budget, so the third city's tail stays `pending`.
 
-**Risk.** Spend without a reader; a cap spent before the traveller arrives.
+**Risk.** Not spend: cents. The risk is F-35-12: a pre-warmed city opened a week later with its last 25 places unverified until it generates again. Closed inside W4 by re-queuing a destination's pending rows when it is served fresh, which is what the verifier's own header says should happen.
 
-**Measured how.** Not through the model harness. W0's production query gives the share of first generations that happened on a destination other than the trip's Day 1 city; that number says whether the problem option 1 solves exists in Trippy's traffic. If it is small, option 1 is not built.
+**Measured how.** Not through the model harness. W0's fresh-path log line gives cold opens against all opens before and after. The W0 production query is no longer needed to decide (the owner ruled on product grounds, §10); it stays as an optional read.
 
-**Verdict.** A frequency reducer, not a latency fix. Owner question Q-35-3, default **no** until W0 says otherwise.
+**Verdict.** A frequency reducer, not a latency fix, and the right product default for a multi-city trip: Day 1 warm and Day 4 cold is the inconsistency the owner named. There is no significant blocker. Ruled in Q-35-3 (revised default **yes**, scoped to stored scopes that carry a country code, kicked together at create and scope save, with the F-35-12 re-queue in the same wave).
 
 ### 4.2 Option 2 — Staged emission through an `emit_category` tool (recommended)
 
@@ -149,17 +151,17 @@ Each row answers: what the traveller gets, what it costs (money, latency, comple
 
 ### 4.4 Option 4 — A readable wait state (recommended, independent of the rest)
 
-**What it does.** While a destination has nothing to show, the skeleton carries copy and progress. The server's keep-alive gains fields it already knows: `{ type: 'thinking', phase: 'generating' | 'joined', categoriesDone, writing }` where `writing` is the category currently expected (the prompt's fixed order), and one status event goes out before the first ping so the copy can appear at once. The client shows, in the panel's voice (design spec §12.9: quiet confidence, sentence case, no exclamation marks):
+**What it does.** While a destination has nothing to show, the panel shows a **curation manifest** instead of three mute rectangles: the eight categories as a fixed list in the prompt's order, each row carrying its state. The server's keep-alive gains fields it already knows: `{ type: 'thinking', phase: 'generating' | 'joined', categoriesDone, writing }` where `writing` is the category currently expected (the prompt's fixed order), and one status event goes out before the first ping so the manifest appears at once. The client shows, in the panel's voice (design spec §12.9: quiet confidence, sentence case, no exclamation marks):
 
-- a DM Mono status line, tracked uppercase, one gold pulse dot (the existing `.trip-live-dot` / `trippyPulse`, reduced-motion safe): `CURATING · 2 OF 8`;
-- one Cormorant sentence: "First look at Ipoh. Trippy is curating eight categories; Essentials lands first." When joined: the same sentence (the traveller cannot tell and does not need to). After 60 s with nothing landed: "Still curating. Larger cities take longer." No countdown, no promised seconds;
-- the three skeleton rectangles kept, recoloured through tokens (`var(--ink-mid)`, `var(--gold-line)`) instead of the literals in F-35-2.
+- one Cormorant sentence above the list: "First look at Ipoh. Trippy is curating eight categories; Essentials lands first." When joined: the same sentence (the traveller cannot tell and does not need to). After 60 s with nothing landed: "Still curating. Larger cities take longer." No countdown, no promised seconds;
+- the manifest: eight rows, DM Mono tracked-uppercase labels from `CATEGORY_LABELS`, fixed height so nothing shifts as rows fill. A **landed** row shows its count in cream and is tappable (it calls the existing `handleCategorySelect`, so the traveller reads Essentials while Food is being written: that is the part that shortens the wait in the head). The **writing** row carries the panel's single gold element, the existing `.trip-live-dot` pulse (reduced-motion safe), and the word "writing". **Queued** rows sit in `--cream-mute`. Hairlines are `--ink-border`; the surface is `--ink-mid`; no literals (F-35-2's `#1a1410` and `rgba(201,160,80,0.08)` go);
+- a DM Mono status line under the sentence: `CURATING · 2 OF 8`.
 
-Stale refresh and "show more" are unchanged (the grid is already on screen); the tab dots keep pulsing as today.
+Once the active tab's categories have landed the manifest gives way to the cards, as the skeleton does today; other tabs still show their pulsing dot. Stale refresh and "show more" are unchanged (the grid is already on screen). At 375 px the sentence, status line and eight rows fit above the fold inside the panel; verified in W2, not assumed.
 
-**What the traveller gets.** The same wait, named. On today's 11 s this is owed already; on any longer wait it is the difference between "broken" and "working".
+**What the traveller gets.** The same wait, named and navigable. On today's 11 s this is owed already; on any longer wait it is the difference between "broken" and "working", and the tappable landed rows mean the traveller is reading real places within the first category's time rather than watching a count.
 
-**Cost.** Half a day to a day: route (two fields on an event the route already sends, both paths), `useDiscovery` (keep the fields in the entry), `DiscoveryPanel` (the state, copy, tokens), tests, and a Playwright pass at 375 px and 1280 px using Plan 33's held-request technique so no generation is spent per screenshot. No model cost.
+**Cost.** About a day: route (two fields on an event the route already sends, both paths), `useDiscovery` (keep the fields in the entry), `DiscoveryPanel` (the manifest component, copy, tokens, row tap), tests, and a Playwright pass at 375 px and 1280 px using Plan 33's held-request technique so no generation is spent per screenshot. No model cost.
 
 **Risk.** Copy that over-promises. The copy carries counts and category names, never times.
 
@@ -258,8 +260,8 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 **Steps.**
 1. Route: before the first ping on the generate and join paths, `write({ type: 'status', phase, categoriesDone, writing })`; the 8 s ping carries the same fields. `writing` is `DISCOVERY_CATEGORIES[categoriesDone]` (the prompt's fixed order). `discoveryRouteCheck.mjs` prints them.
 2. Hook: keep `phase`, `categoriesDone`, `writing`, `startedAt` in the entry; clear on `done`/`error`.
-3. Panel: replace the bare `<TabSkeleton />` case with the wait state from §4.4 (copy as proposed, pending Q-35-4); tokens instead of literals; `CATEGORY_LABELS` for the category name; reduced-motion respected by the existing dot class.
-4. Tests: route emits status then pings with advancing counts on both paths; hook stores and clears them; panel renders the copy for `generating` and `joined`, advances the count, shows the 60 s line, and shows nothing of it on stale or fresh.
+3. Panel: replace the bare `<TabSkeleton />` case with the curation manifest from §4.4 (copy as ruled in Q-35-4); tokens instead of literals; `CATEGORY_LABELS` for the row labels; landed rows call `handleCategorySelect`; the writing row uses the existing `.trip-live-dot`; fixed row heights so the list never reflows; reduced motion respected.
+4. Tests: route emits status then pings with advancing counts on both paths; hook stores and clears them; panel renders the sentence and eight rows for `generating` and `joined`, advances the landed/writing/queued states as categories arrive, switches tab on a landed-row tap, shows the 60 s line, and shows nothing of it on stale or fresh.
 5. Playwright pass per §5 W2, on a dev-DB copy with Plan 33's held-request technique; screenshots at 375 px and 1280 px kept in the wave record.
 
 **Acceptance.** §5 W2 verification; frontend suite and build green; backend suite green.
@@ -280,15 +282,18 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 **Rollback.** One commit: the row returns to `thinking: disabled`, `emission: 'stream'`, 48,000, and variant A's volume line. Pins return with it.
 
-### W4 — Server-side pre-warm of trip scopes (D-35-3; only on Q-35-3 "yes")
+### W4 — Server-side pre-warm of trip scopes, and pending rows re-queued on open (D-35-3)
 
-**Status:** NOT STARTED. Conditional.
+**Status:** NOT STARTED. Runs on the owner's confirmation of the revised Q-35-3 default; independent of W1–W3 and may run alongside W2 (different files).
 
-**Files.** `backend/src/services/trips.js` (`createTrip`, the scope-save path), a small `services/discoveryPrewarm.js` that calls `kickBackgroundGeneration` for each scope with a country code and no fresh catalogue, respecting the daily cap and the registry; tests.
+**Files.** `backend/src/services/trips.js` (`createTrip`, the scope-save path); a small `services/discoveryPrewarm.js` that calls `kickBackgroundGeneration` for each stored scope that carries a country code and has no fresh catalogue, respecting the daily cap and the D-33-1 registry; `routes/discovery.js` fresh path; `services/discoveryVerify.js` (an exported re-queue for pending rows that `enqueueForVerification` already contains, callable with no new ids); tests for each.
 
-**Steps.** Kick for each stored scope (not every day city) on create and on scope save; never for a scope already fresh or already generating; log one line per kick. Measure with the W0 fresh-path log line after a week: cold opens before and after.
+**Steps.**
+1. Pre-warm: on create and on scope save, kick every stored scope with a country code (a scope without one is skipped, never guessed: Plan 26 W4.8's no-country table stays the route's business), all at once rather than serially, since generation is the slow part and the Nominatim pacer already serialises verification. Never for a scope already fresh or already generating. One log line per kick. Day 1's client pre-warm stays as it is.
+2. F-35-12: when the fresh path serves a destination that has `pending` rows, re-queue them (the fold-back `enqueueForVerification` already does, with an empty id list). This is the verifier header's stated intent; it also benefits every pending row left by any earlier budget exhaustion, pre-warm or not.
+3. Measure with the W0 fresh-path log line after a week: cold opens before and after; and the `[discoveryVerify] budget status` line on a three-scope creation day.
 
-**Acceptance.** Suite green; the kick is observable in the log; the resolver budget status (`getDiscoveryBudgetStatus`) is reported in the wave record for a multi-scope trip.
+**Acceptance.** Suite green; the kicks are observable in the log; a three-scope trip created on a dev-DB copy shows three `[discover] destination=` lines, one registry entry each, the daily counter at 1 per destination; a destination with pending rows served fresh drains them; the resolver budget status is reported in the wave record.
 
 ### W5 — Close-out
 
@@ -300,7 +305,7 @@ Update `docs/ENGINEERING.md` ("Discovery and Photos": emission mode, thinking se
 
 ## 7. Sequencing and rollback summary
 
-- **Order.** W0 → (W1 ‖ W2) → W3 → deploy → W4 if ruled → W5. W2 can start at once; W1 waits on W0's go.
+- **Order.** W0 → (W1 ‖ W2 ‖ W4) → W3 → deploy → W5. W2 and W4 can start at once (W4 on the owner's Q-35-3 confirmation); W1 waits on W0's go. W2 and W4 touch different files (panel and hook against trips service and verifier); both touch `routes/discovery.js`, so they are merged in sequence, not side by side.
 - **If W0 says no-go.** W2 still ships (it is owed on today's 11 s). W1/W3 are not built; Q-35-2 goes to the owner with the probe's numbers; this plan closes with D-34-10 standing and the reason recorded.
 - **Rollback unit.** One model-keyed row in `MODEL_PROFILES` plus a redeploy (D-30-1). The staged path and the stream path coexist by model until Plan 34 W5 retires Haiku 4.5's row; at that point the stream path's future is decided there, not here.
 - **No migration, so no schema rollback.**
@@ -342,24 +347,30 @@ Each follows the plain-language shape: what it is, one example, the implication,
 - **Example.** Today a never-opened city costs about one cent to catalogue. With thinking on and staging it is expected to cost about one and a half to two cents, measured in W1. A fresh city is still free to reopen for seven days.
 - **Implication.** At Trippy's volume this is cents per month. The gain is the W4 quality: no repeated places on "show more", cleaner aliases, more verified places, less padding.
 - **Recommendation (default): yes**, provided W1 reports the measured number and it stays under 2× today's per-generation cost. The quality is what you asked for; the money is not the constraint.
+- **Ruled 2026-10-20: OK (the default).**
 
 **Q-35-2 — If the probe or W1 shows the first category still arrives late, what then?** *(Only asked on a W0 no-go or a W1 fail.)*
 - **Plain language.** It is possible the model still does all its planning before the first category even with a tool to stop at. Then no loading change keeps thinking on without the wait.
 - **Example.** The probe shows 4,000 thinking tokens before the first `emit_category` call on Taipei, so the first category would land at about 30 s.
 - **Implication.** The choices are: keep thinking off and ship only the readable wait (no quality gain, no regression); or build the parallel-request variant (3a/3b) as a second attempt, which costs another measurement wave and trades away the one-generation model; or accept the wait, which this plan rules out (D-35-5).
 - **Recommendation (default): keep thinking off, ship W2, record the probe's numbers against D-34-10 so the question is not re-run.** Build 3b only if you want a second attempt and accept that it reopens Plan 33's registry.
+- **Ruled 2026-10-20: OK (the default).**
 
 **Q-35-3 — Should the server pre-warm every scope of a trip, not only Day 1's city?**
 - **Plain language.** When you create a three-city trip, Trippy would start cataloguing all three in the background, so Day 5's city is ready when you get to it. Today only Day 1's city is started, and only when you open the trip.
 - **Example.** You create "Taiwan loop" with Taipei, Taichung and Kaohsiung. Today, opening Discover on the Kaohsiung day a week later means an 11 s wait (44 s with thinking on). With pre-warm it is instant, because Kaohsiung was catalogued the day you made the trip.
 - **Implication.** Each pre-warmed city spends about two cents, one of that city's three daily generations, and about 90 places of verification budget out of a shared 1,000 requests a day, whether or not anyone opens it. It does nothing for a trip you open the moment you create it, nor for a city you type into Discovery's search. W0's production query will say how many cold opens were on a non-Day-1 city.
-- **Recommendation (default): no, until W0's measure shows that most cold generations were on cities that were already in a trip's scopes.** If it does, pre-warm **stored scopes only** (not every day's city), through the existing co-pilot kick, so there is one mechanism.
+- **Original recommendation (default): no, until W0's measure shows that most cold generations were on cities that were already in a trip's scopes.** If it does, pre-warm **stored scopes only** (not every day's city), through the existing co-pilot kick, so there is one mechanism.
+- **Owner, 2026-10-20:** on the fence; from the traveller's side it is intuitive that every city in the trip starts warming when the trip is created, and Day 1 warm with the rest cold is an inconsistent experience; asked whether there is a significant blocker and whether W0's measure is really needed first.
+- **Assessment.** There is no significant blocker, and the measure is not needed to decide. The money is cents. The daily cap is spent only if the same city is "show more"d twice on its creation day. The one real consequence is F-35-12: three new cities in one day exceed the verification budget, and today a city's unreached places are re-queued only when it generates again, so a pre-warmed Kaohsiung opened a week later could show its last places without the "Verified" label until then. That is a defect in the re-queue trigger, and W4 fixes it at the cause by re-queuing pending rows when a city is served fresh. The two cases pre-warm cannot help remain: a trip opened the moment it is created on a non-Day-1 city, and a city typed into search; those are what W1 and W2 are for.
+- **Revised default: yes.** Pre-warm every **stored scope that carries a country code**, all at once, on create and on scope save, through the co-pilot's existing kick (one mechanism), with the fresh-path re-queue in the same wave. Scopes without a country are skipped rather than guessed. **Awaiting the owner's confirmation of this revised default.**
 
 **Q-35-4 — Is this the copy for the wait state?**
 - **Plain language.** While a new city is being catalogued, the panel will show a short status line with a count and one sentence. This is the proposed wording.
 - **Example.** Status line `CURATING · 2 OF 8`. Sentence: "First look at Ipoh. Trippy is curating eight categories; Essentials lands first." After a minute with nothing yet: "Still curating. Larger cities take longer." If you reopen the trip while it is still running you see the same lines with the count where it is.
 - **Implication.** The copy names counts and categories and never promises seconds, so it stays true whether the first category takes 11 s or 44 s. Changing it later is a one-line edit.
 - **Recommendation (default): adopt as written.** The one thing to decide is whether you want the city's name in the sentence; it is there because it tells you the request went to the right place, which the old skeleton never did.
+- **Ruled 2026-10-20: yes, "or better if possible"; the UI must match, and a good waiting state should shorten the wait in the head.** Taken up in §4.4 and W2 as the curation manifest: eight fixed rows in the prompt's order, landed rows tappable so the traveller reads Essentials while Food is written, one gold pulse on the row being written, the sentence and count above. Copy stands as written.
 
 ---
 
