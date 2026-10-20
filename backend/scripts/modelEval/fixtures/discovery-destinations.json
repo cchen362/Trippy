@@ -1,5 +1,5 @@
 {
-  "_doc": "Plan 30 §5.2 discovery corpus: six destinations, all present in the dev catalogue (cityKey + countryCode match a discovery_destinations row) so the with-exclusions variant has a real exclusion list. claudeDestination is built exactly as routes/discovery.js and services/copilotGrounding.js build it: `${label}, ${countryNameFromCode(countryCode)} (${countryCode})`. Active-place counts were read from the dev DB on 2026-10-18 and are context for `role`, not an assertion.",
+  "_doc": "Plan 30 §5.2 discovery corpus: six destinations, all present in the dev catalogue (cityKey + countryCode match a discovery_destinations row) so the with-exclusions variant has a real exclusion list. claudeDestination is built exactly as routes/discovery.js and services/copilotGrounding.js build it: `${label}, ${countryNameFromCode(countryCode)} (${countryCode})`. Active-place counts were read from the dev DB on 2026-10-18 and are context for `role`, not an assertion. Plan 36 W2 adds two destinations with no dev-DB row (hoian, danang): they carry `firstOnly: true` (no exclusion capture, only the 'first' variant) and `optIn: true` (generated only when named by --only), so the default corpus stays the six above.",
   "destinations": [
     {
       "id": "taipei",
@@ -48,6 +48,26 @@
       "label": "Kaohsiung",
       "role": "sparsest per-category catalogue",
       "note": "56 active places, the smallest in the copy; nature 5, wellness 6, culture 6, essentials 6, nightlife 7. Tests the padding defect (Plan 27 Q-27-6) where a city cannot fill every category."
+    },
+    {
+      "id": "hoian",
+      "cityKey": "hoian",
+      "countryCode": "VN",
+      "label": "Hoi An",
+      "role": "genuine small town (Plan 36)",
+      "firstOnly": true,
+      "optIn": true,
+      "note": "Plan 36 W2. Not in the dev catalogue, so it has no exclusion list: first generation only (firstOnly). Opt-in (optIn): generated only when named by --only, so the standard 12-generation corpus is unchanged. Plan 36 measured a ~10k-token 'collapse' (most categories 4-7 items) on 4 of 16 such generations, and Hoi An's production essentials came back at 3. Run it with --repeat to measure a collapse rate."
+    },
+    {
+      "id": "danang",
+      "cityKey": "danang",
+      "countryCode": "VN",
+      "label": "Danang",
+      "role": "small city (Plan 36)",
+      "firstOnly": true,
+      "optIn": true,
+      "note": "Plan 36 W2. Not in the dev catalogue, so it has no exclusion list: first generation only (firstOnly). Opt-in (optIn): generated only when named by --only, so the standard 12-generation corpus is unchanged. A small city next to Hoi An, in the same size band where Plan 36 measured a ~10k-token 'collapse' (most categories 4-7 items) on 4 of 16 generations. Run it with --repeat to measure a collapse rate."
     }
   ]
 }

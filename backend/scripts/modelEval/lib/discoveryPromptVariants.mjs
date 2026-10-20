@@ -46,7 +46,30 @@ export const PROMPT_VARIANTS = Object.freeze({
     quality: FLOOR_RANKED_QUALITY,
     volume: '- Return exactly 12 items in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with generic or mediocre places, and say nothing about any shortfall.',
   }),
+  // Plan 36 W2 (D-36-4): variant A's lines with "say nothing about any shortfall" dropped, plus a
+  // `categories` block (one line per category) inserted after the category-order line. Essentials is
+  // the city's must-see places; practical logistics stay out of every category.
+  'defined-categories': Object.freeze({
+    quality: FLOOR_RANKED_QUALITY,
+    volume: '- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places.',
+    categories: [
+      'What each category holds:',
+      "- essentials: the city's must-see places — the unmissable sights and experiences a first-time visitor would regret skipping, with honest notes on crowds and timing.",
+      '- culture: museums, galleries, temples, shrines, historic sites, performances and living craft traditions.',
+      '- food: restaurants, street-food stalls, food markets, cafés and specific dishes worth seeking out.',
+      '- nature: parks, gardens, beaches, rivers, lakes, hills and viewpoints in or within a day trip of the city.',
+      '- nightlife: bars, night markets, live music, clubs and experiences that come alive after dark.',
+      '- hidden_gems: specific, lesser-known places locals love and most visitors miss.',
+      '- architecture: buildings, bridges, streets and quarters worth seeing for their design or history.',
+      '- wellness: spas, massage, baths, yoga and quiet places to rest and recharge.',
+      'Every item is a place to visit or an experience to have. Practical travel logistics belong in no category: no airports, stations or terminals used for transport, ride-hailing or taxi apps, ATMs or banks, hospitals, clinics or pharmacies, visa or immigration offices, SIM-card counters, or tourist information desks.',
+    ].join('\n'),
+  }),
 });
+
+// The category-order line every discovery prompt carries exactly once; a variant's `categories`
+// block is inserted right after it (Plan 36 W2).
+const CATEGORY_ORDER_LINE = 'essentials, culture, food, nature, nightlife, hidden_gems, architecture, wellness\n';
 
 export function applyPromptVariant(system, variantName, model) {
   const variant = PROMPT_VARIANTS[variantName];
@@ -61,6 +84,13 @@ export function applyPromptVariant(system, variantName, model) {
       throw new Error(`discovery prompt variant "${variantName}": expected ${model}'s live ${key} line exactly once in the system prompt, found ${occurrences}`);
     }
     patched = patched.replace(live[key], () => variant[key] ?? ORIGINAL_LINES[key]);
+  }
+  if (variant.categories) {
+    const occurrences = patched.split(CATEGORY_ORDER_LINE).length - 1;
+    if (occurrences !== 1) {
+      throw new Error(`discovery prompt variant "${variantName}": expected the category-order line exactly once in the system prompt, found ${occurrences}`);
+    }
+    patched = patched.replace(CATEGORY_ORDER_LINE, () => `${CATEGORY_ORDER_LINE}\n${variant.categories}\n`);
   }
   return patched;
 }

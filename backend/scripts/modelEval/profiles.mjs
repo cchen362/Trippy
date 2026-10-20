@@ -56,6 +56,11 @@ export const PROFILES = {
     // Plan 34 W4 (D-34-10): adaptive thinking (no `thinking` field) at effort low with the exact-count
     // line; 48,000 is ~2x the Plan 30 W3 thinking-on max output (25,002), per D-30-6.
     'v-exact12-adaptive-low': { model: HAIKU_55, maxTokens: 48000, effort: 'low', promptVariant: 'exact-count' },
+    // Plan 36 W2 (D-36-4): category definitions, Essentials as must-see places, logistics out, and
+    // "say nothing about any shortfall" dropped; at the live settings, and at effort medium with
+    // thinking still disabled.
+    'v-defined-low': { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'low', promptVariant: 'defined-categories' },
+    'v-defined-medium': { model: HAIKU_55, maxTokens: 48000, thinking: { type: 'disabled' }, effort: 'medium', promptVariant: 'defined-categories' },
     // The shared-prompt question: the same variants on the control model (Haiku 4.5, 64,000).
     '45-floor-ranked': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor-ranked' },
     '45-floor': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor' },

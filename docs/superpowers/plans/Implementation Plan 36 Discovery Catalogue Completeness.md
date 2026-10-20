@@ -1,6 +1,6 @@
 # Implementation Plan 36 — Discovery Catalogue Completeness
 
-**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE and DEPLOYED 2026-10-20 at `a44f437`** (§6). It was merged by the orchestrator, the backend suite passed on main (1,263), and it was browser-verified on a dev-DB copy. It is backend only (no frontend bundle change, no migration). Pre-deploy backup `trippy-2026-10-20-022253.db`; health OK; the new freshness rule was confirmed in the container. **Owner production pass PASSED (2026-10-20):** Hanoi's open started a stale-refresh merge (`existingStops=37`), and a second open joined it. It ended `end_turn categories=8 items=89 complete=true deduped=0 unnamed=0`. Hanoi now has all 8 categories (essentials 18, culture 20, food 22, nature 20, nightlife 11, hidden_gems 10, architecture 12, wellness 11), with a daily count of 2 of 3. W2 (prompt wave) is in progress on `claude/hungry-hugle-78d2ea`. No migration in either wave.
+**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE and DEPLOYED 2026-10-20 at `a44f437`** (§6). It was merged by the orchestrator, the backend suite passed on main (1,263), and it was browser-verified on a dev-DB copy. It is backend only (no frontend bundle change, no migration). Pre-deploy backup `trippy-2026-10-20-022253.db`; health OK; the new freshness rule was confirmed in the container. **Owner production pass PASSED (2026-10-20):** Hanoi's open started a stale-refresh merge (`existingStops=37`), and a second open joined it. It ended `end_turn categories=8 items=89 complete=true deduped=0 unnamed=0`. Hanoi now has all 8 categories (essentials 18, culture 20, food 22, nature 20, nightlife 11, hidden_gems 10, architecture 12, wellness 11), with a daily count of 2 of 3. W2 (prompt wave) is in progress on `claude/hungry-hugle-78d2ea`. No migration in either wave. **Update, W2 MEASURED: gate FAILED, NO-GO** (§6 W2, $0.518, commit on `claude/hungry-hugle-78d2ea`). The category-definitions prompt removes logistics from Essentials but makes small towns thinner and does not cure the collapse, so `claude.js` is unchanged. Q-36-1 is open for the owner.
 
 **Origin.** Plan 35's production pass (2026-10-20, deploy `d5e9e3a`). Hanoi's pre-warm generation ended `end_turn` with 4 of 8 categories (37 items), passed the 4-category minimum, and was stored as a fresh 7-day catalogue. A separate investigation session established the facts below. It changed no code, did no production write, and spent $0.207 on 24 live Haiku 5.5 generations.
 
@@ -138,3 +138,61 @@ The effort `medium` variant is adopted only if it beats `low` on collapse rate w
 **Observation outside W1 (reported to the orchestrator, not fixed).** When a category has zero places after `done`, its tab body is blank: no copy and no manifest. That is what the owner saw on Hanoi. After D-36-1 a traveller meets it only on a day the destination is at its cap, or for a category the city truly cannot fill. Whether the empty tab should say something is a frontend product question.
 
 **Docs.** DECISIONS rows D-36-1, D-36-2 and D-36-3; the ENGINEERING Discovery freshness bullet rewritten; `git diff --check` clean.
+
+### W2 — measured, gate FAILED, NO-GO (2026-10-20); `claude.js` unchanged
+
+**What was measured.** Prompt variant `defined-categories` (`scripts/modelEval/lib/discoveryPromptVariants.mjs`) is Haiku 5.5's live prompt with three changes:
+- one line defining each of the eight categories, inserted after the order line, with Essentials as "the city's must-see places";
+- a closing line keeping practical logistics out of every category;
+- the volume line without "say nothing about any shortfall".
+
+It ran under two profiles, `v-defined-low` (the live settings) and `v-defined-medium` (effort `medium`, thinking still disabled), against a same-day `control`. Each profile covered two sets:
+- the standard corpus: 6 destinations × {first, exclusions} = 12 generations;
+- the small-town set: Hoi An and Da Nang, first generation × 4 repeats = 8 generations.
+
+All three profiles ran at the same moment, so load was equal. D-30-7: every run reported the copy and the owner DB **UNCHANGED**.
+
+The harness gained opt-in, first-only fixtures (`hoian`, `danang`), `--repeat`, and scorer rows for:
+- collapse runs (< 12,000 output tokens with most categories under 8);
+- the Essentials count;
+- categories under 8 items;
+- logistics entries (`LOGISTICS_RE`).
+
+Logistics hits were hand-checked. Control's 52 were real logistics: airports, Didi ride-hailing, ATMs, pharmacies, tourist offices, bus terminals. `v-defined-medium`'s 6 were heritage buildings: KL Railway Station, Ipoh's colonial station, station ruins.
+
+**Spend:** $0.518 (control $0.188, low $0.152, medium $0.179).
+
+| measure | control | v-defined-low | v-defined-medium | gate |
+|---|---|---|---|---|
+| **Standard corpus (12 each)** | | | | |
+| categories 8/8 | 12/12 | 12/12 | 12/12 | every run ✔ |
+| collapse runs | 0/12 | 2/12 (Okinawa, Ipoh) | 0/12 | ≤ control |
+| items per category, median of medians | 10.25 | 9.5 | 10 | ≥ control − 1 |
+| categories under 8 items | 4/96 (4%) | 26/96 (27%) | 7/96 (7%) | — |
+| Essentials median / min | 10 / 4 | 8.5 / 5 | 8.5 / 7 | — |
+| logistics in Essentials (raw) | 40/121 (33%) | 2/109 (2%) | 3/113 (3%), all heritage | 0 real |
+| dropped lines | 0 | 0 | 0 | 0 |
+| duplicate-name drops | 1.7% | 3.9% | 2.9% | reported |
+| alias identical to name | 3.0% | 2.4% | 2.0% | — |
+| exclusion repeats | 34.3% | 41.2% | 26.4% | ≤ control |
+| first category, median / max | 10.8 s / 16.2 s | 11.3 s / 17.3 s | 11.7 s / 19.8 s | median ≤ control + 2 s |
+| **Small towns, Hoi An + Da Nang (8 each)** | | | | |
+| collapse runs | 1/8 | 3/8 | **2/8** | ≤ control ✘ |
+| Essentials median / min | 8.5 / 5 | 5.5 / 3 | **7 / 3** | median ≥ 8 ✘ |
+| items per category, median of medians | 9.75 | 7.25 | **8.25** | ≥ control − 1 ✘ |
+| categories under 8 items | 10/64 (16%) | 40/64 (63%) | **23/64 (36%)** | — |
+| logistics in Essentials (raw) | 28/74 (38%) | 0/45 | 0/55 | 0 ✔ |
+
+**Reading.**
+1. **The definitions do exactly what D-36-4 asked for in quality.** Logistics leave Essentials (33–38% → 0 real) and exclusion repeats fall at effort `medium` (34% → 26%).
+2. **They do not cure the collapse.** Control collapsed 1/8 on small towns here, and 4/16 in the same-day investigation replays (F-36-3), so about 5/24 on Hoi An and Da Nang. The candidate at `medium` collapsed 2/8, and at `low` 3/8 and 2/12 on the standard corpus as well. Dropping "say nothing about any shortfall" did not lower the rate, and effort `medium` did not either.
+3. **On small towns the candidate is thinner across the board, not only in Essentials.** At `medium`, 36% of categories are under 8 against 16%. Essentials shrinks most, because the logistics entries that used to fill it are gone and the model does not replace them with more sights. At effort `low` the definitions cut volume everywhere.
+
+**Verdict: NO-GO.** `v-defined-medium` passes the standard corpus but fails three small-town criteria. `v-defined-low` fails both sets. Adopting either would accept a measured regression on exactly the destinations this wave targets (Plan 36 / ENGINEERING "no meeting in the middle"). The live prompt, profile and pins are unchanged. D-36-4 stands as the owner's definition of Essentials, but it is **not yet expressed in the prompt**.
+
+**Harness kept** (committed): the `defined-categories` variant, the `v-defined-low` / `v-defined-medium` profiles, the small-town fixtures, `--repeat`, and the Plan 36 scorer rows. Run files are under `backend/data/model-eval/runs/discovery/{control,v-defined-low,v-defined-medium}/2026-10-20T08-2*`.
+
+**Open for the owner (Q-36-1).** The collapse is a model-side output-volume mode, about 1 in 5 small-town generations, and prompt wording and effort do not move it. A thin but complete catalogue still counts as fresh under D-36-1. Options, not run:
+- (a) Measure a small-town-specific lever: an exact count line ("Return exactly 10 in every category"), or thinking on, which D-34-10 traded away for the 11 s first category.
+- (b) Make thinness part of freshness: under 5 items in most categories → not fresh, so the next open merges.
+- (c) Ship the definitions anyway for the quality gain, accepting thinner small-town catalogues. That is a measured regression, so it needs an explicit owner ruling.

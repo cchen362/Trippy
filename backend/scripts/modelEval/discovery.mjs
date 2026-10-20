@@ -1,8 +1,8 @@
 // Plan 30 W0 — discovery evaluation harness.
 //
 //   cd backend; NODE_ENV=test node scripts/modelEval/discovery.mjs --profile control
-//     [--only id,id] [--variant first|exclusions] [--concurrency 3] [--max-usd 10] [--limit n]
-//     [--dry-run] [--keep-db]
+//     [--only id,id] [--variant first|exclusions] [--repeat n] [--concurrency 3] [--max-usd 10]
+//     [--limit n] [--dry-run] [--keep-db]
 //
 // Six destinations x two variants (first generation / with the exclusion list a "show more" or a
 // stale refresh would send) -> up to 12 generations per profile. Each generation calls the real
@@ -15,6 +15,11 @@
 // the end proves it. The exclusion lists are captured once from the copy into
 // data/model-eval/discovery-exclusions.json and reused, so every profile is measured against
 // identical lists.
+//
+// Plan 36 W2: --repeat <n> runs every selected item n times (the record keeps the plain fixtureId;
+// extra.repeat is the 1-based repetition), to measure a collapse rate. Fixtures flagged firstOnly have
+// no dev-DB row, so they get no exclusion capture and only the 'first' variant; fixtures flagged optIn
+// (hoian, danang) are generated only when --only names them, so the standard corpus is unchanged.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -53,6 +58,22 @@ function extractVariant(argv) {
   return { variant, rest };
 }
 
+// Plan 36 W2: --repeat is lifted out of argv the same way (default 1).
+function extractRepeat(argv) {
+  const rest = [];
+  let repeat = 1;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--repeat') {
+      repeat = Number(argv[i + 1]);
+      i += 1;
+      if (!Number.isInteger(repeat) || repeat < 1) throw new Error('--repeat must be a positive integer');
+    } else {
+      rest.push(argv[i]);
+    }
+  }
+  return { repeat, rest };
+}
+
 const sha256 = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 // claudeDestination exactly as routes/discovery.js composes it for a known country.
@@ -67,6 +88,7 @@ function loadOrCaptureExclusions(db, fixtures) {
   let captured = 0;
 
   for (const fixture of fixtures) {
+    if (fixture.firstOnly) continue; // Plan 36 W2: no dev-DB row, so no exclusion list to capture
     if (stored.destinations[fixture.id]) continue;
     const row = findDestination(db, fixture.cityKey, fixture.countryCode);
     if (!row) {
@@ -94,14 +116,14 @@ function loadOrCaptureExclusions(db, fixtures) {
 }
 
 // Runs the selected generations and returns the run file path (null for a dry run).
-async function sweep({ args, profile, items, exclusionsById, dryRun }) {
+async function sweep({ args, profile, items, exclusionsById, dryRun, repeat }) {
   console.log(`profile ${args.profile}: ${JSON.stringify(toServiceProfile(profile))}${profile.promptVariant ? ` + prompt variant "${profile.promptVariant}"` : ''}`);
-  console.log(`${items.length} generation(s)${dryRun ? ' (dry run, no API call)' : ''}:`);
-  for (const { fixture, variant } of items) {
+  console.log(`${items.length} generation(s)${repeat > 1 ? ` (${items.length / repeat} item(s) x ${repeat} repeats)` : ''}${dryRun ? ' (dry run, no API call)' : ''}:`);
+  for (const { fixture, variant } of items.filter((item) => item.repeat === 1)) {
     const exclusion = exclusionsById[fixture.id];
     console.log(
       `  ${fixture.id}/${variant}  "${claudeDestinationFor(fixture)}"  ` +
-      `exclusions=${variant === 'exclusions' ? exclusion.count : 0}  [${fixture.role}]`,
+      `exclusions=${variant === 'exclusions' ? exclusion.count : 0}  repeat=${repeat}  [${fixture.role}]`,
     );
   }
   if (dryRun || !items.length) return null;
@@ -112,7 +134,7 @@ async function sweep({ args, profile, items, exclusionsById, dryRun }) {
   const run = openRunFile('discovery', args.profile);
   console.log(`run file: ${run.path}`);
 
-  const summary = await runPool(items, async ({ fixture, variant }) => {
+  const summary = await runPool(items, async ({ fixture, variant, repeat: repetition }) => {
     const exclusion = exclusionsById[fixture.id];
     const exclusions = variant === 'exclusions' ? exclusion.names : [];
     const claudeDestination = claudeDestinationFor(fixture);
@@ -145,11 +167,20 @@ async function sweep({ args, profile, items, exclusionsById, dryRun }) {
         exclusionCount: exclusions.length,
         exclusionsSha: variant === 'exclusions' ? exclusion.sha256 : null,
         categoryTimes,
+        repeat: repetition,
       },
     });
     run.write(record);
     return record;
-  }, { concurrency: args.concurrency, maxUsd: args.maxUsd, onRecord: printProgress });
+  }, {
+    concurrency: args.concurrency,
+    maxUsd: args.maxUsd,
+    // Repeated records share a fixtureId, so the progress line names the repetition.
+    onRecord: (record, state) => printProgress(
+      repeat > 1 ? { ...record, fixtureId: `${record.fixtureId}#${record.extra.repeat}` } : record,
+      state,
+    ),
+  });
 
   console.log(`
 done ${summary.done}/${summary.total}, spent $${summary.spent.toFixed(4)}${summary.stopped ? ` — STOPPED: ${summary.stopped}` : ''}`);
@@ -158,7 +189,8 @@ done ${summary.done}/${summary.total}, spent $${summary.spent.toFixed(4)}${summa
 }
 
 async function main() {
-  const { variant: variantFilter, rest } = extractVariant(process.argv.slice(2));
+  const { variant: variantFilter, rest: afterVariant } = extractVariant(process.argv.slice(2));
+  const { repeat, rest } = extractRepeat(afterVariant);
   const args = parseArgs(rest);
   if (!rest.includes('--concurrency')) args.concurrency = 3;
   const dryRun = args.flags.has('dry-run');
@@ -178,12 +210,18 @@ async function main() {
     console.log(`working copy: ${handle.path}`);
 
     const variants = variantFilter ? [variantFilter] : ['first', 'exclusions'];
-    const items = filterItems(
-      fixtures.flatMap((fixture) => variants.map((variant) => ({ fixture, variant }))),
+    // Plan 36 W2: optIn fixtures need --only to name them; firstOnly fixtures have no 'exclusions' variant.
+    const base = filterItems(
+      fixtures
+        .filter((fixture) => !fixture.optIn || args.only?.has(fixture.id))
+        .flatMap((fixture) => variants
+          .filter((variant) => !fixture.firstOnly || variant === 'first')
+          .map((variant) => ({ fixture, variant }))),
       args,
       (item) => item.fixture.id,
     );
-    runPath = await sweep({ args, profile, items, exclusionsById, dryRun });
+    const items = base.flatMap((item) => Array.from({ length: repeat }, (_, i) => ({ ...item, repeat: i + 1 })));
+    runPath = await sweep({ args, profile, items, exclusionsById, dryRun, repeat });
   } finally {
     // before is null only if setup threw before the first count; then there is nothing to compare.
     if (before) finishSideEffectCheck({ workload: 'discovery', handle, before, runPath, keep: keepDb });

@@ -36,6 +36,8 @@ the model's live lines differ from Haiku 4.5's original: an unnamed line falls b
 one (Plan 34 W4's `exact-count` names both). The discovery scorer reports thinking tokens from the API's exact
 `output_tokens_details.thinking_tokens` when every call carries it, with the Plan 30 W3 estimate printed beside it.
 
+Plan 36 W2 added to discovery: `--repeat <n>` runs every selected item n times (records keep the plain `fixtureId`; `extra.repeat` is the 1-based repetition) to measure a collapse rate. Fixtures `hoian` and `danang` have no dev-catalogue row, so they are `firstOnly` (no exclusion capture, no `exclusions` variant) and `optIn` (generated only when named by `--only`, so the standard 12-generation corpus is unchanged): `--only hoian,danang --repeat 4`. The scorer adds collapse runs (output under 12,000 tokens and most categories under 8 items), essentials median/min, the share of categories under 8 items, and logistics entries by name (raw, any category and essentials only; backs D-36-4, a name heuristic to read, not a verdict), with `ess`, `collapse` and `logi` columns per item.
+
 Extraction profiles may carry `promptVariant` too (Plan 34 W1): `extraction.mjs` installs it from
 `lib/extractionPromptVariants.mjs` after the recorder, wrapping `Messages.prototype.create`, and throws unless the
 request's system prompt is exactly the live `EXTRACTION_SYSTEM`, so a no-op patch cannot be measured under a variant's

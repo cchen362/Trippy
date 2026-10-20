@@ -26,6 +26,15 @@ const BRANCH_WORD_RE = /\b(location|branch|store|outlet|flagship|street|road|rd|
 const SHORT_NAME_RE = /^[A-Z][\p{L}'’.-]*(\s+[A-Z][\p{L}'’.-]*){0,4}$/u;
 const BRACKET_RE = /[(（[【]([^)）\]】]*)[)）\]】]/g;
 
+// Plan 36 W2. Backs D-36-4 (logistics stay out of Discovery): an item whose name is itself a piece of
+// travel plumbing (airport, station, ride-hailing app, bank/ATM, health, visa, SIM, tourist office, post
+// office) is not a place to go. A name-based heuristic, case-insensitive and word-bounded, so a
+// restaurant called "Bank Street Cafe" is a false positive and the count is a signal to read, not a verdict.
+const LOGISTICS_RE = /\b(?:(?:international\s+)?airport|(?:railway|train)\s+station|bus\s+(?:station|terminal)|metro\s+line|ferry\s+terminal|grab|ride[-\s]?hailing|taxi\s+app|atm|bank|hospital|clinic|pharmacy|visa\s+office|immigration|sim\s+(?:card|counter)|tourist\s+information(?:\s+cent(?:re|er))?|post\s+office)\b/i;
+const isLogistics = (name) => LOGISTICS_RE.test(name);
+const COLLAPSE_OUTPUT_TOKENS = 12000;
+const THIN_CATEGORY_ITEMS = 8;
+
 function canonicalCategory(raw) {
   if (typeof raw !== 'string') return null;
   const normalized = raw.trim().toLowerCase().replace(/\s+/g, '_');
@@ -128,6 +137,9 @@ function loadExclusionSets() {
 function analyse(record, exclusionSets) {
   const raw = parseRaw(record);
   const rawItems = raw.categories.flatMap((c) => c.items);
+  const logistics = rawItems.filter((item) => isLogistics(item.name)).length;
+  const rawEssentials = raw.categories.filter((c) => c.category === 'essentials').flatMap((c) => c.items);
+  const logisticsEssentials = rawEssentials.filter((item) => isLogistics(item.name)).length;
 
   const seen = new Set();
   let duplicateDrops = 0;
@@ -160,6 +172,10 @@ function analyse(record, exclusionSets) {
   const perCategoryCounts = DISCOVERY_CATEGORIES.map(
     (category) => output.filter((c) => c.category === category).reduce((n, c) => n + c.items.length, 0),
   );
+  // Plan 36 W2: a "collapse" is a short run (under 12,000 output tokens) whose categories mostly come
+  // back thin (under 8 items). DISCOVERY_CATEGORIES lists essentials first, so index 0 is essentials.
+  const collapsed = (record.usage?.output_tokens ?? Infinity) < COLLAPSE_OUTPUT_TOKENS
+    && perCategoryCounts.filter((n) => n < THIN_CATEGORY_ITEMS).length > perCategoryCounts.length / 2;
   const colonSurvivors = outputItems.filter((item) => hasDepthZeroColon(item.name)).length;
   const firstCategoryMs = record.extra?.categoryTimes?.[0]?.t ?? null;
   const thinkingTokensEstimate = estimatedThinkingTokens(record);
@@ -172,6 +188,11 @@ function analyse(record, exclusionSets) {
     outputItemCount: outputItems.length,
     categoriesWithItems: perCategoryCounts.filter((n) => n > 0).length,
     perCategoryCounts,
+    essentialsCount: perCategoryCounts[DISCOVERY_CATEGORIES.indexOf('essentials')],
+    rawEssentialsCount: rawEssentials.length,
+    collapsed,
+    logistics,
+    logisticsEssentials,
     duplicateDrops,
     repeatsOfExcluded,
     defects,
@@ -214,6 +235,13 @@ function summarise(analyses, prefix = '') {
     [label('any bracket (NOT a quality measure, F-27-33)')]: pct(defect('anyBracket'), rawItems),
     [label('time to first category ms: median / max')]: `${median(analyses.map((a) => a.firstCategoryMs))} / ${max(analyses.map((a) => a.firstCategoryMs))}`,
     [label('cost per usable item ($): median / worst')]: costs.length ? `${median(costs).toFixed(5)} / ${Math.max(...costs).toFixed(5)}` : '—',
+    [label('collapse runs (output < 12,000 tokens and most categories under 8)')]: pct(analyses.filter((a) => a.collapsed).length, n),
+    [label('essentials: median / min items')]: `${median(analyses.map((a) => a.essentialsCount))} / ${Math.min(...analyses.map((a) => a.essentialsCount))}`,
+    [label('categories under 8 items (all generations)')]: pct(
+      sum((a) => a.perCategoryCounts.filter((c) => c < THIN_CATEGORY_ITEMS).length), n * DISCOVERY_CATEGORIES.length,
+    ),
+    [label('logistics entries (raw, any category)')]: pct(sum((a) => a.logistics), rawItems),
+    [label('logistics in essentials (raw)')]: pct(sum((a) => a.logisticsEssentials), sum((a) => a.rawEssentialsCount)),
     [label('thinking blocks (total)')]: sum((a) => a.thinkingBlocks),
     [label('thinking tokens: median / max (share of output)')]: `${median(analyses.map((a) => a.thinkingTokens))} / ${max(analyses.map((a) => a.thinkingTokens))} (${(100 * sum((a) => a.thinkingTokens) / Math.max(1, sum((a) => a.record.usage.output_tokens))).toFixed(0)}%)`,
     [label('thinking tokens source')]: `${exactCount}/${n} exact (API thinking_tokens); ${n - exactCount} estimated`,
@@ -248,6 +276,8 @@ export function score(records) {
     item: `${a.record.fixtureId}/${a.record.variant}`,
     cats: `${a.categoriesWithItems}/8`,
     perCat: a.perCategoryCounts.join(','),
+    ess: a.essentialsCount,
+    collapse: a.collapsed,
     items: a.outputItemCount,
     raw: a.rawItemCount,
     dropped: a.raw.droppedLines,
@@ -257,6 +287,7 @@ export function score(records) {
     dash: a.defects.dashClause,
     aliasEq: a.defects.aliasIdentical,
     descBr: a.defects.descriptiveBracket,
+    logi: a.logistics,
     ttfcMs: a.firstCategoryMs,
     wallS: Math.round(a.record.wallMs / 1000),
     outTok: a.record.usage.output_tokens,
