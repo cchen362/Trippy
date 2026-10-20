@@ -17,7 +17,9 @@
 //
 // Probe ids: extraction-sonnet-5-5, extraction-sonnet-4-6 (EXTRACTION_SCHEMA_W0),
 // extraction-plan-sonnet-5-5, extraction-plan-sonnet-4-6 (§4.1 as written), descriptor-haiku-5-5,
-// descriptor-haiku-4-5, union-inline-17, union-inline-16, and complexity-<variant> (COMPLEXITY_VARIANTS).
+// descriptor-haiku-4-5, union-inline-17, union-inline-16, complexity-<variant> (COMPLEXITY_VARIANTS), and
+// emit-category-haiku-5-5 (Plan 35 W0: EMIT_CATEGORY_INPUT_SCHEMA as a strict tool on the staged
+// discovery prompt — noformat is the same request without the tool, cold/warm force the tool call).
 //
 // D-30-7: no database is imported or opened. The only external call is the Anthropic Messages API,
 // and the only file written is data/model-eval/runs/schema-probe/<timestamp>.jsonl.
@@ -27,6 +29,7 @@ import { mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../../src/config.js';
 import { MODEL_PROFILES, SCENE_TYPES, requestSettings } from '../../src/services/claude.js';
+import { EMIT_CATEGORY_INPUT_SCHEMA, EMIT_CATEGORY_TOOL, checkCategoryInput, stagedDiscoverySystemPrompt } from './lib/emitCategoryTool.mjs';
 import { costUsd } from './lib/pricing.mjs';
 import { RUNS_DIR } from './lib/runner.mjs';
 
@@ -344,8 +347,9 @@ const DESCRIPTOR_USER = 'Kiyomizu-dera, Kyoto, Japan, stop type: experience';
 const BUDGET_SYSTEM = 'Fill the response schema.';
 const BUDGET_USER = 'Reply with nulls.';
 
-// `matrix` probes run noformat -> cold -> warm; `budget` probes run cold only (the outcome is
-// accepted-or-rejected, which the first request already settles).
+// `matrix` and `tool` probes run noformat -> cold -> warm; `budget` probes run cold only (the outcome
+// is accepted-or-rejected, which the first request already settles). A `tool` probe sends its schema
+// as a strict tool with a forced tool choice instead of as output_config.format.
 const PROBES = [
   // The plan's §4.1 schema, as written: rejected on both Sonnet models after the full 180 s compile
   // ("Schema is too complex."), with either carrierCode pattern. Kept so the rejection can be re-run.
@@ -379,6 +383,15 @@ const PROBES = [
     schemaName: 'DESCRIPTOR_SCHEMA', schema: DESCRIPTOR_SCHEMA,
     fallbacks: DESCRIPTOR_FALLBACKS,
     system: DESCRIPTOR_SYSTEM, user: DESCRIPTOR_USER,
+  },
+  // Plan 35 W0: the staged-emission tool. Compile cost is what is measured here; stagedEmissionProbe.mjs
+  // measures the behaviour.
+  {
+    probeId: 'emit-category-haiku-5-5', kind: 'tool', workload: 'discovery', model: HAIKU_55,
+    schemaName: 'EMIT_CATEGORY_INPUT_SCHEMA', schema: EMIT_CATEGORY_INPUT_SCHEMA,
+    fallbacks: [],
+    system: stagedDiscoverySystemPrompt(HAIKU_55),
+    user: 'Curate the best of Ipoh, Malaysia (MY). Include neighbourhood gems alongside the genuinely unmissable. Be specific, be honest about crowds and tourist traps.',
   },
   {
     probeId: 'union-inline-17', kind: 'budget', workload: 'extraction', model: SONNET_55,
@@ -430,10 +443,22 @@ function openProbeFile() {
 
 // The real profile's request fields, with the format merged into output_config beside any effort
 // (Plan 34 D-34-6: Haiku 4.5 and Sonnet 4.6 send output_config: { format } with no effort).
-function buildBody({ model, workload, schema, system, user }) {
+function buildBody({ kind, model, workload, schema, system, user }) {
   const profile = MODEL_PROFILES[model]?.[workload];
   if (!profile) throw new Error(`no ${workload} profile for ${model} in MODEL_PROFILES`);
   const settings = requestSettings({ model, ...profile });
+  if (kind === 'tool') {
+    // The real discovery profile (thinking disabled, which a forced tool choice requires), with
+    // max_tokens cut to 8,000: the probe forces one category, so a single call cannot run long, and the
+    // profile's 48,000 would only raise the ceiling on a mistake. No output format; the tool is the schema.
+    return {
+      ...settings,
+      max_tokens: 8000,
+      system,
+      messages: [{ role: 'user', content: user }],
+      ...(schema ? { tools: [EMIT_CATEGORY_TOOL], tool_choice: { type: 'tool', name: 'emit_category' } } : {}),
+    };
+  }
   const outputConfig = schema
     ? { ...(settings.output_config ?? {}), format: { type: 'json_schema', schema } }
     : settings.output_config;
@@ -445,8 +470,15 @@ function buildBody({ model, workload, schema, system, user }) {
   };
 }
 
-function shapeCheckFor(workload, parsed) {
+function shapeCheckFor(workload, parsed, kind) {
   if (!parsed || typeof parsed !== 'object') return null;
+  if (kind === 'tool') {
+    return {
+      category: parsed.category ?? null,
+      itemCount: Array.isArray(parsed.items) ? parsed.items.length : null,
+      check: checkCategoryInput(parsed),
+    };
+  }
   if (workload === 'descriptor') {
     const query = typeof parsed.photoQuery === 'string' ? parsed.photoQuery : null;
     return {
@@ -515,7 +547,11 @@ async function sendOne(client, probe, { attempt, schemaName, schema }) {
   let parsed = null;
   let parseError = null;
   if (schema) {
-    if (textBlocks.length !== 1) {
+    if (probe.kind === 'tool') {
+      const toolUses = blocks.filter((b) => b.type === 'tool_use');
+      if (toolUses.length !== 1) parseError = `expected exactly one tool_use block, got ${toolUses.length}`;
+      else parsed = toolUses[0].input;
+    } else if (textBlocks.length !== 1) {
       parseError = `expected exactly one text block, got ${textBlocks.length}`;
     } else {
       try {
@@ -541,7 +577,7 @@ async function sendOne(client, probe, { attempt, schemaName, schema }) {
     parsed,
     parseError,
     blockTypes: blocks.map((b) => b.type),
-    shapeCheck: schema && parsed ? shapeCheckFor(probe.workload, parsed) : null,
+    shapeCheck: schema && parsed ? shapeCheckFor(probe.workload, parsed, probe.kind) : null,
     request: body,
   };
 }
@@ -639,11 +675,11 @@ async function main() {
   async function runProbe(probe) {
     if (stopped) return;
     console.log(`\n${probe.probeId} (${probe.model})`);
-    if (probe.kind === 'matrix') {
+    if (probe.kind !== 'budget') {
       if (!(await send(probe, { attempt: 'noformat', schemaName: null, schema: null }))) return;
     }
     const cold = await send(probe, { attempt: 'cold', schemaName: probe.schemaName, schema: probe.schema });
-    if (!cold || probe.kind !== 'matrix') return;
+    if (!cold || probe.kind === 'budget') return;
 
     if (cold.ok) {
       await send(probe, { attempt: 'warm', schemaName: probe.schemaName, schema: probe.schema });

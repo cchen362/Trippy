@@ -121,6 +121,11 @@ descriptor: the same 8-word rule written as seven optional groups instead of `{0
 reshaped (`COMPLEXITY_VARIANTS`: patterns, `details` size and shape, `fieldConfidence`, the `result`
 union, and `ref-per-use-on-8` for how a `$ref` counts against the union limit). Run them with
 `--concurrent`: a rejected compile holds its request for the full 180 s. `--only bogus` lists every id.
+`emit-category-haiku-5-5` (Plan 35 W0) compiles `EMIT_CATEGORY_INPUT_SCHEMA` as a strict `emit_category`
+tool on Haiku 5.5, on the staged discovery prompt (`lib/emitCategoryTool.mjs`), with the real discovery
+profile (thinking disabled, which the forced `tool_choice` requires) and `max_tokens` 8,000; its
+`noformat` request is the same call without the tool, and `shapeCheck` records the category, item count
+and `checkCategoryInput` result.
 
 It writes one JSONL file, `data/model-eval/runs/schema-probe/<timestamp>.jsonl`: per request the exact
 body sent (schema included), the API error text verbatim when rejected, `stopReason`, `usage`,
@@ -134,6 +139,43 @@ Guarantees: the calls are direct SDK `messages.create` calls with hand-written f
 `messages.parse()` or the SDK's json-schema/zod helpers (they rewrite the schema; Plan 34 D-34-2).
 SDK retries off, nothing is repaired. No database is opened and nothing is written outside
 `data/model-eval/`.
+
+## Staged-emission probe (Plan 35 W0)
+
+```bash
+NODE_ENV=test node scripts/modelEval/stagedEmissionProbe.mjs [--only ipoh,chengdu,okinawa] [--runs 2] [--parallel off|on|both] [--max-usd 1] [--max-steps 12] [--concurrency 1] [--strict on|off]
+```
+
+Measures whether Haiku 5.5 with adaptive thinking (effort `low`, no `thinking` field) thinks per category
+when the catalogue is delivered through an `emit_category` tool, or still plans the whole catalogue
+before its first call (Plan 34 W4: first category at 44 s). Each run is a real tool loop on the live
+discovery prompt with the `exact-count` volume line and the NDJSON output opening replaced by the
+staging paragraph (`stagedDiscoverySystemPrompt`): stream a step, replay the assistant turn verbatim
+(thinking blocks and signatures included), answer every `tool_use` with a `tool_result`
+(`{ received, remaining }`), repeat until the model ends its turn, `--max-steps` is reached, or the API
+errors. `tools`, `tool_choice` and the system block are byte-identical on every step; the cache
+breakpoint sits on the system block and the newest `tool_result` only. The user message is the live one.
+`--parallel` selects the `tool_choice` setting: `off` is `disable_parallel_tool_use: true`
+(`parallel: "disabled"`), `on` is `false` sent explicitly (`"allowed"`), `both` runs each. Runs are
+sequential unless `--concurrency` is raised, so timing is not perturbed. `--strict off` sends the same tool
+without `strict` (a diagnostic: W0 used it to tell the strict decoder's CJK `localName` corruption apart
+from the loop itself); each run record carries `strict`.
+
+It writes one JSONL file, `data/model-eval/runs/staged-probe/<timestamp>.jsonl`, one line per run: the
+steps (block timeline from the step's and the run's start, exact `thinking_tokens` from `usage`, stop
+reason and details, usage, cost, text blocks so any prose is visible, each delivered category's full
+tool input with its `checkCategoryInput` result; the first two request bodies whole, later ones as a hash) and the totals
+(`firstCategoryMs` — run start to the first `tool_use` block closing, the moment a server could persist
+the first category — thinking tokens before the first call and per step, calls per turn, duplicates,
+prose-only turns, `end_turn` before the eighth category). Thinking text and signatures are never
+written. The summary prints a per-run table and, per `parallel` setting, the Plan 35 §5 go/no-go:
+median thinking before the first call <= 1,200 tokens; one `emit_category` per turn on at least 10/12 of
+turns with a call; at least one thinking block after the first step; no prose-only turn and no
+`end_turn` before the eighth category. The `--max-usd` guard refuses a step that, at the dearest step
+seen so far, could pass the cap (exit code 2).
+
+Guarantees: direct SDK `messages.stream` calls with retries off; nothing is repaired or retried. No
+database is opened and nothing is written outside `data/model-eval/`.
 
 ## Photo fallback passes (Plan 34 W0, reused by W2)
 

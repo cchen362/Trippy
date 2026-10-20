@@ -75,6 +75,7 @@ export const MODEL_PROFILES = Object.freeze({
       // target. A cut-off is still classified (D-30-3) and leaves the catalogue stale.
       // D-34-10 (Plan 34 W4): thinking on with an exact-count line beat this on quality but put
       // the first category at 44 s; kept off, deferred to a design that removes the wait.
+      // Plan 35 W0: staged emission through a tool was that design; measured NO-GO (23-37 s).
       maxTokens: 48000,
       thinking: Object.freeze({ type: 'disabled' }),
       effort: 'low',

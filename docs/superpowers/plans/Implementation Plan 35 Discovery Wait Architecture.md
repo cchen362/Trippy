@@ -1,6 +1,6 @@
 # Implementation Plan 35 — Discovery Wait Architecture
 
-**Status:** 2026-10-20 — **APPROVED by the owner: Q-35-1 to Q-35-4 all ruled (§10). No wave started.** Next: W0 (probe and fresh-path log line); W2 and W4 may start alongside it. Written at `4cffede` (`origin/main`, the Plan 34 W4 commit) as the plan that Plan 34 §6 W4 and `D-34-10` defer Q-34-4 to. Every decision below is **provisional** until its gate passes. Each owner question Q-35-n carries a default. Waves are implemented later via `/implement-milestone`; each lands on its own branch.
+**Status:** 2026-10-20 — **W0 COMPLETE: the staged-emission probe is a NO-GO** (§6 W0). Haiku 5.5 still planned the catalogue before its first `emit_category` call (median 2,268–2,980 thinking tokens against the 1,200 budget), the first category landed at 23–37 s against the ~15.7 s gate, and strict tool input corrupted CJK `localName` values after the first category. Under Q-35-2 as ruled (the default), **W1 and W3 are not built**, D-34-10 stands, and D-35-1 / D-35-4 are not adopted (D-35-5). **Next: W2 (readable wait state) and W4 (pre-warm + fresh-path re-queue)**, then W5. APPROVED by the owner 2026-10-20: Q-35-1 to Q-35-4 all ruled (§10). Written at `4cffede` (`origin/main`, the Plan 34 W4 commit) as the plan that Plan 34 §6 W4 and `D-34-10` defer Q-34-4 to. Every decision below is **provisional** until its gate passes. Each owner question Q-35-n carries a default. Waves are implemented later via `/implement-milestone`; each lands on its own branch.
 
 **Origin.** Plan 34 W4 measured Discovery on Haiku 5.5 with adaptive thinking on and an exact-count volume line. It was better on every quality measure the gate has: "show more" repeating an excluded place 0 % against 30 %, alias identical to name 1.2 % against 5.7 %, verified 15 % against 12 %, wellness padding 60 % against 72 %. It failed one criterion: the first category reached the traveller after **44.2 s** (range 32.6–78.8 s) instead of **10.7 s**, because the model plans the whole catalogue in one thinking block before it writes a line. The owner ruled that thinking stays off *for now*, and asked whether the loading architecture itself had been examined for a way to keep thinking on without the wait. It had not. This plan examines it.
 
@@ -217,7 +217,7 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 ### W0 — Measure and probe (no production change)
 
-**Status:** NOT STARTED.
+**Status:** COMPLETE 2026-10-20 — **NO-GO.** Results in "W0 results" at the end of this wave. Spend $0.29 against the $0.20 budget; the overrun was a second probe pass, which saved every delivered category as evidence, and a strict-off diagnostic.
 
 **Files.** `backend/scripts/modelEval/stagedEmissionProbe.mjs` (new); `schemaProbe.mjs` (one more schema to compile); `routes/discovery.js` (one log line); `README.md` under `modelEval`.
 
@@ -230,9 +230,50 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 **Acceptance.** The measure is recorded here with its query; the log line is in; the schema compiles; the probe's table is in this plan and the go / no-go is stated.
 
+#### W0 results (2026-10-20, W0 working tree over `5581694`)
+
+**Step 1: production cold generations (read-only).** Run with the owner's approval over ssh: `docker exec -i -w /app/backend trippy-trippy-1 node -` fed a script that opened `/app/data/trippy.db` with `readonly: true`. The query took each destination's first `utc_date` in `discovery_generation_daily`, joined it to `discovery_destinations`, and classified each against the trips that exist today. Day 1 means `days` at the trip's earliest date, `city_override` before `city`, folded with `canonicalGeoKey`. Scope means `trip_scopes.canonical_key`/`label`. Measured 2026-10-20 04:57 UTC, window from 2026-07-22 (90 days).
+- 15 destinations have daily rows; **6 had their first generation in the window**: 1 in the week of 2026-07-27 (Chiang Mai), 3 in the week of 2026-09-14 (Kyoto, Singapore, Osaka), and 2 in the week of 2026-10-12 (Bangkok, Penang).
+- **2 of 6 were a trip's Day 1 city** (Bangkok, Penang). **4 of 6 matched no current trip.** Those are co-pilot kicks, typed searches, or trips since deleted; the classification uses today's trips, so it cannot tell these apart. 0 were a non-Day-1 scope.
+- Volume is too low to rank causes. It confirms only that cold generations are rare, and that most of them happen where no pre-warm could reach. Q-35-3 was ruled on product grounds, so this is recorded only.
+
+**Step 2: fresh-path log line.** `[discover] served fresh destination=<id> places=<n>` sits beside the fresh return in `routes/discovery.js`. It uses the destination id, as the join line does, and contains no secrets. From the next deploy, cold opens against all opens = `[discover] destination=` lines against those plus `served fresh` and `joined running generation` lines.
+
+**Step 3: schema compile.** `schemaProbe.mjs --only emit-category-haiku-5-5`. `EMIT_CATEGORY_INPUT_SCHEMA` (in `scripts/modelEval/lib/emitCategoryTool.mjs`: 11 required item fields, `lat`/`lng`/`localName` nullable, no optional property) was **ACCEPTED** as a `strict` tool on Haiku 5.5.
+- First call 11.2 s and second call 15.7 s, with a forced tool choice and thinking disabled.
+- The tool adds 965 input tokens.
+- Both outputs passed `checkCategoryInput`, with 6 and 13 items. Cost $0.0033.
+
+**Step 4: the probe.** `stagedEmissionProbe.mjs` with the settings §5 calls for: Ipoh, Chengdu and 冲绳 (Okinawa) × 2 runs × {`disable_parallel_tool_use` true, false}, adaptive thinking at `low`, and 16,000 per step. The prompt was the live Haiku 5.5 prompt with the exact-count volume line, and with the NDJSON opening replaced by `STAGING_PARAGRAPH`: one call per category, in order, one call per turn, no text. Run file `runs/staged-probe/2026-10-20T05-04-53-969Z.jsonl`, $0.187. All 12 runs delivered 8 distinct categories in order and ended `end_turn`.
+
+| Setting | Thinking before first call, median (range) | First category, median (range) | Total time, median | One call per turn | Later steps with thinking | Go / no-go |
+|---|---|---|---|---|---|---|
+| parallel disabled | **2,268** (1,795–3,757) | **26.9 s** (25.6–37.3) | 114 s | 48/48 | 14 steps in 5 of 6 runs | **NO-GO** |
+| parallel allowed | **2,980** (1,259–4,223) | **29.6 s** (23.0–32.1) | 104 s | 48/48 | 17 steps in 5 of 6 runs | **NO-GO** |
+
+§5 criteria by setting: thinking ≤ 1,200 failed on both. One call per turn passed on both. Interleaving passed on both, but it is small: most later steps think 0 tokens, and only one run thought more than 1,200 after step 1. "No prose-only turn" failed on both: 2 closing messages per setting, two of which were self-critiques (below). No run ended early.
+
+What the numbers mean:
+1. **The tool boundary halves the up-front plan but does not spread it.** W4's single block was 6,253 tokens. Here step 1 thinks 1,259–4,223 and the rest of the run thinks almost nothing. The model still plans most of the catalogue before Essentials.
+2. **Thinking was not the whole gap; the 1,200-token budget was necessary but not sufficient.** Step-1 medians (parallel disabled): first stream event 1.1 s, thinking phase 11.4 s, then **14.2 s to write the first category as tool input**. Later steps write a category in 10.3 s (median 2,632 output tokens), so the per-category pace matches NDJSON. The three runs closest to the budget (1,234–1,428 tokens, counting the diagnostic below) still landed at 22–24 s. Even with zero thinking, step 1 would land at about 15 s, which is the gate with no margin.
+3. **Strict tool input corrupts CJK local names once a category has been replayed.** A second pass saved every delivered category (`…05-27-24-140Z.jsonl`, 4 runs before a session restart cut it, $0.065). Step 1 was clean on every run. From step 2 on, Chengdu's `localName` came back as control characters where 成都-style script belonged (`"\b\b\b…"`, `"\n\n\n\n"`). That was **10 items in one run and 79 of 80 later items in the other**, and one category collapsed to a single item whose local name was 32 backspaces. Ipoh (Latin-script local names) had 0 bad local names. The first pass showed the same signature without saving the inputs. Chengdu culture collapsed to 1 item in 3 of 4 runs. One Okinawa run delivered 21 items in total, 1–2 in seven of its eight categories. Two runs closed by reporting the junk themselves ("placeholder junk ('\n\n\n', '\ngg\n')"); for Okinawa that report is the model's account and was not read from saved inputs.
+4. **Strict off is not a fix** (diagnostic, `--strict off`, Chengdu × 2, parallel disabled, `…05-53-45-867Z.jsonl`, $0.033). Local names stayed correct CJK, but the shape broke:
+   - one category's `items` arrived as a 6,915-character JSON string;
+   - three categories had items missing `sceneType`;
+   - the other run shrank to 41 items, with 2–3 in four categories.
+   Timing was the same: 22–23 s to the first category, 1,234–1,309 thinking tokens before the first call.
+5. **Cost** was $0.007–0.019 per generation (median about $0.016), within Q-35-1's ceiling. It does not decide anything now.
+
+**Verdict: NO-GO.** As §7 and Q-35-2 (ruled: the default) direct: W1 and W3 are not built. Thinking stays off and D-34-10 stands; D-35-1 and D-35-4 are not adopted; D-35-5 applies. W2 and W4 proceed. This records the result so it is not re-run without a new design. A re-attempt would have to answer three things together:
+- a first-category writing time near 14 s, before any thinking;
+- step-1 planning that the tool boundary does not spread;
+- a strict-decoding defect on non-Latin strings across turns, which no prompt can address.
+
+The probe and the compile probe stay in the harness, so a future model can be measured with one command (`--strict on|off` included).
+
 ### W1 — Staged emission in `claude.js`, measured (D-35-1, D-35-4)
 
-**Status:** NOT STARTED. Starts only on a W0 "go".
+**Status:** NOT BUILT — W0 was a NO-GO (2026-10-20). Closed under Q-35-2 as ruled; kept below as the design a future attempt would start from.
 
 **Files.** `backend/src/services/claude.js`; `backend/tests/claude.test.js`; `backend/scripts/modelEval/profiles.mjs`, `lib/score/discovery.mjs`, `lib/discoveryPromptVariants.mjs`, `README.md`; `docs/DECISIONS.md` (provisional row).
 
@@ -268,7 +309,7 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 ### W3 — Switch Haiku 5.5 discovery to staged, thinking on (D-34-10 reopened) and deploy
 
-**Status:** NOT STARTED. Requires W1 pass and W2 complete.
+**Status:** NOT BUILT — W1 was not built (W0 NO-GO, 2026-10-20). D-34-10 stands.
 
 **Files.** `claude.js` (profile row: drop `thinking`, `emission: 'staged'`, measured `maxTokens`; `DISCOVERY_SELECTION_RULES['claude-haiku-5-5']` takes the exact-count volume line and the staging paragraph), `claude.test.js` (re-capture only the Haiku 5.5 discovery body and prompt pins), `profiles.mjs` (`control` becomes the staged profile; `assertControlIsLive` enforces it), `docs/DECISIONS.md`, `docs/ENGINEERING.md` (Discovery paragraph).
 
@@ -306,6 +347,7 @@ Update `docs/ENGINEERING.md` ("Discovery and Photos": emission mode, thinking se
 ## 7. Sequencing and rollback summary
 
 - **Order.** W0 → (W1 ‖ W2 ‖ W4) → W3 → deploy → W5. W2 and W4 can start at once; W1 waits on W0's go. W2 and W4 touch different files (panel and hook against trips service and verifier); both touch `routes/discovery.js`, so they are merged in sequence, not side by side.
+- **As run (2026-10-20): W0 said no-go, so the order is now W2 ‖ W4 → deploy → W5.** Q-35-2 was ruled before the probe (the default), so no new ruling is needed.
 - **If W0 says no-go.** W2 still ships (it is owed on today's 11 s). W1/W3 are not built; Q-35-2 goes to the owner with the probe's numbers; this plan closes with D-34-10 standing and the reason recorded.
 - **Rollback unit.** One model-keyed row in `MODEL_PROFILES` plus a redeploy (D-30-1). The staged path and the stream path coexist by model until Plan 34 W5 retires Haiku 4.5's row; at that point the stream path's future is decided there, not here.
 - **No migration, so no schema rollback.**
@@ -377,8 +419,8 @@ Each follows the plain-language shape: what it is, one example, the implication,
 
 ## 11. Not verified, and how to close it
 
-- **Whether Haiku 5.5 at `low` interleaves thinking per tool call rather than planning everything first.** Closed by W0's probe (§5).
-- **Whether the `emit_category` strict schema compiles.** Closed by W0 step 3.
-- **How often production meets a cold open, and on which cities.** Closed by W0 step 1 (owner-run query) and, going forward, the fresh-path log line.
-- **The per-generation cost of the staged loop with caching.** Estimated in §4.2 from token arithmetic; measured in W1.
+- **Whether Haiku 5.5 at `low` interleaves thinking per tool call rather than planning everything first.** CLOSED by W0 (2026-10-20): only a little; most of the plan still precedes the first call (W0 results).
+- **Whether the `emit_category` strict schema compiles.** CLOSED by W0 step 3: it compiles; strict decoding then corrupts CJK `localName` after the first replayed category (W0 results, point 3).
+- **How often production meets a cold open, and on which cities.** W0 step 1 measured the cold generations (6 in 90 days, 2 on a Day 1 city); the opens themselves are measurable from the next deploy through the fresh-path log line.
+- **The per-generation cost of the staged loop with caching.** Measured by the W0 probe: $0.007–0.019, median about $0.016. W1 was not built.
 - **Rate-limit behaviour of eight concurrent streams** (option 3a). Not measured, because option 3 is not recommended; it would have to be measured before any attempt.

@@ -248,6 +248,9 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       : false;
 
     if (!more && hasActivePlaces && cacheIsFresh) {
+      // Plan 35 W0: one line per fresh open, so the container log gives cold opens against all
+      // opens (a generation logs its own `[discover] destination=` line; a join logs below).
+      console.log('[discover] served fresh destination=%s places=%d', destinationRow.id, activeRows.length);
       for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
         write({ type: 'category', category: cat.category, items: cat.items });
       }
