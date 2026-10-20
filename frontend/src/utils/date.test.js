@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { naiveIsoToAbsolute, formatCountdown, localIso } from './date.js';
+import { naiveIsoToAbsolute, formatCountdown, formatDeadlineCountdown, localIso } from './date.js';
+
+describe('formatDeadlineCountdown', () => {
+  const now = new Date(2026, 9, 21, 15, 30);
+
+  it('says Today for the same calendar day', () => {
+    expect(formatDeadlineCountdown('2026-10-21', now)).toBe('Today');
+  });
+
+  it('is empty for a date before today', () => {
+    expect(formatDeadlineCountdown('2026-10-20', now)).toBe('');
+  });
+
+  it('defers to formatCountdown for later dates', () => {
+    expect(formatDeadlineCountdown('2026-10-22', now)).toBe('Tomorrow');
+    expect(formatDeadlineCountdown('2026-10-26', now)).toBe('In 5 days');
+  });
+});
 
 // Builds a local-date YYYY-MM-DD string `days` calendar days after `now`,
 // using the same local-midnight arithmetic formatCountdown itself relies on.

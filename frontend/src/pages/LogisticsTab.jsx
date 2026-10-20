@@ -12,6 +12,7 @@ import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import ExpenseSheet from '../components/expenses/ExpenseSheet.jsx';
 import BookingDeleteReview from '../components/logistics/BookingDeleteReview.jsx';
 import BookingConditions from '../components/logistics/BookingConditions.jsx';
+import DueStrip from '../components/logistics/DueStrip.jsx';
 import { categoryMeta } from '../components/expenses/categoryMeta.js';
 import { bookingCostDefaults } from '../components/expenses/bookingCostDefaults.js';
 import { bookingsApi } from '../services/bookingsApi.js';
@@ -275,6 +276,8 @@ export default function LogisticsTab() {
           </button>
         </div>
       </section>
+
+      <DueStrip bookings={bookings} factsByBooking={documentFacts.factsByBooking} />
 
       {/* Per-type sections */}
       {['flight', 'hotel', 'other', 'train'].map((section) => (

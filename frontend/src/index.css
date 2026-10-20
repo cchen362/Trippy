@@ -179,10 +179,6 @@ a {
   .modal-loading-dots span {
     animation: none;
   }
-
-  .trip-live-dot {
-    animation: none;
-  }
 }
 
 button,
@@ -217,6 +213,13 @@ select {
   display: inline-block;
   flex-shrink: 0;
   animation: trippyPulse 1.6s ease-in-out infinite;
+}
+
+/* After the base rule: an equal-specificity override placed earlier in the file loses the cascade. */
+@media (prefers-reduced-motion: reduce) {
+  .trip-live-dot {
+    animation: none;
+  }
 }
 
 .copilot-input::placeholder {

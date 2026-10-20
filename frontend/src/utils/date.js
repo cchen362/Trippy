@@ -26,6 +26,15 @@ export function formatCountdown(startDate, now = new Date()) {
   return `In ${Math.round(days / 30)} months`;
 }
 
+// Countdown for a deadline date. formatCountdown returns '' for the same day,
+// so Due says "Today" there; a date already past gives '' (Due never shows it).
+export function formatDeadlineCountdown(date, now = new Date()) {
+  const today = localIso(now);
+  if (date === today) return 'Today';
+  if (date < today) return '';
+  return formatCountdown(date, now);
+}
+
 // Converts a naive wall-clock ISO string (e.g. "2026-06-08T08:45") to the
 // absolute UTC instant that corresponds to that wall-clock time in `tz`.
 // Required because new Date("2026-06-08T08:45") parses in the *device* timezone,
