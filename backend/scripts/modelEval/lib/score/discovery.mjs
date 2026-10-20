@@ -37,15 +37,28 @@ function rawStreamedText(record) {
   return blocks.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
 }
 
-// W3: thinking text is empty under the default display "omitted", so thinking tokens are estimated
-// as output minus the text's tokens, the text taken at 0.429 tokens per character — the ratio of
-// the Haiku 5.5 `thinking: disabled` run (alt-disabled-low, 2026-10-18), where output is all text.
+// Thinking tokens. Plan 34 W4: the exact API count (usage.output_tokens_details.thinking_tokens on each
+// call's response) is preferred whenever every call in the record carries it; the record's top-level
+// `usage` does not carry it. Plan 30 W3's estimate is the fallback for records without it, and is
+// kept alongside so the two can be compared.
+//
+// W3 estimate: thinking text is empty under the default display "omitted", so thinking tokens are
+// estimated as output minus the text's tokens, the text taken at 0.429 tokens per character — the
+// ratio of the Haiku 5.5 `thinking: disabled` run (alt-disabled-low, 2026-10-18), where output is
+// all text.
 const TEXT_TOKENS_PER_CHAR = 0.429;
 
 function estimatedThinkingTokens(record) {
   if (!thinkingBlockCount(record)) return 0;
   const textTokens = Math.round(rawStreamedText(record).length * TEXT_TOKENS_PER_CHAR);
   return Math.max(0, (record.usage?.output_tokens ?? 0) - textTokens);
+}
+
+// Exact only when every call carries a finite count (sum over calls); otherwise null.
+function exactThinkingTokens(record) {
+  const counts = (record.calls ?? []).map((c) => c.response?.usage?.output_tokens_details?.thinking_tokens);
+  const allExact = counts.length > 0 && counts.every((x) => typeof x === 'number' && Number.isFinite(x));
+  return allExact ? counts.reduce((s, x) => s + x, 0) : null;
 }
 
 function thinkingBlockCount(record) {
@@ -149,6 +162,8 @@ function analyse(record, exclusionSets) {
   );
   const colonSurvivors = outputItems.filter((item) => hasDepthZeroColon(item.name)).length;
   const firstCategoryMs = record.extra?.categoryTimes?.[0]?.t ?? null;
+  const thinkingTokensEstimate = estimatedThinkingTokens(record);
+  const thinkingTokensExactCount = exactThinkingTokens(record);
 
   return {
     record,
@@ -164,7 +179,9 @@ function analyse(record, exclusionSets) {
     colonSurvivors,
     firstCategoryMs,
     thinkingBlocks: thinkingBlockCount(record),
-    thinkingTokens: estimatedThinkingTokens(record),
+    thinkingTokens: thinkingTokensExactCount ?? thinkingTokensEstimate,
+    thinkingTokensExact: thinkingTokensExactCount !== null,
+    thinkingTokensEstimate,
     costPerItem: outputItems.length ? record.costUsd / outputItems.length : null,
   };
 }
@@ -180,6 +197,7 @@ function summarise(analyses, prefix = '') {
   const mediansPerCategory = analyses.map((a) => median(a.perCategoryCounts));
   const minsPerCategory = analyses.map((a) => Math.min(...a.perCategoryCounts));
   const costs = analyses.map((a) => a.costPerItem).filter((c) => c !== null);
+  const exactCount = analyses.filter((a) => a.thinkingTokensExact).length;
 
   return {
     [label('generations')]: n,
@@ -197,7 +215,9 @@ function summarise(analyses, prefix = '') {
     [label('time to first category ms: median / max')]: `${median(analyses.map((a) => a.firstCategoryMs))} / ${max(analyses.map((a) => a.firstCategoryMs))}`,
     [label('cost per usable item ($): median / worst')]: costs.length ? `${median(costs).toFixed(5)} / ${Math.max(...costs).toFixed(5)}` : '—',
     [label('thinking blocks (total)')]: sum((a) => a.thinkingBlocks),
-    [label('est. thinking tokens: median / max (share of output)')]: `${median(analyses.map((a) => a.thinkingTokens))} / ${max(analyses.map((a) => a.thinkingTokens))} (${(100 * sum((a) => a.thinkingTokens) / Math.max(1, sum((a) => a.record.usage.output_tokens))).toFixed(0)}%)`,
+    [label('thinking tokens: median / max (share of output)')]: `${median(analyses.map((a) => a.thinkingTokens))} / ${max(analyses.map((a) => a.thinkingTokens))} (${(100 * sum((a) => a.thinkingTokens) / Math.max(1, sum((a) => a.record.usage.output_tokens))).toFixed(0)}%)`,
+    [label('thinking tokens source')]: `${exactCount}/${n} exact (API thinking_tokens); ${n - exactCount} estimated`,
+    [label('est. thinking tokens (Plan 30 W3 estimate): median / max')]: `${median(analyses.map((a) => a.thinkingTokensEstimate))} / ${max(analyses.map((a) => a.thinkingTokensEstimate))}`,
   };
 }
 
@@ -242,6 +262,8 @@ export function score(records) {
     outTok: a.record.usage.output_tokens,
     stop: a.record.stopReason ?? (a.record.error ? 'error' : 'none'),
     think: a.thinkingBlocks,
+    thinkTok: a.thinkingTokens,
+    thinkExact: a.thinkingTokensExact,
     costUsd: a.record.costUsd,
     perItemUsd: a.costPerItem === null ? '—' : Number(a.costPerItem.toFixed(5)),
     error: a.record.error ? a.record.error.message.slice(0, 60) : '',

@@ -53,6 +53,9 @@ export const PROFILES = {
     'v-floor-ranked-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'floor-ranked' },
     'v-floor-low-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'floor' },
     'v-aim30-exit-disabled-low': { model: HAIKU_55, maxTokens: 96000, effort: 'low', thinking: { type: 'disabled' }, promptVariant: 'aim30-exit' },
+    // Plan 34 W4 (D-34-10): adaptive thinking (no `thinking` field) at effort low with the exact-count
+    // line; 48,000 is ~2x the Plan 30 W3 thinking-on max output (25,002), per D-30-6.
+    'v-exact12-adaptive-low': { model: HAIKU_55, maxTokens: 48000, effort: 'low', promptVariant: 'exact-count' },
     // The shared-prompt question: the same variants on the control model (Haiku 4.5, 64,000).
     '45-floor-ranked': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor-ranked' },
     '45-floor': { model: HAIKU_45, maxTokens: 64000, promptVariant: 'floor' },

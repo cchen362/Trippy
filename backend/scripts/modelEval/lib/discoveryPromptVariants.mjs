@@ -18,6 +18,9 @@ import { DISCOVERY_SELECTION_RULES } from '../../../src/services/claude.js';
 
 export const ORIGINAL_LINES = DISCOVERY_SELECTION_RULES['claude-haiku-4-5-20251001'];
 
+// Variant A's quality line, shared by 'floor-ranked' and 'exact-count' so the two cannot drift.
+const FLOOR_RANKED_QUALITY = '- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.';
+
 // Each variant maps an original line to its replacement; a line it does not name is kept.
 export const PROMPT_VARIANTS = Object.freeze({
   // The frozen first-pass prompt: both original lines, on any model.
@@ -25,7 +28,7 @@ export const PROMPT_VARIANTS = Object.freeze({
   // A: an explicit target and floor per category, and the quality rule rephrased so it ranks the
   // picks within that count instead of gating inclusion. Live for Haiku 5.5 since W3.
   'floor-ranked': Object.freeze({
-    quality: '- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.',
+    quality: FLOOR_RANKED_QUALITY,
     volume: '- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places, and say nothing about any shortfall.',
   }),
   // B: the same target and floor with the original quality line, to tell which line drives volume.
@@ -36,6 +39,12 @@ export const PROMPT_VARIANTS = Object.freeze({
   // exit, to test whether "Fewer sharp picks beats padding" alone is what 5.5 reads as "2-5".
   'aim30-exit': Object.freeze({
     volume: '- Aim for 30 items per category. Stop short of 30 only when the destination has genuinely run out of places that meet these rules.',
+  }),
+  // Plan 34 W4 (D-34-10): variant A's quality line with an exact-count volume line, measured with
+  // adaptive thinking on. Names BOTH keys: an unnamed key would fall back to Haiku 4.5's original line.
+  'exact-count': Object.freeze({
+    quality: FLOOR_RANKED_QUALITY,
+    volume: '- Return exactly 12 items in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with generic or mediocre places, and say nothing about any shortfall.',
   }),
 });
 
