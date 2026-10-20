@@ -366,6 +366,22 @@ Refusals 0, cut-offs 0, invalid 0. Five of six documents are screenshots, so quo
 
 **Acceptance.** Frontend suite and build green; at 375 px and desktop, on a dev copy with W1's facts: all four card types show the zone without breaking the notches or the `:only-child` span at 760 px+; the sheet lists facts with working source taps; the viewer opens a multi-page PDF at the page on a desktop browser and the result on the owner's phone is recorded (F-37-28; if the fragment is ignored, the page number stays visible in the source line and the plan records it under §11); a booking with no facts shows nothing; offline, Logistics renders as today with no error for the missing facts.
 
+### W2b — Reader 37.2: the three W0 notes fixed at the source (D-37-14)
+
+**Status:** NOT STARTED; added 2026-10-20 by the owner's W2 rulings (Q-37-10, Q-37-11, Q-37-12). Must land before W4, so production only ever holds 37.2 reads (migration 038 is not applied in production; a `FACTS_PROMPT_VERSION` change re-reads every source through the boot pass, D-37-1). Independent of W3 (no shared file).
+
+**Why.** W2 shows facts as the reader gives them (D-37-14). Three reader habits seen in W0 and on the W2 dev copy would otherwise reach the traveller: (1) a condition true of the document but not of this booking ("re-check baggage for onward flight" with no onward flight; "passengers on MH-operated flights …"); (2) amounts that make up a printed total read as extra cost (Regent Chongqing "Additional charges" 463.50 and "Taxes" 305.92, inside CNY 5,404.02; quotes that are bare column labels); (3) the booking's own schedule emitted as facts ("Departs Singapore Changi at 12:25", quoted "SIN 12:25"; flight number; cabin class). The W2 dev copy adds a sharper case of (3): the KLM PDF backs both legs, and the reader listed both legs' departure and arrival times under each flight, so KL 1676's first window was the outbound departure.
+
+**Files.** `backend/src/services/claude.js` (`FACTS_SYSTEM` rules, `FACTS_PROMPT_VERSION = '37.2'`, the sha256 pins in `claude.test.js`); `backend/scripts/modelEval/` (a `facts` comparison profile run on 37.1 vs 37.2); no schema change, no migration, no frontend change.
+
+**Steps.**
+1. Draft three prompt rules: (a) the booking's own schedule and identity are not conditions — the vehicle's departure and arrival times, airports and stations, flight or train number, cabin class, seat, booked dates of stay, guest names — while a hotel's check-in and check-out hours, gate or counter closing times and reception hours stay (they are policies about what the traveller may or must do); (b) an amount that is a line of a stated total is part of the total, not a condition; a `cost_condition` is a charge beyond what is paid (deposit, tax payable at the desk, resort fee, a fee after a deadline); (c) a condition that applies only in a circumstance (a carrier, a connection, a passenger type) keeps that circumstance in `value` ("If you have an onward flight: …"). "Do not explain your reasoning in prose." stays the last rule (the extraction pattern, F-37-10).
+2. Measure 37.1 against 37.2 with the W0 harness on the production corpus copy (`prod-2026-10-20b.db`), the synthetic fixtures and the W2 dev copy's seven sources; print per document the facts removed, added and changed; cents.
+3. The owner grades the diff (not a full re-grade): every removed fact is one of the three classes, nothing costly was lost, G-37-1's costly kinds still 0 wrong.
+4. Land the prompt and version with updated pins; the backend suite and the `LIVE_ANTHROPIC=1` smoke green.
+
+**Acceptance.** The diff graded by the owner; the three note classes absent on the corpus; no costly fact lost; pins and suite green; DECISIONS row D-37-14 updated with the numbers.
+
 ### W3 — Due (D-37-6)
 
 **Status:** NOT STARTED; after W2 (both touch `LogisticsTab.jsx`).
@@ -388,7 +404,7 @@ Refusals 0, cut-offs 0, invalid 0. Five of six documents are screenshots, so quo
 
 ## 7. Sequencing and rollback summary
 
-- **Order.** W0 → W1 → W2 → W3 → deploy → W4. W2 and W3 both edit `LogisticsTab.jsx`, so they are sequential. Plan 36's remaining waves and this plan's W1 both edit `claude.js`; merge in sequence.
+- **Order.** W0 → W1 → W2 → W2b and W3 (either order; no shared file) → deploy → W4. W2b must land before the deploy. W2 and W3 both edit `LogisticsTab.jsx`, so they are sequential. Plan 36's remaining waves and this plan's W1 both edit `claude.js`; merge in sequence.
 - **If W0 fails G-37-1.** Nothing past W0 is built; the numbers go to DECISIONS.md with the cause; a re-attempt needs a changed contract or model, not a re-run.
 - **If W0 fails only G-37-2 or G-37-3.** W1–W4 proceed (O-3); the Phase 2 plan is not written; the numbers are recorded.
 - **Rollback unit.** `DOCUMENT_FACTS_ENABLED=0` stops reads at once without a code change (D-37-12); the UI shows nothing without facts; the full feature rollback is one revert plus a redeploy. Migration 038 is additive and stays; no data step.
@@ -481,6 +497,12 @@ Each follows the plain-language shape: what it is, one example, the implication,
 - **Example.** If the census finds many more documents than expected, the runs stop at the cap and report how far they got.
 - **Implication.** Below $8 is cheaper than one night's parking; raising it later is a flag.
 - **Recommendation (default): $8.**
+
+**Asked and ruled 2026-10-20, at the start of W2 (the owner's W0 notes, and what W1's dev run showed).** The owner took the recommendation on each.
+
+- **Q-37-10 — A condition true of the document but maybe not of this booking** ("re-check baggage for onward flight" with none; "passengers on MH-operated flights …"). **Ruled: subordinate, and fix the reader.** The card shows only deadlines and windows (D-37-5), so such lines never reach it; the sheet lists deadlines, windows, requirements and restrictions first and instructions, allowances, contacts and cost lines under a quieter "Also in the document" (D-37-13); reader 37.2 keeps the circumstance in the English line (W2b).
+- **Q-37-11 — Cost lines already inside a printed total** (Regent Chongqing). **Ruled: fix in reader 37.2** (W2b); W2 displays cost conditions as given, and no 37.1 read reaches production.
+- **Q-37-12 — The booking's own schedule emitted as facts.** **Ruled: fix in reader 37.2** (W2b), not a display rule; hotel check-in and check-out hours stay facts.
 
 ---
 

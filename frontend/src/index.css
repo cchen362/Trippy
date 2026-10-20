@@ -1156,6 +1156,55 @@ select {
   background: rgba(24,22,18,0.92);
 }
 
+.logistics-conditions {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: baseline;
+}
+
+.logistics-conditions-label {
+  max-width: 9.5rem;
+  color: var(--cream-mute);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.logistics-conditions-value {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--cream-dim);
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+/* Hotel / other: sits after the rows as the card's last element, so it clears the bottom-right affordance. */
+.logistics-conditions-dossier {
+  padding: 12px 28px 14px 18px;
+  border-top: 1px solid rgba(201,168,76,0.13);
+  background: rgba(24,22,18,0.92);
+}
+
+/* Flight / train: inside the ticket body, which supplies the horizontal padding. */
+.logistics-conditions-transit {
+  margin-top: 14px;
+}
+
+.logistics-transit-body > .logistics-conditions:last-child {
+  padding-right: 28px;
+}
+
 .logistics-data-row {
   display: flex;
   align-items: center;
@@ -1382,6 +1431,10 @@ select {
   .logistics-transit-body {
     padding-left: 20px;
     padding-right: 20px;
+  }
+
+  .logistics-conditions-dossier {
+    padding-left: 20px;
   }
 
   .logistics-route-code {

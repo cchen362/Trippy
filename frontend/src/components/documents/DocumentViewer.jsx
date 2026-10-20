@@ -5,7 +5,9 @@ import { ExternalLink, X } from 'lucide-react';
 // sheet. The near-white pane is deliberate — scanners need to read a QR code off
 // the phone. Semantics (role, Escape, scroll lock, focus) were added; the chrome
 // was not.
-export default function DocumentViewer({ document, onClose }) {
+// `page` (Plan 37) opens a PDF at the page a document fact was read from. It is applied to the
+// URL handed to the iframe and the links only; `document.url` itself is never changed.
+export default function DocumentViewer({ document, page = null, onClose }) {
   const closeButtonRef = useRef(null);
 
   // Held in a ref so the open/close effect below doesn't re-run (and yank focus back
@@ -38,6 +40,7 @@ export default function DocumentViewer({ document, onClose }) {
 
   if (!document) return null;
   const isPdf = document.mediaType === 'application/pdf';
+  const src = isPdf && page ? `${document.url}#page=${page}` : document.url;
 
   return (
     <div
@@ -54,7 +57,7 @@ export default function DocumentViewer({ document, onClose }) {
         <div className="flex items-center gap-4 flex-shrink-0">
           {isPdf && (
             <a
-              href={document.url}
+              href={src}
               target="_blank"
               rel="noreferrer"
               className="font-mono text-[11px] tracking-[0.22em] uppercase flex items-center gap-1.5"
@@ -81,10 +84,10 @@ export default function DocumentViewer({ document, onClose }) {
           screenshot stays scannable against a light background. */}
       <div className="flex-1 flex items-center justify-center overflow-auto p-4" style={{ background: '#f5f3ee' }}>
         {isPdf ? (
-          <iframe src={document.url} title={document.filename || 'Document'} className="w-full h-full rounded-md border-0">
+          <iframe key={src} src={src} title={document.filename || 'Document'} className="w-full h-full rounded-md border-0">
             <p className="font-body text-base p-4" style={{ color: 'var(--ink-deep)' }}>
               This browser can't preview the PDF inline.{' '}
-              <a href={document.url} target="_blank" rel="noreferrer" style={{ color: 'var(--gold)' }}>
+              <a href={src} target="_blank" rel="noreferrer" style={{ color: 'var(--gold)' }}>
                 Open it in a new tab
               </a>
               .

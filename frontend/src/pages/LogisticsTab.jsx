@@ -11,12 +11,14 @@ import DocumentViewer from '../components/documents/DocumentViewer.jsx';
 import ErrorBanner from '../components/common/ErrorBanner.jsx';
 import ExpenseSheet from '../components/expenses/ExpenseSheet.jsx';
 import BookingDeleteReview from '../components/logistics/BookingDeleteReview.jsx';
+import BookingConditions from '../components/logistics/BookingConditions.jsx';
 import { categoryMeta } from '../components/expenses/categoryMeta.js';
 import { bookingCostDefaults } from '../components/expenses/bookingCostDefaults.js';
 import { bookingsApi } from '../services/bookingsApi.js';
 import { fileToInput } from '../services/importApi.js';
 import { formatMinor, currencyForCountry } from '../utils/currency.js';
 import { useExpenses } from '../hooks/useExpenses.js';
+import { useDocumentFacts } from '../hooks/useDocumentFacts.js';
 import { useCollaboration } from '../hooks/useCollaboration.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useTripContext } from './TripPage.jsx';
@@ -66,6 +68,7 @@ export default function LogisticsTab() {
 
   const { user } = useAuth();
   const expensesState = useExpenses(trip.id);
+  const documentFacts = useDocumentFacts(trip.id);
   const collaboration = useCollaboration(trip.id);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -73,6 +76,7 @@ export default function LogisticsTab() {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [editing, setEditing] = useState(null);
   const [viewerDoc, setViewerDoc] = useState(null);
+  const [viewerPage, setViewerPage] = useState(null);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -168,6 +172,7 @@ export default function LogisticsTab() {
     // A composite create wrote an expense the local store hasn't seen — the trip
     // refresh inside createBooking only carries the booking-card badge.
     if (data.cost) await expensesState.refresh();
+    documentFacts.refresh();
     return result;
   };
 
@@ -178,6 +183,7 @@ export default function LogisticsTab() {
       // Surviving linked costs are now unlinked (booking_id set to NULL server-side) —
       // LogisticsTab owns its own useExpenses store, so refresh it alongside the trip.
       await expensesState.refresh();
+      documentFacts.refresh();
       closeSheet();
     } catch (err) {
       // The server validates every expense id before its transaction opens, so a
@@ -201,6 +207,7 @@ export default function LogisticsTab() {
       const input = await fileToInput(file);
       await bookingsApi.addAttachment(liveSelected.id, input);
       await refresh();
+      documentFacts.refresh({ followUp: true });
     } catch (err) {
       setAttachError(err.message);
     } finally {
@@ -216,6 +223,7 @@ export default function LogisticsTab() {
       await bookingsApi.removeAttachment(liveSelected.id, attachmentId);
       setConfirmDocUrl(null);
       await refresh();
+      documentFacts.refresh();
     } catch (err) {
       setDeleteError(err.message || 'Could not remove this document.');
       setConfirmDocUrl(null);
@@ -279,7 +287,14 @@ export default function LogisticsTab() {
             <div className={sectionGridClass(section)}>
               {grouped[section].map((booking) => {
                 const Card = CARD_BY_TYPE[booking.type] || OtherBookingCard;
-                return <Card key={booking.id} booking={booking} onOpen={setSelectedBooking} />;
+                return (
+                  <Card
+                    key={booking.id}
+                    booking={booking}
+                    facts={documentFacts.factsByBooking[booking.id]}
+                    onOpen={setSelectedBooking}
+                  />
+                );
               })}
             </div>
           </section>
@@ -320,7 +335,7 @@ export default function LogisticsTab() {
                     <div key={doc.url} className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setViewerDoc(doc)}
+                        onClick={() => { setViewerDoc(doc); setViewerPage(null); }}
                         className="px-3 py-2 rounded-lg border font-mono text-[11px] tracking-[0.18em] uppercase flex items-center gap-2"
                         style={{ borderColor: 'var(--ink-border)', color: 'var(--cream-dim)' }}
                       >
@@ -365,6 +380,13 @@ export default function LogisticsTab() {
                 </div>
               </div>
             )}
+
+            {/* D-37-5 (Plan 37): Conditions sit between Documents and Costs and render only when the booking has facts. */}
+            <BookingConditions
+              facts={documentFacts.factsByBooking[liveSelected.id]}
+              documents={liveSelected.documents || []}
+              onOpenSource={(doc, page) => { setViewerDoc(doc); setViewerPage(page); }}
+            />
 
             <div className="mt-4">
               <p className="font-mono text-xs tracking-[0.22em] uppercase mb-2" style={{ color: 'var(--cream-mute)' }}>Costs</p>
@@ -490,7 +512,11 @@ export default function LogisticsTab() {
         </div>
       )}
 
-      <DocumentViewer document={viewerDoc} onClose={() => setViewerDoc(null)} />
+      <DocumentViewer
+        document={viewerDoc}
+        page={viewerPage}
+        onClose={() => { setViewerDoc(null); setViewerPage(null); }}
+      />
 
       <ExpenseSheet
         open={expenseSheetOpen}
@@ -546,6 +572,7 @@ export default function LogisticsTab() {
           tripDates={{ startDate: trip.startDate, endDate: trip.endDate }}
           onConfirmed={async () => {
             await refresh();
+            documentFacts.refresh({ followUp: true });
             setCaptureOpen(false);
           }}
           lookupHotels={lookupHotels}

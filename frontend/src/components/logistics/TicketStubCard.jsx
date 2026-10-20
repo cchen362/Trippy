@@ -1,4 +1,5 @@
 import { Paperclip } from 'lucide-react';
+import CardConditions from './CardConditions.jsx';
 
 // Shared transit-card primitive used by FlightBookingCard and TrainBookingCard.
 // Accepts display-ready values only; no booking data access here.
@@ -21,6 +22,7 @@ export default function TicketStubCard({
   footerLeft,
   footerRight,
   costLine,
+  conditions = [],
   connector = false,
   hasDocuments = false,
   onClick,
@@ -94,6 +96,8 @@ export default function TicketStubCard({
             </div>
           </div>
         )}
+
+        <CardConditions lines={conditions} variant="transit" />
 
         {(footerLeft || footerRight || costLine) && (
           <div className="logistics-transit-footer">
