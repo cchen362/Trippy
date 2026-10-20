@@ -170,3 +170,14 @@ The census when the guard landed: one external caller, `importer.test.js` (a liv
 - **R-2 and R-3, ruled later the same day, both yes.** R-2: MCP-uploaded attachments get the same deferred facts read as every other channel; the MCP tool's own request never waits on or pays for a model call, so the "no model call on the MCP path" boundary is **clarified, not reversed**: no model call inside an MCP tool's request, and background reads of stored documents are channel-blind. R-3: a *booking-change proposal* kind is added, limited to field changes on an existing booking (never creating or deleting one through a proposal); Plan 11 D6 stands, the stop keeps following its booking, and the change goes through the same review-and-apply door via the booking service's own update path. R-2 binds the first plan (Plan 37; Plan 36 is the Discovery catalogue completeness plan); R-3 is Phase 3 scope.
 
 The assessment carries the same rulings in its status block; this entry is the cross-tool home.
+
+### Plan 37 W0 — measured outcomes (2026-10-20)
+
+Measured on the owner's whole production corpus (6 documents; one real trip with four screenshots), graded blind by the owner. Detail and numbers: Plan 37, "W0 results".
+
+- **Structured outputs reject `maxItems`** ("For 'array' type, property 'maxItems' is not supported") on Haiku 5.5, Sonnet 5.5 and Sonnet 4.6. A provider fact: do not put `maxItems` in an output schema, and do not add it to `validateAgainstSchema`; bound an answer by its `max_tokens` allowance. A nested optional group in a `pattern` (`^(…(…)?)?$`) compiles on all three.
+- **D-37-9: Haiku 5.5 at `medium` reads documents at import** — it tied Sonnet 5.5 at 100 % on the costly kinds (deadline, window, requirement), at about a seventeenth of the cost per document.
+- **G-37-1 passed; G-37-2 failed: the Phase 2 readiness-ledger plan is not written.** 0 of 27 ledger lines over the one real trip were new to the owner (26 true). Conditions and Due proceed (O-3). Do not re-propose the ledger without a corpus of document-rich trips that W0 did not have.
+- **Owner ruling, what a fact is for G-37-1:** a booking's own details (flight number, date, airports) and a booking's total are not missed facts; facts are a document's conditions.
+- **`pdfjs-dist` and Node:** the releases that run on Node 20 carry GHSA-hq66-cqwq-w95j (high); the production image moves to Node 22 when Plan 37 W1 promotes the dependency.
+- **Prerequisite:** Plan 38 (each imported booking linked to its own file) lands before Plan 37 W1, or a multi-file import shows every file's conditions under every booking.
