@@ -289,7 +289,29 @@ Each wave starts by reading this plan, implements only that wave on its own bran
 
 **Verdict: the production corpus cannot carry W0** (§5's threshold is three document-rich trips). Per Q-37-1's default, W0 pauses for the owner's confirmations from the last two years, and the census is re-run on them. One constraint shapes how they arrive: the readiness prototype needs a real trip (`getTripDetail`: days, bookings, health findings), so loose files under `private/facts/<id>/` can feed the facts runs (G-37-1, B1, B2) but not G-37-2 or G-37-3; confirmations imported into Trippy trips feed both. The census also exposed that pdfjs needs its data directories on Node: `lib/documentText.mjs` now passes `cMapUrl` (without it a CJK PDF on a predefined CMap decodes to the wrong characters and no quote could verify), `standardFontDataUrl` and `wasmUrl`. W1's `documentText.js` must do the same.
 
-*Steps 3–7 (facts runs, grading, readiness, gates) are pending the owner's private fixtures.*
+**Step 1, second census (2026-10-20, owner's ruling).** The owner has no further confirmations to supply (screenshots for four Chengdu–Chongqing bookings only, none in Chinese or Japanese) and imported those four into production in one import (4 files, artifact confirmed 11:11 UTC). Fresh backup `trippy-pre-plan37w0-20261020-111533.db` (integrity ok, sha256 `56cade53…92ec9`, local `prod-2026-10-20b.db`). Census: 3 trips with documents, **6 documents** (5 images, 1 PDF), the Chengdu–Chongqing trip 4 documents across 7 bookings, document-rich trips **0**. The grading sample is all six. W0 ran on this corpus; the gates are read against its size below.
+
+**Step 3 — facts runs** (`--db prod-2026-10-20b.db`; run files `runs/facts/<profile>/2026-10-20T11-16-*.jsonl`):
+
+| | Haiku 5.5 `medium` | Sonnet 5.5 `medium` | Sonnet 4.6 `medium` (images) |
+|---|---|---|---|
+| Documents / outcomes | 6 / complete 6 | 6 / complete 6 | 5 / complete 5 |
+| `stop_reason` | end_turn 6 | end_turn 6 | end_turn 5 |
+| Facts (per document median / max) | 36 (6 / 10) | 35 (6 / 11) | 30 (5 / 11) |
+| Costly-kind facts | 16 | 15 | 12 |
+| Quotes verified on the text-layer document | 10/10 | 11/11 | n/a (no text layer) |
+| Model page = page found | 10/0 | 11/0 | n/a |
+| Largest output tokens | 4,319 | 1,703 | 1,659 |
+| Cost per document median / max | $0.0009 / $0.0029 | $0.0154 / $0.0318 | $0.0193 / $0.0324 |
+| Run cost | $0.0074 | $0.1006 | $0.1024 |
+
+Refusals 0, cut-offs 0, invalid 0. Five of six documents are screenshots, so quote verification (D-37-2) applies to one document: on real data most facts will be stored unverified ("read from image"). The readers disagree visibly on one screenshot (facts 5 / 2 / 4, costly 2 / 0 / 2), which grading settles. The largest output, 4,319 tokens, is Haiku's thinking-inclusive answer on the two-page PDF; W1's allowance at 2× is about 8,700 (D-30-6).
+
+**Step 5 — readiness prototype** on the one real trip with documents (Chengdu–Chongqing, `--min-docs 4`), Sonnet 5.5 `high`, two repeats over each 5.5 facts run (`runs/readiness/readiness-sonnet-55-high/2026-10-20T11-17-36-096Z.jsonl` over Haiku's facts, `…11-18-15-790Z.jsonl` over Sonnet's): all four complete, input ~12,600–13,000 tokens, output 2,144–2,885, $0.046–$0.054 each ($0.20). Items per run: holds 2 / 2 / 2 / 3, conflicts 0 / 0 / 1 / 0, questions 4 / 3 / 3 / 7; unknown evidence ids 0.
+
+**A confound the owner found in the same session.** One import of four screenshots created four bookings, and **every booking shows all four screenshots** under Documents (the SQ 842 flight lists the Chongqing hotel's voucher). Root cause: the booking-to-document link is artifact-level — `confirm` stamps only `importedFrom.artifactId` (`importer.js:181`), extraction never says which input file a booking came from, and `resolveBookingDocuments` returns every image and PDF file of the artifact (`documents.js:11-27`). F-37-14 recorded "one artifact can back several bookings" but not "one artifact holds several unrelated files". Consequences: (1) **D-37-1 as written would show every screenshot's conditions under every booking of that import** (a hotel's check-in window under a flight), so W1 cannot land before the file-to-booking link exists; (2) in W0, `lib/factsCorpus.mjs` attributes each of the four screenshots to all four bookings, so the readiness input tells the model every fact belongs to four bookings, which may produce false conflicts or questions — the grader should mark such lines false and note the cause. Facts accuracy (G-37-1, B1, B2) is unaffected: a fact is graded against its own document.
+
+*Steps 4 and 6–7 (grading, scoring, gate verdicts, D-37-9) wait for the owner's grading of `private/facts/grading/facts-2026-10-20T11-19-17-684Z/` (17 sheets) and `private/facts/grading/readiness-2026-10-20T11-19-18-052Z/` (4 sheets). W0 spend so far: $0.55 of the $8 cap.*
 
 ### W1 — Contract, storage and the read job (D-37-1 … D-37-4, D-37-7 … D-37-12; R-1, R-2)
 
