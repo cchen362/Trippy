@@ -6,14 +6,18 @@ const mockCreate = vi.fn();
 const mockStream = vi.fn();
 
 vi.mock('@anthropic-ai/sdk', () => {
-  return {
-    default: vi.fn().mockImplementation(() => ({
-      messages: {
-        create: mockCreate,
-        stream: mockStream,
-      },
-    })),
-  };
+  // The error classes readDocumentFacts tells apart (Plan 37); the real SDK exposes them as statics on the client class.
+  class APIUserAbortError extends Error {}
+  class APIConnectionError extends Error {}
+  const Anthropic = vi.fn().mockImplementation(() => ({
+    messages: {
+      create: mockCreate,
+      stream: mockStream,
+    },
+  }));
+  Anthropic.APIUserAbortError = APIUserAbortError;
+  Anthropic.APIConnectionError = APIConnectionError;
+  return { default: Anthropic };
 });
 
 // Config module mock — avoids env var validation
@@ -22,6 +26,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 // Import after mocks are in place
+const { default: Anthropic } = await import('@anthropic-ai/sdk');
 const {
   extractBookings, discoverDestination, streamCopilotResponse, generatePhotoDescriptor, coerceSceneType,
   normalizeName, stripEditorialNamePrefix, sanitizeGeneratedAliases,
@@ -31,6 +36,8 @@ const {
   EXTRACTION_SYSTEM, EXTRACTION_OUTPUT_SCHEMA, EXTRACTION_OUTPUT_FORMAT, EXTRACTION_FILE_NUMBERS,
   EXTRACTION_DETAIL_FIELDS, EXTRACTION_CONFIDENCE_FIELDS, validateAgainstSchema, toAppExtraction,
   PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES,
+  FACTS_MODEL, FACT_KINDS, FACTS_OUTPUT_SCHEMA, FACTS_OUTPUT_FORMAT, FACTS_PROMPT_VERSION, FACTS_SYSTEM,
+  buildFactsContextText, buildFactsRequest, classifyFactsResponse, readDocumentFacts,
 } = await import('../src/services/claude.js');
 
 // ---------------------------------------------------------------------------
@@ -2143,6 +2150,8 @@ describe('validateAgainstSchema / toAppExtraction (D-34-2, D-34-3)', () => {
 
   it('throws on a keyword it does not check, so a schema edit cannot go unchecked', () => {
     expect(() => validateAgainstSchema(1, { type: 'string', maxLength: 3 })).toThrow(/does not support the "maxLength" keyword/);
+    // D-37-4 (Plan 37): maxItems is not supported either, and the facts schema carries none (the API rejects it).
+    expect(() => validateAgainstSchema([], { type: 'array', maxItems: 3 })).toThrow(/does not support the "maxItems" keyword/);
     expect(() => validateAgainstSchema(1, { type: 'integer' })).toThrow(/does not support type "integer"/);
     expect(() => validateAgainstSchema({}, { type: 'object', additionalProperties: { type: 'string' } })).toThrow(/additionalProperties: false/);
     expect(() => validateAgainstSchema({}, { $ref: '#/$defs/missing' })).toThrow(/cannot resolve \$ref/);
@@ -3466,5 +3475,339 @@ describe('streamCopilotResponse - proposal acknowledgement and explain step (D-3
     ].join('\n'));
     // The itinerary context is `{}` here, so the whole prompt is deterministic.
     expect(createHash('sha256').update(text).digest('hex')).toBe('801426643725841661899e1f71b2dc10fef551b0340d560583dc5b90b0ecd365');
+  });
+});
+
+// Plan 37 W1 — the document-facts contract moved from the W0 harness into claude.js. The sha256
+// literals below were captured from the W0 harness constants at 72f8184, before the move: that they
+// still hold is the byte-identity proof (what W0 measured is what production sends).
+describe('document facts contract (Plan 37 W1, D-37-4)', () => {
+  const sha256Text = (text) => createHash('sha256').update(text).digest('hex');
+  const context = {
+    bookings: [{
+      type: 'hotel', title: 'Hotel Kanade Kyoto', startDatetime: '2026-11-14T15:00', endDatetime: '2026-11-17T11:00',
+      originTz: null, destinationTz: 'Asia/Tokyo',
+    }],
+    trip: { startDate: '2026-11-13', endDate: '2026-11-20' },
+  };
+  const textDocument = { kind: 'text', mediaType: 'text/plain', content: 'Check-in from 15:00.' };
+
+  const fact = (overrides = {}) => ({
+    kind: 'window', label: 'Check-in hours', value: 'From 15:00', quote: 'Check-in from 15:00.', page: '', at: '',
+    tz: '', tzSource: 'none', appliesFrom: '', appliesTo: '', confidence: 'high', ...overrides,
+  });
+  const answer = (facts) => JSON.stringify({ documentSummary: 'Hotel confirmation, 3 nights', language: 'en', facts });
+  const respond = (text, extras = {}) => ({
+    content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1200, output_tokens: 340 }, ...extras,
+  });
+
+  describe('byte-identity with the W0 harness', () => {
+    it('pins the prompt, the schema and the format', () => {
+      expect(sha256Text(FACTS_SYSTEM)).toBe('d4b0e3d8b618d49f0eadb9bf326c5e8b56a931cd78d82f7449242aa942fbac55');
+      expect(sha256Text(JSON.stringify(FACTS_OUTPUT_SCHEMA))).toBe('258c6d4ba56a2f53328864ee2af5f6f28341cea703358b6b269067e24d25ebee');
+      expect(sha256Text(JSON.stringify(FACTS_OUTPUT_FORMAT))).toBe('d78aa60d344a333f07545496d9c0e2f4c84de669534368b9551e690376e8d898');
+    });
+
+    it('pins the whole request body for Haiku 5.5 at effort medium', () => {
+      const body = buildFactsRequest({ model: 'claude-haiku-5-5', maxTokens: 8700, effort: 'medium' }, { context, document: textDocument });
+      expect(sha256Text(JSON.stringify(body))).toBe('1bbe53e3b3726e75deb7164501390177ae799447394e10aa04656a0acb862cfd');
+    });
+
+    it('ends the prompt with the reasoning guard, and carries the contract version', () => {
+      expect(FACTS_SYSTEM.endsWith('\n10. Do not explain your reasoning in prose.')).toBe(true);
+      expect(FACTS_PROMPT_VERSION).toBe('37.1');
+    });
+  });
+
+  describe('the live profile (D-30-1, D-30-6, D-37-9)', () => {
+    it('reads on Haiku 5.5 at effort medium with a 8,700 allowance', () => {
+      expect(FACTS_MODEL).toBe('claude-haiku-5-5');
+      expect(profileFor('facts')).toEqual({ model: 'claude-haiku-5-5', maxTokens: 8700, effort: 'medium' });
+      expect(Object.keys(profileFor('facts'))).toEqual(['model', 'maxTokens', 'effort']);
+    });
+
+    it('keeps the allowance under the non-streaming ceiling (F-30-6) on both 5.5 rows, and has no 4.x row', () => {
+      expect(MODEL_PROFILES['claude-haiku-5-5'].facts.maxTokens).toBeLessThanOrEqual(21333);
+      expect(MODEL_PROFILES['claude-sonnet-5-5'].facts).toEqual({ maxTokens: 8700, effort: 'medium' });
+      expect(MODEL_PROFILES['claude-sonnet-4-6']).not.toHaveProperty('facts');
+      expect(MODEL_PROFILES['claude-haiku-4-5-20251001']).not.toHaveProperty('facts');
+    });
+  });
+
+  describe('output schema budget (D-34-5, D-37-4)', () => {
+    const children = (node) => [
+      ...Object.values(node.properties ?? {}),
+      ...(node.items ? [node.items] : []),
+      ...(node.anyOf ?? []),
+      ...Object.values(node.$defs ?? {}),
+    ];
+    const allNodes = (node) => [node, ...children(node).flatMap(allNodes)];
+    const nodes = allNodes(FACTS_OUTPUT_SCHEMA);
+
+    it('has no optional property anywhere: every object requires exactly its own keys', () => {
+      const objects = nodes.filter((n) => n.properties);
+      expect(objects).toHaveLength(2);
+      for (const node of objects) {
+        expect(node.additionalProperties).toBe(false);
+        expect([...node.required].sort()).toEqual(Object.keys(node.properties).sort());
+      }
+    });
+
+    it('has no anyOf and no type list, so it spends none of the 16 union definitions', () => {
+      expect(nodes.filter((n) => Array.isArray(n.anyOf) || Array.isArray(n.type))).toHaveLength(0);
+    });
+
+    it('has no maxItems anywhere: the API rejects it, so the allowance bounds a read', () => {
+      expect(JSON.stringify(FACTS_OUTPUT_SCHEMA)).not.toContain('maxItems');
+      for (const node of nodes) expect(node).not.toHaveProperty('maxItems');
+    });
+
+    it('lets every fact field be "" where the document gave nothing, and builds the kind enum from FACT_KINDS', () => {
+      const props = FACTS_OUTPUT_SCHEMA.$defs.fact.properties;
+      for (const name of ['page', 'at', 'tz', 'appliesFrom', 'appliesTo']) {
+        expect(new RegExp(props[name].pattern).test('')).toBe(true);
+      }
+      expect(props.kind.enum).toEqual(FACT_KINDS);
+      expect(FACT_KINDS).toHaveLength(8);
+    });
+
+    it('is deep-frozen, as is the format that carries it', () => {
+      for (const node of nodes) expect(Object.isFrozen(node)).toBe(true);
+      expect(Object.isFrozen(FACTS_OUTPUT_FORMAT)).toBe(true);
+      expect(FACTS_OUTPUT_FORMAT).toEqual({ type: 'json_schema', schema: FACTS_OUTPUT_SCHEMA });
+    });
+  });
+
+  describe('the request', () => {
+    it('puts the format beside the effort, the system as a plain string, and no cache_control', () => {
+      const body = buildFactsRequest(profileFor('facts'), { context, document: textDocument });
+      expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'output_config', 'system', 'messages']);
+      expect(body.output_config).toEqual({ effort: 'medium', format: FACTS_OUTPUT_FORMAT });
+      expect(Object.keys(body.output_config)).toEqual(['effort', 'format']);
+      expect(body.system).toBe(FACTS_SYSTEM);
+      expect(JSON.stringify(body)).not.toContain('cache_control');
+      expect(body.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: buildFactsContextText(context) }, { type: 'text', text: 'Check-in from 15:00.' }] }]);
+    });
+
+    it('carries each document kind in extraction\'s transport', () => {
+      const blockOf = (document) => buildFactsRequest(profileFor('facts'), { context, document }).messages[0].content[1];
+      expect(blockOf({ kind: 'image', mediaType: 'image/png', content: 'AAAA' })).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } });
+      expect(blockOf({ kind: 'pdf', mediaType: 'application/pdf', content: 'BBBB' })).toEqual({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'BBBB' } });
+    });
+
+    it('names every booking the document backs, then the trip dates, with "not given" for gaps', () => {
+      expect(buildFactsContextText(context)).toBe([
+        'Booking context (for disambiguation only):',
+        'Booking 1: hotel "Hotel Kanade Kyoto"; start 2026-11-14T15:00; end 2026-11-17T11:00; origin zone not given; destination zone Asia/Tokyo.',
+        'Trip dates: 2026-11-13 to 2026-11-20.',
+      ].join('\n'));
+    });
+
+    it('throws on a request that cannot be built: a context with no booking, an unknown document kind', () => {
+      expect(() => buildFactsContextText({ bookings: [], trip: {} })).toThrow(/at least one booking/);
+      expect(() => buildFactsRequest(profileFor('facts'), { context, document: { kind: 'spreadsheet', content: '' } })).toThrow(/unknown document kind "spreadsheet"/);
+    });
+  });
+
+  describe('classifyFactsResponse', () => {
+    it('returns the validated value on a good answer, with no error and no detail', () => {
+      const result = classifyFactsResponse(respond(answer([fact()])));
+      expect(result).toMatchObject({ outcome: 'complete', stopReason: 'end_turn', category: null, error: null, detail: null });
+      expect(result.value.facts).toHaveLength(1);
+    });
+
+    it('accepts an empty facts array (a document with no condition)', () => {
+      expect(classifyFactsResponse(respond(answer([]))).outcome).toBe('complete');
+    });
+
+    it('keeps the stop category on a refusal', () => {
+      const result = classifyFactsResponse(respond('', { stop_reason: 'refusal', stop_details: { category: 'reasoning_extraction' } }));
+      expect(result).toMatchObject({ outcome: 'refused', stopReason: 'refusal', category: 'reasoning_extraction', error: null, value: null });
+    });
+
+    it('stores a short category as error and the human message as detail, never the other way round', () => {
+      const secret = 'Alex Example card 4242';
+      const result = classifyFactsResponse(respond(answer([fact({ kind: 'secret', quote: secret })])));
+      expect(result.outcome).toBe('invalid');
+      expect(result.error).toBe('schema_mismatch');
+      expect(result.detail).toMatch(/^facts\[0\]\.kind: /);
+      expect(result.error).not.toContain('kind');
+      expect(result.value).toBeNull();
+      expect(result.parsed.facts[0].quote).toBe(secret);
+    });
+  });
+
+  describe('readDocumentFacts', () => {
+    beforeEach(() => {
+      mockCreate.mockReset();
+    });
+
+    const read = (extra = {}) => readDocumentFacts({ document: textDocument, context, ...extra });
+
+    it('complete: returns the validated value, the usage and the model, and sends the built request', async () => {
+      mockCreate.mockResolvedValue(respond(answer([fact()])));
+
+      const result = await read();
+
+      expect(result).toMatchObject({
+        outcome: 'complete', stopReason: 'end_turn', category: null, error: null, detail: null,
+        usage: { inputTokens: 1200, outputTokens: 340 }, model: 'claude-haiku-5-5',
+      });
+      expect(result.value).toEqual(JSON.parse(answer([fact()])));
+      expect(result.totalMs).toBeGreaterThanOrEqual(0);
+      expect(mockCreate).toHaveBeenCalledOnce();
+      expect(mockCreate.mock.calls[0][0]).toEqual(buildFactsRequest(profileFor('facts'), { context, document: textDocument }));
+      expect(mockCreate.mock.calls[0][1]).toBeUndefined();
+    });
+
+    it('passes the abort signal to the SDK', async () => {
+      mockCreate.mockResolvedValue(respond(answer([])));
+      const controller = new AbortController();
+
+      await read({ signal: controller.signal });
+
+      expect(mockCreate.mock.calls[0][1]).toEqual({ signal: controller.signal });
+    });
+
+    it('sends an explicit profile as given (the harness path)', async () => {
+      mockCreate.mockResolvedValue(respond(answer([])));
+      const profile = { model: 'claude-sonnet-5-5', maxTokens: 16000, effort: 'medium' };
+
+      const result = await read({ profile });
+
+      expect(mockCreate.mock.calls[0][0]).toMatchObject({ model: 'claude-sonnet-5-5', max_tokens: 16000 });
+      expect(result.model).toBe('claude-sonnet-5-5');
+    });
+
+    it('normalises enum spelling (D-34-7): "Deadline" comes back "deadline"', async () => {
+      mockCreate.mockResolvedValue(respond(answer([fact({ kind: 'Deadline', tzSource: 'None', confidence: 'HIGH' })])));
+
+      const result = await read();
+
+      expect(result.outcome).toBe('complete');
+      expect(result.value.facts[0]).toMatchObject({ kind: 'deadline', tzSource: 'none', confidence: 'high' });
+    });
+
+    it('refused: names the stop and its category, with no value and a null error', async () => {
+      mockCreate.mockResolvedValue(respond('', { stop_reason: 'refusal', stop_details: { category: 'reasoning_extraction' } }));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = await read();
+
+      expect(result).toMatchObject({ outcome: 'refused', stopReason: 'refusal', category: 'reasoning_extraction', error: null, value: null, usage: { inputTokens: 1200, outputTokens: 340 } });
+      expect(warnSpy).toHaveBeenCalledWith('[facts] read not usable', { outcome: 'refused', error: null, stopReason: 'refusal' });
+      warnSpy.mockRestore();
+    });
+
+    it('truncated: a max_tokens cut-off is never parsed and never retried (D-30-3)', async () => {
+      mockCreate.mockResolvedValue(respond('{"documentSummary":"Hotel conf', { stop_reason: 'max_tokens' }));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = await read();
+
+      expect(result).toMatchObject({ outcome: 'truncated', stopReason: 'max_tokens', error: null, value: null });
+      expect(mockCreate).toHaveBeenCalledOnce();
+      warnSpy.mockRestore();
+    });
+
+    describe('invalid answers are named, never repaired', () => {
+      let warnSpy;
+      beforeEach(() => {
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+      afterEach(() => {
+        warnSpy.mockRestore();
+      });
+
+      it('not_one_text_block: two text blocks', async () => {
+        mockCreate.mockResolvedValue({
+          content: [{ type: 'text', text: answer([]) }, { type: 'text', text: answer([]) }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 },
+        });
+        const result = await read();
+        expect(result).toMatchObject({ outcome: 'invalid', error: 'not_one_text_block', value: null });
+        expect(result.detail).toMatch(/got 2/);
+      });
+
+      it('not_json: a fenced block is a failure, not something to strip', async () => {
+        mockCreate.mockResolvedValue(respond(`\`\`\`json\n${answer([])}\n\`\`\``));
+        const result = await read();
+        expect(result).toMatchObject({ outcome: 'invalid', error: 'not_json', value: null });
+      });
+
+      it('schema_mismatch: a fact with an unknown kind', async () => {
+        mockCreate.mockResolvedValue(respond(answer([fact({ kind: 'gossip' })])));
+        const result = await read();
+        expect(result).toMatchObject({ outcome: 'invalid', error: 'schema_mismatch', value: null });
+        expect(result.detail).toMatch(/^facts\[0\]\.kind/);
+      });
+
+      it('empty_quote: a fact whose quote is whitespace and zero-width characters only (D-37-2)', async () => {
+        mockCreate.mockResolvedValue(respond(answer([fact(), fact({ quote: ' \n　​⁠ ' })])));
+        const result = await read();
+        expect(result).toMatchObject({ outcome: 'invalid', error: 'empty_quote', value: null });
+        expect(result.detail).toBe('facts[1].quote: empty');
+      });
+
+      it('logs the category and never the detail, a quote or a fact', async () => {
+        mockCreate.mockResolvedValue(respond(answer([fact({ kind: 'gossip', quote: 'Alex Example card 4242' })])));
+        await read();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith('[facts] read not usable', { outcome: 'invalid', error: 'schema_mismatch', stopReason: 'end_turn' });
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('4242');
+      });
+    });
+
+    describe('a provider failure is an outcome, not a throw or a null', () => {
+      let warnSpy;
+      beforeEach(() => {
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+      afterEach(() => {
+        warnSpy.mockRestore();
+      });
+
+      it('names an HTTP status', async () => {
+        mockCreate.mockRejectedValue(Object.assign(new Error('529 overloaded'), { status: 529 }));
+        const result = await read();
+        expect(result).toMatchObject({ outcome: 'error', error: 'api_529', detail: '529 overloaded', value: null, usage: null, stopReason: null, category: null, model: 'claude-haiku-5-5' });
+        expect(result.totalMs).toBeGreaterThanOrEqual(0);
+        expect(mockCreate).toHaveBeenCalledOnce();
+      });
+
+      it('names a connection failure (a timeout is one)', async () => {
+        mockCreate.mockRejectedValue(new Anthropic.APIConnectionError('Connection error.'));
+        expect(await read()).toMatchObject({ outcome: 'error', error: 'connection', detail: 'Connection error.' });
+      });
+
+      it('names an abort, by the SDK\'s abort error', async () => {
+        mockCreate.mockRejectedValue(new Anthropic.APIUserAbortError('Request was aborted.'));
+        expect(await read()).toMatchObject({ outcome: 'error', error: 'aborted' });
+      });
+
+      it('names an abort, by the signal, whatever the SDK threw', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        mockCreate.mockRejectedValue(new Error('socket closed'));
+        expect(await read({ signal: controller.signal })).toMatchObject({ outcome: 'error', error: 'aborted' });
+      });
+
+      it('calls anything else unexpected', async () => {
+        mockCreate.mockRejectedValue(new TypeError('boom'));
+        expect(await read()).toMatchObject({ outcome: 'error', error: 'unexpected', detail: 'boom' });
+      });
+
+      it('warns once with the category only', async () => {
+        mockCreate.mockRejectedValue(Object.assign(new Error('529 overloaded'), { status: 529 }));
+        await read();
+        expect(warnSpy).toHaveBeenCalledOnce();
+        expect(warnSpy).toHaveBeenCalledWith('[facts] read not usable', { outcome: 'error', error: 'api_529', stopReason: null });
+      });
+    });
+
+    it('throws on a request that cannot be built, without calling the API', async () => {
+      await expect(readDocumentFacts({ document: { kind: 'spreadsheet', content: '' }, context })).rejects.toThrow(/unknown document kind/);
+      await expect(readDocumentFacts({ document: textDocument, context: { bookings: [] } })).rejects.toThrow(/at least one booking/);
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
   });
 });

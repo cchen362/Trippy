@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
@@ -20,11 +23,11 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^8.5.2",
-    "geo-tz": "^8.1.6"
+    "geo-tz": "^8.1.6",
+    "pdfjs-dist": "~6.4.299"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "pdfjs-dist": "~6.4.299",
     "vitest": "^1.6.0"
   }
 }

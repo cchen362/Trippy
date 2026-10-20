@@ -116,11 +116,13 @@ export const PROFILES = {
     // the acknowledgement protocol (D-30-9). Their profiles and code are removed; the run files stay
     // under runs/copilot/v-reply-text-low/ and runs/copilot/v-reply-text-short-low/ as history.
   },
-  // Plan 37 W0: no live `facts` or `readiness` workload exists yet — profileFor('facts') throws
-  // (F-37-7) — so neither workload has a `control` profile and neither script asserts one. The
-  // contract is lib/factsContract.mjs. 16,000 is a measuring allowance under the 21,333
-  // non-streaming ceiling; W1 sets the live one at about 2x W0's largest observed output (D-30-6).
+  // Plan 37 W1 landed the live `facts` workload: `control` is production (assertControlIsLive
+  // refuses to run a stale one) and lib/factsContract.mjs re-exports the contract from src. The
+  // measuring profiles keep W0's 16,000 allowance under the 21,333 non-streaming ceiling; the live one
+  // is about 2x W0's largest observed output (D-30-6). `readiness` is still a grading prototype with
+  // no live workload and so no `control`.
   facts: {
+    control: { model: HAIKU_55, maxTokens: 8700, effort: 'medium' },
     // B2 / D-37-9: the import-time reader is Haiku 5.5 unless it is more than one point behind
     // Sonnet 5.5 on the costly kinds. Both think adaptively by default at this effort.
     'facts-haiku-55-medium': { model: HAIKU_55, maxTokens: 16000, effort: 'medium' },

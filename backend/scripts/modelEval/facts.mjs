@@ -47,7 +47,7 @@ import { installRecorder, recordFixture } from './lib/recorder.mjs';
 import {
   FIXTURES_DIR, PRIVATE_DIR, parseArgs, openRunFile, readRunFile, buildRecord, runPool, filterItems, printProgress,
 } from './lib/runner.mjs';
-import { getProfile, toServiceProfile } from './profiles.mjs';
+import { assertControlIsLive, getProfile, toServiceProfile } from './profiles.mjs';
 import {
   COSTLY_FACT_KINDS, FACTS_PROMPT_VERSION, buildFactsRequest, classifyFactsResponse, findQuote,
 } from './lib/factsContract.mjs';
@@ -533,6 +533,7 @@ function printRunSummary(records) {
 async function runMode({ args, source, loaded, dbPath }) {
   const profile = getProfile(WORKLOAD, args.profile);
   const serviceProfile = toServiceProfile(profile);
+  if (args.profile === 'control') assertControlIsLive(WORKLOAD);
   if (!config.anthropicApiKey) throw new Error('ANTHROPIC_API_KEY is not set (backend/.env); a facts run needs it');
 
   let documents = loaded.documents;
@@ -591,7 +592,7 @@ async function runMode({ args, source, loaded, dbPath }) {
         outcome: classified ? classified.outcome : 'error',
         stopReason: classified?.stopReason ?? null,
         refusalCategory: classified?.category ?? null,
-        validationError: classified?.outcome === 'invalid' ? classified.error : null,
+        validationError: classified?.outcome === 'invalid' ? classified.detail : null,
         parsedOnInvalid: classified?.outcome === 'invalid' ? classified.parsed : null,
         textLayer: analysis.textLayer,
         textLayerError: analysis.error,

@@ -1,45 +1,14 @@
 // Plan 37 W0 — the text Trippy can extract from a document itself, in the harness.
 //
 // D-37-2 verifies a fact's quote against text Trippy extracted, never against what the model says it
-// read: the PDF's text layer, or the pasted text. This is the harness copy (W1 moves the production
-// one to src/services/documentText.js). A scanned PDF yields pages with no text and an image yields
-// null; the callers record both as "no text layer", never as a pass.
+// read: the PDF's text layer, or the pasted text. The extraction itself lives in
+// src/services/documentText.js (W1); this file re-exports it and keeps the census helpers built on it.
+// A scanned PDF yields pages with no text and an image yields null; the callers record both as
+// "no text layer", never as a pass.
 
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
-import { normaliseForMatch } from './factsContract.mjs';
+import { extractPdfPages, normaliseForMatch } from '../../../src/services/documentText.js';
 
-// pdfjs reads its data files with fs.readFile(<dir> + <name>) on Node, so each option is the package's
-// own directory with a trailing slash. Without cMapUrl a CJK PDF that uses a predefined CMap (UniJIS,
-// UniGB, ...) decodes to the wrong characters and its quotes could never verify; without
-// standardFontDataUrl a PDF on the 14 standard fonts warns and loses their glyph data.
-const PDFJS_DIR = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json')).replace(/\\/g, '/');
-const PDFJS_DATA = Object.freeze({
-  cMapUrl: `${PDFJS_DIR}/cmaps/`,
-  cMapPacked: true,
-  standardFontDataUrl: `${PDFJS_DIR}/standard_fonts/`,
-  wasmUrl: `${PDFJS_DIR}/wasm/`,
-});
-
-// pdfjs-dist's legacy build runs on Node without a canvas. In v6 the loading task owns the document's
-// resources, so it is the task, not the document, that is destroyed.
-export async function extractPdfPages(bytes) {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, ...PDFJS_DATA });
-  try {
-    const doc = await task.promise;
-    const pages = [];
-    for (let n = 1; n <= doc.numPages; n += 1) {
-      const page = await doc.getPage(n);
-      const content = await page.getTextContent();
-      pages.push(content.items.map((item) => item.str + (item.hasEOL ? '\n' : '')).join(''));
-      page.cleanup();
-    }
-    return { pages, pageCount: doc.numPages };
-  } finally {
-    await task.destroy();
-  }
-}
+export { extractPdfPages };
 
 // The pages of a document as findQuote() wants them: a pasted text is one page, a PDF one string per
 // page, an image has no text layer (null). A PDF pdfjs cannot open throws; the caller names the

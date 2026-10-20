@@ -22,8 +22,8 @@
 // discovery prompt — noformat is the same request without the tool, cold/warm force the tool call),
 // and the Plan 37 W0 probes: facts-haiku-5-5, facts-sonnet-5-5, facts-sonnet-4-6 (FACTS_OUTPUT_SCHEMA,
 // lib/factsContract.mjs), facts-plan-haiku-5-5 (§4.1 as written, rejected for `maxItems`) and readiness-sonnet-5-5
-// (READINESS_OUTPUT_SCHEMA, lib/readinessPrototype.mjs). Those workloads have no row in MODEL_PROFILES
-// (and must not), so each of these probes carries its own `profile` from profiles.mjs.
+// (READINESS_OUTPUT_SCHEMA, lib/readinessPrototype.mjs). The facts probes predate the live facts row (Plan 37 W1)
+// and the readiness probe has none, so each of these probes carries its own `profile` from profiles.mjs.
 //
 // D-30-7: no database is imported or opened. The only external call is the Anthropic Messages API,
 // and the only file written is data/model-eval/runs/schema-probe/<timestamp>.jsonl.
@@ -605,7 +605,7 @@ function shapeCheckFor(workload, parsed, kind, response) {
       kinds: facts.map((f) => f?.kind ?? null),
       atValues: facts.map((f) => f?.at ?? null),
       pages: facts.map((f) => f?.page ?? null),
-      validation: { outcome: verdict.outcome, error: verdict.error },
+      validation: { outcome: verdict.outcome, error: verdict.detail },
     };
   }
   if (workload === 'readiness') {

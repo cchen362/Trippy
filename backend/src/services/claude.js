@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
 import { PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL } from './copilotTools.js';
+import { normaliseForMatch } from './documentText.js';
 
 let _client = null;
 
@@ -26,6 +27,10 @@ export const COPILOT_MODEL = 'claude-sonnet-5-5';
 // Plan 30 W3: Haiku 5.5 with thinking disabled, and the prompt's volume rules keyed by model
 // (DISCOVERY_SELECTION_RULES). Reverting this constant restores Haiku 4.5's settings and prompt.
 export const DISCOVERY_MODEL = 'claude-haiku-5-5';
+
+// D-37-9 (Plan 37): Haiku 5.5 at effort 'medium' reads documents at import — it tied Sonnet 5.5 at 100 % on the costly kinds in W0 B2 at about a seventeenth of the cost per document.
+// Sonnet 5.5 keeps a `facts` row as the measured alternative; no 4.x row exists because there is nothing to roll back to.
+export const FACTS_MODEL = 'claude-haiku-5-5';
 
 // D-30-1 (Plan 30): request settings are keyed by MODEL, never by workload alone — reverting a
 // workload's *_MODEL constant automatically restores that model's compatible parameters.
@@ -55,6 +60,10 @@ export const MODEL_PROFILES = Object.freeze({
     // does not apply, and the allowance is a ceiling, not a spend. No `thinking` field: adaptive
     // stays on.
     copilot: Object.freeze({ maxTokens: 16000, effort: 'low' }),
+    // Plan 37 W1 / D-37-9: the alternative reader W0 measured (largest output 1,703 tokens thinking
+    // included). It shares Haiku 5.5's ceiling because W0's corpus was six documents and an unspent
+    // ceiling costs nothing; non-streaming, so it must stay at or under 21,333 (F-30-6).
+    facts: Object.freeze({ maxTokens: 8700, effort: 'medium' }),
   }),
   'claude-sonnet-4-6': Object.freeze({
     // Rollback row for both extraction (since Plan 30 W4) and the co-pilot (since Plan 30 W5).
@@ -67,6 +76,10 @@ export const MODEL_PROFILES = Object.freeze({
     // largest output seen at any effort, and a cut-off still degrades to the Plan 10 D3 null
     // fallback (resolvedName + city), so the allowance can never block a stop.
     descriptor: Object.freeze({ maxTokens: 1024, effort: 'low' }),
+    // Plan 37 W1 / D-30-6: W0 measured the largest output at 4,319 tokens thinking included (the
+    // two-page PDF); 8,700 is about 2x. The call is non-streaming, so it must stay at or under
+    // 21,333 (F-30-6). A cut-off is the named `truncated` outcome and is never retried (D-30-3).
+    facts: Object.freeze({ maxTokens: 8700, effort: 'medium' }),
     discovery: Object.freeze({
       // Plan 30 W3 second pass / D-30-6: with thinking disabled the largest generation in 12 was
       // 22,715 output tokens (median 19,485); 48,000 is about 2x that. Thinking is disabled
@@ -98,6 +111,7 @@ const WORKLOAD_MODELS = Object.freeze({
   descriptor: PHOTO_DESCRIPTOR_MODEL,
   discovery: DISCOVERY_MODEL,
   copilot: COPILOT_MODEL,
+  facts: FACTS_MODEL,
 });
 
 // The profile a workload sends: its configured model first, then that model's settings for the
@@ -1124,6 +1138,203 @@ export async function generatePhotoDescriptor({ title, resolvedName, city, count
     console.warn('[photo] descriptor generation failed', { title, error: err?.message });
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Document facts (Plan 37): the conditions in a booking's documents, read once at import
+// ---------------------------------------------------------------------------
+
+// The eight kinds a fact can carry; the schema's `kind` enum is built from this so the vocabulary has one source.
+export const FACT_KINDS = Object.freeze([
+  'deadline', 'window', 'requirement', 'instruction', 'allowance', 'contact', 'restriction', 'cost_condition',
+]);
+
+// D-37-4 (Plan 37): one object type, every property required, "" for not given, no anyOf — inside D-34-5's budget (0 optional properties, 0 unions) and validateAgainstSchema's keyword set as it stands.
+// There is no `maxItems`: the API rejects it (W0, 2026-10-20), so a read is bounded by its max_tokens allowance, whose cut-off is the named `truncated` outcome.
+// The `at` pattern's nested optional group compiled on Haiku 5.5, Sonnet 5.5 and Sonnet 4.6, so date and time are one field.
+export const FACTS_OUTPUT_SCHEMA = deepFreeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['documentSummary', 'language', 'facts'],
+  properties: {
+    documentSummary: { type: 'string', description: 'One line: what this document is, e.g. "Hotel confirmation, 3 nights".' },
+    language: { type: 'string', pattern: '^[a-z]{2}$', description: "ISO 639-1 code of the document's primary language." },
+    facts: { type: 'array', items: { $ref: '#/$defs/fact' } },
+  },
+  $defs: {
+    fact: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'label', 'value', 'quote', 'page', 'at', 'tz', 'tzSource', 'appliesFrom', 'appliesTo', 'confidence'],
+      properties: {
+        kind: { enum: [...FACT_KINDS] },
+        label: { type: 'string', description: 'Up to five English words, e.g. "Free cancellation until".' },
+        value: { type: 'string', description: 'The condition as one short English phrase.' },
+        quote: { type: 'string', description: 'The sentence or fragment exactly as printed, in its original language. Never paraphrase, translate or shorten it.' },
+        page: { type: 'string', pattern: '^([1-9][0-9]{0,2})?$', description: 'Page number as printed, 1-based; "" for a single image or when pages are not distinguishable.' },
+        at: { type: 'string', pattern: '^([0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?)?$', description: 'The moment the condition refers to, local to the place: a date, or a date and time; "" if none.' },
+        tz: { type: 'string', pattern: '^([A-Za-z]+(/[A-Za-z0-9_+-]+)+)?$', description: 'IANA zone only when stated by the document or supplied by the booking context; "" otherwise.' },
+        tzSource: { enum: ['document', 'booking', 'none'] },
+        appliesFrom: { type: 'string', pattern: '^([0-9]{4}-[0-9]{2}-[0-9]{2})?$' },
+        appliesTo: { type: 'string', pattern: '^([0-9]{4}-[0-9]{2}-[0-9]{2})?$' },
+        confidence: { enum: ['high', 'medium', 'low'] },
+      },
+    },
+  },
+});
+export const FACTS_OUTPUT_FORMAT = Object.freeze({ type: 'json_schema', schema: FACTS_OUTPUT_SCHEMA });
+
+// Bump when the prompt or schema changes: a document is re-read only when its read key (content hash, model, this version) changes (D-37-1).
+export const FACTS_PROMPT_VERSION = '37.1';
+
+// D-37-10 (Plan 37): a time keeps its document's zone or says it has none — rule 5 sets `tz` only when the document states a zone or the booking context supplies one, and `tzSource` records which, so the UI can say "zone not stated" instead of assuming.
+// The prompt is Plan 37 §4.2 verbatim; rule 10 is the same reasoning-request guard as extraction's last rule (Plan 34 W1).
+export const FACTS_SYSTEM = `You are a travel-document reading engine. You receive one document that belongs to a traveller's booking (a confirmation email, an e-ticket, a hotel voucher, a pass, a tour voucher, a luggage-forwarding sheet, or a screenshot of one) and must list every condition in it as structured JSON.
+
+A condition is anything that could change what the traveller must do, bring, pay or expect, or when: deadlines (cancel by, change by, check-in opens, pay by, collect by), windows (check-in hours, reception hours, pickup time, entry slot, validity period), requirements (passport, printed voucher, the card used to pay, a QR code, an ID matching the name), instructions (meeting point, platform, terminal, how to reach, what to show), allowances (baggage, seats, guests, breakfast), contacts (phone, email, address in local script), restrictions (non-refundable, non-changeable, no late entry, age limits), cost conditions (deposit, city tax, resort fee, late fee).
+
+Rules:
+1. Read the whole document, every page. One fact per condition; a condition stated twice is one fact.
+2. NEVER invent a value. Quote the sentence or fragment exactly as printed, in its original language; never paraphrase, translate or shorten the quote. Put the English reading in "value".
+3. Skip boilerplate that names no specific time, amount, place or action (general terms, marketing, "subject to conditions" lines). Keep anything with a time, a date, an amount, a place, a name requirement or an action.
+4. "at" is the moment the condition refers to, local to the place, as a date or a date and time; "" when the condition has none. A date without a year takes the year from the booking context below; make no other inference.
+5. "tz" is the IANA zone only if the document states a zone or the booking context supplies one, and "tzSource" says which; otherwise "" and "none". Never guess a zone.
+6. "page" is the page number as printed, 1-based; "" for a single image or when pages are not distinguishable.
+7. "kind" is one of the eight kinds; choose the closest. "label" is up to five English words; "value" is one short English phrase.
+8. The booking context below (type, title, dates, zones, trip dates) is for disambiguation only; never produce a fact from the context itself.
+9. If the document holds no condition, return an empty "facts" array; never pad.
+10. Do not explain your reasoning in prose.`;
+
+const orNotGiven = (v) => (v ? v : 'not given');
+
+// The booking-context text block (§4.2): type, title, start, end, origin and destination zones per
+// booking the document backs (one artifact can back several bookings, F-37-14), then the trip's
+// dates. No "today": nothing in the read depends on it, and a constant block keeps reads of the same
+// document comparable across days.
+//   context = { bookings: [{ type, title, startDatetime, endDatetime, originTz, destinationTz }],
+//               trip: { startDate, endDate } }
+export function buildFactsContextText(context) {
+  const bookings = context?.bookings ?? [];
+  if (!bookings.length) throw new Error('facts context: a document must belong to at least one booking');
+  const lines = ['Booking context (for disambiguation only):'];
+  bookings.forEach((b, i) => {
+    lines.push(
+      `Booking ${i + 1}: ${b.type} "${b.title}"; start ${orNotGiven(b.startDatetime)}; end ${orNotGiven(b.endDatetime)}; ` +
+      `origin zone ${orNotGiven(b.originTz)}; destination zone ${orNotGiven(b.destinationTz)}.`,
+    );
+  });
+  const trip = context?.trip ?? {};
+  lines.push(`Trip dates: ${orNotGiven(trip.startDate)} to ${orNotGiven(trip.endDate)}.`);
+  return lines.join('\n');
+}
+
+// The document in extraction's transport (F-37-11). `content` is UTF-8 text for kind text and
+// base64 for image and pdf.
+function documentBlock(document) {
+  if (document.kind === 'text') return { type: 'text', text: document.content };
+  if (document.kind === 'image') {
+    return { type: 'image', source: { type: 'base64', media_type: document.mediaType, data: document.content } };
+  }
+  if (document.kind === 'pdf') {
+    return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: document.content } };
+  }
+  throw new Error(`facts request: unknown document kind "${document.kind}"`);
+}
+
+// The full request body: the profile's settings with the format beside its effort (D-34-6), the
+// system prompt as a plain string (no cache_control: one document per call, nothing stable enough to
+// cache), and one user turn of context then document.
+export function buildFactsRequest(profile, { context, document }) {
+  return {
+    ...requestSettings(profile, { format: FACTS_OUTPUT_FORMAT }),
+    system: FACTS_SYSTEM,
+    messages: [{ role: 'user', content: [{ type: 'text', text: buildFactsContextText(context) }, documentBlock(document)] }],
+  };
+}
+
+// D-30-3 / D-37-4: classify the stop first, then parse exactly one text block and validate it.
+// Nothing is repaired. Returns { outcome, stopReason, category, error, detail, value, parsed } where
+// outcome is complete | refused | truncated | invalid. `error` is a short category — null, or one of
+// not_one_text_block | not_json | schema_mismatch | empty_quote — and is the only part a caller may
+// store: `detail` is the human message (a validator path and reason, a JSON parse message) and can
+// echo what the model wrote, so it is for a developer's eyes, never for a row or a log line.
+// `value` is the validated answer (enum spellings normalised, D-34-7) only when complete; `parsed`
+// is kept on an invalid outcome so a harness record shows what came back.
+export function classifyFactsResponse(message) {
+  const stop = classifyStop(message);
+  const base = { stopReason: stop.stopReason, category: stop.category };
+  if (stop.outcome !== 'complete') return { ...base, outcome: stop.outcome, error: null, detail: null, value: null, parsed: null };
+
+  const invalid = (error, detail, parsed = null) => ({ ...base, outcome: 'invalid', error, detail, value: null, parsed });
+  const textBlocks = (message.content ?? []).filter((b) => b.type === 'text');
+  if (textBlocks.length !== 1) return invalid('not_one_text_block', `expected exactly one text block, got ${textBlocks.length}`);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(textBlocks[0].text);
+  } catch (err) {
+    return invalid('not_json', `not JSON (${err.message})`);
+  }
+  const checked = validateAgainstSchema(parsed, FACTS_OUTPUT_SCHEMA);
+  if (!checked.ok) return invalid('schema_mismatch', checked.error, parsed);
+  // D-37-2: no fact without its quote.
+  const emptyQuote = checked.value.facts.findIndex((f) => !normaliseForMatch(f.quote));
+  if (emptyQuote !== -1) return invalid('empty_quote', `facts[${emptyQuote}].quote: empty`, parsed);
+
+  return { ...base, outcome: 'complete', error: null, detail: null, value: checked.value, parsed };
+}
+
+// A provider failure as a named outcome: the signal aborting, an HTTP status, a connection or timeout
+// failure, or anything else the SDK threw. Never the document's text.
+function factsProviderError(err, signal) {
+  if (signal?.aborted || err instanceof Anthropic.APIUserAbortError) return 'aborted';
+  if (Number.isInteger(err?.status)) return `api_${err.status}`;
+  if (err instanceof Anthropic.APIConnectionError) return 'connection';
+  return 'unexpected';
+}
+
+// Reads one document into facts with a single non-streaming call (Plan 37). Provider failures are
+// outcomes, never throws and never null: the caller records every attempt, so a read that could not
+// finish says why. Nothing is retried or repaired (D-30-3, D-37-4); a request that cannot be built
+// (an unknown document kind, a context with no booking) is a bug and throws.
+// document: { kind: 'text'|'image'|'pdf', mediaType, content } — content is UTF-8 for text, base64 otherwise.
+// context: see buildFactsContextText. profile (optional): request settings override for the
+// evaluation harness; defaults to live. signal (optional): aborts the request.
+// Returns { outcome, stopReason, category, error, detail, value, usage, totalMs, model } where outcome is
+// complete | refused | truncated | invalid | error and usage is { inputTokens, outputTokens } or null.
+// Never logs the document, a quote or a fact.
+export async function readDocumentFacts({ document, context, profile = profileFor('facts'), signal }) {
+  const request = buildFactsRequest(profile, { context, document });
+  const started = Date.now();
+
+  let message;
+  try {
+    message = await getClient().messages.create(request, signal ? { signal } : undefined);
+  } catch (err) {
+    const error = factsProviderError(err, signal);
+    console.warn('[facts] read not usable', { outcome: 'error', error, stopReason: null });
+    return {
+      outcome: 'error', stopReason: null, category: null, error, detail: err?.message ?? null,
+      value: null, usage: null, totalMs: Date.now() - started, model: profile.model,
+    };
+  }
+
+  const classified = classifyFactsResponse(message);
+  const read = {
+    outcome: classified.outcome,
+    stopReason: classified.stopReason,
+    category: classified.category,
+    error: classified.error,
+    detail: classified.detail,
+    value: classified.value,
+    usage: { inputTokens: message.usage?.input_tokens ?? 0, outputTokens: message.usage?.output_tokens ?? 0 },
+    totalMs: Date.now() - started,
+    model: profile.model,
+  };
+  if (read.outcome !== 'complete') {
+    console.warn('[facts] read not usable', { outcome: read.outcome, error: read.error, stopReason: read.stopReason });
+  }
+  return read;
 }
 
 // Query tool_use names the loop below executes server-side and feeds back as a tool_result —

@@ -1,14 +1,15 @@
 // Plan 30 W1 — opt-in live smoke test against the real Anthropic API.
 //
 // One tiny request per workload SHAPE (extraction text+image, descriptor, co-pilot tools+stream,
-// discovery NDJSON stream), sent with the real SDK client and the settings production sends
-// (requestSettings(profileFor(workload))). It answers one question the mocked suite cannot: does
-// the currently configured model/SDK/profile combination still produce responses the parsers read
-// correctly — known block types, text read only from `text` blocks, usage present, a normal stop.
+// discovery NDJSON stream), plus one document-facts read of a two-page PDF (Plan 37), sent with the
+// real SDK client and the settings production sends (requestSettings(profileFor(workload))). It
+// answers one question the mocked suite cannot: does the currently configured model/SDK/profile
+// combination still produce responses the parsers read correctly — known block types, text read only
+// from `text` blocks, usage present, a normal stop.
 //
-// COST: pennies per run (about 8 small requests; the largest is a few hundred output tokens on
-// Sonnet). NEVER part of `npm test`: the whole suite is skipped, and makes zero API calls, unless
-// LIVE_ANTHROPIC=1.
+// COST: pennies per run (about 9 small requests; the largest are a few hundred output tokens on
+// Sonnet, and a few thousand on the Haiku 5.5 facts read of the PDF). NEVER part of `npm test`: the
+// whole suite is skipped, and makes zero API calls, unless LIVE_ANTHROPIC=1.
 //
 // RUN (PowerShell, from backend/ — config.js loads backend/.env, which holds the real key):
 //   $env:LIVE_ANTHROPIC='1'; npx vitest run tests/live
@@ -16,12 +17,16 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { deflateSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../../src/config.js';
 import {
   profileFor, requestSettings, classifyStop, extractBookings, generatePhotoDescriptor, validateAgainstSchema,
-  PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES,
+  PHOTO_DESCRIPTOR_OUTPUT_FORMAT, PHOTO_DESCRIPTOR_OUTPUT_SCHEMA, PHOTO_DESCRIPTOR_SYSTEM, SCENE_TYPES, readDocumentFacts,
 } from '../../src/services/claude.js';
+import { extractPdfPages, findQuote } from '../../src/services/documentText.js';
 import {
   PROPOSE_ITINERARY_CHANGES_TOOL, SEARCH_DISCOVERY_CATALOGUE_TOOL, CHECK_TRIP_HEALTH_TOOL,
 } from '../../src/services/copilotTools.js';
@@ -194,4 +199,28 @@ describe.skipIf(process.env.LIVE_ANTHROPIC !== '1')('live Anthropic smoke (Plan 
       expect(Array.isArray(entry.items)).toBe(true);
     }
   }, 120_000);
+
+  it('document facts through the real readDocumentFacts: a two-page PDF reads into quoted facts (Plan 37)', async () => {
+    const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'documentText', 'hotel-kanade-2p.pdf'));
+    const result = await readDocumentFacts({
+      document: { kind: 'pdf', mediaType: 'application/pdf', content: bytes.toString('base64') },
+      context: {
+        bookings: [{
+          type: 'hotel', title: 'Hotel Kanade Kyoto', startDatetime: '2026-11-14T15:00', endDatetime: '2026-11-17T11:00',
+          originTz: 'Asia/Tokyo', destinationTz: 'Asia/Tokyo',
+        }],
+        trip: { startDate: '2026-11-13', endDate: '2026-11-20' },
+      },
+    });
+
+    expect(result.outcome).toBe('complete');
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.model).toBe(profileFor('facts').model);
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.value.facts.length).toBeGreaterThan(0);
+    for (const fact of result.value.facts) expect(fact.quote.trim().length).toBeGreaterThan(0);
+    const { pages } = await extractPdfPages(bytes);
+    expect(result.value.facts.some((fact) => findQuote(pages, fact.quote).found)).toBe(true);
+  }, 180_000);
 });
