@@ -63,6 +63,16 @@ export function cacheTimestampToEpochMs(value) {
   return Number.isFinite(epoch) ? epoch : null;
 }
 
+// The one freshness rule every reader applies (the /discover route, the co-pilot's
+// catalogue search, the trip-scope pre-warm): a destination is fresh only when it holds
+// active places AND its last generation is within CACHE_TTL_MS. A row with no active
+// places is never fresh, however recently it was generated.
+export function isCatalogueFresh(destinationRow, activePlaceCount, now = Date.now()) {
+  if (!destinationRow || activePlaceCount <= 0) return false;
+  const lastGeneratedAtMs = cacheTimestampToEpochMs(destinationRow.last_generated_at);
+  return lastGeneratedAtMs !== null && (now - lastGeneratedAtMs) < CACHE_TTL_MS;
+}
+
 // Backs the D6 empty-country guard (Plan 9 Wave 5): every country-coded row
 // (country_code != '') that already exists for a city_key. The route uses
 // this to decide whether an EMPTY-countryCode Discovery request can safely

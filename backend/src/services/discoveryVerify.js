@@ -649,6 +649,30 @@ export function enqueueForVerification(db, destinationId, placeIds = []) {
   return queue.promise;
 }
 
+// D-35-3 (Plan 35 W4, F-35-12): re-queues a destination's provenance='pending' rows with no
+// new ids, for the /discover route's fresh path. Before this, only a generation called
+// enqueueForVerification, so a row left pending by a budget-exhausted drain waited for the
+// destination's next "show more" or 7-day refresh, however often it was opened. This is the
+// header's "retried the next time anyone browses that destination", applied to a plain open.
+//
+// The fold-back is enqueueForVerification's own (same queue, same in-flight exclusion, same
+// background priority); this adds one gate: with today's resolver budget already spent, no
+// drain is started, because it could only mark the same rows pending again. Returns the
+// drain's promise for tests; the route never awaits it.
+export function requeuePendingVerification(db, destinationId) {
+  const { pending } = db.prepare(
+    `SELECT COUNT(*) AS pending FROM discovery_places WHERE destination_id = ? AND status = 'active' AND provenance = 'pending'`,
+  ).get(destinationId);
+  if (pending === 0) return Promise.resolve();
+
+  if (!hasResolverBudget()) {
+    logBudgetExhaustedOnce();
+    return Promise.resolve();
+  }
+
+  return enqueueForVerification(db, destinationId);
+}
+
 // Plan 26 W3.3 (F-26-12): the bounded re-verification path. enqueueForVerification
 // above only ever re-collects provenance='pending' rows, so a row that was
 // CHECKED and landed at the terminal 'unverified' state is never retried —

@@ -57,6 +57,7 @@ import { getOrCreateDestination, insertPlaces, recordVerificationAttempts, listV
 import {
   enqueueForVerification,
   enqueueForReverification,
+  requeuePendingVerification,
   waitForVerificationDrain,
   getDiscoveryBudgetStatus,
   __resetDiscoveryVerifyForTests,
@@ -530,6 +531,70 @@ describe('discoveryVerify — resolver-call daily budget', () => {
     const afterSecondDrain = getDb().prepare('SELECT * FROM discovery_places WHERE destination_id = ? ORDER BY id').all(dest.id);
     expect(afterSecondDrain.filter((r) => r.provenance === 'pending')).toHaveLength(0);
     expect(afterSecondDrain.filter((r) => r.provenance === 'verified')).toHaveLength(2);
+  });
+});
+
+describe('discoveryVerify — requeuePendingVerification (Plan 35 W4, D-35-3, F-35-12)', () => {
+  function pendingCount(destId) {
+    return getDb().prepare(
+      `SELECT COUNT(*) AS n FROM discovery_places WHERE destination_id = ? AND provenance = 'pending'`,
+    ).get(destId).n;
+  }
+
+  it('drains the pending rows of the destination: one resolver call per row, none left pending', async () => {
+    const dest = makeDestination({ cityKey: 'requeue1' });
+    [1, 2, 3].forEach((n) => insertOne(dest.id, { name: `Requeue Place ${n}` }));
+    mockResolvePlace.mockResolvedValue(resolvedHit());
+
+    await requeuePendingVerification(getDb(), dest.id);
+    await waitForVerificationDrain(dest.id);
+
+    expect(mockResolvePlace).toHaveBeenCalledTimes(3);
+    expect(pendingCount(dest.id)).toBe(0);
+  });
+
+  it('does nothing when no row is pending', async () => {
+    const dest = makeDestination({ cityKey: 'requeue2' });
+    const place = insertOne(dest.id, { name: 'Already Checked' });
+    markUnverified(place.id);
+
+    await requeuePendingVerification(getDb(), dest.id);
+    await waitForVerificationDrain(dest.id);
+
+    expect(mockResolvePlace).not.toHaveBeenCalled();
+  });
+
+  it('starts no drain when the daily resolver budget is already spent, leaving rows pending', async () => {
+    const dest = makeDestination({ cityKey: 'requeue3' });
+    insertOne(dest.id, { name: 'Deferred One' });
+    insertOne(dest.id, { name: 'Deferred Two' });
+    config.discoveryResolverDailyRequestBudget = 0;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await requeuePendingVerification(getDb(), dest.id);
+    await waitForVerificationDrain(dest.id);
+    errorSpy.mockRestore();
+
+    expect(mockResolvePlace).not.toHaveBeenCalled();
+    expect(pendingCount(dest.id)).toBe(2);
+  });
+
+  it('does not double-queue rows a running drain already holds', async () => {
+    const dest = makeDestination({ cityKey: 'requeue4' });
+    const places = [1, 2, 3].map((n) => insertOne(dest.id, { name: `Held Place ${n}` }));
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    mockResolvePlace.mockImplementation(async () => { await gate; return resolvedHit(); });
+
+    enqueueForVerification(getDb(), dest.id, places.map((p) => p.id));
+    // The requeue lands while the first drain is in flight: its pending rows are the same ids.
+    const requeued = requeuePendingVerification(getDb(), dest.id);
+    release();
+    await requeued;
+    await waitForVerificationDrain(dest.id);
+
+    expect(mockResolvePlace).toHaveBeenCalledTimes(3);
+    expect(pendingCount(dest.id)).toBe(0);
   });
 });
 

@@ -5,6 +5,7 @@ import { getDb } from '../db/database.js';
 import { countryNameFromCode } from '../utils/countries.js';
 import { assertTripAccess, suggestCountryForDestinationText } from '../services/trips.js';
 import { runCatalogueGeneration, getRunningGeneration } from '../services/discoveryGeneration.js';
+import { requeuePendingVerification } from '../services/discoveryVerify.js';
 import { DISCOVERY_CATEGORIES } from '../services/claude.js';
 import {
   getOrCreateDestination,
@@ -251,6 +252,9 @@ router.post('/:tripId/discover', requireTripAccess, async (req, res, next) => {
       // Plan 35 W0: one line per fresh open, so the container log gives cold opens against all
       // opens (a generation logs its own `[discover] destination=` line; a join logs below).
       console.log('[discover] served fresh destination=%s places=%d', destinationRow.id, activeRows.length);
+      // D-35-3 (F-35-12): a fresh open retries the rows a budget-exhausted drain left
+      // 'pending', which otherwise wait for the next generation. Fire-and-forget, never awaited.
+      requeuePendingVerification(db, destinationRow.id);
       for (const cat of groupPlaceRowsByCategory(activeRows, prefs)) {
         write({ type: 'category', category: cat.category, items: cat.items });
       }

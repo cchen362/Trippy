@@ -213,7 +213,7 @@ export async function applyDraft({ userId, draftId, report = async () => {}, sig
         startDate: newTrip.startDate,
         endDate: newTrip.endDate,
         destinations: newTrip.destinations,
-      });
+      }, { prewarmDiscovery: false }); // see createTrip: no Anthropic call on the MCP path, no kick mid-transaction
       effectiveTripId = created.trip.id;
     }
 

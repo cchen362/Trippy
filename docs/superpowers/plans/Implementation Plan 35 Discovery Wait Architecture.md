@@ -375,7 +375,7 @@ The probe and the compile probe stay in the harness, so a future model can be me
 
 ### W4 — Server-side pre-warm of trip scopes, and pending rows re-queued on open (D-35-3)
 
-**Status:** NOT STARTED. Ruled in (Q-35-3, 2026-10-20); independent of W1–W3 and may run alongside W2 (different files).
+**Status:** COMPLETE 2026-10-20, not deployed. Backend suite green (45 files passed, 1 skipped as before). Acceptance passed on a dev-DB copy (results below). D-35-3 is stamped in code; its DECISIONS.md row is added at merge.
 
 **Files.** `backend/src/services/trips.js` (`createTrip`, the scope-save path); a small `services/discoveryPrewarm.js` that calls `kickBackgroundGeneration` for each stored scope that carries a country code and has no fresh catalogue, respecting the daily cap and the D-33-1 registry; `routes/discovery.js` fresh path; `services/discoveryVerify.js` (an exported re-queue for pending rows that `enqueueForVerification` already contains, callable with no new ids); tests for each.
 
@@ -385,6 +385,35 @@ The probe and the compile probe stay in the harness, so a future model can be me
 3. Measure with the W0 fresh-path log line after a week: cold opens before and after; and the `[discoveryVerify] budget status` line on a three-scope creation day.
 
 **Acceptance.** Suite green; the kicks are observable in the log; a three-scope trip created on a dev-DB copy shows three `[discover] destination=` lines, one registry entry each, the daily counter at 1 per destination; a destination with pending rows served fresh drains them; the resolver budget status is reported in the wave record.
+
+#### W4 results (2026-10-20, working tree over `c97b361`)
+
+**What shipped.**
+- `services/discoveryPrewarm.js` (new) holds `kickBackgroundGeneration`, moved verbatim from `copilotGrounding.js` (only its log prefix changed), and `prewarmTripScopes`. The co-pilot search imports the kick from there, so there is still one mechanism. It moved because `trips.js` now calls the pre-warm and `copilotGrounding.js` imports `trips.js`. Leaving it in place would have made an import cycle. It also could not go into `discoveryGeneration.js`: the co-pilot tests observe `runCatalogueGeneration` across the module boundary, and an internal call would bypass that.
+- `prewarmTripScopes` skips scopes with no country code, duplicate keys, and destinations that are fresh, generating or at the daily cap. Everything else is kicked at once, with one `[discoveryPrewarm] kick trip=… destination=…|CC label=… merge=…` line each.
+- `createTrip` calls it after its transaction commits. `updateTrip` calls it after the chip reconcile commits.
+- **Deviation, for the owner to confirm:** `createTrip` takes `{ prewarmDiscovery }`, and MCP `apply_draft` passes `false`. The MCP path never calls Anthropic (DECISIONS.md, Plan 28 cost boundary). Its `createTrip` also runs inside the uncommitted D-28-3 transaction, so a kick there could mint catalogue rows for a trip that then rolls back. An MCP-created trip warms when it is opened (Day 1) or when its chips are next saved. Q-35-3 did not distinguish channels; pre-warming MCP-created trips too would mean reopening the Plan 28 boundary, which is a separate ruling.
+- `discoveryVerify.requeuePendingVerification(db, destinationId)` is `enqueueForVerification`'s fold-back with no new ids. It adds one gate: when today's resolver budget is already spent, it starts no drain, because a drain then could only mark the same rows `pending` again. `routes/discovery.js` calls it on the fresh path, beside the W0 log line.
+- `db/discoveryCatalogue.isCatalogueFresh` is the freshness rule for the co-pilot search and the pre-warm. The route keeps its own inline copy for now: W2 owned that part of the file during this wave. Switching it to the helper is a one-line follow-up after the merge.
+- Tests: `tests/discoveryPrewarm.test.js` (9), `tests/discoveryFreshRequeue.test.js` (2), and 4 in `discoveryVerify.test.js`.
+- `tests/setup/noDiscoveryPrewarm.js` stubs `prewarmTripScopes` for the unit project. Without it, 298 detached generations fired from unrelated trip tests. They passed only because this worktree had no API key. With a key loaded, each would have been a request the network guard fails (the DECISIONS.md section "Backend unit suite makes no network calls" gains a note on this at merge).
+
+**Acceptance on a dev-DB copy** (`better-sqlite3` backup of `backend/data/trippy.db` into the session scratchpad; real Haiku 5.5 generation, real resolver; escalation capped at 10 for this run to bound Google spend; resolver budget at its default 1,000).
+- **Pre-warm.** Trip "W4 QA Taiwan loop" had Tainan, Hualien and Taichung (`TW`) plus "Nowhereville" with no country. None of the three had a catalogue row before.
+  - Three `[discoveryPrewarm] kick` lines and three `[discover] destination=… , Taiwan (TW)` lines, all within 0.3 s.
+  - Registry: one running entry each (ids 24, 25, 26). No row was minted for the country-less scope.
+  - All three ended `end_turn` with 8 categories and 0 dropped lines: 99, 78 and 81 items, the last at 83.8 s.
+  - Daily counter: 1 per destination.
+- **Resolver budget on the creation day.** The three drains ran together under the shared pacer. `[discoveryVerify] budget status` reported `resolverRequests=934/1000`, then `1001/1000` and `1004/1000`, at +712 s to +757 s (escalation `10/10`, reverify `0/150`). Then `daily resolver REQUEST budget exhausted (1000)`. Final state:
+  - Tainan: 32 pending, 64 unverified, 3 verified.
+  - Hualien: 5 pending, 73 unverified.
+  - Taichung: 0 pending, 80 unverified, 1 verified.
+  This is F-35-12 reproduced: a three-city creation day ends with the tail of the last-drained city `pending`.
+- **Fresh open drains them.** A new process stood in for the next day, with fresh in-process budgets. It served Tainan through the route's fresh path: `[discover] served fresh destination=24 places=99`, 8 categories plus `done:cached`, and no generation. The re-queued drain took 112 s and 154 resolver requests (`154/1000`). It left Tainan at 0 pending, 95 unverified and 4 verified.
+- **Spend:** about $0.06 Anthropic (six Haiku 5.5 generations: the first run's script exited mid-drain on the resolver's unref'd pacing timers, so the run was repeated from a fresh copy), about 2,160 Nominatim requests, and 30 Google escalations.
+- **Observed, not in W4's scope:** Taiwan places verified at about 3 % (8 of 258). The cap of 10 escalations bounds this run, so it is not a production number. It is recorded only so that nobody reads it as a W4 effect.
+
+**Step 3 (a week of production logs)** opens with the deploy. Compare `[discover] destination=` lines against `served fresh` and `joined running generation` lines before and after, and read the `[discoveryVerify] budget status` line on the first multi-city creation day.
 
 ### W5 — Close-out
 

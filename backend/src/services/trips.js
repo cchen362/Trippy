@@ -5,6 +5,7 @@ import { resolveBookingDocuments } from './documents.js';
 import { resolvePlace } from './placeResolver.js';
 import { canonicalGeoKey, scopesMatch, knownCityLabel } from '../utils/geoIdentity.js';
 import { googlePlaceIdForStop } from '../utils/googlePlaceIdentity.js';
+import { prewarmTripScopes } from './discoveryPrewarm.js';
 
 function toIsoDate(value) {
   return new Date(value).toISOString().slice(0, 10);
@@ -912,7 +913,13 @@ export function listTripsForUser(userId, { today = toIsoDate(new Date()) } = {})
   });
 }
 
-export function createTrip(userId, input) {
+// prewarmDiscovery: D-35-3 starts every stored scope's Discovery catalogue once the trip has
+// committed. The MCP apply path passes false, for two reasons. The MCP path never calls
+// Anthropic (DECISIONS.md, Plan 28 cost boundary). And it calls createTrip inside its own
+// all-or-nothing transaction (D-28-3), which has not committed when this returns, so a
+// kick here could mint catalogue rows for a trip that then rolls back. An MCP-created trip
+// warms when the traveller opens it (Day 1) or next saves its destination chips.
+export function createTrip(userId, input, { prewarmDiscovery = true } = {}) {
   const db = getDb();
   const title = input.title?.trim();
   const startDate = input.startDate;
@@ -992,6 +999,7 @@ export function createTrip(userId, input) {
   });
 
   const tripId = create();
+  if (prewarmDiscovery) prewarmTripScopes(db, listTripScopes(tripId), { tripId });
   return getTripDetail(tripId, userId);
 }
 
@@ -1035,6 +1043,9 @@ export function updateTrip(userId, tripId, input) {
       reconcileTripScopes(db, tripId, newPairs);
     });
     reconcile();
+    // D-35-3: the scope-save path. Kicked once the reconcile has committed; scopes already
+    // fresh or generating are skipped inside, so re-saving an unchanged chip list costs nothing.
+    prewarmTripScopes(db, listTripScopes(tripId), { tripId });
   }
 
   let newEndDate = existingRow.end_date;

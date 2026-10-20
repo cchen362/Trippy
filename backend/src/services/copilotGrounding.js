@@ -13,66 +13,18 @@
 import { getDb } from '../db/database.js';
 import {
   findDestination,
-  getOrCreateDestination,
   listActivePlaces,
   listCountryCodedRows,
   getDailyGenerationCount,
+  isCatalogueFresh,
   MAX_GENERATIONS_PER_DESTINATION_PER_DAY,
-  CACHE_TTL_MS,
-  cacheTimestampToEpochMs,
 } from '../db/discoveryCatalogue.js';
-import { runCatalogueGeneration, getRunningGeneration } from './discoveryGeneration.js';
+// The kick is shared with the trip-scope pre-warm (D-35-3), so it lives there; this module
+// still decides when to fire it.
+import { kickBackgroundGeneration } from './discoveryPrewarm.js';
 import { rankPlaces, buildFitLine } from './discoveryRank.js';
 import { buildTripScopes, listTripScopes } from './trips.js';
 import { scopesMatch } from '../utils/geoIdentity.js';
-import { countryNameFromCode } from '../utils/countries.js';
-
-// Fires the exact generation pipeline routes/discovery.js's /discover handler
-// uses (via services/discoveryGeneration.js), detached from the search call
-// that triggered it — the SSE-less co-pilot turn must never await this. Errors
-// are logged, never thrown back at anything, since nothing is awaiting.
-//
-// "Is this destination already generating" is answered by the shared registry in
-// discoveryGeneration.js (D-33-1), the same one the /discover route consults, so a
-// co-pilot search and a Discovery open for the same city never double-generate. When
-// one is running the kick simply returns: the search already answers
-// catalogueState 'generating' either way, and there is nothing to subscribe to here
-// because no caller streams. The registry check and the runCatalogueGeneration call
-// below sit in one synchronous stretch (no await between them), which is what makes
-// check-then-start atomic.
-function kickBackgroundGeneration(db, { cityKey, countryCode, label, useExclusions }) {
-  const key = `${cityKey}|${countryCode}`;
-
-  (async () => {
-    // Row creation is legitimately generation's job (see module header) — the
-    // kick is the one place in this file allowed to mint a destination row.
-    const destinationRow = getOrCreateDestination(db, {
-      cityKey,
-      countryCode,
-      displayName: label,
-    });
-
-    if (getRunningGeneration(destinationRow.id)) return;
-
-    // Mirrors routes/discovery.js's claudeDestination composition exactly: country
-    // context (when known) is composed into the STRING sent to Claude only.
-    const claudeDestination = countryCode
-      ? `${label}, ${countryNameFromCode(countryCode)} (${countryCode})`
-      : label.trim().toLowerCase();
-
-    await runCatalogueGeneration(db, {
-      destinationRow,
-      claudeDestination,
-      useExclusions,
-      onCategory: undefined,
-    });
-  })().catch((err) => {
-    console.error(
-      '[copilotGrounding] background generation failed destination=%s: %s',
-      key, err.message,
-    );
-  });
-}
 
 // Maps a stored, active discovery_places row into the bounded G8 compact shape the
 // model sees: no lat/lng, no photo fields — just enough to talk about and reference
@@ -139,10 +91,7 @@ export async function searchDiscoveryCatalogue(tripDetail, input) {
   let dailyGenerationCount = 0;
   if (destinationRow) {
     activeRows = listActivePlaces(db, destinationRow.id);
-    const lastGeneratedAtMs = cacheTimestampToEpochMs(destinationRow.last_generated_at);
-    cacheIsFresh = activeRows.length > 0 && lastGeneratedAtMs !== null
-      ? (Date.now() - lastGeneratedAtMs) < CACHE_TTL_MS
-      : false;
+    cacheIsFresh = isCatalogueFresh(destinationRow, activeRows.length);
     dailyGenerationCount = getDailyGenerationCount(db, destinationRow.id);
   }
 
