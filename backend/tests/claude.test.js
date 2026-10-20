@@ -1556,12 +1556,15 @@ describe('default request bodies are byte-identical (Plan 30 W0)', () => {
     // Plan 30 W3: the second deliberate move off the W0 pin — Haiku 5.5, thinking disabled at
     // effort 'low', with Haiku 5.5's discovery selection rules (the sha256 below was re-captured
     // for this body).
+    // Plan 36 W4 (D-36-6): the prompt alone moved (category definitions, 12 per batch); the settings
+    // asserted below are unchanged, and the sha256 was re-captured for the new system text.
     expect(Object.keys(body)).toEqual(['model', 'max_tokens', 'thinking', 'output_config', 'system', 'messages']);
     expect(body.model).toBe('claude-haiku-5-5');
     expect(body.max_tokens).toBe(48000);
     expect(body.thinking).toEqual({ type: 'disabled' });
     expect(body.output_config).toEqual({ effort: 'low' });
-    expect(sha256(body)).toBe('4feadef79f9f7b407c58f264aacc3c7e898184a6e130682918677e43d4a18a1e');
+    expect(body.system.startsWith(discoverySystemPrompt('claude-haiku-5-5'))).toBe(true);
+    expect(sha256(body)).toBe('8adbf90bbd778b48b824610e0544de92777a36bb544b7d393ef708b9127e93ae');
   });
 
   it('discoverDestination rolled back to Haiku 4.5 sends the exact W0 body (Plan 30 W3 rollback)', async () => {
@@ -1762,17 +1765,33 @@ describe('discovery prompt keyed by model (D-30-1, Plan 30 W3)', () => {
   it('pins each model\'s discovery prompt text', () => {
     // Haiku 4.5: byte-identical to the DISCOVER_SYSTEM constant before W3.
     expect(sha256Text(discoverySystemPrompt('claude-haiku-4-5-20251001'))).toBe('34c3742fbd01638a66e1e9ba9a2d35c13c5270004407a5abb099bdff495c362e');
-    // Haiku 5.5: the measured W3 second-pass variant A.
-    expect(sha256Text(discoverySystemPrompt('claude-haiku-5-5'))).toBe('b851c503f3e9ff456e26ac742c0cf3875b6ed8d68e8d96ec714b152098f814d9');
+    // Haiku 5.5: the measured Plan 36 W4 'defined-count-12' prompt (D-36-6), byte-identical to what
+    // the harness measured (was b851c503…, Plan 30 W3 variant A).
+    expect(sha256Text(discoverySystemPrompt('claude-haiku-5-5'))).toBe('c021ae4eb55aaf6966c77fbc1ba9765b09a3e43a11794bc955d23cf4cc67f6f9');
   });
 
-  it('differs between models only in the two selection lines', () => {
+  it('differs between models only in the two selection lines and Haiku 5.5\'s categories block', () => {
     const p45 = discoverySystemPrompt('claude-haiku-4-5-20251001');
     const p55 = discoverySystemPrompt('claude-haiku-5-5');
     const r45 = DISCOVERY_SELECTION_RULES['claude-haiku-4-5-20251001'];
     const r55 = DISCOVERY_SELECTION_RULES['claude-haiku-5-5'];
+    expect(r45).not.toHaveProperty('categories');
     expect(p55).not.toBe(p45);
-    expect(p55.replace(r55.quality, () => r45.quality).replace(r55.volume, () => r45.volume)).toBe(p45);
+    expect(p55.split(r55.categories)).toHaveLength(2);
+    expect(
+      p55
+        .replace(r55.quality, () => r45.quality)
+        .replace(r55.volume, () => r45.volume)
+        .replace(`\n${r55.categories}\n`, () => ''),
+    ).toBe(p45);
+  });
+
+  it('keeps logistics out of Haiku 5.5\'s categories and asks for 12 per batch (D-36-4, D-36-6)', () => {
+    const r55 = DISCOVERY_SELECTION_RULES['claude-haiku-5-5'];
+    expect(r55.categories).toMatch(/^- essentials: the city's must-see places/m);
+    expect(r55.categories).toMatch(/Practical travel logistics belong in no category/);
+    expect(r55.volume).toMatch(/Return 12 places in every category/);
+    expect(r55.volume).not.toMatch(/say nothing about any shortfall/);
   });
 
   it('every model with a discovery profile has selection rules, and the map is frozen', () => {

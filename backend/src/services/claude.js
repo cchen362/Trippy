@@ -678,7 +678,15 @@ export function normalizeName(str) {
 // literally: "Aim for 30 … do not force 30" gave 2–5 items per category, so its rules name a
 // target and a floor and rank within that count instead of gating inclusion. The same wording on
 // Haiku 4.5 broke its output format (a category lost, 14 lines dropped), which is why the rules
-// are per model rather than shared. Every other line of the prompt is identical for both models.
+// are per model rather than shared. Every other line of the prompt is identical for both models,
+// except Haiku 5.5's `categories` block (Plan 36 W4), which Haiku 4.5 does not have.
+//
+// D-36-4 (Plan 36): Essentials is the city's must-see places; practical logistics belong in no category.
+// D-36-6 (Plan 36 W4): Haiku 5.5 asks for 12 places per category per batch, a batch size and not a cap ("Find more places" appends up to CATEGORY_ACTIVE_CAP = 45).
+// The owner accepted the measured cost: on "show more", about 40% of a batch repeats an excluded name
+// (control 31%), but new places per batch held (51.5 against 52.3), so the repeats cost about $0.001
+// a tap and are dropped by insertPlaces. Do not "fix" the repeat rate by dropping the definitions
+// without re-measuring new places per batch; see docs/DECISIONS.md.
 export const DISCOVERY_SELECTION_RULES = Object.freeze({
   'claude-haiku-4-5-20251001': Object.freeze({
     quality: '- Each suggestion must earn its place. If you cannot write a specific, non-generic "whyItFits", do not include it.',
@@ -686,7 +694,19 @@ export const DISCOVERY_SELECTION_RULES = Object.freeze({
   }),
   'claude-haiku-5-5': Object.freeze({
     quality: '- Each suggestion must earn its place: put the picks with the most specific "whyItFits" first in each category, and when a candidate would only get a generic "whyItFits", choose a different place instead.',
-    volume: '- Return 10–15 items per category. Include at least 8 in every category unless the destination genuinely cannot support that many; never pad with mediocre places, and say nothing about any shortfall.',
+    volume: '- Return 12 places in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with mediocre places.',
+    categories: [
+      'What each category holds:',
+      "- essentials: the city's must-see places — the unmissable sights and experiences a first-time visitor would regret skipping, with honest notes on crowds and timing.",
+      '- culture: museums, galleries, temples, shrines, historic sites, performances and living craft traditions.',
+      '- food: restaurants, street-food stalls, food markets, cafés and specific dishes worth seeking out.',
+      '- nature: parks, gardens, beaches, rivers, lakes, hills and viewpoints in or within a day trip of the city.',
+      '- nightlife: bars, night markets, live music, clubs and experiences that come alive after dark.',
+      '- hidden_gems: specific, lesser-known places locals love and most visitors miss.',
+      '- architecture: buildings, bridges, streets and quarters worth seeing for their design or history.',
+      '- wellness: spas, massage, baths, yoga and quiet places to rest and recharge.',
+      'Every item is a place to visit or an experience to have. Practical travel logistics belong in no category: no airports, stations or terminals used for transport, ride-hailing or taxi apps, ATMs or banks, hospitals, clinics or pharmacies, visa or immigration offices, SIM-card counters, or tourist information desks.',
+    ].join('\n'),
   }),
 });
 
@@ -699,14 +719,18 @@ export function discoverySystemPrompt(model) {
   return discoverSystemWith(rules);
 }
 
-const discoverSystemWith = ({ quality, volume }) => `You are a discerning travel curator. Return ONLY newline-delimited JSON — one object per line, one line per category, nothing else. No prose, no markdown fences, no wrapper object.
+// A model's optional `categories` block sits between the category-order line and the item shape;
+// a model without one (Haiku 4.5) gets exactly the text it always had.
+const discoverSystemWith = ({ quality, volume, categories }) => {
+  const categoriesBlock = categories ? `\n${categories}\n` : '';
+  return `You are a discerning travel curator. Return ONLY newline-delimited JSON — one object per line, one line per category, nothing else. No prose, no markdown fences, no wrapper object.
 
 Each line must match exactly:
 {"category":"<name>","items":[...]}
 
 Output all 8 categories in this order:
 essentials, culture, food, nature, nightlife, hidden_gems, architecture, wellness
-
+${categoriesBlock}
 Each item: { "name": string, "description": string (1-2 sentences, specific and factual), "whyItFits": string (one concrete sentence — name atmosphere, crowd level, or specific draw; never generic phrases like "great for couples" or "popular with tourists"; describe the PLACE itself, never the traveller — never write "the traveller", "your group", "your trip", "your preferences", or any other personalization framing, since this text is shown for every trip regardless of who's asking), "estimatedDuration": string, "openingHours": string, "lat": number|null, "lng": number|null }
 
 Additional item fields:
@@ -725,6 +749,7 @@ ${quality}
 ${volume}
 - Use the most specific, locally-used name for each place. Do not append generic suffixes unless part of the official name.
 - Do not repeat the same place across categories.`;
+};
 
 // A model without discovery selection rules must fail at boot, not on its first generation.
 discoverySystemPrompt(DISCOVERY_MODEL);

@@ -1,6 +1,6 @@
 # Implementation Plan 36 — Discovery Catalogue Completeness
 
-**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE and DEPLOYED 2026-10-20 at `a44f437`** (§6). It was merged by the orchestrator, the backend suite passed on main (1,263), and it was browser-verified on a dev-DB copy. It is backend only (no frontend bundle change, no migration). Pre-deploy backup `trippy-2026-10-20-022253.db`; health OK; the new freshness rule was confirmed in the container. **Owner production pass PASSED (2026-10-20):** Hanoi's open started a stale-refresh merge (`existingStops=37`), and a second open joined it. It ended `end_turn categories=8 items=89 complete=true deduped=0 unnamed=0`. Hanoi now has all 8 categories (essentials 18, culture 20, food 22, nature 20, nightlife 11, hidden_gems 10, architecture 12, wellness 11), with a daily count of 2 of 3. **W2 MEASURED: gate FAILED, NO-GO** (§6 W2, $0.518; harness and plan only, merged to main at `3c586d9`). The category-definitions prompt removes logistics from Essentials but makes small towns thinner and does not cure the collapse, so `claude.js` is unchanged. **Q-36-1 ruled (a); W3 MEASURED: gate FAILED, NO-GO** (§6 W3, $0.540). A firm count line fixes small-town Essentials but is read as a ceiling (items per category 9 vs 10.75), and it does not cure the early stop, so `claude.js` is unchanged; no fourth prompt attempt without a new idea. No migration in any wave.
+**Status:** 2026-10-20 — **APPROVED** (owner rulings of 2026-10-20, relayed by the Plan 35 orchestrator). **W1 COMPLETE and DEPLOYED 2026-10-20 at `a44f437`** (§6). It was merged by the orchestrator, the backend suite passed on main (1,263), and it was browser-verified on a dev-DB copy. It is backend only (no frontend bundle change, no migration). Pre-deploy backup `trippy-2026-10-20-022253.db`; health OK; the new freshness rule was confirmed in the container. **Owner production pass PASSED (2026-10-20):** Hanoi's open started a stale-refresh merge (`existingStops=37`), and a second open joined it. It ended `end_turn categories=8 items=89 complete=true deduped=0 unnamed=0`. Hanoi now has all 8 categories (essentials 18, culture 20, food 22, nature 20, nightlife 11, hidden_gems 10, architecture 12, wellness 11), with a daily count of 2 of 3. **W2 MEASURED: gate FAILED, NO-GO** (§6 W2, $0.518; harness and plan only, merged to main at `3c586d9`). The category-definitions prompt removes logistics from Essentials but makes small towns thinner and does not cure the collapse, so `claude.js` is unchanged. **Q-36-1 ruled (a); W3 MEASURED: gate FAILED, NO-GO** (§6 W3, $0.540). A firm count line fixes small-town Essentials but is read as a ceiling (items per category 9 vs 10.75), and it does not cure the early stop, so `claude.js` is unchanged; no fourth prompt attempt without a new idea. No migration in any wave. **W4 MEASURED (definitions + 12 per batch, $0.535):** every criterion passes except exclusion repeats (39.7% against 31.2%; new places per show-more batch equal, 51.5 against 52.3). Q-36-2 is open, so `claude.js` is unchanged pending that ruling. **Q-36-2 ruled GO: W4 ADOPTED (D-36-6)** on `claude/hungry-hugle-78d2ea`, not merged, not deployed: Haiku 5.5's discovery prompt now carries the category definitions and 12 per batch.
 
 **Origin.** Plan 35's production pass (2026-10-20, deploy `d5e9e3a`). Hanoi's pre-warm generation ended `end_turn` with 4 of 8 categories (37 items), passed the 4-category minimum, and was stored as a fresh 7-day catalogue. A separate investigation session established the facts below. It changed no code, did no production write, and spent $0.207 on 24 live Haiku 5.5 generations.
 
@@ -53,6 +53,7 @@
 - **D-36-3 — Every generation's end line reports completeness and silent drops.** `[discover] end` gains `complete=<true|false>` (all eight categories have usable items), `deduped=<n>` (items dropped as a repeat of an earlier name) and `unnamed=<n>` (items dropped for having no `name`). The Plan 30 standing log check then reads `complete=false` directly.
 - **D-36-4 — Essentials is the city's must-see places.** These are unmissable sights and experiences, with honest crowd notes. Practical logistics (airports, ride-hailing apps, ATMs, hospitals, visa offices, SIM counters, bus and train stations as transport) stay out of Discovery. W2 writes one line defining each of the eight categories.
 - **D-36-5 — Hanoi gets no production write.** It heals on its first open after W1 deploys: not fresh under D-36-1, so the open runs a stale-refresh merge (its daily count was 1 of 3 on 2026-10-20).
+- **D-36-6 — Haiku 5.5 discovery asks for 12 places per category per batch, with the category definitions (owner ruling on Q-36-2, 2026-10-20, a measured trade-off).** 12 is a batch size: "Find more places" appends up to `CATEGORY_ACTIVE_CAP = 45` per tab. The accepted costs are the first category about 9 s → 14 s (covered by the D-35-2 wait screen) and a show-more repeat rate of about 40% against 31%. Those repeats are dropped silently, and new places per batch held (51.5 against 52.3), so they cost about $0.001 a tap. Marker `D-36-6` beside `DISCOVERY_SELECTION_RULES['claude-haiku-5-5']` in `claude.js`; DECISIONS.md row names the repeat-rate cost.
 
 ---
 
@@ -253,3 +254,70 @@ A genuinely empty category is exactly what D-36-1 (W1) turns into a merge on the
 **Where this leaves Q-36-1.** The two prompt levers measured (definitions alone; definitions plus a count) both buy Essentials quality at the cost of volume, and neither moves the early stop, which is model-side. W1 already repairs an *incomplete* catalogue. What remains unhandled is a *complete but thin* one. If the owner wants that closed, the remaining idea is structural rather than prompt-side: Q-36-1 option (b), thinness as part of freshness (e.g. most categories under 5 → not fresh, so the next open merges). It has not been measured or built.
 
 **Harness kept** (committed): the `defined-count` variant, the `v-count-low` profile, the `luangprabang` and `hue` fixtures, and the "excluding logistics" scorer rows. Run files: `backend/data/model-eval/runs/discovery/{control,v-count-low}/2026-10-20T08-37-22-*`.
+
+### Owner ruling after W3 (2026-10-20): try 12 per batch
+
+The owner first asked whether a number caps big cities. It does not. The count is a **per-batch size**: "Find more places" appends further batches to a tab until `CATEGORY_ACTIVE_CAP = 45` (`db/discoveryCatalogue.js`), and the route declines only when every category is full (`catalogue_full`). A big city reaches 45 per tab through more batches, not through one long one. That is why a fixed number is acceptable in the prompt at all. The ruling: measure W3's variant with the count at 12. If it fails, the prompt line of Plan 36 closes, with no further variants.
+
+### W4 — definitions + 12 per batch, measured (2026-10-20): every criterion passes except exclusion repeats; ruling requested, `claude.js` unchanged
+
+**What was measured.** Prompt variant `defined-count-12`: the W2 definitions plus "Return 12 places in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with mediocre places."
+
+Profile `v-count12-low` (live settings) ran against a same-day `control`, both at the same moment, on the W3 corpus:
+- standard ×12;
+- small towns ×18 (Hoi An and Da Nang ×6, Luang Prabang and Hue ×3).
+
+**Spend $0.535.** D-30-7 **UNCHANGED** on all six runs. Scoring: non-logistics items for both profiles, as in W3.
+
+| measure | control | v-count12-low | gate | result |
+|---|---|---|---|---|
+| **Small towns (18 each)** | | | | |
+| collapse runs | 5/18 | 1/18 | ≤ control | ✔ |
+| Essentials, non-logistics, median / min | 4.5 / 2 | 12 / 3 | median ≥ 8 | ✔ |
+| items per category, non-logistics, median of medians | 10 | 10.25 | ≥ control − 1 | ✔ |
+| categories under 8 items (raw) | 46/144 (32%) | 12/144 (8%) | — | better |
+| logistics in Essentials (raw) | 64/148 (43%) | 0/186 (0%) | near 0 | ✔ |
+| first category, median / max | 9.5 s / 17.2 s | 13.9 s / 18.3 s | median ≤ control + 5 s | ✔ (+4.4 s) |
+| **Standard corpus (12 each)** | | | | |
+| categories 8/8 | 12/12 | 12/12 | — | = |
+| collapse runs | 1/12 | 0/12 | — | better |
+| items per category, non-logistics, median of medians | 9.5 | 10.75 | ≥ control − 1 | ✔ |
+| categories under 8 items (raw) | 13/96 | 1/96 | — | better |
+| logistics in Essentials (raw) | 29/95 (31%) | 2/134 (1.5%) | — | better |
+| dropped lines | 0 | 0 | 0 | ✔ |
+| duplicate-name drops | 1.3% | 1.3% | — | = |
+| alias identical to name | 3.3% | 2.7% | — | ✔ |
+| description in brackets | 0.9% | 0.2% | — | ✔ |
+| **exclusion repeats** | **31.2%** | **39.7%** | ≤ control | **✘** |
+| first category, median / max | 9.3 s / 15.1 s | 14.2 s / 15.9 s | median ≤ control + 5 s | ✔ (+4.9 s) |
+
+**Exclusion repeats: what drives them, and what they cost.** The same-day deltas across all three prompt waves, with each wave's exclusions runs (6 per profile):
+
+| wave | control repeats | candidate repeats | Δ | new places per "show more" batch, control → candidate |
+|---|---|---|---|---|
+| W2, definitions + range, effort low | 35.3% | 43.7% | +8.4 pts | 52.5 → 44.5 |
+| W2, definitions + range, effort medium | 35.3% | 27.7% | −7.6 pts | 52.5 → 56.2 |
+| W3, definitions + 10, effort low | 27.6% | 34.9% | +7.3 pts | 64.7 → 47.7 |
+| W4, definitions + 12, effort low | 31.9% | 40.3% | +8.4 pts | 52.3 → 51.5 |
+
+(Repeats are counted per raw item; "new places" is the service output minus repeats, an approximation good to a few items.)
+
+- **The definitions drive the higher repeat rate, at effort `low`.** The rise is +7 to +8 points whatever the count line says (a range, 10 or 12). At effort `medium` the same definitions *lower* it. The count does not drive it.
+- **At 12 the traveller-visible cost is gone.** A "show more" batch adds about as many genuinely new places as control (51.5 against 52.3, −1.5%), because the candidate writes more places per batch. What remains is spend: about 40% of a show-more batch's output repeats an excluded name, against about 32%. That is roughly $0.001 per batch.
+
+**Verdict: the gate as written FAILS on one criterion** (exclusion repeats ≤ control). Every other small-town and standard-corpus criterion passes, most by a wide margin. Small-town Essentials rises from 4.5 real places to 12, and collapses fall from 5/18 to 1/18. First-category time is within the +5 s bound, but only just (+4.4 s and +4.9 s): a 12-place batch writes longer. `claude.js` is **not** changed. Whether the repeat-rate criterion, whose purpose (new places per batch) is met, should block adoption is put to the orchestrator and owner as **Q-36-2**. Implementation is ready to follow a "go": Haiku 5.5 rules only, keyed by model, Haiku 5.5 discovery pins re-captured.
+
+**Control noise, for the record.** Control's own small-town collapse rate this session was 5/18, against 0/18 in W3 an hour earlier. Its first-category median ranged from 9.3 s to 13.2 s across the three waves. Single-wave comparisons are only as good as their same-day control, which is why every wave ran one.
+
+**Harness kept:** the `defined-count-12` variant and the `v-count12-low` profile. Run files: `backend/data/model-eval/runs/discovery/{control,v-count12-low}/2026-10-20T08-51-59-*`.
+
+### Q-36-2 — owner ruling (2026-10-20): GO; W4 ADOPTED
+
+The orchestrator put both costs to the owner in plain terms. The first tab's wait rises from about 9 s to about 14 s, which the D-35-2 wait screen covers. On "Find more places", about 40% of a batch repeats an already-stored name, against 31%; those are dropped silently, while the new places per tap hold at about 52, for about $0.001 a tap. The owner ruled **GO**: ship the definitions with 12 per batch for Haiku 5.5. This is an owner ruling on a measured trade-off, and the evidence that made it acceptable is the new-places-per-batch column in the W4 exclusion-repeats table above (51.5 against 52.3). It is recorded as **D-36-6** (§2), with a code marker and a DECISIONS.md row, so the repeat rate is not "fixed" later without re-measuring new places per batch.
+
+**Implementation.**
+- `DISCOVERY_SELECTION_RULES['claude-haiku-5-5']` gains `categories` (the definitions block) and the 12-per-batch `volume` line. `discoverSystemWith` places a model's categories block after the category-order line, and a model without one (Haiku 4.5) gets exactly its old text.
+- The shipped Haiku 5.5 prompt is **byte-identical to the measured `defined-count-12` text** (sha256 `c021ae4e…`), and the Haiku 4.5 prompt is unchanged (sha256 `34c3742f…`).
+- Re-captured pins, Haiku 5.5 only: the discovery prompt (`b851c503…` → `c021ae4e…`) and the discovery request body (`4feadef7…` → `8adbf90b…`). The selection-lines test now also strips the categories block, and one new test asserts D-36-4 and D-36-6 in the rules. The Haiku 4.5 prompt and body pins are untouched.
+- **Harness.** `applyPromptVariant` now swaps a model's live categories block for the variant's own block, or for none. Every variant keeps meaning the text it was measured on: `defined-count-12` is a no-op on Haiku 5.5, and `floor-ranked` reproduces the pre-W4 prompt byte for byte. `control`'s settings did not change, so `assertControlIsLive` needs no edit. A `profiles.mjs` comment dates which control run files measure which prompt.
+- `cd backend; npm test`: 46 files passed, 2 skipped; **1,258 tests passed**, 12 skipped. No migration, no frontend change.

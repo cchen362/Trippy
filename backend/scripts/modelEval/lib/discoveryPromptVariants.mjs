@@ -10,8 +10,9 @@
 // prompt does not contain its model's live lines exactly once fails loudly: a silent no-op patch
 // would measure the live prompt under a variant's name.
 //
-// W3 shipped variant A ('floor-ranked') as Haiku 5.5's live rules, so on a Haiku 5.5 profile that
-// variant is now a byte-for-byte no-op.
+// W3 shipped variant A ('floor-ranked') as Haiku 5.5's live rules. Plan 36 W4 then shipped
+// 'defined-count-12' (D-36-6), so on a Haiku 5.5 profile that variant is now the byte-for-byte no-op
+// and 'floor-ranked' reproduces the pre-W4 prompt (its lines, and no categories block).
 
 import Anthropic from '@anthropic-ai/sdk';
 import { DISCOVERY_SELECTION_RULES } from '../../../src/services/claude.js';
@@ -75,6 +76,13 @@ export const PROMPT_VARIANTS = Object.freeze({
     volume: '- Return 10 places in every category. Return fewer only when the destination genuinely cannot support 10 places that meet these rules; never pad with mediocre places.',
     categories: DEFINED_CATEGORIES,
   }),
+  // Plan 36 W4: W3 with the batch at 12. The number is a per-batch size, not a catalogue cap: "Find
+  // more places" appends batches up to CATEGORY_ACTIVE_CAP (45) per tab.
+  'defined-count-12': Object.freeze({
+    quality: FLOOR_RANKED_QUALITY,
+    volume: '- Return 12 places in every category. Return fewer only when the destination genuinely cannot support 12 places that meet these rules; never pad with mediocre places.',
+    categories: DEFINED_CATEGORIES,
+  }),
 });
 
 // The category-order line every discovery prompt carries exactly once; a variant's `categories`
@@ -95,13 +103,17 @@ export function applyPromptVariant(system, variantName, model) {
     }
     patched = patched.replace(live[key], () => variant[key] ?? ORIGINAL_LINES[key]);
   }
-  if (variant.categories) {
-    const occurrences = patched.split(CATEGORY_ORDER_LINE).length - 1;
-    if (occurrences !== 1) {
-      throw new Error(`discovery prompt variant "${variantName}": expected the category-order line exactly once in the system prompt, found ${occurrences}`);
-    }
-    patched = patched.replace(CATEGORY_ORDER_LINE, () => `${CATEGORY_ORDER_LINE}\n${variant.categories}\n`);
+  // Plan 36 W4: the variant's categories block (or none) replaces the live model's block (or none),
+  // so a variant means the same text whether or not its model ships a block — 'floor-ranked' on
+  // Haiku 5.5 is still the pre-W4 prompt, and 'defined-count-12' is now a no-op there.
+  const liveBlock = live.categories ? `\n${live.categories}\n` : '';
+  const anchor = `${CATEGORY_ORDER_LINE}${liveBlock}`;
+  const occurrences = patched.split(anchor).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(`discovery prompt variant "${variantName}": expected ${model}'s category-order line and categories block exactly once in the system prompt, found ${occurrences}`);
   }
+  const variantBlock = variant.categories ? `\n${variant.categories}\n` : '';
+  patched = patched.replace(anchor, () => `${CATEGORY_ORDER_LINE}${variantBlock}`);
   return patched;
 }
 
