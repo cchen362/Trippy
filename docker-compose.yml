@@ -10,3 +10,16 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  # Trippy's own Cloudflare Tunnel connector (trippy-tunnel). The tunnel is
+  # remotely managed: its ingress (http://localhost:6768) is set in the
+  # Cloudflare dashboard, so host networking keeps that origin valid.
+  # Bump the pin here, never the host's cloudflared package. TUNNEL_TOKEN
+  # lives only in the server's .env.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?TUNNEL_TOKEN must be set in .env}
+    network_mode: host
+    restart: unless-stopped
